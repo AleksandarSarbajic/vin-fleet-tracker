@@ -3,7 +3,7 @@
 import { memo } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import type { Status } from '@/lib/status';
-import { elapsed } from '@/lib/format';
+import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';
 
@@ -49,6 +49,64 @@ const RAIL: Record<Status, string> = {
   NO_APPT: 'rail-dashed',
   STALE_GPS: 'rail-dotted',
 };
+
+/**
+ * The Next stop cell: city first, because that is what a dispatcher scans
+ * for, then the dock detail (§6.2 step 1 of the truncation ladder — the dock
+ * is the first thing to go, so it only rides along in the wide layout), then
+ * the load number, and ONLY when the truck holds more than one open load
+ * (§12.13) — with one load the number is noise in a 191px column.
+ */
+function nextStopText(row: FleetRow, columns: 6 | 8): string {
+  const stop = row.nextStop;
+  if (!stop) return '—';
+  const place =
+    stop.city && stop.state ? `${stop.city}, ${stop.state}` : (stop.facilityName ?? '—');
+  const parts = [place];
+  if (columns === 8 && stop.dockDoor) parts.push(stop.dockDoor);
+  if (row.openLoadCount > 1) parts.push(stop.loadNumber);
+  return parts.join(' · ');
+}
+
+/** Everything the cell had to drop, plus the stop-local time (§6.2). */
+function stopTitle(row: FleetRow): string | null {
+  const stop = row.nextStop;
+  if (!stop) return null;
+  const when =
+    stop.apptStartUtc && stop.apptTz
+      ? timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true })
+      : 'no appointment';
+  return [
+    `${stop.type === 'PU' ? 'Pick up' : 'Deliver'} — ${stop.facilityName ?? 'facility unnamed'}`,
+    [stop.city, stop.state].filter(Boolean).join(', '),
+    stop.dockDoor,
+    `Load ${stop.loadNumber}`,
+    when,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
+ * The appointment, in the STOP's own zone (§7.1) — a single list carries
+ * CST, MST and PST at once, which is exactly why every time is labelled.
+ * Computed at render from the instant plus the IANA zone; nothing about the
+ * abbreviation is stored.
+ */
+function apptText(row: FleetRow): string {
+  const stop = row.nextStop;
+  if (!stop?.apptStartUtc || !stop.apptTz) return '—';
+  return timeInZone(new Date(stop.apptStartUtc), stop.apptTz);
+}
+
+function apptTitle(row: FleetRow): string | null {
+  const stop = row.nextStop;
+  if (!stop?.apptStartUtc || !stop.apptTz) return null;
+  const full = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
+  // FCFS is a facility cutoff, not a slot (§12.2) — the row says so on hover
+  // rather than inventing a glyph the design never drew.
+  return stop.apptType === 'FCFS' ? `${full} · FCFS cutoff, not a slot` : full;
+}
 
 function Marked({ text, query }: { text: string; query: string }) {
   const parts = highlight(text, query);
@@ -147,16 +205,18 @@ function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
         </div>
       ) : null}
 
-      {/* TODO(phase 4): Next stop comes from stops — facility, city and dock.
-          Left empty rather than invented; fabricating destinations is how the
-          design document ended up with a load-number format nobody asked for. */}
-      <div className="truncate text-body text-text-muted">—</div>
+      <div
+        title={stopTitle(row) ?? undefined}
+        className={`truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
+      >
+        {row.nextStop ? <Marked text={nextStopText(row, columns)} query={query} /> : '—'}
+      </div>
 
       <div
-        className={`text-right text-body tabular-nums ${quiet ? 'text-text-secondary' : 'font-semibold text-text-muted'}`}
+        title={apptTitle(row) ?? undefined}
+        className={`text-right text-body font-semibold tabular-nums ${quiet ? 'text-text-secondary' : 'text-text'}`}
       >
-        {/* TODO(phase 4): appointment, rendered in the STOP's zone. */}
-        — : —
+        {apptText(row)}
       </div>
 
       {columns === 8 ? (

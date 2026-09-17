@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { cityState } from '@/samsara/schemas';
 import type { Status } from '@/lib/status';
+import { LOAD_STATUSES, type LoadStatus } from '@/lib/loads';
 
 /**
  * The console's fleet query, its row schema, and the mapping between them.
@@ -34,6 +35,37 @@ export interface FleetRow {
   /** "New Lenox, IL" — what the Position column renders. */
   cityState: string | null;
   status: Status;
+  /**
+   * The next stop, by §12.13: the earliest undeparted stop across every OPEN
+   * load the truck holds. Null when the truck has no load, which is an empty
+   * state a dispatcher genuinely sees (§12.14).
+   */
+  nextStop: NextStop | null;
+  /** §12.13. Above 1, the row shows which load is driving the deadline. */
+  openLoadCount: number;
+  /**
+   * The next appointment as an ISO-8601 UTC string, lifted to the top level
+   * because it is the urgency sort's secondary key (§12.4). Mirrors
+   * `nextStop.apptStartUtc`.
+   */
+  apptAt: string | null;
+}
+
+export interface NextStop {
+  stopId: string;
+  loadId: string;
+  loadNumber: string;
+  loadStatus: LoadStatus;
+  type: 'PU' | 'DEL';
+  facilityName: string | null;
+  city: string | null;
+  state: string | null;
+  dockDoor: string | null;
+  /** ISO-8601 UTC, or null for a stop with no appointment yet. */
+  apptStartUtc: string | null;
+  /** The facility's IANA zone. The appointment renders in THIS zone (§7.1). */
+  apptTz: string | null;
+  apptType: 'APPT' | 'FCFS';
 }
 
 /**
@@ -65,7 +97,14 @@ export const LATEST_POSITION_SQL = sql`
     p.speed_mph               as speed_mph,
     to_char(p.recorded_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as recorded_at,
-    p.formatted_location      as formatted_location
+    p.formatted_location      as formatted_location,
+    ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.stop_type,
+    ns.facility_name, ns.stop_city, ns.stop_state, ns.dock_door,
+    ns.appointment_start_utc, ns.appointment_tz, ns.appointment_type,
+    (select count(*) from loads ol
+      where ol.truck_id = t.id
+        and ol.status not in ('DELIVERED', 'TONU', 'CANCELLED'))::int
+                              as open_load_count
   from trucks t
   -- assignments_one_open_per_truck guarantees at most one open row, so this
   -- cannot multiply the result set.
@@ -78,6 +117,38 @@ export const LATEST_POSITION_SQL = sql`
     order by recorded_at desc
     limit 1
   ) p on true
+  /**
+   * The next stop (§12.13): lowest undeparted sequence, and for a truck
+   * holding two loads, the EARLIEST DEADLINE across both — which is why the
+   * appointment leads the ordering and the sequence only breaks ties.
+   *
+   * The terminal statuses are the three in lib/loads.ts. A delivered load's
+   * stops are history, not work.
+   */
+  left join lateral (
+    select
+      s.id::text              as stop_id,
+      l.id::text              as load_id,
+      l.load_number           as load_number,
+      l.status::text          as load_status,
+      s.type::text            as stop_type,
+      s.facility_name         as facility_name,
+      s.city                  as stop_city,
+      s.state                 as stop_state,
+      s.dock_door             as dock_door,
+      to_char(s.appointment_start_utc at time zone 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                              as appointment_start_utc,
+      s.appointment_tz        as appointment_tz,
+      s.appointment_type::text as appointment_type
+    from loads l
+    join stops s on s.load_id = l.id
+    where l.truck_id = t.id
+      and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
+      and s.departed_at is null
+    order by s.appointment_start_utc asc nulls last, s.sequence asc
+    limit 1
+  ) ns on true
   where t.active
   order by t.truck_number asc nulls last
 `;
@@ -115,6 +186,26 @@ export const FleetQueryRow = z.object({
    */
   recorded_at: z.string().regex(ISO_UTC_MS, 'expected ISO-8601 UTC from to_char').nullable(),
   formatted_location: z.string().nullable(),
+
+  /** The next-stop lateral. Every field is null when the truck has no load. */
+  stop_id: z.string().uuid().nullable(),
+  load_id: z.string().uuid().nullable(),
+  load_number: z.string().nullable(),
+  load_status: z.enum(LOAD_STATUSES).nullable(),
+  stop_type: z.enum(['PU', 'DEL']).nullable(),
+  facility_name: z.string().nullable(),
+  stop_city: z.string().nullable(),
+  stop_state: z.string().nullable(),
+  dock_door: z.string().nullable(),
+  /** Same to_char cast, same reason: a STRING, never a Date. */
+  appointment_start_utc: z
+    .string()
+    .regex(ISO_UTC_MS, 'expected ISO-8601 UTC from to_char')
+    .nullable(),
+  appointment_tz: z.string().nullable(),
+  appointment_type: z.enum(['APPT', 'FCFS']).nullable(),
+  /** §12.13: the row names the load only when there is more than one. */
+  open_load_count: z.number().int(),
 });
 
 export type FleetQueryRow = z.infer<typeof FleetQueryRow>;
@@ -137,6 +228,25 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     cityState: cityState(raw.formatted_location),
     // Overwritten by applyPlaceholders in fleet.ts.
     status: 'ON_TIME' as Status,
+    nextStop:
+      raw.stop_id && raw.load_id && raw.load_number && raw.load_status && raw.stop_type
+        ? {
+            stopId: raw.stop_id,
+            loadId: raw.load_id,
+            loadNumber: raw.load_number,
+            loadStatus: raw.load_status,
+            type: raw.stop_type,
+            facilityName: raw.facility_name,
+            city: raw.stop_city,
+            state: raw.stop_state,
+            dockDoor: raw.dock_door,
+            apptStartUtc: raw.appointment_start_utc,
+            apptTz: raw.appointment_tz,
+            apptType: raw.appointment_type ?? 'APPT',
+          }
+        : null,
+    openLoadCount: raw.open_load_count,
+    apptAt: raw.appointment_start_utc,
   };
 }
 

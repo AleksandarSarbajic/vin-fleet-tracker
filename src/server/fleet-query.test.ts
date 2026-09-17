@@ -86,6 +86,23 @@ withDb('the fleet query, against the real database', () => {
       speed_mph: 'number',
       recorded_at: 'string',
       formatted_location: 'string',
+      // The next-stop lateral (§12.13). appointment_start_utc carries the
+      // same to_char cast as recorded_at and for the same reason: a
+      // timestamptz read through db.execute arrives as a driver value, and
+      // the row type must not claim otherwise.
+      stop_id: 'string',
+      load_id: 'string',
+      load_number: 'string',
+      load_status: 'string',
+      stop_type: 'string',
+      facility_name: 'string',
+      stop_city: 'string',
+      stop_state: 'string',
+      dock_door: 'string',
+      appointment_start_utc: 'string',
+      appointment_tz: 'string',
+      appointment_type: 'string',
+      open_load_count: 'number',
     };
 
     for (const row of raw) {
@@ -145,6 +162,20 @@ describe('the schema guard itself', () => {
     speed_mph: 0,
     recorded_at: '2026-09-17T10:37:13.524Z',
     formatted_location: 'Maple Road, New Lenox, IL, 60451',
+    // The next-stop lateral. All null is the "truck holds no load" case.
+    stop_id: null,
+    load_id: null,
+    load_number: null,
+    load_status: null,
+    stop_type: null,
+    facility_name: null,
+    stop_city: null,
+    stop_state: null,
+    dock_door: null,
+    appointment_start_utc: null,
+    appointment_tz: null,
+    appointment_type: null,
+    open_load_count: 0,
   };
 
   it('accepts the shape the query produces', () => {

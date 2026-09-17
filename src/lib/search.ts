@@ -9,9 +9,17 @@ export interface Searchable {
   driverName: string | null;
   cityState: string | null;
   formattedLocation: string | null;
-  /** TODO(phase 4): load number and next-stop destination join here. */
-  loadNumber?: string | null;
-  nextStop?: string | null;
+  /**
+   * The next stop, searched by facility, city, state and load number — the
+   * §9.6 field set. Structured rather than a pre-joined string so the row
+   * type stays the one the list renders from.
+   */
+  nextStop?: {
+    loadNumber: string;
+    facilityName: string | null;
+    city: string | null;
+    state: string | null;
+  } | null;
 }
 
 /**
@@ -27,8 +35,10 @@ function haystack(row: Searchable): string {
     row.driverName ?? '',
     row.cityState ?? '',
     row.formattedLocation ?? '',
-    row.loadNumber ?? '',
-    row.nextStop ?? '',
+    row.nextStop?.loadNumber ?? '',
+    row.nextStop?.facilityName ?? '',
+    row.nextStop?.city ?? '',
+    row.nextStop?.state ?? '',
   ]
     .join(FIELD_SEPARATOR)
     .toLowerCase();
