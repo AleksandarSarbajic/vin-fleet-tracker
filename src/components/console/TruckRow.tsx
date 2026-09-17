@@ -108,6 +108,27 @@ function apptTitle(row: FleetRow): string | null {
   return stop.apptType === 'FCFS' ? `${full} · FCFS cutoff, not a slot` : full;
 }
 
+/** The chip's own Unassigned glyph, at row scale. */
+function DriverSlash() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path d="M8 21v-2a4 4 0 0 1 4-4h1" />
+      <circle cx="12" cy="7" r="3.5" />
+      <path d="m3 3 18 18" />
+    </svg>
+  );
+}
+
 function Marked({ text, query }: { text: string; query: string }) {
   const parts = highlight(text, query);
   if (parts.length <= 1) return <>{text}</>;
@@ -192,7 +213,17 @@ function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
         {row.driverName ? (
           <Marked text={row.driverName} query={query} />
         ) : (
-          'Unassigned'
+          /**
+           * §12.18: the word `Unassigned` is said ONCE per row, by the chip.
+           * Here the absence is the signal — a Driver column that reads as
+           * blank scans faster down 23 rows than one repeating a word the
+           * chip already carries, and this cell still has to say "no driver"
+           * for a truck whose status is NO_APPT rather than UNASSIGNED.
+           */
+          <span className="flex items-center gap-1.5 text-status-neutral-fg">
+            <DriverSlash />
+            <span aria-label="No driver assigned">—</span>
+          </span>
         )}
       </div>
 

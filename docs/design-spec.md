@@ -1553,6 +1553,49 @@ less, which is why cutting two columns reads as calmer rather than denser.
 This supersedes the `1b` two-line row as the narrow-list answer. `1b` remains
 the layout below 1024px viewport width, where the row goes two-line anyway.
 
+## 12.18 `Unassigned` is said once, by the chip
+
+**Supersedes the first clause of §5.8.** Truck 137 rendered `Unassigned` in
+the Driver column AND an `Unassigned` status chip — the same word twice in a
+44px row, 128px apart.
+
+**The chip is the carrier.** The Driver cell shows the driver-slash icon and
+an em dash; the word appears only in the chip.
+
+Why that way round:
+
+- The chip is load-bearing in four places at once — the urgency sort key, the
+  filter-chip count, the marker key, and the footer's below-the-fold tally.
+  The Driver cell is load-bearing in none of them.
+- A Driver column that reads as *blank* is faster to scan down 23 rows than
+  one repeating a word. The absence is the signal.
+- It generalises. Once the real engine lands, a driverless truck with no live
+  appointment is `NO_APPT`, not `UNASSIGNED` — that row still needs the
+  Driver cell to say "no driver" without a status word to borrow. Making the
+  chip the sole carrier is a rule that holds for both, rather than a special
+  case for one status.
+
+The rest of §5.8 stands unchanged: the schedule chip is replaced rather than
+accompanied, the last computed ETA moves to the ETA cell struck through, and
+the row keeps its marginally sunken ground.
+
+## 12.19 The status placeholder, and what killed half of it
+
+`lib/placeholder-fleet.ts` fabricated a status AND a driver name for phase 3.
+
+**The driver half died in phase 4.** Drivers are real `assignments` rows now,
+entered on the bulk assignment screen; Samsara returns `data: null` for
+driver-vehicle assignments in this org, so there was never anything to sync.
+
+**The status half dies in phase 5**, replaced by the engine in
+`lib/status.ts`. Until then it is guarded rather than trusted:
+`placeholder-guard.test.ts` asserts exactly one non-test importer
+(`server/fleet.ts`, the seam the engine replaces), asserts no fabricated field
+beyond status, and — deliberately — **fails when the module is deleted**,
+naming itself as the next thing to remove. A guard that quietly passes over a
+module that no longer exists reads as protection nobody is getting.
+
+
 ---
 
 # 13. Still open

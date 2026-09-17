@@ -65,8 +65,55 @@ other. The legacy `anon` / `service_role` JWTs are deprecated and unused.
 | `npm run db:studio` | Drizzle Studio |
 | `npm run worker` | Ingestion worker — the only thing that calls Samsara |
 | `npm run samsara:probe` | Re-verify `docs/samsara.md` against the live org |
+| `npm run seed:demo` | Obviously-fake loads and stops for development |
 
 `npm run check` also runs as a Husky pre-commit hook.
+
+## Dispatch data (phase 4)
+
+| Surface | Route | Who |
+|---|---|---|
+| Bulk assignment board | `/assignments` | dispatcher writes, viewer reads |
+| Edit stop / new load | `Enter` on the selected row | dispatcher |
+| Reassignment confirm | inside the modal, on a driver change | dispatcher |
+| `trucks.active` | the modal's Active checkbox | **admin only** |
+
+Every mutating route re-checks the role server-side. A viewer sees the same
+controls, disabled, with a tooltip naming why (§12.14) — hidden controls make
+people think the app is broken.
+
+### Appointments
+
+Wall time at the facility plus an IANA zone, converted **by Postgres**. The
+wire format carries integer parts (`{y,m,d}`, `{h,min}`) and the schema is
+`.strict()`, so a client sending `startUtc` is refused by name.
+
+Two rules worth knowing before touching `src/server/appointment.ts`:
+
+- **Never bind a wall-time string as `${wall}::timestamp` through
+  postgres.js's own tagged template.** It infers the parameter type from the
+  cast and serialises through a JS `Date`, shifting the value by the Node
+  process's offset — measured at two hours from a CEST machine, five and a
+  half from `TZ=Asia/Kolkata`. `drizzle(client)` replaces those serialisers,
+  so the app's writes are safe, but `scripts/*.mts` open bare clients.
+  `make_timestamp` with integer parts is immune on both paths.
+- **`AT TIME ZONE` binds tighter than `+`.** `start + interval at time zone
+  'UTC'` fails with `function timezone(unknown, interval) does not exist`.
+
+An hour that does not exist at that facility (spring forward) is **refused**
+with a field error; an hour that happens twice (fall back) is accepted and
+flagged `resolution: 'ambiguous'`, resolved to the second, standard-time
+occurrence.
+
+### Test data
+
+```bash
+npm run seed:demo            # DEMO- loads and stops across the active fleet
+npm run seed:demo -- --clear # removes exactly what it wrote
+```
+
+Everything it writes is marked `DEMO-` / `BROKER DEMO`. Nothing it creates
+could be mistaken for a real load.
 
 ## The ingestion worker
 
@@ -154,5 +201,13 @@ docs/design-spec.md The design, extracted
 - **1 — done.** Scaffold, env validation, schema, migrations, RLS, auth.
 - **2 — done.** Samsara client and ingestion worker, verified against the
   live org. See `docs/samsara.md`.
-- **3 — next.** Read-only console: map, virtualized list, two-way selection,
+- **3 — done.** Read-only console: map, virtualized list, two-way selection,
   search, draggable split.
+- **4 — done.** Dispatch data: loads, stops, the edit modal, the two-sided
+  reassignment transaction, the bulk assignment board, audit log. The status
+  override block (§9.5) is deliberately held back to phase 5, with the engine
+  that computes the status it sits beside.
+- **5 — next.** Status engine, colour coding, filter chips, footer bar,
+  urgency groups, offline rule, and the full timezone suite — including the
+  `TOMORROW` midnight rollover, which needs the engine to have anything to
+  assert.
