@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { Console } from '@/components/console/Console';
 import { serverEnv } from '@/env/server';
@@ -15,21 +14,30 @@ function initials(name: string): string {
   return `${parts[0]?.[0] ?? ''}${parts[parts.length - 1]?.[0] ?? ''}`.toUpperCase();
 }
 
-export default async function ConsolePage() {
+const first = (v: string | string[] | undefined): string | null =>
+  Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+
+export default async function ConsolePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await getSessionUser();
   if (!user) redirect('/login');
 
-  // Server component runs the query directly, so first paint has data and
-  // there is no loading flash before the first client poll.
+  // Search params are read HERE, on the server, and passed down. Reading them
+  // in the client component with useSearchParams opts its whole subtree out
+  // of server rendering, which threw away this prefetch entirely.
+  const params = await searchParams;
   const fleet = await loadFleet();
 
   return (
-    <Suspense fallback={null}>
-      <Console
-        initial={{ fleet, fetchedAt: new Date().toISOString() }}
-        dispatchTz={serverEnv.DISPATCH_TZ}
-        userInitials={initials(user.fullName)}
-      />
-    </Suspense>
+    <Console
+      initial={{ fleet, fetchedAt: new Date().toISOString() }}
+      dispatchTz={serverEnv.DISPATCH_TZ}
+      userInitials={initials(user.fullName)}
+      initialQuery={first(params['q']) ?? ''}
+      initialTruck={first(params['truck'])}
+    />
   );
 }

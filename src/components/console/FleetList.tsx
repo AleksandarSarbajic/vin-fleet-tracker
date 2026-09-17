@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
 

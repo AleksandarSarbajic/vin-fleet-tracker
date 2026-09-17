@@ -1,6 +1,6 @@
 'use client';
 
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { STATUS_LABEL, isProblem } from '@/lib/status';
 
 /**
@@ -30,8 +30,12 @@ export function ListFooter({
     .map(([status, n]) => `${n} ${STATUS_LABEL[status as keyof typeof STATUS_LABEL].toLowerCase()}`)
     .join(', ');
 
-  const from = rows.length === 0 ? 0 : firstVisible + 1;
-  const to = Math.min(lastVisible + 1, rows.length);
+  // Before the virtualizer has measured its scroller — server render, and the
+  // first client paint — nothing is visible yet. "Showing 1-0 of 23" is worse
+  // than saying nothing, so the range collapses to 0.
+  const nothingVisible = lastVisible < firstVisible;
+  const from = rows.length === 0 || nothingVisible ? 0 : firstVisible + 1;
+  const to = nothingVisible ? 0 : Math.min(lastVisible + 1, rows.length);
 
   return (
     <div className="flex h-[30px] shrink-0 items-center justify-between border-t border-line-hair bg-[#1a2027] px-4 text-small text-text-secondary">

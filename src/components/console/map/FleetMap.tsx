@@ -11,7 +11,7 @@ import type { GeoJSONSource } from 'mapbox-gl';
 import type { Point } from 'geojson';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { clientEnv } from '@/env/client';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import {
   CLUSTER_MAX_ZOOM,
   CLUSTER_RADIUS,
@@ -37,6 +37,7 @@ import {
   splitForMap,
 } from './geo';
 import { MapPopup } from './MapPopup';
+import { MapFooter, MarkerKey, ZoomControl } from './MapChrome';
 
 /**
  * The map never re-renders per truck.
@@ -157,8 +158,32 @@ export function FleetMap({
     [onSelect, reducedMotion],
   );
 
+  const zoom = useCallback(
+    (direction: 1 | -1) => {
+      const map = mapRef.current?.getMap();
+      if (!map) return;
+      map.easeTo({
+        zoom: map.getZoom() + direction,
+        duration: reducedMotion ? 0 : PAN_MS,
+      });
+    },
+    [reducedMotion],
+  );
+
+  /** Newest fix across the fleet — what the footer reports. */
+  const newestPositionAt = useMemo(() => {
+    let newest: string | null = null;
+    for (const r of rows) {
+      if (r.recordedAt && (!newest || r.recordedAt > newest)) newest = r.recordedAt;
+    }
+    return newest;
+  }, [rows]);
+
   return (
-    <div className="relative h-full w-full bg-surface-sunken">
+    <div className="relative flex h-full w-full flex-col bg-surface-sunken">
+      <div className="relative min-h-0 flex-1">
+      <ZoomControl onZoom={zoom} />
+      <MarkerKey />
       <Map
         ref={mapRef}
         mapboxAccessToken={clientEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
@@ -203,6 +228,8 @@ export function FleetMap({
           <MapPopup row={selectedRow} onClose={() => onSelect(null)} />
         ) : null}
       </Map>
+      </div>
+      <MapFooter newestPositionAt={newestPositionAt} />
     </div>
   );
 }

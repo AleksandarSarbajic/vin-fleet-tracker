@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Database-backed tests need the real connection strings.
+    setupFiles: ['./vitest.setup.ts'],
   },
 });

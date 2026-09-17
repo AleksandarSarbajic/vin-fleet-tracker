@@ -90,7 +90,14 @@ export const clusterCountLayer = {
     'text-allow-overlap': true,
     'text-ignore-placement': true,
   },
-  paint: { 'text-color': '#e9ebed' },
+  paint: {
+    'text-color': '#e9ebed',
+    // Problem markers are drawn ABOVE cluster bubbles on purpose, so a
+    // co-located late truck can land on top of a bubble and bury its count.
+    // The halo keeps the number readable through it.
+    'text-halo-color': '#1d2126',
+    'text-halo-width': 1.5,
+  },
 } as unknown as SymbolLayerSpecification;
 
 /** Individual trucks from the clustered source, once they are not clustered. */

@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
 import { ConsoleHeader } from './ConsoleHeader';
@@ -22,19 +22,33 @@ interface Props {
   initial: FleetResponse;
   dispatchTz: string;
   userInitials: string;
+  /**
+   * Read on the SERVER and passed down, not read here with
+   * `useSearchParams`. That hook opts its whole subtree out of server
+   * rendering, which silently threw away the server-side loadFleet() prefetch
+   * — the first paint carried no fleet at all and the console had to refetch
+   * from /api/fleet on mount.
+   */
+  initialQuery: string;
+  initialTruck: string | null;
 }
 
-export function Console({ initial, dispatchTz, userInitials }: Props) {
+export function Console({
+  initial,
+  dispatchTz,
+  userInitials,
+  initialQuery,
+  initialTruck,
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
-  const params = useSearchParams();
   const reducedMotion = useReducedMotion();
 
   const { data } = useFleet(initial);
   const rows = useMemo(() => data?.fleet ?? NO_ROWS, [data]);
 
   /** Typed immediately, applied 250ms later — the field never feels laggy. */
-  const [typed, setTyped] = useState(() => params.get('q') ?? '');
+  const [typed, setTyped] = useState(initialQuery);
   const [query, setQuery] = useState(typed);
   useEffect(() => {
     const id = window.setTimeout(() => setQuery(typed), SEARCH_DEBOUNCE_MS);
@@ -45,27 +59,24 @@ export function Console({ initial, dispatchTz, userInitials }: Props) {
    * The URL carries the truck NUMBER, not the internal id: a number is what a
    * dispatcher can read off the screen, verify, and say down a phone.
    */
-  const urlTruck = params.get('truck');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [missingTruck, setMissingTruck] = useState<string | null>(null);
+  const resolvedInitialTruck = useRef(false);
 
   useEffect(() => {
-    if (!urlTruck) return;
-    const match = rows.find((r) => String(r.truckNumber) === urlTruck);
-    if (match) {
-      setSelectedId(match.id);
-      setMissingTruck(null);
-    } else if (rows.length > 0) {
-      // Unknown or inactive: the console still loads, with a note. A link a
-      // colleague sent you should never be a dead end.
-      setMissingTruck(urlTruck);
-    }
-  }, [urlTruck, rows]);
+    if (!initialTruck || resolvedInitialTruck.current || rows.length === 0) return;
+    resolvedInitialTruck.current = true;
+    const match = rows.find((r) => String(r.truckNumber) === initialTruck);
+    if (match) setSelectedId(match.id);
+    // Unknown or inactive: the console still loads, with a dismissible note.
+    // A link a colleague sent you should never be a dead end.
+    else setMissingTruck(initialTruck);
+  }, [initialTruck, rows]);
 
   /** Search and selection both live in the URL so a link carries the view. */
   const syncUrl = useCallback(
     (next: { q?: string; truck?: string | null }) => {
-      const search = new URLSearchParams(params.toString());
+      const search = new URLSearchParams(window.location.search);
       if (next.q !== undefined) {
         if (next.q.trim()) search.set('q', next.q);
         else search.delete('q');
@@ -77,14 +88,13 @@ export function Console({ initial, dispatchTz, userInitials }: Props) {
       const qs = search.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
-    [params, pathname, router],
+    [pathname, router],
   );
 
   useEffect(() => {
-    if ((params.get('q') ?? '') !== query) syncUrl({ q: query });
-    // syncUrl changes identity with params; running on query alone is correct.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+    const current = new URLSearchParams(window.location.search).get('q') ?? '';
+    if (current !== query) syncUrl({ q: query });
+  }, [query, syncUrl]);
 
   const select = useCallback(
     (id: string | null) => {

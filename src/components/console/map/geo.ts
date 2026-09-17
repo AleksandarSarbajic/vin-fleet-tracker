@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, Point } from 'geojson';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { isProblem } from '@/lib/status';
 
 export interface TruckFeatureProps extends Record<string, unknown> {

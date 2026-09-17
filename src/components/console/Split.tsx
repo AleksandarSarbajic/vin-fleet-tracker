@@ -61,7 +61,15 @@ export function Split({ list, map, onResizeEnd }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  const splitEnabled = width >= SPLIT_DISABLED_BELOW;
+  /**
+   * `width` is 0 until the ResizeObserver first fires — on the server, and on
+   * the client's first paint. Treating unmeasured as "too narrow" collapses
+   * the console to the map-only layout on every desktop load and then snaps
+   * to the split a frame later. Unmeasured means "assume the split", which is
+   * the overwhelmingly common case; only a real measurement collapses it.
+   */
+  const measured = width > 0;
+  const splitEnabled = !measured || width >= SPLIT_DISABLED_BELOW;
 
   /** Keeps both panes above their minimums whatever the container width. */
   const clamp = useCallback(

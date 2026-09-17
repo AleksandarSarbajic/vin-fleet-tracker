@@ -1,7 +1,7 @@
 'use client';
 
 import { Popup } from 'react-map-gl/mapbox';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph } from '@/lib/format';
 import { StatusChip } from '../StatusChip';
 

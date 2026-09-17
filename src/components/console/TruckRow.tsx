@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import type { FleetRow } from '@/server/fleet';
+import type { FleetRow } from '@/server/fleet-query';
 import { elapsed } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';

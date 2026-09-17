@@ -45,24 +45,30 @@ function filledCircle(fill: string, r: number): Shape {
   };
 }
 
-/** Diagonal hatch, for STALE_GPS. Drawn into a tile and used as a fill. */
-function hatchPattern(ctx: CanvasRenderingContext2D): CanvasPattern | string {
-  const tile = document.createElement('canvas');
-  const pitch = 4 * SCALE;
-  tile.width = pitch;
-  tile.height = pitch;
-  const t = tile.getContext('2d');
-  if (!t) return NEUTRAL;
-  t.strokeStyle = NEUTRAL;
-  t.lineWidth = 1.4 * SCALE;
-  // Two strokes so the pattern tiles seamlessly across the diagonal.
-  t.beginPath();
-  t.moveTo(-pitch, pitch);
-  t.lineTo(pitch, -pitch);
-  t.moveTo(0, pitch * 2);
-  t.lineTo(pitch * 2, 0);
-  t.stroke();
-  return ctx.createPattern(tile, 'repeat') ?? NEUTRAL;
+/**
+ * Diagonal hatch for STALE_GPS, stroked directly into the marker rather than
+ * built as a CanvasPattern.
+ *
+ * The pattern approach did not survive contact with a real map. The tile was
+ * created from an already `scale(2,2)`-ed context, so its 4px pitch came out
+ * at 16 logical px against a 14.4px circle — at most one faint line crossed
+ * the shape, and on tiles the marker read as an empty ring. Stroking the lines
+ * under a clip is both simpler and actually visible.
+ */
+function hatchCircle(ctx: CanvasRenderingContext2D, r: number): void {
+  ctx.save();
+  circlePath(ctx, r);
+  ctx.clip();
+  ctx.strokeStyle = NEUTRAL;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  // 45 degrees, 3.5px apart, swept wide enough to cover the whole box.
+  for (let x = -MARKER_SIZE; x < MARKER_SIZE * 2; x += 3.5) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + MARKER_SIZE, MARKER_SIZE);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 const SHAPES: Record<Status, Shape> = {
@@ -165,11 +171,7 @@ const SHAPES: Record<Status, Shape> = {
       circlePath(ctx, 7.2);
       ctx.fillStyle = NEUTRAL_FILL;
       ctx.fill();
-      ctx.save();
-      ctx.clip();
-      ctx.fillStyle = hatchPattern(ctx);
-      ctx.fillRect(0, 0, MARKER_SIZE, MARKER_SIZE);
-      ctx.restore();
+      hatchCircle(ctx, 7.2);
       circlePath(ctx, 7.2);
       ctx.setLineDash([1.5, 2.2]);
       ctx.lineWidth = 1.5;
