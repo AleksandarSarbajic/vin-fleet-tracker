@@ -59,8 +59,39 @@ other. The legacy `anon` / `service_role` JWTs are deprecated and unused.
 | `npm run db:migrate` | Apply migrations (session pooler) |
 | `npm run db:verify` | Assert RLS, policies and grants are intact |
 | `npm run db:studio` | Drizzle Studio |
+| `npm run worker` | Ingestion worker — the only thing that calls Samsara |
+| `npm run samsara:probe` | Re-verify `docs/samsara.md` against the live org |
 
 `npm run check` also runs as a Husky pre-commit hook.
+
+## The ingestion worker
+
+```bash
+npm run worker
+```
+
+A standalone Node process, **not** deployed on Supabase: `pg_cron` has a
+one-minute floor and Edge Functions are not built for a persistent poller.
+Put it on a small VM, Railway or Fly — in **eu-west-1**, next to the
+database, not near the fleet.
+
+- **Exactly one instance.** It is the only thing that talks to Samsara;
+  every client reads our database. Ten open tabs must not mean ten times the
+  Samsara traffic.
+- Polls `/fleet/vehicles/stats/feed` every 30s with a **cursor persisted in
+  `feed_health.cursor`**, so a restart resumes rather than re-ingesting cold.
+- Token bucket, exponential backoff with full jitter, circuit breaker, and a
+  log line for every throttle event.
+- On a cold start it seeds from the stats snapshot and derives
+  `trucks.active` from position recency. Samsara has no active flag and a
+  third of this org's feed is trucks that have not moved in months.
+- Syncs the vehicle and driver rosters hourly; prunes positions beyond the
+  7-day rolling window, always keeping each truck's newest fix.
+- Connects over `DIRECT_URL`, the session pooler.
+
+`docs/samsara.md` records the response shapes this worker parses, **verified
+against the live org** rather than taken from the published reference.
+Re-check it with `npm run samsara:probe`.
 
 ## Security model
 
@@ -107,4 +138,7 @@ docs/design-spec.md The design, extracted
 
 - **0 — done.** `docs/design-spec.md`.
 - **1 — done.** Scaffold, env validation, schema, migrations, RLS, auth.
-- **2 — next.** Samsara client and ingestion worker.
+- **2 — done.** Samsara client and ingestion worker, verified against the
+  live org. See `docs/samsara.md`.
+- **3 — next.** Read-only console: map, virtualized list, two-way selection,
+  search, draggable split.
