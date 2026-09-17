@@ -119,7 +119,13 @@ fontFamily: {
 Square corners are the default. `sm`/`md` exist but are not used on any drawn
 element.
 
-## 1.2 Light theme (opt-in)
+## 1.2 Light theme — specified, not built
+
+> **Deferred (§12.16).** Dark is the default and the only theme QA signs off.
+> The remap below is recorded so it isn't lost, but it is **incomplete** — it
+> has no values for `line.*`, `row.*`, `text.mutedOnSelected`,
+> `status.neutral`, `status.tomorrow` or any status `bg`/`bd`, and no measured
+> ratios. **Do not half-implement it.** Ship dark only until it is finished.
 
 Same token names remapped, nothing else changes.
 
@@ -199,7 +205,7 @@ MacBook 16 both land. Header is 56px; everything below it is the split.
 | **≥ 2200** | Ultrawide. Map grows to 980px; list keeps its 8 columns and gains Trailer + Broker. All header chips visible. |
 | **1440–2199** | Reference layout. Header 56, then the `3b` draggable split — default 60/40 in the list's favour (at 1728: list 1037, map 685, handle 6). Map hard minimum 520px, list minimum 560px. Position persisted per dispatcher. **The map is never a fixed width.** |
 | **1280–1439** | Split still draggable, range narrows to map 520–620. Driver column drops to **120px**; Position and Next stop share the remainder. |
-| **1024–1279** | Below **1086** total the split is **disabled**: map collapses to a toggle, list runs full width. Toggle state persists per dispatcher. |
+| **1024–1279** | Below **1086** total the split is **disabled**: map collapses to a toggle, list runs full width. Toggle state persists per dispatcher. **The detail panel becomes a full-screen sheet over the list** (§12.12). |
 | **< 1024** | Two-line rows (`1b`), map as a tab. |
 | **< 480** | Phone stack (`2f`). |
 
@@ -299,7 +305,7 @@ stop**, which is the proportional split the brief calls for.
 spare at 10.5px; widening two of them only adds room. Barlow Condensed at
 `.11em` is narrow enough that a 1px type step costs about 4px of label width.
 
-> **Flag — see §12.** 693px of non-flexible width does not fit inside the
+> **Flag — see §13.3.** 693px of non-flexible width does not fit inside the
 > 560px list minimum. See the open question on the narrow-list row variant.
 
 ## 4.2 Column labels
@@ -386,7 +392,7 @@ hue**.
 | Status | fg | bg | border | Border style | Chip word |
 |---|---|---|---|---|---|
 | `LATE` | `#ff8a7a` | `#3a1f1c` | `#6b3129` | solid | `Late` |
-| `STALE_GPS` | `#b3bac0` | `#262a2f` | `#6e767d` | **dotted** | `GPS 2h 40m` (elapsed, tabular) |
+| `STALE_GPS` | `#b3bac0` | `#262a2f` | `#6e767d` | **dotted** | `2h 40m` — elapsed, tabular, **one format everywhere, no `GPS` prefix**; the icon carries that (§12.11) |
 | `UNASSIGNED` | `#b3bac0` | `#262a2f` | `#6e767d` | **solid** | `Unassigned` |
 | `AT_RISK` | `#f2b23f` | `#3a2c15` | `#6b5224` | solid | `At risk` |
 | `NO_APPT` | `#b3bac0` | `#262a2f` | `#6e767d` | **dashed** | `No appt` |
@@ -399,6 +405,13 @@ Tailwind token names (`2g`): `status.late`, `status.risk`, `status.ontime`,
 states (`STALE_GPS`, `UNASSIGNED`, `NO_APPT`) all resolve to
 `status.neutral` and are told apart by border style, icon and marker
 pattern — never by colour.
+
+**`STALE_GPS` is only evaluated for a truck with a live appointment**
+(§12.3). Samsara gateways report on ignition, so a legitimately parked truck
+goes quiet for hours; a parked truck with no load resolves to `NO_APPT` and
+**never** to `STALE_GPS`. `UNASSIGNED` is gated on a live appointment the
+same way, which makes the three neutral states mutually exclusive by
+construction.
 
 ## 5.2 Measured contrast (`1a`)
 
@@ -476,6 +489,17 @@ LATE → STALE_GPS → UNASSIGNED → AT_RISK → NO_APPT → ARRIVED → ON_TIM
 Turn 4: a truck with a live appointment and nobody driving it sorts **third**,
 after Late and Stale GPS, ahead of At risk. It cannot sit below twelve on-time
 rows.
+
+**Secondary sort within an urgency band: appointment time ascending, nulls
+last** (§12.4).
+
+**The list does not re-sort on refresh.** Order is computed on load, on filter
+change, and on explicit user action only. Status colours, ETAs and positions
+update **in place**; rows never move under a click. When the computed order
+has drifted, a pill appears at the top of the scroller — `6 rows would
+reorder` — and clicking it re-sorts. This is also what makes the `2h`
+status-change toast safe: the row has already recoloured, but it has not
+moved.
 
 Other sorts offered in the list header (`2a`, `3c`): `Urgency` (default,
 active) · `Appt time` · `Truck no.`
@@ -622,9 +646,9 @@ the **dispatch** zone.
 | `/` | Focus search |
 | `Esc` | Clears search, **then** clears selection. In a dirty modal, raises the discard confirm — never a silent close. |
 | `↑` `↓` | Move row selection, map follows |
-| `Enter` | Open detail |
-| `E` | Open edit |
-| `1`–`N` | Toggle the status filter chips — **see the open question in §12** |
+| `Enter` | **Open the edit modal.** Selection already shows the detail panel, so binding `Enter` to "detail" was redundant (§12.10). |
+| `E` | Open edit (same as `Enter`) |
+| `1`–`7` | Toggle the filter chips, in drawn order: `1` Late · `2` At risk · `3` On time · `4` Arrived · `5` Tomorrow · `6` Data issues · `7` Inactive. Chips are **multi-select** (§12.9). |
 | `0` | Reset filters to All |
 | `Cmd/Ctrl` + `Enter` | Save (edit modal) |
 | `←` `→` | Move the split handle in 2% steps (when the handle has focus) |
@@ -689,11 +713,26 @@ search · filter chips · status cluster. At 60 trucks the search shrinks to
 - **Avatar**: 30×30, 1px `line.hair` border, initials in cond 600 11
   `text.secondary`.
 
-### Chip set as drawn
+### Chip set
 
 `All` · `Late` · `At risk` · `On time` · `Arrived` · `Tomorrow` ·
-`Data issues`. At 60 trucks `Data issues` abbreviates to `Data` (`3d`).
-`Data issues` is the combined bucket for the three neutral states.
+`Data issues` · **`Inactive`**. At 60 trucks `Data issues` abbreviates to
+`Data` (`3d`). `Data issues` is the combined bucket for the three neutral
+states.
+
+**`Inactive` is added in v1** (§12.14). `trucks.active` is ours, not
+Samsara's, and the stats feed returns every vehicle ever registered — some
+dead since 2019. Without a way to see and flip inactive trucks, seeding is a
+dead end. The chip filters to `active = false`; the flag is flipped by a
+checkbox in the edit modal. No separate admin screen.
+
+**Chips are multi-select** — each toggles independently, `0` resets to All
+(§12.9).
+
+**Counts are fleet-wide, not search-scoped** (§12.8). With a search narrowing
+the list to 3 of 20, every chip still reads its full-fleet count. They show
+what you would get if you cleared the search, which is the point of leaving
+them visible.
 
 ## 9.2 List panel
 
@@ -706,6 +745,13 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
   `Groups collapse — click a group head`.
 - **Body**: scrolls, `min-height: 0`, column header sticky inside it.
   **Virtualize with TanStack Virtual regardless of current fleet size.**
+- **Stale-sort pill**: when the computed order has drifted from the displayed
+  order, a pill sits at the top of the scroller reading `N rows would
+  reorder`. Clicking it re-sorts. See §5.6 — **the list never re-sorts on its
+  own.**
+- **Next stop** is the lowest `stops.sequence` with no `departed_at`. A truck
+  holding two loads takes the **earliest deadline across both**, and the row
+  shows the load number so it is clear which one (§12.13).
 - **Footer bar** (30px): `#1a2027` ground, `line.hair` top, sans 400 11.5
   `text.secondary`. Left: `Showing 1–21 of 30`. Right: the below-the-fold
   counts, with `0 problems below the fold` in `status.ontime.fg` when true
@@ -714,13 +760,18 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
 ## 9.3 Map panel
 
 - Mapbox **`dark-v11`** tiles.
-- **Clustered — but problem markers never cluster.** Cluster counts include
-  **on-time and tomorrow trucks only**. 30 trucks collapsing into clusters can
+- **Clustered — but the problem set never clusters** (§12.5). The problem set
+  is `LATE`, `STALE_GPS`, `UNASSIGNED`, `AT_RISK`, `NO_APPT`. **Everything
+  else clusters, Arrived included.** 30 trucks collapsing into clusters can
   never hide a late truck.
+  *(This corrects `3d`'s caption, which said cluster counts were on-time and
+  tomorrow only and left Arrived unaccounted for.)*
 - Cluster bubble: square, `surface.raised` fill, 1px `accent` border, count in
   sans 600 tabular `text.DEFAULT`. Size scales with count — 34px at 5, 38px at
   7, 40px at 11, 42px at 14, 48px at 24.
-- `Clusters break below zoom 6`.
+- **No clustering above zoom 6**; clusters break apart as you zoom in past
+  it. *(The document's `Clusters break below zoom 6` is backwards — §12.6.
+  Confirm the exact zoom against real tiles before locking it.)*
 - **Zoom control**: two stacked 32×32 buttons, `surface.raised`, `line.hair`
   border, top-right at 16/14px inset.
 - **Marker key**: bottom-right, `rgba(21,24,27,.92)` ground, `line.hair`
@@ -728,8 +779,8 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
   risk, On time, Arrived, Tomorrow, Data issue.
 - **Map footer** (26px): `line.hair` top, Micro-step 10.5 `text.muted`. Left
   is contextual (`Positions from ELD · newest 12s ago`, or
-  `Clusters break below zoom 6 · problem markers never cluster`, or
-  `Cluster count is on-time + tomorrow trucks only`). Right is always
+  `Clusters break apart above zoom 6 · problem markers never cluster`, or
+  `Cluster count excludes the problem set`). Right is always
   `© Mapbox · OpenStreetMap`.
 - **Selection is two-way**: marker click scrolls and rails the row; row click
   pans the map. **120ms**, and nothing else moves.
@@ -862,6 +913,10 @@ a single line saying so.**
   clears` in Small/`text.muted`, with `Esc` in `accent`.
 - **Match highlight**: `background: #3d4a57`, ink `text.DEFAULT`. **A steel
   plate, not a yellow one — yellow is spoken for by At risk.**
+- **US state names map to abbreviations in both directions** (§12.7), so
+  `kansas` and `KS` both match `Wichita, KS`. This is what makes `2d`'s
+  otherwise-impossible `KS` highlight on the query `kan` correct.
+- Driver names match on **surname only** — as does the modal's driver picker.
 
 ## 9.7 Empty state — no results (`2e`)
 
@@ -869,10 +924,22 @@ Centred in the list body, `gap: 10px`: icon, then a Display-step headline
 (cond 600 17/1.1 `.06em` uppercase) `No truck matches "petrov 42"`, then a
 420px-max explanation in sans 400 12.5/1.5 `text.secondary` naming the actual
 rule — `Driver names match on surname only, and truck numbers are four
-digits. Try petrov or 1203.` — then `Clear search` (primary 34px) and
-`Search all loads` (secondary 34px).
+digits. Try petrov or 1203.` — then `Clear search` (primary 34px).
+
+**`Search all loads` is cut** — there is nothing behind it (§12.15).
 
 The column header stays visible above it.
+
+### Other empty states — build these in v1 (§12.14)
+
+Same centred construction: icon, Display-step headline, a 420px-max
+explanation that names the actual cause and the next action.
+
+| Case | Headline | Body |
+|---|---|---|
+| **Zero active trucks** | `No active trucks` | Explains that `active` is set by position recency on seed and flipped by hand, and points at the `Inactive` chip. Action: `Show inactive trucks`. |
+| **Truck with no load** | `No load assigned` | In the detail panel. Status reads `No appt`. Action: `Add load`. |
+| **Nothing selected** | `Select a truck` | In the detail panel at rest. One line — `Pick a row, or click a marker.` No action button. |
 
 ## 9.8 Offline / sync failed (`2e`)
 
@@ -929,16 +996,27 @@ Availability comes from the `drivers.active` flag. *Deleted: `HOS 11h 00m`,
 Below: `Current assignment: M. Kowalczyk since Mon 02:10 CDT. Type a surname
 to search all N drivers.`
 
+Also in this group: an **`Active` checkbox** bound to `trucks.active`
+(§12.14), with helper text `Inactive trucks are hidden from the console and
+counted under the Inactive chip.` This is the only place the flag is
+editable — there is no admin screen.
+
 ### Appointment — as written on the rate confirmation
 
 Grid `1fr 1fr 1fr`.
+
+Above the grid, a two-segment **`APPT` / `FCFS`** toggle (§12.2), same
+36px segmented-control chrome as the override block.
 
 - `Date (stop-local)` — tabular
 - `Time at the stop` — **this is the primary field.** The abbreviation is
   **locked to the facility** and shown as a badge inside the input
   (`surface.overlay`, `line.hair`, cond 600 11 `.09em`). A rate con reading
   14:30 gets typed as 14:30.
-- `Window` — `±30 min`
+- `Window` — `±30 min`. **Hidden when the stop is `FCFS`** — an FCFS time is
+  a facility cutoff, not a slot, so there is no window to set and
+  `appointment_end_utc` stays null. The field label becomes
+  `Cutoff at the facility`.
 
 Below, read-only derived line: `Your clock (read-only): Mon 16 Sep, 14:30 CDT
 · 21:30 CET` — both console clocks, `text.secondary`, tabular.
@@ -983,6 +1061,12 @@ is dirty.
 - Zod schema shared client and server; **the server re-validates everything.**
 - Optimistic update with rollback.
 - **Nothing is sent to any driver.** No SMS, no notification of any kind.
+- **Roles** (§12.14): a `viewer` sees every Edit, Save, `Clear now` and
+  `Reassign` control **disabled with a tooltip naming the reason** — never
+  hidden. Hidden controls make people think the app is broken. `dispatcher`
+  and `admin` both get the full modal; only `admin` may flip `trucks.active`.
+  The role is checked **server-side on every mutating route** regardless of
+  what the UI showed.
 
 ## 9.10 Reassignment confirm (`4a`)
 
@@ -1050,6 +1134,10 @@ First load, 6 rows then real data. Two-tone static blocks: `#252a30` for
 primary cells, `#1f2429` for secondary, stripe `rgb(255 255 255 / .07)`.
 Heights 11–12px, widths vary per row so it doesn't read as a grid.
 **No shimmer** — under reduced-motion nothing changes, because nothing moved.
+
+**Built on the real 8-column grid**, not `2h`'s drawing. `2h` omits Next stop
+and Status and uses the pre-correction Appt/Status widths; it is wrong
+(§12.11). Use the §4.1 grid so the skeleton and the loaded row don't shift.
 
 ### Error boundary — panel-level, never whole-screen
 
@@ -1183,74 +1271,291 @@ built here:
 
 ---
 
-# 12. Open questions and inconsistencies found during extraction
+# 12. Rulings
 
-These are places where the design document contradicts itself or where a
-correction exposes a gap. **None of them were silently resolved.**
+Decisions taken **2026-09-17**, after the phase-0 extraction. **These carry
+brief-level authority and supersede both the design document and
+`PROJECT_BRIEF.md` where they conflict.** Numbering follows the order the
+questions were raised.
 
-## 12.1 Filter-chip number keys — `1`–`7` or `1`–`6`?
+Sections 1–11 above have already been amended to match; each amendment points
+back here.
 
-`2g`'s keyboard map says **`1`–`7` toggle the status filter chips**, which
-matches turn 1's seven status tokens. But every drawn console (`2a`, `3c`,
-`3d`, `2f`) shows **six** chips after `All`: `Late`, `At risk`, `On time`,
-`Arrived`, `Tomorrow`, `Data issues` — the three neutral states are folded
-into one `Data issues` bucket.
+## 12.1 Deadline, LATE and AT_RISK
 
-Turn 4 added `UNASSIGNED` into that same neutral family and did **not** give
-it a chip. `4c`'s "next" list offers *"Unassigned needs its own filter chip"*
-as an available follow-up request, which confirms it was not built.
+The brief stacked a 30-minute grace on top of a ±30 window — 90 minutes of
+slack measured from the start time. **The window *is* the grace.**
 
-**Decision needed:** `1`–`6` against the drawn chips (and `Unassigned` stays
-inside `Data issues`), or `1`–`7` with `Unassigned` promoted to its own chip.
-I have specified `1`–`N` in §8.1 pending the call.
+```ts
+deadline = appointment_end_utc ?? appointment_start_utc
+LATE     = projectedEta >  deadline
+AT_RISK  = projectedEta >  deadline - 45min    // and not already LATE
+```
 
-## 12.2 List-column width — 1037 or 1132?
+No extra grace anywhere. A 14:00–15:00 window is late at **15:01**, which is
+what a receiver means by it.
 
-`2g` and `3b` both state **list 1037, map 685 at 1728** with the default
-60/40 split. `3e`'s column proof says it was drawn at **1132px, "the real
-list-column width at the default 60/40 split"**.
+- `lateThresholdMinutes` is **retired** from the config object.
+- `riskBufferMinutes` stays at **45**.
+- "The appointment has passed with no arrival" needs no separate clause — a
+  projected ETA past the deadline already produces `LATE`.
 
-These disagree by 95px. 1037 is 60% of 1728 and is corroborated twice; 1132
-appears once. **§4.1 uses 1037.** The `3e` conclusion (that all five fixed
-labels hold at 10.5px) is unaffected — it holds with more margin at 1132 and
-still holds at 1037, since the fixed columns don't flex.
+Supersedes the At-risk / Late rules in `1a` and in `PROJECT_BRIEF.md`.
 
-## 12.3 The 560px list minimum cannot hold the 8-column row
+## 12.2 FCFS is real, and gets a control
 
-With correction 2 applied, the non-flexible width of the console row is
-**693px** (fixed columns + gaps + padding). The `3b` list minimum is
-**560px**. Even with `2g`'s 1280-breakpoint step of Driver 148 → 120, it is
-665px. The single-line row **cannot** fit inside the list minimum.
+`appointment_type (FCFS|APPT)` stays in the schema. First-come-first-served is
+how a large share of loads actually work.
 
-This is not created by the correction — it was already true at 671px before
-it — but the correction makes it 22px worse.
+- An **FCFS stop's time is a facility cutoff, not an appointment.**
+- FCFS stops **can reach `LATE`** against that cutoff.
+- FCFS stops **never reach `AT_RISK`.** There is no slot to miss, only doors
+  that close.
+- The modal's appointment group gets an **`APPT` / `FCFS` toggle**. Choosing
+  FCFS **hides the `±` window control**, so `appointment_end_utc` stays null
+  and the deadline coalesces to `appointment_start_utc`.
 
-The design's own answer appears to be the **`1b` two-line row**, whose caption
+See §9.9.
+
+## 12.3 Two stale thresholds, two numbers
+
+| Key | Value | Scope |
+|---|---|---|
+| `feedStaleMinutes` | **5** | Fleet-wide. Poll is 30s, so ten missed cycles means the feed is down. Triggers `feedStale: true` and the §5.9 colour withdrawal. |
+| `staleMinutes` | **45** | Per-truck. Drives the `STALE_GPS` status. |
+
+**The trap:** verified Samsara data shows gateways report on ignition, so a
+legitimately parked truck goes quiet for hours. **Only evaluate `STALE_GPS`
+for a truck that has a live appointment.** A parked truck with no load
+resolves to `NO_APPT` and never to `STALE_GPS`.
+
+This makes `STALE_GPS`, `UNASSIGNED` (already gated on a live appointment) and
+`NO_APPT` mutually exclusive by construction.
+
+## 12.4 Sort stability — the list does not re-sort on refresh
+
+Secondary sort within an urgency band: **appointment time ascending, nulls
+last.**
+
+The deeper rule: **sort order is computed on load, on filter change, and on
+explicit user action only.** Status colours, ETAs and positions update **in
+place**. Rows never move under a click.
+
+When the computed order has drifted from the displayed order, a pill appears
+at the top of the scroller — `N rows would reorder` — and clicking it
+re-sorts. This also resolves the `2h` toast case: `1246 slipped to At risk`
+recolours the row and the marker without moving anything.
+
+See §5.6 and §9.2.
+
+## 12.5 Problem set
+
+```
+problem set = LATE · STALE_GPS · UNASSIGNED · AT_RISK · NO_APPT
+```
+
+`ARRIVED`, `ON_TIME` and `TOMORROW` are **not** problems.
+
+- **Footer bar** counts the problem set — that is what `0 problems below the
+  fold` means.
+- **Clustering**: the problem set **never clusters**. Everything else does,
+  **Arrived included.**
+
+This corrects `3d`'s caption, which said cluster counts were on-time and
+tomorrow only and left Arrived unaccounted for.
+
+## 12.6 Clustering zoom rule is backwards in the document
+
+`3c`'s map footer reads `Clusters break below zoom 6`. Clusters break apart as
+you zoom **in**, so the correct rule is **no clustering above zoom 6**.
+
+Written into §9.3. **Confirm the exact zoom against real `dark-v11` tiles
+before locking it** — 6 was chosen against a placeholder.
+
+## 12.7 Search maps US state names to abbreviations
+
+Both directions: `kansas` and `KS` both match `Wichita, KS`.
+
+This is deliberate and is what makes `2d`'s otherwise-impossible `KS`
+highlight on the query `kan` correct.
+
+Driver names still match on **surname only**, in search and in the modal's
+driver picker.
+
+## 12.8 Filter chip counts are fleet-wide
+
+Not search-scoped. With a search narrowing the list to 3 of 20, every chip
+still reads its full-fleet count. **They show what you would get if you
+cleared the search**, which is the point of leaving them visible.
+
+## 12.9 Filter chips are multi-select
+
+Each toggles independently. `0` resets to All.
+
+## 12.10 `Enter` opens the edit modal
+
+Selection already shows the detail panel, so binding `Enter` to "open detail"
+was redundant. `Enter` and `E` both open edit.
+
+Fixed in §8.1.
+
+## 12.11 Format fixes
+
+| Thing | Ruling |
+|---|---|
+| Arrived ETA cell | `In 10:58` becomes **`Arr 10:58`**, and it means `arrived_at`. |
+| Stale chip | **One format everywhere: `2h 40m`.** No `GPS` prefix — the icon carries that. The `1a` reference chip's `GPS 2h 40m` is wrong. |
+| Weekday prefix | Appears whenever the appointment is **not today in dispatch-local time** — `Tue 06:30 CDT`. Not tied to the `TOMORROW` status. |
+| `2h` skeleton | **Wrong.** Drawn on 6 columns at pre-correction widths. Rebuild on the real §4.1 8-column grid so the skeleton and the loaded row don't shift. |
+
+## 12.12 Detail panel below 1086px
+
+Becomes a **full-screen sheet over the list**, dismissed by `Esc` or a back
+control. It does not try to live under a collapsed map.
+
+Resolves the undefined-height problem: at `< 1086` the map is a toggle, so
+there is no map to sit beneath.
+
+## 12.13 Next stop, and trucks holding two loads
+
+**Next stop = the lowest `stops.sequence` with no `departed_at`.**
+
+A truck holding two loads takes the **earliest deadline across both**, and the
+row shows the load number so it is clear which one is driving the status.
+
+## 12.14 Built in v1
+
+Three things the design never drew that ship anyway.
+
+### `Inactive` filter chip
+
+**Forced by the Samsara data.** The stats feed returns every vehicle ever
+registered — one response held fixes from seconds old to seven months old, and
+trucks decommissioned since 2019 are still in it. `trucks.active` is **ours**,
+seeded from position recency (a fix within 24h = active).
+
+Without a way to see and flip inactive trucks, **seeding is a dead end**.
+
+A chip plus a checkbox in the edit modal is enough. **No separate admin
+screen.** See §9.1 and §9.9.
+
+### Role treatment
+
+A `viewer` sees every Edit, Save, `Clear now` and `Reassign` control
+**disabled with a tooltip naming the reason — never hidden.** Hidden controls
+make people think the app is broken.
+
+`dispatcher` and `admin` both get the full modal; only `admin` may flip
+`trucks.active`. The role is checked **server-side on every mutating route**
+regardless of what the UI showed.
+
+### Three more empty states
+
+Zero active trucks · truck with no load · nothing selected in the detail
+panel. Cheap, and all three will certainly occur. Specified in §9.7.
+
+## 12.15 Deferred to v2
+
+Recorded as **deferred, not missing** — each is referenced by the design but
+deliberately out of v1 scope.
+
+| Surface | Referenced by |
+|---|---|
+| **History** | `History` button in the `2b` detail panel; `4a`'s "reversible from truck 1088's history for the rest of the shift" |
+| **Toast preferences** | `2h`'s "status-change toasts are opt-in per chip" — there is no settings surface |
+| **Audit log view** | `audit_log` is written on every edit; nothing reads it back |
+| **Override review** | `4c`'s "reviewable at the end of a week"; `4c`'s own follow-up list offers the screen as unbuilt |
+
+**`Search all loads` is cut outright** — there is nothing behind it. Removed
+from the `2e` empty state (§9.7).
+
+Until History ships, the `History` button in the detail panel and the
+"reversible from history" line in the `4a` confirm dialog have nothing to open.
+**Both need hiding, or the reassignment confirm will promise a reversal path
+that does not exist.**
+
+## 12.16 Light theme is deferred
+
+Dark is what gets signed off. `2g`'s remap is **specified but unbuilt** and is
+**incomplete** — no values for `line.*`, `row.*`, `text.mutedOnSelected`,
+`status.neutral`, `status.tomorrow` or any status `bg`/`bd`, and no measured
+ratios at all.
+
+Marked as such in §1.2 so nobody half-implements it.
+
+---
+
+# 13. Still open
+
+The five contradictions found during extraction. **These have not been ruled
+on.** Four are cosmetic or deferred; one needs a decision before the list is
+built in phase 3.
+
+## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
+
+`2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
+`Inactive` chip (§12.14) makes the set **seven**:
+
+```
+1 Late · 2 At risk · 3 On time · 4 Arrived · 5 Tomorrow · 6 Data issues · 7 Inactive
+```
+
+which reconciles `2g` exactly. §8.1 is written this way.
+
+**The inference to confirm:** that `Inactive` belongs in the same keyed row as
+the status chips, rather than sitting apart as a different axis (an `active`
+flag is not a status). If it sits apart, the keyed set reverts to `1`–`6` and
+`2g`'s `1`–`7` is simply stale.
+
+## 13.2 List-column width — 1037 or 1132?
+
+`2g` and `3b` both say **list 1037, map 685 at 1728**. `3e`'s column proof
+says it was drawn at **1132px, "the real list-column width at the default
+60/40 split"**. They disagree by 95px.
+
+§4.1 uses **1037** — it is 60% of 1728 and corroborated twice, against 1132's
+single appearance. `3e`'s conclusion is unaffected either way, since the fixed
+columns don't flex.
+
+Low stakes. Worth a glance only because `3e` is the section that exists to be
+authoritative about column widths.
+
+## 13.3 The 560px list minimum cannot hold the 8-column row — **needs a decision**
+
+The blocking one. Non-flexible width of the console row is **693px** (fixed
+columns + gaps + padding). The `3b` list minimum is **560px**. With `2g`'s
+1280-breakpoint step of Driver 148 → 120 it is still 665px.
+
+Not created by correction 2 — it was 671px before — but the correction makes
+it 22px worse.
+
+The design's own answer looks like the **`1b` two-line row**, whose caption
 reads *"for the 560–640px list panel beside the map"*. Its non-flexible width
-is 331px, which leaves 229px of flexible column at a 560px list. But `2g`'s
+is 331px, leaving 229px of flexible column at a 560px list. But `2g`'s
 breakpoint table ties two-line rows to **viewport `< 1024`**, not to list
 width.
 
-**Proposed resolution, needs confirming:** the row variant is chosen by
-**list-panel width, not viewport width** — single-line above roughly 940px of
-list, `1b` two-line below it. That makes both statements true and makes the
-560px minimum meaningful. Flagged rather than assumed.
+**Proposed:** the row variant is chosen by **list-panel width, not viewport
+width** — single-line above roughly 940px of list, `1b` two-line below it.
+That makes both statements true and makes the 560px minimum meaningful.
 
-## 12.4 Unassigned vs Tomorrow markers
+**Phase 3 needs this settled before the list is built.**
 
-Both are circles. `TOMORROW` is a hollow circle, no fill, `#858d94` 1.5
-stroke. `UNASSIGNED` is a solid-outline circle, `#262a2f` fill, `#b3bac0`
-1.5 stroke. They differ by fill and by one step of grey, which is a weaker
-shape separation than the rest of the set achieves.
+## 13.4 Unassigned and Tomorrow markers are both circles
 
-Turn 4 states this explicitly and deliberately ("no new hue"), so it is built
-as specified — but it is the one place where the greyscale-safe guarantee
-leans on fill rather than silhouette. Worth a look on real tiles.
+`TOMORROW` is a hollow circle, no fill, `#858d94` 1.5 stroke. `UNASSIGNED` is
+a solid-outline circle, `#262a2f` fill, `#b3bac0` 1.5 stroke. They separate by
+fill and one step of grey — weaker than the rest of the set, which separates
+by silhouette.
 
-## 12.5 `2f` phone detail lacks an override block
+Turn 4 states this deliberately ("no new hue"), so it is built as specified.
+It is the one place the greyscale-safe guarantee leans on fill rather than
+shape. **Look at it on real tiles in phase 3.**
 
-The `4c` override treatment is specified for the row, the edit modal and the
-desktop detail panel. The phone detail stack (`2f`) predates it and shows no
-override block. Given turn 4's authority and the parity requirement, the
-phone detail should carry the collapsed form of the block. Not drawn
-anywhere — flagged.
+## 13.5 `2f` phone detail has no override block
+
+`4c`'s override treatment is specified for the row, the edit modal and the
+desktop detail panel. The phone detail stack predates it.
+
+Given turn 4's authority and the phone-parity requirement, the phone detail
+should carry the collapsed form of the block. **Not drawn anywhere.**
