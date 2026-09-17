@@ -107,6 +107,52 @@ function apptText(row: FleetRow): { prefix: string | null; time: string } {
   return { prefix: null, time: timeInZone(new Date(stop.apptStartUtc), stop.apptTz) };
 }
 
+/**
+ * The ETA cell.
+ *
+ * An absent ETA says WHY (§12.24). A stop a dispatcher typed has no
+ * coordinates — there is no geocoder — so nothing can be projected for it,
+ * and that is a different fact from "no appointment" or "not computed yet".
+ * All three rendered as an em dash before, which is the same as not saying.
+ *
+ * UNASSIGNED keeps its last computed value, struck through by the class
+ * above: an ETA with no driver is fiction, but blanking it loses information
+ * the dispatcher had a moment ago (§5.8).
+ */
+function etaText(row: FleetRow, feedStale: boolean): string {
+  // Every ETA reads `stale` while the feed is down: the projection is built
+  // on a position we no longer trust (§5.9).
+  if (feedStale) return 'stale';
+  const zone = row.nextStop?.apptTz;
+  switch (row.etaAbsence) {
+    case 'has-eta':
+      return row.etaUtc && zone ? timeInZone(new Date(row.etaUtc), zone) : '—';
+    case 'suppressed-unassigned':
+      return row.lastComputedEtaUtc && zone
+        ? timeInZone(new Date(row.lastComputedEtaUtc), zone)
+        : '—';
+    case 'no-coordinates':
+      return 'no ETA';
+    case 'arrived':
+      return 'arrived';
+    case 'no-appointment':
+      return '—';
+  }
+}
+
+function etaTitle(row: FleetRow): string | undefined {
+  switch (row.etaAbsence) {
+    case 'no-coordinates':
+      return 'No ETA — this stop has no coordinates, so nothing can be projected for it.';
+    case 'suppressed-unassigned':
+      return 'Last computed ETA. No driver is assigned, so it is not a projection any more.';
+    case 'arrived':
+      return 'The truck is at the stop.';
+    default:
+      return undefined;
+  }
+}
+
 function apptTitle(row: FleetRow): string | null {
   const stop = row.nextStop;
   if (!stop?.apptTz || !stop.apptStartUtc) return null;
@@ -160,6 +206,13 @@ function Marked({ text, query }: { text: string; query: string }) {
 interface Props {
   row: FleetRow;
   /**
+   * §5.9, a hard requirement: when the FEED is stale the row withdraws
+   * schedule colour entirely. A green row built on nine-minute-old GPS is
+   * worse than no row. Appointment times stay full strength — they come from
+   * our database, not from the feed.
+   */
+  feedStale: boolean;
+  /**
    * The instant the fleet was fetched, and the reference every age on the row
    * is measured against.
    *
@@ -177,10 +230,18 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
-function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Props) {
+function TruckRowImpl({
+  row,
+  fetchedAt,
+  feedStale,
+  columns,
+  selected,
+  query,
+  onSelect,
+}: Props) {
   const reference = fetchedAt ? new Date(fetchedAt) : undefined;
-  const quiet = row.status === 'TOMORROW';
-  const stale = row.status === 'STALE_GPS';
+  const quiet = !feedStale && row.status === 'TOMORROW';
+  const stale = feedStale || row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
 
   const appt = apptText(row);
@@ -220,7 +281,11 @@ function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Pr
         selected ? 'border-l-[3px] border-l-accent' : 'border-l-[3px] border-l-transparent',
       ].join(' ')}
     >
-      <div className={`h-full ${RAIL[row.status]}`} aria-hidden="true" />
+      {/* Every stripe switches to the dotted stale gradient (§5.9). */}
+      <div
+        className={`h-full ${feedStale ? RAIL.STALE_GPS : RAIL[row.status]}`}
+        aria-hidden="true"
+      />
 
       <div
         className={`font-sans text-data tabular-nums ${quiet ? 'font-medium text-text-secondary' : 'font-bold text-text'}`}
@@ -290,16 +355,20 @@ function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Pr
 
       {columns === 8 ? (
         <div
-          className={`text-right text-body tabular-nums text-text-muted ${unassigned ? 'line-through' : ''}`}
+          title={etaTitle(row)}
+          className={`truncate text-right text-body tabular-nums ${
+            unassigned ? 'text-text-muted line-through' : 'text-text-secondary'
+          }`}
         >
-          {/* TODO(phase 5): projected ETA from the status engine. */}
-          {stale ? 'stale' : '—'}
+          {etaText(row, feedStale)}
         </div>
       ) : null}
 
       <div className="flex justify-end">
+        {/* A dotted neutral chip carrying the age, fleet-wide (§5.9). */}
         <StatusChip
-          status={row.status}
+          status={feedStale ? 'STALE_GPS' : row.status}
+          forced={!feedStale && row.override !== null}
           label={
             stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined
           }
@@ -318,6 +387,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
   return (
     a.row === b.row &&
     a.fetchedAt === b.fetchedAt &&
+    a.feedStale === b.feedStale &&
     a.columns === b.columns &&
     a.selected === b.selected &&
     a.query === b.query

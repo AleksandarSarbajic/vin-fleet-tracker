@@ -42,6 +42,7 @@ export default async function ConsolePage({
       userInitials={initials(user.fullName)}
       initialQuery={first(params['q']) ?? ''}
       initialTruck={first(params['truck'])}
+      initialChips={(first(params['chips']) ?? '').split(',').filter(Boolean)}
       drivers={board.drivers}
       role={user.role}
     />

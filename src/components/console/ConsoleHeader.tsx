@@ -4,15 +4,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
 import { SearchField } from './SearchField';
+import { FilterChips, type FilterKey } from './FilterChips';
+import type { FleetRow } from '@/server/fleet-query';
 
-/**
- * design-spec §9.1. 56px, raised ground, hairline bottom.
- *
- * TODO(phase 5): the status filter chips belong between the search field and
- * the status cluster — All, Late, At risk, On time, Arrived, Tomorrow, Data
- * issues, Inactive, keyed 1–7 with 0 resetting to All. They are phase 5 scope
- * along with the status engine that makes their counts mean anything.
- */
+/** design-spec §9.1. 56px, raised ground, hairline bottom. */
 
 function Clock({ instant, zone, label, primary }: {
   instant: Date;
@@ -43,6 +38,11 @@ function Clock({ instant, zone, label, primary }: {
 }
 
 interface Props {
+  /** Every truck, so the chip counts stay fleet-wide (§12.8). */
+  rows: FleetRow[];
+  chips: Set<FilterKey>;
+  onToggleChip: (key: FilterKey) => void;
+  onResetChips: () => void;
   query: string;
   onQueryChange: (value: string) => void;
   matchCount: number;
@@ -54,6 +54,10 @@ interface Props {
 }
 
 export function ConsoleHeader({
+  rows,
+  chips,
+  onToggleChip,
+  onResetChips,
   query,
   onQueryChange,
   matchCount,
@@ -104,12 +108,16 @@ export function ConsoleHeader({
         totalCount={totalCount}
       />
 
-      {/* TODO(phase 5): the Unassigned filter chip links here too, once the
-          chips exist. Until then this is the only way in. */}
-      <div className="flex items-center">
+      <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+        <FilterChips
+          rows={rows}
+          selected={chips}
+          onToggle={onToggleChip}
+          onReset={onResetChips}
+        />
         <Link
           href="/assignments"
-          className="border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+          className="shrink-0 border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
         >
           Assignments
         </Link>

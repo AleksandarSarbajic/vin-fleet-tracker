@@ -4,6 +4,8 @@ import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
 import { StatusChip } from '../StatusChip';
+import { OVERRIDE_REASON_LABEL } from '@/lib/override';
+import { STATUS_LABEL } from '@/lib/status';
 
 /**
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
@@ -76,7 +78,7 @@ export function MapPopup({
             {row.truckNumber ?? row.samsaraName}
             {row.driverName ? ` · ${row.driverName}` : ''}
           </span>
-          <StatusChip status={row.status} />
+          <StatusChip status={row.status} forced={row.override !== null} />
         </div>
 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[5px] px-[10px] py-[9px] text-[12px]">
@@ -116,6 +118,24 @@ export function MapPopup({
               )}
               {row.openLoadCount > 1 ? ` · ${row.openLoadCount} open loads` : ''}
             </Row>
+          ) : null}
+          {/**
+            * §9.5: Showing and Computed sit adjacent, each in its own colour,
+            * so a dispatcher can see exactly what the override is hiding.
+            * When the two agree the block collapses to a single line — which
+            * here means it does not render at all, because the chip above
+            * already says it.
+            */}
+          {row.override && row.override.forcedStatus !== row.computed ? (
+            <>
+              <Row label="Computed">
+                <span className="text-status-risk-fg">{STATUS_LABEL[row.computed]}</span>
+              </Row>
+              <Row label="Forced by">
+                {row.override.setByName ?? 'a dispatcher'} —{' '}
+                {OVERRIDE_REASON_LABEL[row.override.reason]}
+              </Row>
+            </>
           ) : null}
           <Row label="Driver">
             {row.driverName ?? (

@@ -33,6 +33,8 @@ interface Props {
   rows: FleetRow[];
   /** Reference instant for every age on a row — see TruckRow. */
   fetchedAt: string | null;
+  /** §5.9: withdraws schedule colour from every row at once. */
+  feedStale: boolean;
   selectedId: string | null;
   query: string;
   drift: number;
@@ -43,6 +45,7 @@ interface Props {
 export function FleetList({
   rows,
   fetchedAt,
+  feedStale,
   selectedId,
   query,
   drift,
@@ -106,9 +109,12 @@ export function FleetList({
           {headers.map((h) => (
             <div
               key={h}
-              className={`font-cond text-micro uppercase text-text-muted ${RIGHT_ALIGNED.has(h) ? 'text-right' : ''}`}
+              className={`font-cond text-micro uppercase ${RIGHT_ALIGNED.has(h) ? 'text-right ' : ''}${
+                feedStale && h === 'Position' ? 'text-status-neutral-fg' : 'text-text-muted'
+              }`}
             >
-              {h}
+              {/* The column says so itself rather than only the rows (§5.9). */}
+              {feedStale && h === 'Position' ? 'Position (frozen)' : h}
             </div>
           ))}
         </div>
@@ -123,7 +129,11 @@ export function FleetList({
           </button>
         ) : null}
 
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {/* The body dims as a whole: the schedule is not to be trusted. */}
+        <div
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+          className={feedStale ? 'opacity-[.72]' : ''}
+        >
           {items.map((item) => {
             const row = rows[item.index];
             if (!row) return null;
@@ -141,6 +151,7 @@ export function FleetList({
                 <TruckRow
                   row={row}
                   fetchedAt={fetchedAt}
+                  feedStale={feedStale}
                   columns={columns}
                   selected={row.id === selectedId}
                   query={query}

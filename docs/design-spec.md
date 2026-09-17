@@ -1705,6 +1705,83 @@ runs to receivers that do. When a dispatcher hits it, the fix is an explicit
 **next-day control** on the latest hour, not a rethink of the model.
 
 
+## 12.23 An edit writes only the fields the form owns
+
+A save updates the columns its form renders. **Never a full-row replace.**
+
+The rule exists because of a measured failure: the phase-4 edit modal had no
+broker field, and saving a stop set `loads.broker` to null — the column
+existed, the form did not render it, and the write listed it anyway. It is
+visible in the audit log as `broker: "BROKER DEMO" -> null`, which is the only
+reason it was ever noticed.
+
+The same shape as §12.21's survival: **a rule present in some layers and
+absent from others.** Both were invisible until someone exercised the path.
+
+Tested where it can actually go wrong: `override.test.ts` saves and clears an
+override and asserts every appointment column on the stop is byte-identical
+before and after. The override lives in its own table, so touching the stop at
+all would be the bug.
+
+## 12.24 No coordinates, no projection — and say so
+
+`LATE` and `AT_RISK` are defined against **projected ETA** (§12.1), and a
+projection needs the stop's coordinates. `stops.lat` / `stops.lng` exist and
+**nothing populates them** — there is no geocoder, by design, and no
+dispatcher types coordinates off a rate confirmation.
+
+So the engine takes the ETA as an argument and degrades honestly:
+
+| The stop has | `LATE` | `AT_RISK` | The ETA cell reads |
+|---|---|---|---|
+| coordinates | projected ETA past the deadline | ETA within 45 min of it | the projected time |
+| none | **the clock passing the deadline** | **never** | `no ETA`, with the reason on hover |
+
+`AT_RISK` does not fire without a projection: you cannot be at risk of missing
+something nothing projected. An FCFS stop without coordinates therefore reads
+LATE at 15:01 rather than at 09:00 — later than the rule wants, but honest
+about what it knows. An honest "he's late" beats a fabricated "he'll be late".
+
+**The absence is visible, not silent.** `no ETA` with a tooltip naming the
+cause, never an em dash: a dispatcher has to be able to tell "the board cannot
+project this stop" from "nothing entered yet", and as a dash those are
+identical.
+
+### The strongest argument yet for revisiting the geocoder rule
+
+The brief bans external geocoding, and the ban is right about what it was
+aimed at — **per-position reverse geocoding**, which is a call per truck per
+poll, forever, to replace a string Samsara already gives us.
+
+A **one-time city/state → coordinates lookup on save** is a different thing at
+a different cost: one call per stop entered, cached in the row, never repeated.
+That would give every stop a projection and make §12.1 true everywhere rather
+than where the seed happens to have filled in.
+
+**Not now** — it is a brief-level change and phase 5 is not the place. Worth
+reconsidering after phase 6.
+
+## 12.25 Precedence is not urgency rank
+
+The engine asks its questions in a different order from the one the list sorts
+in, and they disagree in exactly one place. Written down because two orders
+disagreeing looks like a bug to whoever reads the file next.
+
+```
+urgency rank   LATE · STALE_GPS · UNASSIGNED · AT_RISK · NO_APPT · ARRIVED · ON_TIME · TOMORROW
+precedence     ARRIVED · NO_APPT · UNASSIGNED · STALE_GPS · LATE · AT_RISK · TOMORROW · ON_TIME
+```
+
+**UNASSIGNED is evaluated before STALE_GPS.** Rank puts STALE_GPS higher, but
+an unassigned truck is usually parked, and a parked truck's gateway goes quiet
+because Samsara reports on ignition (§12.3). Rank order would therefore label
+exactly those trucks "Stale GPS" — the symptom, with the cause hidden. So
+STALE_GPS applies only to trucks that HAVE a driver.
+
+`ARRIVED` leads because arrival ends the question, and `NO_APPT` comes next
+because everything below it needs an appointment to measure against.
+
+
 ---
 
 # 13. Still open

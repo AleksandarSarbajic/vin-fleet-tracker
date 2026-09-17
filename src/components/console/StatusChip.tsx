@@ -78,14 +78,31 @@ const ICON: Record<Status, React.ReactNode> = {
   ),
 };
 
+/** The override glyph: a hand, for a status a person decided. */
+const OVERRIDE_GLYPH = (
+  <>
+    <path d="M12 11V5.5a1.5 1.5 0 0 1 3 0V12" />
+    <path d="M9 12V7.5a1.5 1.5 0 0 0-3 0V14a7 7 0 0 0 7 7h1a6 6 0 0 0 6-6v-3.5a1.5 1.5 0 0 0-3 0" />
+    <path d="M15 11.5v-2a1.5 1.5 0 0 1 3 0v2" />
+  </>
+);
+
 interface Props {
   status: Status;
+  /**
+   * §9.5: a forced chip keeps the status COLOUR, swaps the status icon for
+   * the override glyph, and appends " · forced". The stripe and the sort are
+   * untouched — the chip is the only place the row changes, so the list still
+   * reads by urgency while a reviewer can see which reds are decisions rather
+   * than measurements.
+   */
+  forced?: boolean;
   /** Overrides the word. Stale GPS prints its elapsed age instead. */
   label?: string | undefined;
   className?: string;
 }
 
-export function StatusChip({ status, label, className = '' }: Props) {
+export function StatusChip({ status, label, forced = false, className = '' }: Props) {
   return (
     <span
       className={`inline-flex h-[21px] shrink-0 items-center gap-1 border px-[7px] font-cond text-micro uppercase leading-none tracking-[.08em] ${CHIP[status]} ${className}`}
@@ -101,9 +118,10 @@ export function StatusChip({ status, label, className = '' }: Props) {
         aria-hidden="true"
         className="shrink-0"
       >
-        {ICON[status]}
+        {forced ? OVERRIDE_GLYPH : ICON[status]}
       </svg>
       {label ?? STATUS_LABEL[status]}
+      {forced ? <span className="opacity-80"> · forced</span> : null}
     </span>
   );
 }

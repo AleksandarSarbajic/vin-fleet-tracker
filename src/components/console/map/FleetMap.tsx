@@ -60,6 +60,11 @@ interface Props {
   rows: FleetRow[];
   /** Reference instant for the popup's GPS age — see TruckRow on hydration. */
   fetchedAt: string | null;
+  /**
+   * §5.9. Every marker drops to the stale shape while the feed is down — a
+   * green dot on a position nobody trusts is the same lie as a green row.
+   */
+  feedStale: boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   /** §12.10's Enter, reachable from the map too. */
@@ -72,6 +77,7 @@ interface Props {
 export function FleetMap({
   rows,
   fetchedAt,
+  feedStale,
   selectedId,
   onSelect,
   onEdit,
@@ -81,7 +87,10 @@ export function FleetMap({
   const mapRef = useRef<MapRef | null>(null);
   const didFit = useRef(false);
 
-  const { problem, clustered } = useMemo(() => splitForMap(rows), [rows]);
+  const { problem, clustered } = useMemo(
+    () => splitForMap(rows, feedStale),
+    [rows, feedStale],
+  );
   const selectedRow = useMemo(
     () => rows.find((r) => r.id === selectedId) ?? null,
     [rows, selectedId],

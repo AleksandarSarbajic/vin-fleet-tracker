@@ -10,6 +10,8 @@ import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { DriverSelect } from '@/components/assignments/DriverSelect';
+import { OVERRIDE_REASON_LABEL, OverrideInput } from '@/lib/override';
+import { OverrideBlock, type OverrideDraft } from './OverrideBlock';
 import {
   AppointmentFields,
   FCFS_DEFAULT_EARLIEST,
@@ -108,6 +110,15 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   );
 
   const [form, setForm] = useState(initialForm);
+
+  const [override, setOverride] = useState<OverrideDraft>(() => ({
+    forced: row.override?.forcedStatus ?? 'AUTO',
+    reason: row.override?.reason ?? '',
+    reasonNote: row.override?.reasonNote ?? '',
+    expiry: 'PLUS_4H',
+    customDate: '',
+    customTime: '',
+  }));
   const set = <K extends keyof typeof initialForm>(key: K, value: (typeof initialForm)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -178,7 +189,96 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   );
 
   const driverChanged = driverId !== initialDriverId;
-  const canSave = mayEdit && parsed.success && dirty.length > 0 && !saving;
+
+  /**
+   * The override travels as its own request to its own table — but Save owns
+   * both, so §9.5's rule holds: Save is disabled while an override lacks a
+   * reason, exactly as it is while a field is invalid.
+   */
+  const overrideChanged =
+    override.forced !== (row.override?.forcedStatus ?? 'AUTO') ||
+    (override.forced !== 'AUTO' && override.reason !== (row.override?.reason ?? ''));
+
+  const overridePayload =
+    override.forced === 'AUTO'
+      ? null
+      : OverrideInput.safeParse({
+          stopId: stop?.stopId ?? '',
+          forcedStatus: override.forced,
+          reason: override.reason === '' ? undefined : override.reason,
+          reasonNote: override.reasonNote.trim() === '' ? null : override.reasonNote,
+          expiry: override.expiry,
+          customExpiry:
+            override.expiry === 'CUSTOM' && override.customDate && override.customTime
+              ? {
+                  date: {
+                    y: Number(override.customDate.slice(0, 4)),
+                    m: Number(override.customDate.slice(5, 7)),
+                    d: Number(override.customDate.slice(8, 10)),
+                  },
+                  time: {
+                    h: Number(override.customTime.slice(0, 2)),
+                    min: Number(override.customTime.slice(3, 5)),
+                  },
+                  tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                }
+              : null,
+        });
+
+  const overrideErrors: FieldError[] =
+    overridePayload && !overridePayload.success
+      ? overridePayload.error.issues.map((i) => ({
+          field: i.path.join('.'),
+          message: i.message,
+        }))
+      : [];
+
+  const canSave =
+    mayEdit &&
+    parsed.success &&
+    overrideErrors.length === 0 &&
+    (dirty.length > 0 || overrideChanged) &&
+    !saving;
+
+  /** Writes the override after the stop save. Its own table, its own route. */
+  const sendOverride = useCallback(async (): Promise<boolean> => {
+    if (!overrideChanged) return true;
+
+    const response =
+      override.forced === 'AUTO'
+        ? await fetch('/api/overrides', {
+            method: 'DELETE',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ stopId: stop?.stopId }),
+          })
+        : await fetch('/api/overrides', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(overridePayload?.success ? overridePayload.data : null),
+          });
+
+    if (response.ok) return true;
+    const body = (await response.json()) as { error?: string; fields?: FieldError[] };
+    setErrors(body.fields?.length ? body.fields : [{ field: '*', message: body.error ?? 'The override failed.' }]);
+    return false;
+  }, [override.forced, overrideChanged, overridePayload, stop?.stopId]);
+
+  /** `Clear now` from the block — immediate, not part of the save (§9.5). */
+  const clearOverrideNow = useCallback(async () => {
+    if (!stop) return;
+    setSaving(true);
+    try {
+      await fetch('/api/overrides', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopId: stop.stopId }),
+      });
+      setOverride((d) => ({ ...d, forced: 'AUTO', reason: '' }));
+      await queryClient.invalidateQueries({ queryKey: ['fleet'] });
+    } finally {
+      setSaving(false);
+    }
+  }, [queryClient, stop]);
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
   const send = useCallback(
@@ -242,6 +342,11 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           return;
         }
 
+        // The override is a second request to a second table. If it fails the
+        // stop edit still stands and the field error says why, rather than the
+        // whole save being rolled back on the client's behalf.
+        if (!(await sendOverride())) return;
+
         await queryClient.invalidateQueries({ queryKey: key });
         onClose();
       } catch (error: unknown) {
@@ -253,7 +358,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         setSaving(false);
       }
     },
-    [edit, onClose, parsed, queryClient, row.id],
+    [edit, onClose, parsed, queryClient, row.id, sendOverride],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
@@ -478,6 +583,29 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                 className="h-14 w-full border border-line-hair bg-surface-sunken p-2 text-[13px] leading-[1.5] text-text"
               />
             </fieldset>
+
+            <OverrideBlock
+              draft={override}
+              onChange={setOverride}
+              computed={row.computed}
+              live={
+                row.override
+                  ? {
+                      forcedStatus: row.override.forcedStatus,
+                      reasonLabel: OVERRIDE_REASON_LABEL[row.override.reason],
+                      setByName: row.override.setByName,
+                      setAtUtc: row.override.setAtUtc,
+                      expiresAtUtc: row.override.expiresAtUtc,
+                    }
+                  : null
+              }
+              disabled={!mayEdit || !stop}
+              onClearNow={() => void clearOverrideNow()}
+              errors={(field) =>
+                overrideErrors.find((e) => e.field === field)?.message ??
+                errors.find((e) => e.field === field)?.message
+              }
+            />
 
             {errorFor('*') ? (
               <p className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg">

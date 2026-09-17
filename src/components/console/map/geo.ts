@@ -14,7 +14,7 @@ export type TruckCollection = FeatureCollection<Point, TruckFeatureProps>;
 
 const EMPTY: TruckCollection = { type: 'FeatureCollection', features: [] };
 
-export function toFeature(row: FleetRow): TruckFeature | null {
+export function toFeature(row: FleetRow, feedStale = false): TruckFeature | null {
   if (row.lat === null || row.lng === null) return null;
   return {
     type: 'Feature',
@@ -24,7 +24,9 @@ export function toFeature(row: FleetRow): TruckFeature | null {
       id: row.id,
       truckNumber: row.truckNumber,
       label: row.truckNumber === null ? row.samsaraName : String(row.truckNumber),
-      status: row.status,
+      // §5.9: with the feed down every marker drops to the stale shape. A
+      // green dot on a position nobody trusts is the same lie as a green row.
+      status: feedStale ? 'STALE_GPS' : row.status,
     },
   };
 }
@@ -44,7 +46,10 @@ export function toFeature(row: FleetRow): TruckFeature | null {
  * several readings per vehicle per poll (one truck carried five, five seconds
  * apart); those are history rows, not markers.
  */
-export function splitForMap(rows: FleetRow[]): {
+export function splitForMap(
+  rows: FleetRow[],
+  feedStale = false,
+): {
   problem: TruckCollection;
   clustered: TruckCollection;
 } {
@@ -52,9 +57,12 @@ export function splitForMap(rows: FleetRow[]): {
   const clustered: TruckFeature[] = [];
 
   for (const row of rows) {
-    const feature = toFeature(row);
+    const feature = toFeature(row, feedStale);
     if (!feature) continue;
-    (isProblem(row.status) ? problem : clustered).push(feature);
+    // STALE_GPS is in the problem set, so a stale feed also stops everything
+    // clustering — which is right: nothing should be summarised into a
+    // bubble while the positions behind it are frozen.
+    (isProblem(feedStale ? 'STALE_GPS' : row.status) ? problem : clustered).push(feature);
   }
 
   return {

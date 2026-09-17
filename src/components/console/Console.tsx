@@ -6,6 +6,7 @@ import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
+import { FILTER_KEYS, passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
@@ -34,6 +35,8 @@ interface Props {
    */
   initialQuery: string;
   initialTruck: string | null;
+  /** Filter chips ride in the URL so a link carries the whole view (§9.6). */
+  initialChips: string[];
   /** For the edit modal's driver picker. */
   drivers: BoardDriver[];
   role: Role;
@@ -45,6 +48,7 @@ export function Console({
   userInitials,
   initialQuery,
   initialTruck,
+  initialChips,
   drivers,
   role,
 }: Props) {
@@ -60,10 +64,19 @@ export function Console({
    *
    * TODO(next commit): the Inactive chip flips this.
    */
-  const rows = useMemo(
-    () => (data?.fleet ?? NO_ROWS).filter((row) => row.active),
-    [data],
+  /** Every truck, inactive included — the chips decide what is shown. */
+  const all = useMemo(() => data?.fleet ?? NO_ROWS, [data]);
+
+  const [chips, setChips] = useState<Set<FilterKey>>(
+    () => new Set(initialChips.filter((c): c is FilterKey => FILTER_KEYS.includes(c as FilterKey))),
   );
+
+  /**
+   * Nothing selected means "active trucks, any status" (§12.9). The filter
+   * runs over the real `active` column rather than being special-cased inside
+   * the Inactive chip.
+   */
+  const rows = useMemo(() => all.filter((row) => passesFilters(row, chips)), [all, chips]);
 
   /** Typed immediately, applied 250ms later — the field never feels laggy. */
   const [typed, setTyped] = useState(initialQuery);
@@ -95,8 +108,12 @@ export function Console({
 
   /** Search and selection both live in the URL so a link carries the view. */
   const syncUrl = useCallback(
-    (next: { q?: string; truck?: string | null }) => {
+    (next: { q?: string; truck?: string | null; chips?: FilterKey[] }) => {
       const search = new URLSearchParams(window.location.search);
+      if (next.chips !== undefined) {
+        if (next.chips.length > 0) search.set('chips', next.chips.join(','));
+        else search.delete('chips');
+      }
       if (next.q !== undefined) {
         if (next.q.trim()) search.set('q', next.q);
         else search.delete('q');
@@ -132,8 +149,30 @@ export function Console({
     [editingId, rows],
   );
 
+  const toggleChip = useCallback(
+    (key: FilterKey) =>
+      setChips((current) => {
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        syncUrl({ chips: [...next] });
+        return next;
+      }),
+    [syncUrl],
+  );
+
+  const resetChips = useCallback(() => {
+    setChips(new Set());
+    syncUrl({ chips: [] });
+  }, [syncUrl]);
+
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
-  const { ordered, drift, resort } = useDisplayOrder(filtered, 'urgency', query);
+  const { ordered, drift, resort } = useDisplayOrder(
+    filtered,
+    'urgency',
+    // §12.4: order recomputes on a filter or search change, never on a poll.
+    `${query}|${[...chips].sort().join(',')}`,
+  );
 
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
@@ -177,12 +216,16 @@ export function Console({
   return (
     <div className="flex h-dvh flex-col bg-surface-base">
       <ConsoleHeader
+        rows={all}
+        chips={chips}
+        onToggleChip={toggleChip}
+        onResetChips={resetChips}
         query={typed}
         onQueryChange={setTyped}
         matchCount={filtered.length}
         totalCount={rows.length}
         fetchedAt={data?.fetchedAt ?? null}
-        feedNewestAt={null}
+        feedNewestAt={data?.feedNewestAt ?? null}
         dispatchTz={dispatchTz}
         userInitials={userInitials}
       />
@@ -230,6 +273,7 @@ export function Console({
             <FleetList
               rows={ordered}
               fetchedAt={data?.fetchedAt ?? null}
+              feedStale={data?.feedStale ?? false}
               selectedId={selectedId}
               query={query}
               drift={drift}
@@ -241,6 +285,7 @@ export function Console({
             <FleetMap
               rows={filtered}
               fetchedAt={data?.fetchedAt ?? null}
+              feedStale={data?.feedStale ?? false}
               selectedId={selectedId}
               onSelect={select}
               onEdit={setEditingId}
