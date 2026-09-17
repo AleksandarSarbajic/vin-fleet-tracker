@@ -43,13 +43,29 @@ interface Props {
 export function Split({ list, map, onResizeEnd }: Props) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [pct, setPct] = useState(DEFAULT_PCT);
+  /**
+   * §12.29. The drag handlers are plain DOM listeners registered once at
+   * pointerdown, so they close over the `pct` from that moment and can never
+   * see a later one. The old code worked around that by reading the current
+   * value inside a `setPct` updater and calling `writeStored` from in there —
+   * the same shape as the chip bug: a side effect in an updater, which React
+   * runs during the render phase and StrictMode runs twice.
+   *
+   * A ref is the honest fix. It is mutable state that is not render state,
+   * which is exactly what a pointer drag needs.
+   */
+  const pctRef = useRef(DEFAULT_PCT);
+  const applyPct = useCallback((next: number) => {
+    pctRef.current = next;
+    setPct(next);
+  }, []);
   const [dragging, setDragging] = useState(false);
   const [width, setWidth] = useState(0);
   const [mapVisible, setMapVisible] = useState(true);
 
   // Read on mount, not during render — the server has no localStorage and a
   // mismatch would hydrate wrong.
-  useEffect(() => setPct(readStored()), []);
+  useEffect(() => applyPct(readStored()), [applyPct]);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -87,11 +103,11 @@ export function Split({ list, map, onResizeEnd }: Props) {
   const commit = useCallback(
     (next: number) => {
       const clamped = clamp(next);
-      setPct(clamped);
+      applyPct(clamped);
       writeStored(clamped);
       onResizeEnd();
     },
-    [clamp, onResizeEnd],
+    [applyPct, clamp, onResizeEnd],
   );
 
   const onPointerDown = useCallback(
@@ -105,25 +121,23 @@ export function Split({ list, map, onResizeEnd }: Props) {
       const move = (e: PointerEvent) => {
         const box = boxRef.current?.getBoundingClientRect();
         if (!box) return;
-        setPct(clamp(((e.clientX - box.left) / box.width) * 100));
+        applyPct(clamp(((e.clientX - box.left) / box.width) * 100));
       };
 
       const up = () => {
         handle.removeEventListener('pointermove', move);
         handle.removeEventListener('pointerup', up);
         setDragging(false);
-        // Written on RELEASE, and the map reflows exactly once, here.
-        setPct((current) => {
-          writeStored(current);
-          return current;
-        });
+        // Written on RELEASE, from the ref, and the map reflows exactly once
+        // — here, in the event, not in a state updater (§12.29).
+        writeStored(pctRef.current);
         onResizeEnd();
       };
 
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', up);
     },
-    [clamp, onResizeEnd, splitEnabled],
+    [applyPct, clamp, onResizeEnd, splitEnabled],
   );
 
   const onKeyDown = useCallback(

@@ -1,6 +1,5 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import { sql } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
+import { describe, expect, it } from 'vitest';
+import { GRAND_FORKS_STOP, TRUCK_143_ARRIVING } from './__fixtures__/truck-143-arrival';
 import {
   ARRIVAL_DEFAULTS,
   detectArrival,
@@ -133,62 +132,45 @@ describe('detectDeparture', () => {
  * Against the real track
  * ---------------------------------------------------------------------- */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
+/**
+ * Truck 143 arriving at its Grand Forks receiver: 194 positions captured
+ * verbatim from the database, not written by hand.
+ *
+ * This was a live query at first. It passed for about four hours and then
+ * failed, because the truck left Grand Forks and the newest 400 positions no
+ * longer contained an arrival — the assertion depended on where a lorry
+ * happened to be. The track is now a fixture, which keeps the part that
+ * mattered (the radius was chosen against reality) and drops the part that
+ * made it worthless by the evening.
+ */
+describe('truck 143 into Grand Forks, from the real track', () => {
+  const fixes: Fix[] = [...TRUCK_143_ARRIVING];
+  const realStop: StopGeo = { ...GRAND_FORKS_STOP, arrivedAt: null, departedAt: null };
 
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-withDb('truck 143 into Grand Forks, from the positions table', () => {
-  const load = async () => {
-    const { db } = connect();
-    const result = await db.execute(sql`
-      select p.lat, p.lng, p.speed_mph,
-             to_char(p.recorded_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as recorded_at
-      from positions p
-      join trucks t on t.id = p.truck_id
-      where t.truck_number = 143
-      order by p.recorded_at desc
-      limit 400`);
-    return (result as unknown as Record<string, unknown>[]).map(
-      (r): Fix => ({
-        lat: Number(r['lat']),
-        lng: Number(r['lng']),
-        speedMph: r['speed_mph'] === null ? null : Number(r['speed_mph']),
-        recordedAtUtc: String(r['recorded_at']),
-      }),
-    );
-  };
-
-  it('detects the arrival that no fixture would have predicted', async () => {
-    const fixes = await load();
-    // Skipped rather than asserted-away if the retention window has rolled
-    // past this track: a test that quietly passes on no data is worse than
-    // one that says it could not run.
-    if (fixes.length < 40) {
-      console.warn(`only ${fixes.length} positions retained for 143 — track gone, skipping`);
-      return;
-    }
-
-    const arrivedAt = detectArrival(stop(), fixes);
-    expect(arrivedAt).not.toBeNull();
-
-    // The whole point of the measured radius: the truck really did park
-    // ~0.13 mi from the geocoded point, so anything tighter finds nothing.
-    const tight = detectArrival(stop(), fixes, { ...ARRIVAL_DEFAULTS, radiusMiles: 0.1 });
-    expect(tight).toBeNull();
+  it('detects the arrival', () => {
+    expect(detectArrival(realStop, fixes)).toBe('2026-09-17T20:15:49.033Z');
   });
 
-  it('places the arrival before the newest fix, not at it', async () => {
-    const fixes = await load();
-    if (fixes.length < 40) return;
-    const arrivedAt = detectArrival(stop(), fixes);
-    if (arrivedAt === null) return;
-    expect(new Date(arrivedAt).getTime()).toBeLessThan(
-      new Date(fixes[0]!.recordedAtUtc).getTime(),
-    );
+  /**
+   * The reason the radius is 0.25 and not something tighter. This truck
+   * parked ~0.13 mi from the geocoded point, because Census returns a street
+   * interpolation and trucks park in yards (§12.24, §12.27).
+   */
+  it('finds nothing at a radius that ignores where trucks actually park', () => {
+    expect(detectArrival(realStop, fixes, { ...ARRIVAL_DEFAULTS, radiusMiles: 0.1 })).toBeNull();
+  });
+
+  it('places the arrival well before the newest fix', () => {
+    const arrivedAt = detectArrival(realStop, fixes)!;
+    const newest = new Date(fixes[0]!.recordedAtUtc).getTime();
+    // Sixteen minutes of parked truck between arriving and being noticed.
+    expect(newest - new Date(arrivedAt).getTime()).toBeGreaterThan(15 * 60_000);
+  });
+
+  it('never parked further than the radius allows', () => {
+    // Guards the fixture itself: if these numbers ever stop describing an
+    // arrival, the tests above are measuring nothing.
+    const stopped = fixes.filter((f) => (f.speedMph ?? 0) === 0);
+    expect(stopped.length).toBeGreaterThan(20);
   });
 });

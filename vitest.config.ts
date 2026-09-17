@@ -7,7 +7,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // .tsx too: the console's render-phase bugs (§12.29) need a React
+    // renderer to catch, and those tests are components.
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     // Database-backed tests need the real connection strings.
     setupFiles: ['./vitest.setup.ts'],
     /**

@@ -2125,6 +2125,77 @@ deliberate act with its own audit entry, and it is atomic by itself. Folding
 it into the save would mean a dispatcher had to press Save to undo something
 they had already decided to undo.
 
+## 12.29 Three render-phase bugs, one shape
+
+The console has now shipped three bugs that had nothing in common on the
+surface and everything in common underneath. All three **worked visibly**.
+All three passed typecheck, lint and the whole suite.
+
+| # | Symptom | What was actually wrong |
+|---|---|---|
+| 1 | "Synced 2s ago" on the server, "4s" on the client | a render read `Date.now()` |
+| 2 | First paint carried no fleet; the console refetched on mount | `useSearchParams` opted the subtree out of server rendering and discarded the `loadFleet()` prefetch |
+| 3 | `Cannot update a component (Router) while rendering a different component (Console)` | `router.replace` called from inside a `setChips` updater |
+
+**The shape: work that belongs to an event or to the server was performed
+during render instead.** Render must be a pure function of props and state.
+Reading the clock is not pure. Reading the URL bar is not pure. Writing the
+URL is very much not pure.
+
+### Why the third one hid so well
+
+The offending line sat inside a `useCallback`, which reads as "this is a
+handler". It was not the callback that ran at the wrong time — it was the
+**updater it passed to React**:
+
+```ts
+setChips((current) => {
+  const next = new Set(current);
+  …
+  syncUrl({ chips: [...next] });   // ← React calls this while RENDERING
+  return next;
+});
+```
+
+React invokes a functional updater during the render phase. Anything inside it
+happens during render, however event-shaped the code around it looks. Wrapping
+it in more `useCallback` cannot help, and neither can `setTimeout` — that only
+moves the same wrong call somewhere harder to see.
+
+**The rule: a state updater returns the next state and does nothing else.**
+Compute what you need in the handler, then set state and cause effects there.
+Reading current state directly in a handler is correct — a handler always sees
+the last committed value. The functional form buys atomicity across several
+updates in one tick, which a single click does not need.
+
+### The same bug was in the split, silently
+
+`Split` wrote `localStorage` from inside a `setPct` updater for exactly the
+same reason — the pointer handlers close over a stale `pct`. React does not
+warn about `localStorage`, so it never surfaced; it was double-writing under
+StrictMode and nobody could tell. Fixed with a ref, which is the honest tool
+for mutable state that is not render state.
+
+### How it is caught now
+
+`useChipFilters.test.tsx` asserts **exactly one URL write per click**, under
+`StrictMode`.
+
+That is the whole trick, and it needs no Router and no matching of React's
+warning text. StrictMode deliberately double-invokes state updaters to flush
+out side effects hiding in them. A pure updater runs twice and nothing
+outside notices. An impure one writes the URL **twice per click**, which is a
+call count. The test was written against the broken code first and failed with
+`expected 1, got 2`.
+
+### The other three URL writers, audited
+
+| Writer | Verdict |
+|---|---|
+| `?truck=` selection | written only from event handlers — row click, marker click, arrow keys, Dismiss. Correct. |
+| search field | a guarded effect on the **settled** debounced value. A genuine effect: it reacts to a value changing over time, not to a render. |
+| split persistence | had the bug. Fixed. |
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

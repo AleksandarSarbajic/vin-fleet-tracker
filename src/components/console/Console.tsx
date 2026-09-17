@@ -6,7 +6,7 @@ import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
-import { FILTER_KEYS, passesFilters, type FilterKey } from './FilterChips';
+import { passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
@@ -15,6 +15,7 @@ import { FleetList } from './FleetList';
 import { Split } from './Split';
 import { FleetMap } from './map/FleetMap';
 import { useDisplayOrder } from './useDisplayOrder';
+import { useChipFilters } from './useChipFilters';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -56,20 +57,42 @@ export function Console({
   const pathname = usePathname();
   const reducedMotion = useReducedMotion();
 
+  /** Search and selection both live in the URL so a link carries the view. */
+  const syncUrl = useCallback(
+    (next: { q?: string; truck?: string | null; chips?: FilterKey[] }) => {
+      const search = new URLSearchParams(window.location.search);
+      if (next.chips !== undefined) {
+        if (next.chips.length > 0) search.set('chips', next.chips.join(','));
+        else search.delete('chips');
+      }
+      if (next.q !== undefined) {
+        if (next.q.trim()) search.set('q', next.q);
+        else search.delete('q');
+      }
+      if (next.truck !== undefined) {
+        if (next.truck) search.set('truck', next.truck);
+        else search.delete('truck');
+      }
+      const qs = search.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router],
+  );
+
+  /**
+   * §12.29: the chips own their state and write the URL FROM THE CLICK. The
+   * toggle used to call syncUrl inside a setChips updater, which React runs
+   * during render — so router.replace fired mid-render.
+   */
+  const { chips, toggleChip, resetChips } = useChipFilters(initialChips, syncUrl);
+
   const { data } = useFleet(initial);
   /**
-   * The payload carries every truck, inactive included, so the Inactive chip
-   * (§12.14) has something to filter to. The default view is active only —
-   * applied here, on the real column, rather than hidden inside the chip.
-   *
-   * TODO(next commit): the Inactive chip flips this.
+   * Every truck, inactive included, so the Inactive chip (§12.14) has
+   * something to filter to. The default view is active only — applied on the
+   * real column in `passesFilters`, not hidden inside the chip.
    */
-  /** Every truck, inactive included — the chips decide what is shown. */
   const all = useMemo(() => data?.fleet ?? NO_ROWS, [data]);
-
-  const [chips, setChips] = useState<Set<FilterKey>>(
-    () => new Set(initialChips.filter((c): c is FilterKey => FILTER_KEYS.includes(c as FilterKey))),
-  );
 
   /**
    * Nothing selected means "active trucks, any status" (§12.9). The filter
@@ -106,28 +129,12 @@ export function Console({
     else setMissingTruck(initialTruck);
   }, [initialTruck, rows]);
 
-  /** Search and selection both live in the URL so a link carries the view. */
-  const syncUrl = useCallback(
-    (next: { q?: string; truck?: string | null; chips?: FilterKey[] }) => {
-      const search = new URLSearchParams(window.location.search);
-      if (next.chips !== undefined) {
-        if (next.chips.length > 0) search.set('chips', next.chips.join(','));
-        else search.delete('chips');
-      }
-      if (next.q !== undefined) {
-        if (next.q.trim()) search.set('q', next.q);
-        else search.delete('q');
-      }
-      if (next.truck !== undefined) {
-        if (next.truck) search.set('truck', next.truck);
-        else search.delete('truck');
-      }
-      const qs = search.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    },
-    [pathname, router],
-  );
-
+  /**
+   * The search box is debounced, so the URL follows the SETTLED query rather
+   * than every keystroke. That makes this a genuine effect — it reacts to a
+   * value changing over time, not to a render — and the guard keeps it from
+   * writing when the URL already says what it would say.
+   */
   useEffect(() => {
     const current = new URLSearchParams(window.location.search).get('q') ?? '';
     if (current !== query) syncUrl({ q: query });
@@ -148,23 +155,6 @@ export function Console({
     () => (editingId ? (rows.find((r) => r.id === editingId) ?? null) : null),
     [editingId, rows],
   );
-
-  const toggleChip = useCallback(
-    (key: FilterKey) =>
-      setChips((current) => {
-        const next = new Set(current);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        syncUrl({ chips: [...next] });
-        return next;
-      }),
-    [syncUrl],
-  );
-
-  const resetChips = useCallback(() => {
-    setChips(new Set());
-    syncUrl({ chips: [] });
-  }, [syncUrl]);
 
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
   const { ordered, drift, resort } = useDisplayOrder(
