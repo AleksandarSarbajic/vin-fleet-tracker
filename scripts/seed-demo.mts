@@ -17,6 +17,7 @@ import { eq, inArray, like, or, sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 import { loads, stops, trucks } from '../src/db/schema.ts';
 import { AppointmentInput } from '../src/lib/appointment.ts';
+import { DEMO_NOTE, PLACES } from './demo-places.mts';
 import { resolveAppointment } from '../src/server/appointment.ts';
 
 loadEnv({ path: '.env.local' });
@@ -32,33 +33,6 @@ const PREFIX = 'DEMO-';
  * exercised. A dispatcher-entered stop still has none, which is exactly the
  * case `etaAbsence: 'no-coordinates'` exists to render.
  */
-/**
- * REAL addresses, in real industrial districts, with no coordinates.
- *
- * They used to be "1 DEMO Industrial Park" with hand-written lat/lng, which
- * made the demo data the one thing on the board that could never exercise
- * the geocoder — every seeded stop had coordinates no dispatcher-entered
- * stop could get, so the ETA path looked healthy in development and was
- * broken in production. Now the seed goes through the same forward geocode a
- * save does, and a demo stop that fails to resolve fails the way a real one
- * would.
- *
- * The DEMO marking moved to the load number and the dispatcher note, which
- * is where a human actually reads it — and which is what `--clear` matches.
- */
-const PLACES = [
-  { address: '1400 Laraway Road', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago' },
-  { address: '3902 Main Avenue', city: 'Fargo', state: 'ND', zip: '58103', tz: 'America/Chicago' },
-  { address: '5500 East 56th Avenue', city: 'Denver', state: 'CO', zip: '80216', tz: 'America/Denver' },
-  { address: '4747 West Buckeye Road', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix' },
-  { address: '2611 South Westmoreland Road', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago' },
-  { address: '4400 Fulton Industrial Boulevard SW', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York' },
-  { address: '1750 South 4800 West', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
-] as const;
-
-/** On every demo stop. A human reads this; `--clear` matches it. */
-const DEMO_NOTE = 'DEMO SEED — safe to delete';
-
 const LOAD_STATUSES = ['DISPATCHED', 'AT_SHIPPER', 'LOADED', 'AT_RECEIVER'] as const;
 
 const { client, db } = createDirectDb(process.env.DIRECT_URL!);

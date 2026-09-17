@@ -26,7 +26,8 @@
     "prepare": "husky",
     "seed:demo": "tsx scripts/seed-demo.mts",
     "geocode:backfill": "tsx scripts/geocode-backfill.mts",
-    "check:truck": "tsx scripts/check-truck.mts"
+    "check:truck": "tsx scripts/check-truck.mts",
+    "demo:relocate": "tsx scripts/relocate-demo-stops.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
