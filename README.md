@@ -130,6 +130,34 @@ cleared before the phase 6 deploy.** It is in the phase 6 entry of
 `PROJECT_BRIEF.md` for that reason. The script refuses to run against
 `NODE_ENV=production` without `--force`, which is a seatbelt, not the plan.
 
+## The status engine
+
+`src/lib/status.ts` is pure: no I/O, no database, no clock of its own. `now`
+is an argument like everything else. It emits a semantic status and the UI
+maps that to a token — no colour value appears in the file.
+
+**Precedence is not urgency rank** (§12.25). Rank orders the list; precedence
+orders the questions, and they disagree in one place on purpose: UNASSIGNED is
+asked before STALE_GPS, because a parked driverless truck's gateway goes quiet
+on ignition and rank order would report the symptom while hiding the cause.
+
+**ETA degrades honestly** (§12.24). `stops.lat/lng` are populated by nothing —
+there is no geocoder — so where a stop has no coordinates, LATE falls back to
+the clock and AT_RISK does not fire at all. The ETA cell says `no ETA` with the
+reason on hover rather than an em dash. `npm run seed:demo` gives its DEMO
+cities coordinates so the projection path is exercised in development, and
+deliberately leaves every fourth stop without them.
+
+Two thresholds, two failure modes (§12.3): `staleMinutes: 45` is one truck's
+gateway; `feedStaleMinutes: 5` is the whole pipe, and it triggers the §5.9
+colour withdrawal fleet-wide. To see that, stop the worker and wait five
+minutes — the console drops every row to the stale treatment while
+**appointment times stay full strength**, because they come from our database
+rather than the feed.
+
+**Urgency group heads are still unwritten**, per §5.7: the trigger is the
+fleet crossing 40 trucks. It is 23 of 34.
+
 ## The ingestion worker
 
 ```bash
@@ -222,7 +250,9 @@ docs/design-spec.md The design, extracted
   reassignment transaction, the bulk assignment board, audit log. The status
   override block (§9.5) is deliberately held back to phase 5, with the engine
   that computes the status it sits beside.
-- **5 — next.** Status engine, colour coding, filter chips, footer bar,
-  urgency groups, offline rule, and the full timezone suite — including the
-  `TOMORROW` midnight rollover, which needs the engine to have anything to
-  assert.
+- **5 — done.** Status engine, colour coding, filter chips, footer counts,
+  the offline rule and the §9.5 override block. Urgency group heads remain
+  unwritten by §5.7 — the trigger is 40 trucks and the fleet is 23.
+- **6 — next.** Hardening: roles enforced server-side, rate-limit tuning,
+  Sentry, Playwright on the critical flows, deploy. **Clear the demo data
+  first** — `npm run seed:demo -- --clear`.
