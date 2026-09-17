@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { assignments, drivers, loads, stops, trucks, auditLog } from '@/db/schema';
+import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
 import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
@@ -180,6 +181,99 @@ withDb('the edit modal save', () => {
     expect(saved.result.appointment?.startUtc).toBe('2026-09-18T19:30:00.000Z');
     expect(saved.stop?.tz).toBe('America/Chicago');
     expect(saved.stop?.apptUtc?.toISOString()).toBe('2026-09-18T19:30:00.000Z');
+  });
+
+  /**
+   * §12.21, and the reason this is a test rather than a button check: the
+   * column was made nullable, the modal was updated — and the shared Zod
+   * schema kept `.min(1)`, so an empty load number was still refused at the
+   * boundary and the save never reached the database. The rule lives in three
+   * places and all three are asserted here.
+   */
+  describe('an empty load number (§12.21)', () => {
+    it('passes the shared schema, which is what the route re-parses', () => {
+      const parsed = StopEdit.safeParse({
+        stopId: null,
+        truckId: '00000000-0000-4000-8000-000000000000',
+        loadNumber: '',
+        loadStatus: 'AVAILABLE',
+        stopType: 'DEL',
+        addressLine: null,
+        city: null,
+        state: null,
+        zip: null,
+        appointment: null,
+        dispatcherNote: null,
+      });
+      expect(parsed.success).toBe(true);
+      // NULL, never '' — one way to say "not known yet".
+      expect(parsed.success && parsed.data.loadNumber).toBeNull();
+    });
+
+    it('is stored as NULL, not as an empty string', async () => {
+      const saved = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+        const result = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
+        });
+        const [load] = await tx
+          .select({ number: loads.loadNumber })
+          .from(loads)
+          .where(eq(loads.id, result.loadId));
+        return load?.number;
+      });
+      expect(saved).toBeNull();
+    });
+
+    it('survives a round trip through the fleet query as null', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
+        });
+        const rows = parseFleetRows(await tx.execute(LATEST_POSITION_SQL));
+        return rows.find((r) => r.id === t[0]!.id)?.nextStop;
+      });
+      // The row schema must accept it too, or the console throws on render.
+      expect(seen).not.toBeUndefined();
+      expect(seen?.loadNumber).toBeNull();
+    });
+
+    it('can be given a number later, and taken away again', async () => {
+      const values = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
+        });
+        const read = async () =>
+          (
+            await tx
+              .select({ number: loads.loadNumber })
+              .from(loads)
+              .where(eq(loads.id, created.loadId))
+          )[0]?.number ?? null;
+
+        const empty = await read();
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          edit: edit({ truckId: t[0]!.id, stopId: created.stopId, loadNumber: 'VL-99120' }),
+        });
+        const given = await read();
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          // Whitespace is not a load number either.
+          edit: edit({ truckId: t[0]!.id, stopId: created.stopId, loadNumber: '   ' }),
+        });
+        return { empty, given, removed: await read() };
+      });
+      expect(values).toEqual({ empty: null, given: 'VL-99120', removed: null });
+    });
   });
 
   it('refuses an appointment in the hour that does not exist', async () => {

@@ -12,12 +12,28 @@ import { LOAD_STATUSES } from './loads';
  * place for the appointment path to go wrong.
  */
 
-/** Non-empty and trimmed. Nothing more — brokers number loads any way. */
+/**
+ * §12.21: **permanently optional.** This supersedes the phase-3 ruling that
+ * required a load number, and the constraint is not coming back.
+ *
+ * Brokers do not always supply a number when the load is entered. A required
+ * field that dispatchers work around by typing junk is worse than a nullable
+ * column: junk looks real to the next shift and to anyone reconciling against
+ * the broker, and nothing downstream can tell it from a real number.
+ *
+ * Empty input becomes NULL rather than '', so there is one way to say "not
+ * known yet" instead of two. Trimmed, capped, otherwise unvalidated —
+ * brokers number loads any way they like.
+ *
+ * This is the schema the client validates with AND the one the route
+ * re-parses, so a form cannot start blocking a save the API would accept.
+ */
 export const LoadNumber = z
   .string()
   .trim()
-  .min(1, "Load number can't be empty. Any format the broker uses.")
-  .max(64);
+  .max(64)
+  .transform((value) => (value === '' ? null : value))
+  .nullable();
 
 export const StopEdit = z
   .object({

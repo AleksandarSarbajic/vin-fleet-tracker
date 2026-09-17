@@ -1616,19 +1616,38 @@ dock/door detail (` · Dock 14`)". That rung no longer exists. The cell is now
 (§12.13); the street address and ZIP live in the tooltip, where they do not
 compete with the city for a 191px column.
 
-## 12.21 Load number is not required
+## 12.21 Load numbers are permanently optional
 
-**Reverses the phase-3 position.** `loads.load_number` is nullable, and the
-modal marks it optional.
+**Supersedes the phase-3 ruling that required them. Do not reintroduce the
+constraint.**
 
-Broker paperwork does not always carry a number at the moment the load is
-entered. A dispatcher who cannot save without one **types something** — and an
-invented load number is worse than an empty one, because it looks real to the
-next shift and to anyone reconciling against the broker.
+Brokers do not always supply a number when the load is entered. A dispatcher
+who cannot save without one **types something** — and an invented load number
+is worse than an empty one, because it looks real to the next shift and to
+anyone reconciling against the broker, and nothing downstream can tell it from
+a real number. A required field that people work around by typing junk has
+made the data worse, not better.
 
 Stored as `NULL`, never `''`: two ways to say "not known yet" is one too many.
 The not-blank check constraint stays, now meaning *if present, it has to be
-something*.
+something*, and whitespace alone is not something.
+
+**The rule lives in three places and all three must agree:**
+
+| Where | What it says |
+|---|---|
+| `loads.load_number` | nullable column, `loads_number_not_blank` allows NULL |
+| `LoadNumber` in `lib/stop-edit.ts` | the ONE schema the modal checks with and the route re-parses |
+| The modal | no required marker, no field error, Save stays enabled |
+
+That list exists because the first attempt at this ruling got two of the three
+and looked done: the column was nullable and the modal said optional, while
+the shared Zod schema kept `.min(1)` and refused the save at the boundary. Any
+renderer must also print an absent number as words — `Load null` reached the
+modal header the same way, because one of two renderers was updated.
+
+Covered by `stop-edit.test.ts`, which asserts the schema, the stored value and
+the round trip back through the fleet query rather than the state of a button.
 
 ## 12.22 FCFS carries receiving hours
 

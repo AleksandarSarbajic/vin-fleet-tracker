@@ -320,7 +320,9 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                 {stop ? `Edit stop — truck ${truckName}` : `New load — truck ${truckName}`}
               </h2>
               <p className="mt-0.5 text-small text-text-muted">
-                {stop ? `Load ${stop.loadNumber}` : 'No load on this truck yet'}
+                {stop
+                  ? (stop.loadNumber ?? 'Load number not given yet')
+                  : 'No load on this truck yet'}
                 {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
               </p>
             </div>
@@ -460,7 +462,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                   value={form.loadNumber}
                   onChange={(v) => set('loadNumber', v)}
                   error={errorFor('loadNumber')}
-                  help="Any format the broker uses, or leave it for now"
+                  help="Any format the broker uses, or leave it blank (§12.21)"
                 />
               </div>
             </fieldset>
