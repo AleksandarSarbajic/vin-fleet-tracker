@@ -40,6 +40,19 @@ const LOAD_STATUSES = ['DISPATCHED', 'AT_SHIPPER', 'LOADED', 'AT_RECEIVER'] as c
 const { client, db } = createDirectDb(process.env.DIRECT_URL!);
 const clearOnly = process.argv.includes('--clear');
 
+/**
+ * A seatbelt, not the plan. The plan is the line in PROJECT_BRIEF.md's phase 6
+ * entry: clear the demo data before deploying. This only stops the most
+ * obvious way of getting it wrong.
+ */
+if (process.env.NODE_ENV === 'production' && !clearOnly && !process.argv.includes('--force')) {
+  console.error(
+    'Refusing to seed demo data with NODE_ENV=production.\n' +
+      'If this really is what you want, pass --force. To remove it, pass --clear.',
+  );
+  process.exit(1);
+}
+
 /** Everything this script has ever written, and nothing else. */
 const demoLoads = await db
   .select({ id: loads.id })

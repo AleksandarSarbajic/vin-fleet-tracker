@@ -115,6 +115,12 @@ npm run seed:demo -- --clear # removes exactly what it wrote
 Everything it writes is marked `DEMO-` / `BROKER DEMO`. Nothing it creates
 could be mistaken for a real load.
 
+**The demo data is kept on purpose through phase 5** — the status engine has
+nothing to compute against without loads and appointments — and **must be
+cleared before the phase 6 deploy.** It is in the phase 6 entry of
+`PROJECT_BRIEF.md` for that reason. The script refuses to run against
+`NODE_ENV=production` without `--force`, which is a seatbelt, not the plan.
+
 ## The ingestion worker
 
 ```bash

@@ -334,6 +334,28 @@ withDb('DST, with every date derived', () => {
   });
 });
 
+/* ---------------------- still owed by this suite ------------------------- */
+
+withDb('the dispatch-zone midnight rollover', () => {
+  /**
+   * The one case from PROJECT_BRIEF's timezone list that is NOT covered here.
+   *
+   * TOMORROW is "the appointment's calendar day in the DISPATCH zone is after
+   * today" — not the stop's zone, not the browser's. An appointment at 23:30
+   * CDT and one at 00:30 CDT forty minutes later fall on different sides of
+   * that line while being almost the same instant, and a dispatcher in
+   * Belgrade sees neither boundary on their own clock.
+   *
+   * It cannot be written yet: the rule lives in the status engine, which
+   * lands in phase 5. It is `todo` rather than a comment so that every run of
+   * this suite prints it — the rest of the timezone list passes, and a
+   * missing case in a green suite is the easiest kind of gap to never notice.
+   */
+  it.todo(
+    'TOMORROW rolls over at midnight in the DISPATCH zone — needs lib/status.ts (phase 5)',
+  );
+});
+
 /* ------------------- the machine must not matter ------------------------- */
 
 withDb('the saving machine cannot change the appointment', () => {

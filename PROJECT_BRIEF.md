@@ -208,5 +208,9 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
 4. Dispatch data: loads, stops, edit modal, reassignment transaction, audit log.
 5. Status engine, colour coding, filter chips, footer bar, urgency groups, offline rule — with the full timezone test suite.
 6. Hardening: roles enforced server-side, rate-limit tuning, Sentry, Playwright on the critical flows, deploy.
+   **Clear the demo data before deploying — `npm run seed:demo -- --clear`.**
+   Phase 4 seeded `DEMO-` loads and stops so the console and the status engine
+   have something to compute against. They are kept deliberately through
+   phase 5 and must not ship.
 
 Tell me when something I've asked for is a bad idea, and why, before you implement it.
