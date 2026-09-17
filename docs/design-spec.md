@@ -204,7 +204,7 @@ MacBook 16 both land. Header is 56px; everything below it is the split.
 |---|---|
 | **≥ 2200** | Ultrawide. Map grows to 980px; list keeps its 8 columns and gains Trailer + Broker. All header chips visible. |
 | **1440–2199** | Reference layout. Header 56, then the `3b` draggable split — default 60/40 in the list's favour (at 1728: list 1037, map 685, handle 6). Map hard minimum 520px, list minimum 560px. Position persisted per dispatcher. **The map is never a fixed width.** |
-| **1280–1439** | Split still draggable, range narrows to map 520–620. Driver column drops to **120px**; Position and Next stop share the remainder. |
+| **1280–1439** | Split still draggable, range narrows to map 520–620. Driver column drops to **120px**; Position and Next stop share the remainder. **Below 900px of list width the row drops to six columns** (§12.17). |
 | **1024–1279** | Below **1086** total the split is **disabled**: map collapses to a toggle, list runs full width. Toggle state persists per dispatcher. **The detail panel becomes a full-screen sheet over the list** (§12.12). |
 | **< 1024** | Two-line rows (`1b`), map as a tab. |
 | **< 480** | Phone stack (`2f`). |
@@ -307,6 +307,23 @@ spare at 10.5px; widening two of them only adds room. Barlow Condensed at
 
 > **Flag — see §13.3.** 693px of non-flexible width does not fit inside the
 > 560px list minimum. See the open question on the narrow-list row variant.
+
+### Narrow variant — six columns below 900px of list width (§12.17)
+
+```
+grid-template-columns: 3px 72px 148px minmax(0,1fr) 128px 128px;
+gap: 0 14px;
+height: 44px;            /* unchanged — never shrink to fit */
+padding-right: 16px;
+```
+
+Status rail · Truck · Driver · **Next stop** · Appt · Status. **Position and
+ETA are cut**, not squeezed: Position is carried by the detail panel and the
+marker, and ETA is derived rather than entered.
+
+Non-flexible width is **565px**, which fits the 560px list minimum with the
+one flexible column taking the remainder. Type scale and row height are
+identical to the eight-column row.
 
 ## 4.2 Column labels
 
@@ -504,7 +521,13 @@ moved.
 Other sorts offered in the list header (`2a`, `3c`): `Urgency` (default,
 active) · `Appt time` · `Truck no.`
 
-## 5.7 Urgency groups (above 40 trucks)
+## 5.7 Urgency groups (above 40 trucks) — **specified, not built**
+
+> **Build the flat list.** The real fleet is **23 active trucks of 34** (11
+> are inactive — measured, see `docs/samsara.md` §3). That is the 20-truck
+> layout: no group heads, no collapsed sections. This section stays specified
+> so nothing is lost, and the code path stays unwritten until the fleet
+> actually crosses 40. Virtualize the flat list regardless of size.
 
 Above 40 trucks the flat list stops being readable and urgency becomes
 explicit group heads (`3d`):
@@ -580,6 +603,10 @@ So the implementable ladder, in order, as the list panel narrows:
 5. **Driver** steps 148 → 120px at the 1280 breakpoint and ellipsises the
    surname, keeping the initial.
 6. **Never**: Truck, Appt, ETA, Status chip.
+
+Below 900px of list width the ladder stops mattering: Position and ETA are
+gone entirely (§12.17) and Next stop is the only flexible column left, so it
+absorbs all of the narrowing on its own.
 
 The two widened columns (Appt 128, Status 128) join Truck and ETA in the
 never-truncate set — they are wider than before, so they are further from
@@ -1483,6 +1510,49 @@ ratios at all.
 
 Marked as such in §1.2 so nobody half-implements it.
 
+## 12.17 Narrow list: six columns, not eight
+
+Resolves the §13.3 contradiction. The console row's non-flexible width is
+**693px** against a **560px** list minimum, so the eight-column row cannot
+fit in the narrow band.
+
+**Below 900px of list width the row drops to six columns.** Cut **Position**
+and **ETA**:
+
+- **Position** is the least load-bearing column — the detail panel and the
+  map marker both carry it.
+- **ETA** is derived, not entered. It is the one number a dispatcher can
+  reconstruct from Appt and Status.
+
+| Kept | Cut |
+|---|---|
+| status rail (3px), Truck, Driver, Next stop, Appt, Status | Position, ETA |
+
+**Do not shrink type or padding to fit eight.** A dispatcher at 4am reading a
+9px row is the exact failure this design was built to avoid. The row keeps
+its 44px height and the §2 type scale at every width.
+
+### Where this actually bites
+
+Only in the narrow band where the map and list are **both** visible. Below
+**1086px** the map collapses entirely and the list gets the full window,
+which is wider than 900px on any real screen — so the six-column row is a
+band, not an endpoint.
+
+### Arithmetic
+
+```
+non-flexible, 8 columns:  3 + 72 + 148 + 128 + 100 + 128 + (7 × 14) + 16 = 693
+non-flexible, 6 columns:  3 + 72 + 148 + 128       + 128 + (5 × 14) + 16 = 565
+```
+
+At a 900px list that leaves **335px** for Next stop, against 191px at the
+reference width — the one remaining flexible column gets more room, not
+less, which is why cutting two columns reads as calmer rather than denser.
+
+This supersedes the `1b` two-line row as the narrow-list answer. `1b` remains
+the layout below 1024px viewport width, where the row goes two-line anyway.
+
 ---
 
 # 13. Still open
@@ -1520,26 +1590,11 @@ columns don't flex.
 Low stakes. Worth a glance only because `3e` is the section that exists to be
 authoritative about column widths.
 
-## 13.3 The 560px list minimum cannot hold the 8-column row — **needs a decision**
+## 13.3 The 560px list minimum — **RESOLVED, see §12.17**
 
-The blocking one. Non-flexible width of the console row is **693px** (fixed
-columns + gaps + padding). The `3b` list minimum is **560px**. With `2g`'s
-1280-breakpoint step of Driver 148 → 120 it is still 665px.
-
-Not created by correction 2 — it was 671px before — but the correction makes
-it 22px worse.
-
-The design's own answer looks like the **`1b` two-line row**, whose caption
-reads *"for the 560–640px list panel beside the map"*. Its non-flexible width
-is 331px, leaving 229px of flexible column at a 560px list. But `2g`'s
-breakpoint table ties two-line rows to **viewport `< 1024`**, not to list
-width.
-
-**Proposed:** the row variant is chosen by **list-panel width, not viewport
-width** — single-line above roughly 940px of list, `1b` two-line below it.
-That makes both statements true and makes the 560px minimum meaningful.
-
-**Phase 3 needs this settled before the list is built.**
+Below 900px of list width the row drops to six columns: Position and ETA are
+cut, type and padding are untouched. Kept here as a pointer because the
+arithmetic that produced it is worth not re-deriving.
 
 ## 13.4 Unassigned and Tomorrow markers are both circles
 

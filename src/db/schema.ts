@@ -67,11 +67,26 @@ export const overrideReason = pgEnum('override_reason', [
   'OTHER',
 ]);
 
-/** TODO(phase 4): confirm this vocabulary with Alex — it is not in the brief. */
+/**
+ * The dispatcher's vocabulary for where a load is.
+ *
+ * TONU — "truck ordered not used" — is the broker cancelling AFTER the truck
+ * is committed, and we bill for it. It is deliberately distinct from
+ * CANCELLED: dispatchers need the two apart, and DISPATCHED can go straight
+ * to TONU.
+ *
+ * Only DELIVERED, TONU and CANCELLED are terminal. **No ordering is enforced
+ * between the rest** — real loads skip states constantly, and a state machine
+ * that refuses a legitimate jump at 3am is worse than no state machine.
+ */
 export const loadStatus = pgEnum('load_status', [
-  'PLANNED',
-  'ACTIVE',
+  'AVAILABLE',
+  'DISPATCHED',
+  'AT_SHIPPER',
+  'LOADED',
+  'AT_RECEIVER',
   'DELIVERED',
+  'TONU',
   'CANCELLED',
 ]);
 
@@ -210,7 +225,7 @@ export const loads = pgTable(
     /** Non-empty and trimmed, nothing more. Broker numbers come any shape. */
     loadNumber: text('load_number').notNull(),
     broker: text('broker'),
-    status: loadStatus('status').notNull().default('PLANNED'),
+    status: loadStatus('status').notNull().default('AVAILABLE'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(now),
   },
   (t) => [

@@ -15,6 +15,13 @@
       "when": 1789632392193,
       "tag": "0001_rls_deny_by_default",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789640915646,
+      "tag": "0002_load_status_vocabulary",
+      "breakpoints": true
     }
   ]
 }

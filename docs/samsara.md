@@ -86,9 +86,29 @@ Real response, trimmed to one vehicle:
 
 4. **One vehicle is named exactly `"Truck"`, with no number.** So
    `parseTruckNumber` returns null and `trucks.truck_number` is null for it.
-   33 of 34 parse. The row must fall back to `samsara_name` rather than
-   render a blank cell — the console's Truck column is the one thing that
-   never truncates and never empties.
+   33 of 34 parse. The row falls back to `samsara_name` rather than render a
+   blank cell — the console's Truck column is the one thing that never
+   truncates and never empties.
+
+   > **Action for whoever administers the Samsara org.** This is a
+   > data-entry gap on their side, and the fallback only stops it being a
+   > blank cell — a dispatcher still sees the word `Truck` sitting in a
+   > column of four-digit numbers. Rename it in Samsara to match the fleet
+   > convention and the problem disappears at the source.
+   >
+   > | | |
+   > |---|---|
+   > | Samsara vehicle id | `281474979704989` |
+   > | VIN | `3AKJHHDR6NSMX2517` |
+   > | Gateway serial | `GDW6UMV7Y9` |
+   > | Licence plate | `P1190376` |
+   > | Vehicle | 2022 Freightliner Cascadia |
+   > | Tags | *(none)* |
+   > | Created in Samsara | 2021-12-23 |
+   >
+   > **Not urgent today:** its newest fix is 2026-06-24, so it seeds
+   > `active: false` and does not appear in the console. It becomes visible
+   > the moment it reports again.
 
 ---
 

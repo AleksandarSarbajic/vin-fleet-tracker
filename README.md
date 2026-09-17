@@ -34,6 +34,10 @@ like application bugs, so the env schema rejects each wrong shape by name.
 | `DATABASE_URL` | Transaction | 6543 | Next.js route handlers |
 | `DIRECT_URL` | Session | 5432 | Migrations, ingestion worker |
 
+Pool sizes are set for **3 concurrent dispatchers across 5 accounts**: the
+app pool is `max: 10`, the worker `max: 2`. Revisit only if that headcount
+changes.
+
 Transaction mode does not support prepared statements — the pooled client
 sets `prepare: false` and that line is load-bearing.
 
@@ -72,8 +76,18 @@ npm run worker
 
 A standalone Node process, **not** deployed on Supabase: `pg_cron` has a
 one-minute floor and Edge Functions are not built for a persistent poller.
-Put it on a small VM, Railway or Fly — in **eu-west-1**, next to the
-database, not near the fleet.
+Put it on a small VM, Railway or Fly.
+
+### Deployment region — settled, do not relitigate
+
+**The worker runs in `eu-west-1`, next to Postgres. Not near the fleet.**
+
+The database is in `eu-west-1` (Ireland). The worker is chatty with Postgres
+— every poll is several round trips — and makes exactly **one** Samsara call
+per cycle regardless of where it sits. Moving it to the US to be "closer to
+the trucks" adds transatlantic latency to every database round trip and saves
+nothing on the single API call. Dispatchers work from Europe, so the Next.js
+app belongs in `eu-west-1` too.
 
 - **Exactly one instance.** It is the only thing that talks to Samsara;
   every client reads our database. Ten open tabs must not mean ten times the
