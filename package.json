@@ -25,7 +25,8 @@
     "db:studio": "drizzle-kit studio",
     "prepare": "husky",
     "seed:demo": "tsx scripts/seed-demo.mts",
-    "geocode:backfill": "tsx scripts/geocode-backfill.mts"
+    "geocode:backfill": "tsx scripts/geocode-backfill.mts",
+    "check:truck": "tsx scripts/check-truck.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
