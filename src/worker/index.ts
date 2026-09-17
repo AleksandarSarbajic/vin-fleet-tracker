@@ -6,6 +6,7 @@ import { ServerEnv, report } from '@/env/schema';
 import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
+import { sweepArrivals } from './arrival';
 import {
   flattenFeed,
   prunePositions,
@@ -141,6 +142,24 @@ async function pollOnce(
 
   await recordSuccess(db, page.endCursor, result.newestRecordedAt);
 
+  /**
+   * §12.27. AFTER the positions land, because it reads them back — running it
+   * first would evaluate this poll against last poll's track.
+   *
+   * Deliberately outside the try that wraps ingestion at the call site is NOT
+   * what happens here: a failure to detect an arrival must not lose the
+   * positions we just wrote or stall the cursor, so it is caught on its own.
+   * A missed arrival costs one poll; a lost cursor costs the feed.
+   */
+  let sweep = { arrived: 0, departed: 0, considered: 0 };
+  try {
+    sweep = await sweepArrivals(db, logger);
+  } catch (error: unknown) {
+    logger.error('arrival sweep failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   logger.info('poll: ingested', {
     vehicles: page.rows.length,
     readings: pending.length,
@@ -150,6 +169,9 @@ async function pollOnce(
     newestPositionAt: result.newestRecordedAt?.toISOString() ?? null,
     cursor: shortCursor(page.endCursor),
     breaker: samsara.breakerState,
+    arrivalsDetected: sweep.arrived,
+    departuresDetected: sweep.departed,
+    stopsWatched: sweep.considered,
   });
 }
 

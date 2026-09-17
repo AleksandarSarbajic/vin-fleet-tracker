@@ -2001,6 +2001,90 @@ predictably are worth more than a set of pairwise special cases, because the
 next pair does not need a decision. Left as it is, on purpose, so nobody
 "fixes" it later and inherits the exception table.
 
+## 12.27 Nobody ever wrote `arrived_at`
+
+`stops.arrived_at` and `stops.departed_at` have been in the schema since
+phase 1. **No code path ever set either one.**
+
+The consequences were quiet and separate, which is why neither got noticed:
+
+- `ARRIVED` requires `arrived_at`, so the status was **unreachable**. A truck
+  parked at its receiver read ON TIME forever. The engine was correct; the
+  state simply never arrived.
+- §12.13's next stop is "the lowest sequence with no `departed_at`", so a
+  truck never advanced to its second stop however far away it drove.
+
+The design never said who would populate them. It described what they meant
+and moved on, and every layer assumed some other layer was doing it. The only
+rows that ever had a value were written by the demo seed — which made it look
+populated in development, where anyone would have caught it.
+
+### It could not have been built before the geocoder
+
+Detection needs the stop's coordinates, and until §12.24 nothing had any. The
+two gaps had the same root, and closing the first one is what made the second
+one fixable.
+
+### The rule
+
+| | |
+|---|---|
+| **Arrived** | within the radius, speed 0, held for `confirmSeconds` |
+| **Departed** | outside the radius, newest fix moving, held for `confirmSeconds` |
+| **Never** | unset automatically — a truck that leaves and returns is a dispatcher's call |
+
+**Radius: 0.25 mi. Measured, not guessed.** Truck 143 parked at its Grand
+Forks receiver and sat at **0.119–0.135 mi** from the stop's coordinates for
+seven minutes at 0 mph. That gap is real and has two causes: Census returns a
+point interpolated along the street centreline from a house-number range
+(§12.24), not a dock door; and trucks park in yards. Anything under 0.15 mi
+would not have fired on the only real arrival available. 0.25 mi clears it
+with about twice the margin while staying roughly three city blocks.
+
+**Confirmation: 120 seconds.** The radius alone would fire on a truck at a red
+light near the receiver — it is within range and not moving. What a red light
+does not do is last two minutes. This feed delivers a fix every 5–8 seconds,
+so the window is ~20 corroborating positions rather than two, and one bad fix
+breaks the run rather than confirming it.
+
+### The instant recorded is when it arrived, not when we noticed
+
+`arrived_at` is the **oldest fix of the confirmed run** — the first stationary
+position inside the radius — never the poll's clock and never the newest fix.
+The confirmation window is how the worker became sure; it is not when the
+truck got there. Recording the moment of noticing would put every arrival two
+minutes late and make dwell time wrong for everyone downstream.
+
+Same anchoring rule as the ETA (§12.24), for the same reason: **the position
+is the fact, the poll is the observation.**
+
+Verified on the live feed. Truck 143's arrival was written as `20:15:49Z`
+after being detected at `20:31:29Z` — sixteen minutes earlier than the poll
+that found it, because the truck had been parked that long.
+
+### What it costs after an outage
+
+Only the last 30 minutes of positions are considered. In steady state that is
+invisible: the worker polls every 30 s and confirms an arrival about two
+minutes after it happens, so the run's first fix is the true instant.
+
+After an outage longer than the window it is not invisible — a truck that
+parked three hours ago is recorded as arriving at the window's edge. The
+worker cannot see further back than it looks. A bounded and stated inaccuracy,
+and the reason the window is 30 minutes rather than 5.
+
+### The dispatcher still wins
+
+The worker records facts; the override decides what the row shows. A live
+`ARRIVED` override beats the engine whatever `arrived_at` says (§9.5), and a
+forced status is unaffected by anything here. The worker is not consulted
+about display and never clears a dispatcher's decision.
+
+Every write — arrival and departure — puts a row in `audit_log` with
+`actor_user_id` null, `source: "worker"`, and the radius and window that
+convinced it, so a stop that changed state overnight can be explained, and the
+threshold argued with, after the fact.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled
