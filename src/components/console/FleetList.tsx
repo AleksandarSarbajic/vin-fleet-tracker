@@ -31,6 +31,8 @@ const RIGHT_ALIGNED = new Set(['Appt', 'ETA', 'Status']);
 
 interface Props {
   rows: FleetRow[];
+  /** Reference instant for every age on a row — see TruckRow. */
+  fetchedAt: string | null;
   selectedId: string | null;
   query: string;
   drift: number;
@@ -40,6 +42,7 @@ interface Props {
 
 export function FleetList({
   rows,
+  fetchedAt,
   selectedId,
   query,
   drift,
@@ -137,6 +140,7 @@ export function FleetList({
               >
                 <TruckRow
                   row={row}
+                  fetchedAt={fetchedAt}
                   columns={columns}
                   selected={row.id === selectedId}
                   query={query}

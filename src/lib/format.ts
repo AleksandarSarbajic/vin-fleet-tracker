@@ -22,7 +22,10 @@ export function compassPoint(heading: number | null): string | null {
  * Elapsed time, in the one format the design uses everywhere: "12s",
  * "9m", "2h 40m". No "GPS" prefix — the chip icon carries that (§12.11).
  */
-export function elapsed(fromIso: string | null, now: Date = new Date()): string | null {
+export function elapsed(
+  fromIso: string | null,
+  now: Date = new Date(),
+): string | null {
   if (!fromIso) return null;
   const then = Date.parse(fromIso);
   if (Number.isNaN(then)) return null;

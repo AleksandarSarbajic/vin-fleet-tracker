@@ -150,13 +150,26 @@ function Marked({ text, query }: { text: string; query: string }) {
 
 interface Props {
   row: FleetRow;
+  /**
+   * The instant the fleet was fetched, and the reference every age on the row
+   * is measured against.
+   *
+   * NOT `new Date()`. The server renders this row and the browser hydrates it
+   * milliseconds later, so a clock read at render time gives "21s" on one
+   * side and "24s" on the other — which React reports as a hydration failure
+   * and then re-renders the whole tree to recover. Measuring from the fetch
+   * instant also states the age more honestly: it is the age of the DATA, not
+   * of the paint.
+   */
+  fetchedAt: string | null;
   columns: 6 | 8;
   selected: boolean;
   query: string;
   onSelect: (id: string) => void;
 }
 
-function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
+function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Props) {
+  const reference = fetchedAt ? new Date(fetchedAt) : undefined;
   const quiet = row.status === 'TOMORROW';
   const stale = row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
@@ -262,7 +275,9 @@ function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
       <div className="flex justify-end">
         <StatusChip
           status={row.status}
-          label={stale ? (elapsed(row.recordedAt) ?? undefined) : undefined}
+          label={
+            stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined
+          }
         />
       </div>
     </div>
@@ -277,6 +292,7 @@ function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
 export const TruckRow = memo(TruckRowImpl, (a, b) => {
   return (
     a.row === b.row &&
+    a.fetchedAt === b.fetchedAt &&
     a.columns === b.columns &&
     a.selected === b.selected &&
     a.query === b.query

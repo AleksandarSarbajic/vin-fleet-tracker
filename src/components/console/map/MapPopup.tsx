@@ -2,20 +2,20 @@
 
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
-import { compassPoint, elapsed, mph } from '@/lib/format';
+import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
 import { StatusChip } from '../StatusChip';
 
 /**
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
  * shows, so nothing critical is hover-only.
  *
- * TODO(phase 4): the action row goes at the bottom of this component —
- * "Edit load" (primary) and "Call driver" (secondary, HIDDEN when
- * drivers.phone is null rather than rendered as a dead button). Their absence
- * here is phase-3 scope, not a design decision.
+ * The action row carries "Edit load" only. "Call driver" is NOT here: it is
+ * hidden when `drivers.phone` is null rather than rendered as a dead button,
+ * and the fleet query does not carry the phone — Samsara returns none for
+ * this org, so every value would be null today. It joins when a dispatcher
+ * has somewhere to type one.
  *
- * TODO(phase 4): Next stop, Appt (with its stop-local time) and Projected
- * join the fact list once loads and stops exist.
+ * TODO(phase 5): `Projected` joins the fact list with the status engine.
  */
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -25,12 +25,24 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   </>
 );
 
-export function MapPopup({ row, onClose }: { row: FleetRow; onClose: () => void }) {
+export function MapPopup({
+  row,
+  fetchedAt,
+  onEdit,
+  onClose,
+}: {
+  row: FleetRow;
+  fetchedAt: string | null;
+  onEdit: (id: string) => void;
+  onClose: () => void;
+}) {
   if (row.lat === null || row.lng === null) return null;
 
   const speed = mph(row.speedMph);
   const compass = compassPoint(row.heading);
-  const age = elapsed(row.recordedAt);
+  // Measured from the fetch instant, so server and client agree — see
+  // TruckRow's note on hydration.
+  const age = elapsed(row.recordedAt, fetchedAt ? new Date(fetchedAt) : undefined);
 
   return (
     <Popup
@@ -64,11 +76,47 @@ export function MapPopup({ row, onClose }: { row: FleetRow; onClose: () => void 
           <Row label="GPS age">
             <span className="tabular-nums">{age ?? '—'}</span>
           </Row>
+          <Row label="Next stop">
+            {row.nextStop
+              ? `${row.nextStop.type === 'PU' ? 'Pick up' : 'Deliver'} — ${
+                  [row.nextStop.facilityName, row.nextStop.city, row.nextStop.state]
+                    .filter(Boolean)
+                    .join(', ') || '—'
+                }`
+              : 'No load on this truck'}
+          </Row>
+          {row.nextStop ? (
+            <Row label="Appt">
+              <span className="tabular-nums">
+                {row.nextStop.apptStartUtc && row.nextStop.apptTz
+                  ? timeInZone(new Date(row.nextStop.apptStartUtc), row.nextStop.apptTz, {
+                      weekday: true,
+                    })
+                  : 'none'}
+              </span>
+            </Row>
+          ) : null}
+          {row.nextStop ? (
+            <Row label="Load">
+              {row.nextStop.loadNumber}
+              {row.openLoadCount > 1 ? ` · ${row.openLoadCount} open loads` : ''}
+            </Row>
+          ) : null}
           <Row label="Driver">
             {row.driverName ?? (
               <span className="text-status-neutral-fg">Unassigned</span>
             )}
           </Row>
+        </div>
+
+        <div className="flex justify-end border-t border-line-soft px-[10px] py-2">
+          <button
+            type="button"
+            onClick={() => onEdit(row.id)}
+            className="h-7 bg-accent px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover"
+          >
+            Edit load
+          </button>
         </div>
       </div>
     </Popup>

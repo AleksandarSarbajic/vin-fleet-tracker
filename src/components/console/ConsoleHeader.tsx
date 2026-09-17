@@ -62,7 +62,17 @@ export function ConsoleHeader({
   dispatchTz,
   userInitials,
 }: Props) {
-  const [now, setNow] = useState(() => new Date());
+  /**
+   * Seeded from the FETCH instant, not from the clock.
+   *
+   * The server renders this header and the browser hydrates it a second or
+   * two later; `new Date()` on both sides gives "Synced 2s ago" against
+   * "Synced 4s ago", which React reports as a hydration failure and recovers
+   * from by re-rendering the tree. Deriving the first paint from a value both
+   * sides already share makes the two renders identical, and the interval
+   * below takes over immediately after mount.
+   */
+  const [now, setNow] = useState(() => (fetchedAt ? new Date(fetchedAt) : new Date(0)));
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);

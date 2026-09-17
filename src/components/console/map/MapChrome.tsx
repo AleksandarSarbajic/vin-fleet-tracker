@@ -127,8 +127,15 @@ export function MarkerKey() {
   );
 }
 
-export function MapFooter({ newestPositionAt }: { newestPositionAt: string | null }) {
-  const age = elapsed(newestPositionAt);
+export function MapFooter({
+  newestPositionAt,
+  fetchedAt,
+}: {
+  newestPositionAt: string | null;
+  /** Same reference as every other age on screen — see ConsoleHeader. */
+  fetchedAt: string | null;
+}) {
+  const age = elapsed(newestPositionAt, fetchedAt ? new Date(fetchedAt) : undefined);
   return (
     <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-line-hair px-3 font-sans text-micro normal-case tracking-normal text-text-muted">
       <span>

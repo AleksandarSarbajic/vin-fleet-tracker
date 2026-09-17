@@ -58,8 +58,12 @@ const PAN_MS = 150;
 
 interface Props {
   rows: FleetRow[];
+  /** Reference instant for the popup's GPS age — see TruckRow on hydration. */
+  fetchedAt: string | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** §12.10's Enter, reachable from the map too. */
+  onEdit: (id: string) => void;
   /** Incremented on split drag-end. The map reflows then, never mid-drag. */
   resizeSignal: number;
   reducedMotion: boolean;
@@ -67,8 +71,10 @@ interface Props {
 
 export function FleetMap({
   rows,
+  fetchedAt,
   selectedId,
   onSelect,
+  onEdit,
   resizeSignal,
   reducedMotion,
 }: Props) {
@@ -225,11 +231,16 @@ export function FleetMap({
         </Source>
 
         {selectedRow ? (
-          <MapPopup row={selectedRow} onClose={() => onSelect(null)} />
+          <MapPopup
+            row={selectedRow}
+            fetchedAt={fetchedAt}
+            onEdit={onEdit}
+            onClose={() => onSelect(null)}
+          />
         ) : null}
       </Map>
       </div>
-      <MapFooter newestPositionAt={newestPositionAt} />
+      <MapFooter fetchedAt={fetchedAt} newestPositionAt={newestPositionAt} />
     </div>
   );
 }

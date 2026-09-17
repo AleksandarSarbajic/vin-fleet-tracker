@@ -219,6 +219,7 @@ export function Console({
           list={
             <FleetList
               rows={ordered}
+              fetchedAt={data?.fetchedAt ?? null}
               selectedId={selectedId}
               query={query}
               drift={drift}
@@ -229,8 +230,10 @@ export function Console({
           map={
             <FleetMap
               rows={filtered}
+              fetchedAt={data?.fetchedAt ?? null}
               selectedId={selectedId}
               onSelect={select}
+              onEdit={setEditingId}
               resizeSignal={resizeSignal}
               reducedMotion={reducedMotion}
             />
