@@ -1,0 +1,5 @@
+node_modules
+.next
+drizzle
+design
+next-env.d.ts

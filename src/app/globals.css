@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Spec §2: set on body and never turned off — truck numbers, times, ETAs,
+     counts and mileages all align down the column. */
+  body {
+    @apply bg-surface-base text-text font-sans;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Spec §8.2: never removed, never browser-default. */
+  :focus-visible {
+    outline: 2px solid theme('colors.accent.DEFAULT');
+    outline-offset: 2px;
+  }
+
+  /* Spec §8.3: 120ms ground/selection, 150ms map pan, nothing else. Under
+     reduced motion all of it becomes 0ms and the map jumps. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

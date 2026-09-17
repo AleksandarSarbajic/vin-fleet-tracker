@@ -8,3 +8,8 @@ node_modules/
 coverage/
 playwright-report/
 test-results/
+
+# build output
+.next/
+next-env.d.ts
+*.tsbuildinfo

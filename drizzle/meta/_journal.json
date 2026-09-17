@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789632374279,
+      "tag": "0000_ambiguous_terrax",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789632392193,
+      "tag": "0001_rls_deny_by_default",
+      "breakpoints": true
+    }
+  ]
+}
