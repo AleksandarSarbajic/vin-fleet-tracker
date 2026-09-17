@@ -36,6 +36,13 @@
       "when": 1789658575686,
       "tag": "0004_stop_field_set_and_fcfs_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789670794639,
+      "tag": "0005_forward_geocode_on_save",
+      "breakpoints": true
     }
   ]
 }

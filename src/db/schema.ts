@@ -59,6 +59,20 @@ export const stopType = pgEnum('stop_type', ['PU', 'DEL']);
  */
 export const appointmentType = pgEnum('appointment_type', ['APPT', 'FCFS']);
 
+/**
+ * How precisely a stop's coordinates are known (§12.24).
+ *
+ * `rooftop` — the street number and street both matched. Good to a building.
+ * `city`    — only the locality matched, so this is a city centroid and can
+ *             be several miles out.
+ *
+ * Stored rather than collapsed into a boolean because the error is not a
+ * detail: a city centroid is noise on a 400-mile run and nonsense on a
+ * 12-mile one, and a LATE that puts a dispatcher on the phone to a broker
+ * deserves to carry how well we actually know where the receiver is.
+ */
+export const geocodePrecision = pgEnum('geocode_precision', ['rooftop', 'city']);
+
 export const overrideReason = pgEnum('override_reason', [
   'RECEIVER_CONFIRMED_DETENTION',
   'APPT_RESCHEDULED_BY_BROKER',
@@ -276,8 +290,19 @@ export const stops = pgTable(
     city: text('city'),
     state: text('state'),
     zip: text('zip'),
+    /**
+     * §12.24. Written ONLY by the forward geocoder in server/geocode.ts, from
+     * the four address fields above, in the same save. Never typed, never
+     * accepted from a client.
+     */
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
+    geocodePrecision: geocodePrecision('geocode_precision'),
+    /** Mapbox v6 `properties.match_code.confidence` — exact | high. */
+    geocodeConfidence: text('geocode_confidence'),
+    /** The address Mapbox says it matched, for eyeballing a suspect ETA. */
+    geocodedAddress: text('geocoded_address'),
+    geocodedAt: timestamp('geocoded_at', { withTimezone: true }),
 
     /**
      * Written from stop-local wall time + appointment_tz, converted
@@ -336,6 +361,58 @@ export const stops = pgTable(
     check(
       'stops_departed_after_arrived',
       sql`departed_at is null or arrived_at is null or departed_at >= arrived_at`,
+    ),
+  ],
+);
+
+/* ------------------------------ geocode_cache -------------------------- */
+
+/**
+ * Forward-geocoding results, keyed by the NORMALISED address string (see
+ * lib/address.ts). Provider data, not dispatch data — nothing here is
+ * authoritative and the whole table can be truncated without losing a fact
+ * the business owns.
+ *
+ * Why it exists: the same DC gets entered over and over. One call per
+ * distinct address instead of one per stop.
+ *
+ * Misses are cached too, with `lat` null. A typo that fails to resolve would
+ * otherwise spend a call on every save of the same stop. They expire sooner
+ * than hits — see server/geocode.ts — because a miss is usually a typo, and
+ * caching a typo forever keeps punishing the corrected version.
+ *
+ * `fetched_at` also carries the 30-day expiry that makes storage legal if the
+ * Mapbox account cannot grant `permanent=true`: coordinates re-derive from an
+ * address we already own, so expiry costs one call per stop per month.
+ */
+export const geocodeCache = pgTable(
+  'geocode_cache',
+  {
+    /** lib/address.ts `normalizeAddress` output. Not a display string. */
+    normalizedAddress: text('normalized_address').primaryKey(),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    precision: geocodePrecision('precision'),
+    confidence: text('confidence'),
+    /** What the provider says it matched, verbatim. */
+    matchedAddress: text('matched_address'),
+    /** Why a miss was a miss, for the modal warning and for debugging. */
+    missReason: text('miss_reason'),
+    provider: text('provider').notNull().default('mapbox-v6'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('geocode_cache_fetched_idx').on(t.fetchedAt),
+    /** A hit has both coordinates or neither. Half a coordinate is a bug. */
+    check(
+      'geocode_cache_coords_paired',
+      sql`(lat is null) = (lng is null)`,
+    ),
+    /** A hit must say how good it is; a miss must say why it missed. */
+    check(
+      'geocode_cache_hit_has_precision',
+      sql`(lat is null and precision is null and miss_reason is not null)
+          or (lat is not null and precision is not null and miss_reason is null)`,
     ),
   ],
 );
