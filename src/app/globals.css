@@ -4,6 +4,44 @@
 
 @layer components {
   /**
+   * Mapbox's own popup chrome, which ships WHITE — `.mapboxgl-popup-content`
+   * has a white background and the tip a matching white border, so the one
+   * piece of the map we did not draw ourselves arrived in the wrong theme.
+   *
+   * Scoped as `.ft-popup.mapboxgl-popup <part>` — two classes on the root and
+   * one on the part, 0-3-0. Mapbox's own tip rule is
+   * `.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip`, which is 0-2-0 and
+   * therefore ties with a single-class scope; it then wins on source order,
+   * because `mapbox-gl.css` is imported from FleetMap.tsx and lands after
+   * this file. Measured: the content override applied and the tip stayed
+   * white until this selector gained its third class. Winning on specificity
+   * rather than order means it survives that import moving.
+   *
+   * The container stops painting entirely — the inner div already carries the
+   * raised surface and the accent border, and two backgrounds would mean two
+   * places to change a token.
+   */
+  .ft-popup.mapboxgl-popup .mapboxgl-popup-content {
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  /**
+   * All four sides, not just the one the current anchor uses. The popup is
+   * anchored `bottom` today, but Mapbox flips the anchor near a viewport
+   * edge, and a white arrow appearing only when a truck sits at the top of
+   * the map is exactly the kind of bug nobody reproduces on demand.
+   */
+  .ft-popup.mapboxgl-popup .mapboxgl-popup-tip {
+    border-top-color: theme('colors.surface.raised');
+    border-bottom-color: theme('colors.surface.raised');
+    border-left-color: theme('colors.surface.raised');
+    border-right-color: theme('colors.surface.raised');
+  }
+
+  /**
    * The 3px status rail in column one (spec §5.5). Every other rail state is
    * a flat token and uses a `bg-*` utility directly; these two are repeating
    * gradients, which Tailwind has no utility for. The colour still comes from

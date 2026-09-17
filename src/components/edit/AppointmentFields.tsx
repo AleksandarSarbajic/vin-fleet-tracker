@@ -67,12 +67,15 @@ export function AppointmentFields({
   dispatchTz,
   disabled,
   error,
+  initialFocus = false,
 }: {
   draft: AppointmentDraft;
   onChange: (next: AppointmentDraft) => void;
   dispatchTz: string;
   disabled: boolean;
   error?: string | undefined;
+  /** Takes the modal's opening focus when the truck already has a driver. */
+  initialFocus?: boolean;
 }) {
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...draft, ...patch });
 
@@ -148,6 +151,7 @@ export function AppointmentFields({
               </span>
               <input
                 type="date"
+                data-initial-focus={initialFocus ? '' : undefined}
                 value={draft.date}
                 onChange={(e) => set({ date: e.target.value })}
                 className="h-10 w-full border border-line-hair bg-surface-sunken px-2.5 text-body tabular-nums text-text"

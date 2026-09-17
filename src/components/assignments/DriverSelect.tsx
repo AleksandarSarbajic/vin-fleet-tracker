@@ -24,6 +24,8 @@ interface Props {
   truckLabel: string;
   disabled: boolean;
   disabledReason?: string | undefined;
+  /** Marks this as the modal's opening focus target (see useFocusTrap). */
+  autoFocus?: boolean;
   onChange: (driverId: string | null) => void;
 }
 
@@ -34,6 +36,7 @@ export function DriverSelect({
   truckLabel,
   disabled,
   disabledReason,
+  autoFocus = false,
   onChange,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -75,6 +78,7 @@ export function DriverSelect({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
+        data-initial-focus={autoFocus ? '' : undefined}
         aria-label={`Driver for truck ${truckLabel}`}
         disabled={disabled}
         title={disabled ? disabledReason : undefined}

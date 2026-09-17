@@ -345,6 +345,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                   <DriverSelect
                     drivers={drivers}
                     value={driverId}
+                    /**
+                     * Only when the truck has nobody. With a driver already
+                     * assigned, the modal was opened to change something
+                     * else — most often the appointment — and an open
+                     * dropdown over the form is in the way.
+                     */
+                    autoFocus={initialDriverId === null}
                     claimedBy={claimedBy}
                     truckLabel={truckName}
                     disabled={!mayEdit || saving}
@@ -377,6 +384,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               onChange={(next) => set('appointment', next)}
               dispatchTz={dispatchTz}
               disabled={!mayEdit}
+              initialFocus={initialDriverId !== null}
               error={errorFor('appointment.time')}
             />
 
