@@ -5,6 +5,8 @@
  * third party. That does not belong in something `db:migrate` runs
  * unattended on a deploy.
  *
+ * No API key: the US Census geocoder needs none (§12.24).
+ *
  * Every stop with an address and no coordinates, one forward call each,
  * through the SAME code path a dispatcher's save uses — so the demo data and
  * the backfilled data exercise what real data will, rather than a shortcut
@@ -27,18 +29,6 @@ const dryRun = process.argv.includes('--dry-run');
 const all = process.argv.includes('--all');
 const limitArg = process.argv.find((a) => a.startsWith('--limit='));
 const limit = limitArg ? Number(limitArg.split('=')[1]) : undefined;
-
-const token = process.env['MAPBOX_GEOCODING_TOKEN'];
-if (!token && !dryRun) {
-  console.error(
-    'MAPBOX_GEOCODING_TOKEN is not set. This script would do nothing but\n' +
-      'write "not configured" into every row, so it refuses to run.\n\n' +
-      'Create a SECRET (sk.) Mapbox token scoped to geocoding and put it in\n' +
-      '.env.local. It must NOT be NEXT_PUBLIC_MAPBOX_TOKEN — that one ships\n' +
-      'to browsers.',
-  );
-  process.exit(1);
-}
 
 const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
 
@@ -81,7 +71,7 @@ for (const stop of work) {
     continue;
   }
 
-  const outcome = await geocodeAddress(db, stop, { token });
+  const outcome = await geocodeAddress(db, stop);
 
   if (outcome.ok) {
     await db

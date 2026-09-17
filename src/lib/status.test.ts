@@ -37,7 +37,7 @@ const stop = (over: Partial<StopFacts> = {}): StopFacts => ({
   apptType: 'APPT',
   arrivedAt: null,
   ...STOP_COORDS,
-  precision: 'rooftop',
+  precision: 'street',
   hasAddress: true,
   ...over,
 });
@@ -397,7 +397,7 @@ describe('the projection itself', () => {
 
   /** Nothing branches on precision yet — it rides along for a future rule. */
   it('carries the coordinate precision beside the status', () => {
-    expect(evaluate(truck(), config, NOW).precision).toBe('rooftop');
+    expect(evaluate(truck(), config, NOW).precision).toBe('street');
     expect(
       evaluate(truck({ stop: stop({ precision: 'city' }) }), config, NOW).precision,
     ).toBe('city');

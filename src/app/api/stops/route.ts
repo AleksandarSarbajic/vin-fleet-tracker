@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { AuthError, requireRole } from '@/lib/auth';
-import { serverEnv } from '@/env/server';
 import { StopEdit } from '@/lib/stop-edit';
 import { saveStopEdit, StopEditError } from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
@@ -31,9 +30,6 @@ export async function POST(request: Request) {
     const result = await saveStopEdit(db, {
       actorUserId: user.id,
       edit: parsed.data,
-      // The SERVER-side Mapbox token. Never NEXT_PUBLIC_MAPBOX_TOKEN, which
-      // ships to browsers — env/schema.ts refuses to start if they are equal.
-      geocodeToken: serverEnv.MAPBOX_GEOCODING_TOKEN,
     });
     return NextResponse.json(result);
   } catch (error: unknown) {

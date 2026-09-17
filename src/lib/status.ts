@@ -109,15 +109,15 @@ export interface StopFacts {
   lat: number | null;
   lng: number | null;
   /**
-   * How well we know where this is. `city` is a centroid and can be several
-   * miles out; `rooftop` is a building.
+   * How well we know where this is. `street` is interpolated along the
+   * matched street segment; `city` is a centroid, several miles wide.
    *
    * Nothing branches on this yet, deliberately. It rides alongside the status
    * so that a future rule can be more cautious about a LATE built on a city
    * centroid — which is the one that puts a dispatcher on the phone to a
    * broker — without having to re-plumb the engine to find out.
    */
-  precision: 'rooftop' | 'city' | null;
+  precision: 'street' | 'city' | null;
   /** True when a dispatcher typed an address, located or not. */
   hasAddress: boolean;
 }
@@ -199,7 +199,7 @@ export interface StatusResult {
    */
   milesRemaining: number | null;
   /** Carried beside the status so a future rule can weigh it — see StopFacts. */
-  precision: 'rooftop' | 'city' | null;
+  precision: 'street' | 'city' | null;
   /**
    * The ETA the engine would have produced for an UNASSIGNED truck. The row
    * renders it struck through, so the number is visible as history without

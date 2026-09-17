@@ -62,7 +62,16 @@ console.log(`  next stop   ${[row.nextStop?.addressLine, row.nextStop?.city, row
 console.log(`  coords      ${row.nextStop?.lat ?? 'NULL'}, ${row.nextStop?.lng ?? 'NULL'}  (${row.nextStop?.precision ?? 'no precision'})`);
 console.log(`  appt        ${row.nextStop?.apptType} ${fmt(row.nextStop?.apptStartUtc ?? null)}–${fmt(row.nextStop?.apptEndUtc ?? null)} ${tz}`);
 console.log(`  ---`);
-console.log(`  MILES       ${row.milesRemaining === null ? '—' : `${Math.round(row.milesRemaining)} mi`}`);
-console.log(`  ETA         ${fmt(row.etaUtc)}   (${row.etaAbsence})`);
+const secs = (iso: string | null) =>
+  iso
+    ? new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }).format(new Date(iso))
+    : '—';
+
+console.log(`  MILES       ${row.milesRemaining === null ? '—' : `${row.milesRemaining.toFixed(3)} mi (shown as ${Math.round(row.milesRemaining) < 10 ? 'arriving' : `${Math.round(row.milesRemaining)} mi`})`}`);
+console.log(`  ETA         ${secs(row.etaUtc)}   (${row.etaAbsence})`);
 console.log(`  STATUS      ${row.status}`);
+// The anchor: ETA is fix time + travel, never clock time + travel.
+console.log(`  anchor      fix ${secs(row.recordedAt)} + travel = ETA`);
 await client.end();

@@ -356,37 +356,41 @@ withDb('the edit modal save', () => {
  * ---------------------------------------------------------------------- */
 
 withDb('the forward geocode (§12.24)', () => {
-  const GEO_TOKEN = 'sk.test-geocoding-token';
-  const GRAND_FORKS = { lat: 47.9253, lng: -97.0329 };
+  const GRAND_FORKS = { lat: 47.936987, lng: -97.057369 };
 
+  /** A Census locations/address response, shaped as the live service returns one. */
   const located = () =>
     vi.fn(
       async () =>
         new Response(
           JSON.stringify({
-            features: [
-              {
-                properties: {
-                  full_address: '1804 N Washington St, Grand Forks, ND 58203',
-                  coordinates: {
-                    latitude: GRAND_FORKS.lat,
-                    longitude: GRAND_FORKS.lng,
-                  },
-                  match_code: {
-                    confidence: 'exact',
-                    address_number: 'matched',
-                    street: 'matched',
+            result: {
+              addressMatches: [
+                {
+                  matchedAddress: '1804 N WASHINGTON ST, GRAND FORKS, ND, 58203',
+                  // x is LONGITUDE. Backwards puts the fleet in the Indian Ocean.
+                  coordinates: { x: GRAND_FORKS.lng, y: GRAND_FORKS.lat },
+                  tigerLine: { side: 'R', tigerLineId: '637799318' },
+                  addressComponents: {
+                    fromAddress: '1800',
+                    toAddress: '1818',
+                    city: 'GRAND FORKS',
+                    state: 'ND',
+                    zip: '58203',
                   },
                 },
-              },
-            ],
+              ],
+            },
           }),
           { status: 200 },
         ),
     );
 
   const unlocatable = () =>
-    vi.fn(async () => new Response(JSON.stringify({ features: [] }), { status: 200 }));
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
+    );
 
   const edit = (over: Partial<StopEdit> & { truckId: string }) =>
     StopEdit.parse({
@@ -394,7 +398,7 @@ withDb('the forward geocode (§12.24)', () => {
       loadNumber: 'TEST-GEO',
       loadStatus: 'DISPATCHED',
       stopType: 'DEL',
-      addressLine: '1804 North Washington Street',
+      addressLine: '1804 Vitest Fixture Street',
       city: 'Grand Forks',
       state: 'ND',
       zip: '58203',
@@ -416,7 +420,6 @@ withDb('the forward geocode (§12.24)', () => {
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       const [stop] = await tx
@@ -436,9 +439,13 @@ withDb('the forward geocode (§12.24)', () => {
     expect(saved.calls).toBe(1);
     expect(saved.stop?.lat).toBeCloseTo(GRAND_FORKS.lat, 4);
     expect(saved.stop?.lng).toBeCloseTo(GRAND_FORKS.lng, 4);
-    expect(saved.stop?.precision).toBe('rooftop');
-    expect(saved.stop?.confidence).toBe('exact');
-    expect(saved.stop?.matched).toContain('Grand Forks');
+    // Renamed from `rooftop`: Census interpolates along a TIGER street
+    // segment and never returns a parcel point (§12.24).
+    expect(saved.stop?.precision).toBe('street');
+    // The signal we actually had, not a grade borrowed from another provider.
+    expect(saved.stop?.confidence).toBe('census:in-range');
+    // Census normalises to upper case and USPS abbreviations.
+    expect(saved.stop?.matched).toContain('GRAND FORKS');
     expect(saved.stop?.at).not.toBeNull();
     expect(saved.warnings).toEqual([]);
   });
@@ -454,7 +461,6 @@ withDb('the forward geocode (§12.24)', () => {
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       const afterCreate = fetchImpl.mock.calls.length;
@@ -473,7 +479,6 @@ withDb('the forward geocode (§12.24)', () => {
             windowMinutes: 30,
           },
         }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       return { afterCreate, total: fetchImpl.mock.calls.length };
@@ -490,7 +495,6 @@ withDb('the forward geocode (§12.24)', () => {
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       await saveStopEdit(tx as never, {
@@ -500,7 +504,6 @@ withDb('the forward geocode (§12.24)', () => {
           stopId: created.stopId,
           addressLine: '2100 South Columbia Road',
         }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       return fetchImpl.mock.calls.length;
@@ -515,7 +518,6 @@ withDb('the forward geocode (§12.24)', () => {
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       await saveStopEdit(tx as never, {
@@ -527,7 +529,6 @@ withDb('the forward geocode (§12.24)', () => {
           addressLine: '1804   north washington street',
           zip: '58203-4412',
         }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl,
       });
       return fetchImpl.mock.calls.length;
@@ -548,7 +549,6 @@ withDb('the forward geocode (§12.24)', () => {
           state: 'ZZ',
           zip: '00000',
         }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl: unlocatable(),
       });
       const [stop] = await tx
@@ -577,7 +577,6 @@ withDb('the forward geocode (§12.24)', () => {
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl: located(),
       });
       await saveStopEdit(tx as never, {
@@ -587,7 +586,6 @@ withDb('the forward geocode (§12.24)', () => {
           stopId: created.stopId,
           addressLine: '9999 Nowhere At All Parkway',
         }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl: unlocatable(),
       });
       const [stop] = await tx
@@ -609,7 +607,6 @@ withDb('the forward geocode (§12.24)', () => {
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl: located(),
       });
       const columns = {
@@ -623,7 +620,6 @@ withDb('the forward geocode (§12.24)', () => {
       await saveStopEdit(tx as never, {
         actorUserId: null,
         edit: edit({ truckId: t[0]!.id, stopId: created.stopId, city: 'Fargo' }),
-        geocodeToken: GEO_TOKEN,
         fetchImpl: located(),
       });
       const [after] = await tx.select(columns).from(stops).where(eq(stops.id, created.stopId));

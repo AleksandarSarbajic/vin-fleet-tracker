@@ -1767,45 +1767,106 @@ This is the other direction and a different order of magnitude.
 One call per distinct address, ever, because the cache is keyed on the
 normalised address and the same DC is entered over and over.
 
-### The confidence cutoff
+### The provider: US Census Bureau, not a commercial geocoder
 
-Mapbox Geocoding **v6 forward, structured input** — `address_line1`, `place`,
-`region`, `postcode` as separate parameters, never one concatenated string.
-Concatenating them just to make the provider re-split them is where "1804
-North Washington Street" becomes a match on "Washington". `country=us`,
-`types` matched to what was typed, `limit=5`.
+`https://geocoding.geo.census.gov/geocoder/locations/address`, structured
+input, `benchmark=Public_AR_Current`.
 
-v6 rather than v5 because it returns `match_code`: each component reported
-`matched` / `unmatched` / `not_applicable`, plus an overall `confidence` of
-`exact | high | medium | low`. v5's `relevance` is one opaque float, and with
-it you cannot tell a confident rooftop from a confident city centroid.
+Chosen over Mapbox because the fleet is US-only and every stop is a US street
+address, so Census coverage fits the whole problem. It needs **no API key and
+no card**, and it carries **no storage restriction** — which removes the
+permanent-vs-temporary licensing question entirely rather than paying
+$5/1,000 to resolve it, and removes a spend-cap risk on an account with no
+hard cap.
 
-| Typed | Accepted when | Stored precision |
+Structured input — `street`, `city`, `state`, `zip` as separate parameters,
+never one concatenated string. Concatenating them just to make the provider
+re-split them is where "1804 North Washington Street" becomes a match on
+"Washington".
+
+**The coverage tradeoff is real.** TIGER is weaker than a commercial geocoder
+on very new industrial addresses, which are exactly the addresses a freight
+company visits. Measured on the first backfill: `1400 Laraway Road, New Lenox
+IL` — a real road — returns zero matches. **The no-ETA fallback is what
+absorbs this**, and it is why that fallback was built before the provider was.
+
+### The cutoff, and why it checks components itself
+
+Census returns **no confidence value of any kind** on this endpoint. The
+`exact` / `non_exact` match type belongs to the *batch* CSV API, not to
+`locations/address`, which returns only `addressMatches[]` with
+`matchedAddress`, `coordinates`, `tigerLine.side` and the segment's house
+number range. There is nothing to map, so the signal is derived here.
+
+Worse, and the reason this section exists: **Census silently ignores
+components that disagree.** Both measured against the live service:
+
+```
+street=1804 North Washington Street  city=Grand Forks  state=TX
+  → 1804 N WASHINGTON ST, GRAND FORKS, ND, 58203      ← wrong state, answered anyway
+
+street=200 Center Street  city=Chicago  state=IL
+  → 200 CENTER ST, WEST CHICAGO, IL, 60185            ← a different city
+```
+
+Mapbox's `match_code` gave component agreement for free. Here it is checked
+in `outcomeFor` or it is not checked at all, and an unchecked match is exactly
+the confident wrong number the cutoff exists to refuse.
+
+| Rule | |
+|---|---|
+| `state` must agree | hard requirement |
+| `city` **or** `zip` must agree | not both — see below |
+| a second match >1 mi away | ambiguous, refused |
+| no matches | refused |
+
+**City or ZIP, not both**, because legitimate disagreement happens in each
+direction: `5500 E 56th Ave, Denver CO 80216` correctly matches ZIP `80022`
+(the typed ZIP was wrong), and a `St. Paul` / `SAINT PAUL` spelling differs
+while the ZIP holds. Both disagreeing is the West Chicago case.
+
+Erring toward refusal is deliberate: **a refusal costs an ETA, an acceptance
+costs a wrong ETA**, and only one of those sends a dispatcher somewhere.
+
+### Precision is single-valued under this provider
+
+| Tier | Meaning | Written today |
 |---|---|---|
-| street + city/state | `exact` or `high`, **and** `address_number` and `street` both `matched` | `rooftop` |
-| city/state only | `exact` or `high` on a `place` result | `city` |
-| anything else | — | nothing; a warning names what did not match |
+| `street` | interpolated along the matched TIGER segment from its house-number range | **always** |
+| `city` | a locality centroid | never |
 
-Two tiers rather than one threshold, because **the error matters differently
-by distance**: a city centroid is a couple of miles out, which is noise on a
-400-mile run and nonsense on a 12-mile one. A street that was typed but did
-not match is **refused rather than downgraded to its city** — returning a
-centroid as if it were the warehouse is a confident wrong number, and a
-confident wrong number is worse than no number.
+The tier was named `rooftop` under Mapbox. Census **never returns a parcel
+point** — every match is a street-segment interpolation — so the value was
+renamed rather than left claiming an accuracy the data cannot back.
 
-Precision is stored and carried beside the status. Nothing branches on it
-yet, deliberately: it is there so a future rule can be more cautious about a
-`LATE` built on a city centroid, which is the one that puts a dispatcher on
-the phone to a broker.
+`city` is **unreachable**: Census rejects city-only input with HTTP 400 rather
+than degrading to a centroid. The value is kept for a provider that can do
+coarse matches, and this table exists so nobody reads a single-valued column
+as a live signal. Confidence stores what the signal actually was —
+`census:in-range` or `census:zip-differs` — not a grade borrowed from a
+provider we no longer use.
+
+### Attribution
+
+The Census Bureau API Terms of Service require, verbatim:
+
+> "This product uses the Census Bureau Data API but is not endorsed or
+> certified by the Census Bureau."
+
+The geocoder's own API documentation states no terms at all, and that ToS page
+addresses `api.census.gov` while the geocoder is a different host — so the
+scope is arguably ambiguous. **It is displayed anyway**, beside the Mapbox
+credit in the map chrome. It costs one line; omitting it is a bet. Phase 3
+already shipped without a required attribution once.
 
 ### Multiple results
 
-Mapbox ranks, so #1 is the answer. The risk is not choosing badly between
-distinct candidates — it is a **tie**: the same street name, equally
-confident, in two different towns. So the runner-up gets a veto. If #2 shares
-#1's confidence and sits more than a mile away, that is ambiguity: store
-nothing, warn, name both. A weaker runner-up is ignored, and a close one is
-the same place ranked twice.
+The runner-up veto **survived the provider swap, simplified**. Census returns
+no confidence, so the old "equally confident runner-up" precondition became
+vacuous; the rule is now distance alone. It was kept rather than deleted
+because it still fires on real responses: `1 Broadway, New York` returns two
+matches 0.1 mi apart — one street, two ZIP segments — which passes, while two
+genuinely different places do not.
 
 ### The ETA is anchored to the position, not the clock
 
@@ -1876,18 +1937,27 @@ Nothing is less atomic for it: the save still lands with the coordinates it
 resolved or does not land at all, and the only cost of a rolled-back save is a
 geocode already in the cache. Hard 2.5s timeout; a timeout is a warning.
 
-### Storage terms
+### Caching and freshness
 
-Requests send `permanent=true`, because we store the result. If the account
-cannot grant it, the coordinates are **discarded** and the refusal is logged
-loudly — storing under temporary terms would be a licence violation sitting in
-a database nobody remembers to check.
+No storage terms to satisfy — that question died with the provider swap. The
+TTL is now about **freshness**: TIGER gains addresses between releases, so a
+miss today may resolve next month, and a hit can be superseded by a better
+range.
 
-The cache carries `fetched_at` and a **30-day TTL on hits**, 7 days on misses,
-built regardless of how the account answers. Coordinates re-derive from an
-address we already own, so expiry costs one call per stop per month. Misses
-expire sooner because a miss is usually a typo, and caching a typo for a month
-keeps punishing the corrected version.
+**30 days on hits, 7 on misses.** Coordinates re-derive from an address we
+already own, so expiry costs one free call per stop per month. Misses expire
+sooner because a miss is usually a typo, and caching a typo for a month keeps
+punishing the corrected version.
+
+**Transient failures are never cached.** A timeout or a 5xx is a property of
+the service, not of the address; caching "Census was down at 14:02" for a week
+would keep a good address unlocatable long after it came back. This matters
+more with a free government service that publishes no rate limit and no uptime
+guarantee than it did with a paid one.
+
+Measured on the first backfill: 16 stops needing coordinates produced **8
+provider calls**, because the cache is keyed on the normalised address and the
+same DC appears repeatedly.
 
 
 ## 12.25 Precedence is not urgency rank

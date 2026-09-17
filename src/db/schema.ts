@@ -62,16 +62,23 @@ export const appointmentType = pgEnum('appointment_type', ['APPT', 'FCFS']);
 /**
  * How precisely a stop's coordinates are known (§12.24).
  *
- * `rooftop` — the street number and street both matched. Good to a building.
- * `city`    — only the locality matched, so this is a city centroid and can
- *             be several miles out.
+ * `street` — interpolated along the matched TIGER street segment from its
+ *            house-number range. Good to a block, typically much better.
+ *            NOT a rooftop: the Census geocoder never returns a parcel point,
+ *            and naming it `rooftop` would claim what the data cannot back.
+ * `city`   — a locality centroid, potentially several miles out.
+ *
+ * `city` is currently UNREACHABLE: the Census locations/address service
+ * rejects city-only input with HTTP 400 rather than degrading to a centroid,
+ * so every row written today reads `street`. Kept for a provider that can do
+ * coarse matches — and flagged here, because a column that looks like a live
+ * signal while carrying one value is worse than one that admits it.
  *
  * Stored rather than collapsed into a boolean because the error is not a
- * detail: a city centroid is noise on a 400-mile run and nonsense on a
- * 12-mile one, and a LATE that puts a dispatcher on the phone to a broker
- * deserves to carry how well we actually know where the receiver is.
+ * detail: a LATE that puts a dispatcher on the phone to a broker deserves to
+ * carry how well we actually know where the receiver is.
  */
-export const geocodePrecision = pgEnum('geocode_precision', ['rooftop', 'city']);
+export const geocodePrecision = pgEnum('geocode_precision', ['street', 'city']);
 
 export const overrideReason = pgEnum('override_reason', [
   'RECEIVER_CONFIRMED_DETENTION',

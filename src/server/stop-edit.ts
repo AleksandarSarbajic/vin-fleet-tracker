@@ -51,14 +51,6 @@ export async function saveStopEdit(
   input: {
     actorUserId: string | null;
     edit: StopEdit;
-    /**
-     * `serverEnv.MAPBOX_GEOCODING_TOKEN`, passed in by the route rather than
-     * read here — same reason as in geocode.ts: it keeps the env boundary in
-     * one place, keeps this file out of `server-only` so it stays testable,
-     * and makes it visible at the call site which of the two Mapbox tokens
-     * this spends. Undefined degrades to a warning, never to a failed save.
-     */
-    geocodeToken?: string | undefined;
     /** Injected by the tests; production uses the real network. */
     fetchImpl?: typeof fetch;
   },
@@ -97,7 +89,6 @@ export async function saveStopEdit(
   let geocode: GeocodeOutcome | null = null;
   if (addressChanged) {
     geocode = await geocodeAddress(db, typed, {
-      token: input.geocodeToken,
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
     });
     if (!geocode.ok && geocode.reason !== 'empty-address') {

@@ -142,8 +142,21 @@ export function MapFooter({
         Positions from ELD{age ? ` · newest ${age} ago` : ''} · problem markers
         never cluster
       </span>
-      {/* Required by the Mapbox terms. The Map's own control is disabled. */}
-      <span>© Mapbox · OpenStreetMap</span>
+      {/*
+        * Required credit, both of them.
+        *
+        * Mapbox's terms require theirs and the Map's own control is disabled.
+        * The Census notice is the Bureau's own prescribed wording: the
+        * geocoder's API docs state no terms, but the Census Bureau API Terms
+        * of Service require this notice "prominently within the application",
+        * and the scope is ambiguous enough that including it costs one line
+        * and excluding it is a bet. Phase 3 already missed an attribution
+        * once; this is what not repeating that looks like.
+        */}
+      <span>
+        © Mapbox · OpenStreetMap · This product uses the Census Bureau Data API
+        but is not endorsed or certified by the Census Bureau.
+      </span>
     </div>
   );
 }

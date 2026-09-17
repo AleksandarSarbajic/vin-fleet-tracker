@@ -43,6 +43,13 @@
       "when": 1789670794639,
       "tag": "0005_forward_geocode_on_save",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789670795639,
+      "tag": "0006_census_geocoder",
+      "breakpoints": true
     }
   ]
 }

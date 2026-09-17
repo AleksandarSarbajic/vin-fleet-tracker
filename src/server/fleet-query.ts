@@ -55,7 +55,7 @@ export interface FleetRow {
   /** Straight-line miles left, from the same calculation as the ETA (§12.24). */
   milesRemaining: number | null;
   /** How well the stop's coordinates are known. Null when there are none. */
-  etaPrecision: 'rooftop' | 'city' | null;
+  etaPrecision: 'street' | 'city' | null;
   /** Why there is no ETA, so the UI can say it rather than print a dash. */
   etaAbsence: EtaAbsence;
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
@@ -106,8 +106,8 @@ export interface NextStop {
    */
   lat: number | null;
   lng: number | null;
-  /** `rooftop` is a building; `city` is a centroid, several miles wide. */
-  precision: 'rooftop' | 'city' | null;
+  /** `street` is a TIGER segment interpolation; `city` is a centroid. */
+  precision: 'street' | 'city' | null;
   arrivedAt: string | null;
 }
 
@@ -299,7 +299,7 @@ export const FleetQueryRow = z.object({
   /** Null on every stop a dispatcher typed — there is no geocoder (§12.24). */
   stop_lat: z.number().nullable(),
   stop_lng: z.number().nullable(),
-  stop_precision: z.enum(['rooftop', 'city']).nullable(),
+  stop_precision: z.enum(['street', 'city']).nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),

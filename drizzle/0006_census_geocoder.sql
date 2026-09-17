@@ -1,0 +1,28 @@
+-- ---------------------------------------------------------------------------
+-- Swap the geocoding provider: Mapbox -> US Census Bureau.
+--
+-- WHY
+--
+-- The fleet is US-only and every stop is a US street address, so Census
+-- coverage fits the whole problem. It needs no API key and no card, and it
+-- carries no storage restriction -- which removes the permanent-vs-temporary
+-- licensing question entirely rather than paying to resolve it. It also
+-- removes a spend-cap risk on an account with no hard cap.
+--
+-- WHAT CHANGES HERE
+--
+-- Only the name of the precise tier. Census returns TIGER address-RANGE
+-- INTERPOLATION -- a point computed along a street segment from its house
+-- number range -- and never a parcel or rooftop point. Leaving the value
+-- called `rooftop` would be a claim the data cannot back, and the stored
+-- value is precisely what a future rule is meant to weigh.
+--
+-- `city` is kept and is UNREACHABLE under this provider: the Census
+-- locations/address service rejects city-only input with HTTP 400 rather
+-- than returning a coarse match. It stays for a provider that can, and
+-- §12.24 says so rather than leaving a reader to wonder why nothing writes it.
+--
+-- RENAME, not a new type: existing rows keep their identity and no data moves.
+-- ---------------------------------------------------------------------------
+
+ALTER TYPE "public"."geocode_precision" RENAME VALUE 'rooftop' TO 'street';
