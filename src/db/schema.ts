@@ -208,7 +208,20 @@ export const positions = pgTable(
     formattedLocation: text('formatted_location'),
   },
   (t) => [
-    index('positions_truck_recorded_idx').on(t.truckId, t.recordedAt.desc()),
+    /**
+     * ONE index on (truck_id, recorded_at), not two.
+     *
+     * It does both jobs: it dedupes the feed — which returns the same reading
+     * again across polls — and it serves the console's
+     * `order by recorded_at desc limit 1` lateral seek, because a btree scans
+     * backwards just as cheaply as forwards.
+     *
+     * A second, descending index used to sit beside it. Measured before
+     * dropping it: 1008 kB, and `pg_stat_user_indexes.idx_scan = 0` — never
+     * chosen once, against 19,940 scans of this one. It cost an index write
+     * on every inserted position, and positions take ~26 inserts every 30
+     * seconds forever.
+     */
     uniqueIndex('positions_truck_recorded_key').on(t.truckId, t.recordedAt),
     check('positions_lat_range', sql`lat between -90 and 90`),
     check('positions_lng_range', sql`lng between -180 and 180`),

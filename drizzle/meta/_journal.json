@@ -22,6 +22,13 @@
       "when": 1789640915646,
       "tag": "0002_load_status_vocabulary",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789651439360,
+      "tag": "0003_drop_redundant_positions_index",
+      "breakpoints": true
     }
   ]
 }

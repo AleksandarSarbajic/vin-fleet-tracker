@@ -43,9 +43,11 @@ export interface FleetRow {
  *
  * LEFT JOIN LATERAL ... LIMIT 1, deliberately, NOT `DISTINCT ON (truck_id)`.
  * DISTINCT ON scans the whole index — O(positions). This does one index seek
- * per truck against positions_truck_recorded_idx — O(trucks) — and stays flat
- * as the table grows. Verified: `npm run db:explain` shows loops=23 against a
- * full 7,906-row scan for the alternative.
+ * per truck against positions_truck_recorded_key — scanned BACKWARDS, since
+ * that index is ascending and a btree walks either way — O(trucks), flat as
+ * the table grows. Verified: `npm run db:explain` shows
+ * `Index Scan Backward using positions_truck_recorded_key`, loops=23, against
+ * a full-table scan for the alternative.
  *
  * `recorded_at` is cast to ISO-8601 UTC **in SQL**, not in TypeScript.
  * Postgres's default text rendering of a timestamptz is

@@ -1,0 +1,28 @@
+-- ---------------------------------------------------------------------------
+-- Drops positions_truck_recorded_idx. It was redundant from the day it was
+-- written, and it was never used once.
+--
+-- Two indexes covered (truck_id, recorded_at):
+--
+--   positions_truck_recorded_idx   1008 kB   idx_scan = 0       (…, recorded_at DESC)
+--   positions_truck_recorded_key   1000 kB   idx_scan = 19,940  UNIQUE (…, recorded_at)
+--
+-- The unique one is not optional — it is what stops the feed writing the same
+-- reading twice — and it serves the console's
+-- `order by recorded_at desc limit 1` seek by scanning backwards, which a
+-- btree does at the same cost as forwards. EXPLAIN confirms it: the lateral
+-- join runs `Index Scan Backward using positions_truck_recorded_key`,
+-- loops=23, with the descending index sitting unused beside it.
+--
+-- The cost of keeping it was one extra index write per inserted position, on
+-- a table taking ~26 inserts every 30 seconds for as long as this runs.
+--
+-- Note for whoever reads this next: drizzle-kit also wanted to emit a
+-- DROP TYPE / CREATE TYPE pair for load_status here. That is an artefact, not
+-- a change — migration 0002 was handwritten and never refreshed the snapshot,
+-- so drizzle still believed the enum held the invented vocabulary. The 0003
+-- snapshot beside this file is the corrected baseline; the enum in the
+-- database has been right since 0002 and must not be dropped and rebuilt.
+-- ---------------------------------------------------------------------------
+
+DROP INDEX IF EXISTS public.positions_truck_recorded_idx;
