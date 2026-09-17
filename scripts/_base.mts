@@ -1,0 +1,11 @@
+import { config as loadEnv } from 'dotenv';
+import postgres from 'postgres';
+loadEnv({ path: '.env.local' });
+const sql = postgres(process.env.DIRECT_URL!, { max: 1 });
+const [p] = await sql`SELECT count(*) positions, max(recorded_at) newest FROM positions`;
+const [t] = await sql`SELECT count(*) total, count(*) FILTER (WHERE active) active FROM trucks`;
+const [f] = await sql`SELECT left(cursor,8) cur, last_success_at, last_error FROM feed_health WHERE id=1`;
+console.log('BASELINE  positions:', p!.positions, ' newest:', p!.newest);
+console.log('BASELINE  trucks:', t!.total, 'total,', t!.active, 'active');
+console.log('BASELINE  feed:', f);
+await sql.end();

@@ -59,8 +59,20 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => stop('SIGTERM'));
 
   try {
-    await syncRoster(db, samsara);
-    await seedIfCold(db, samsara);
+    // Startup runs inside the same reporting path as a poll. Without this a
+    // bad token or a dead API kills the process with feed_health untouched,
+    // so the console shows staleness with no reason next to it — and
+    // feed_health.last_error is the only place a dispatcher's offline banner
+    // can learn WHY the feed stopped.
+    try {
+      await syncRoster(db, samsara);
+      await seedIfCold(db, samsara);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('startup failed', { error: message });
+      await recordFailure(db, `startup: ${message}`);
+      throw error;
+    }
 
     let lastRoster = Date.now();
     let lastPrune = Date.now();
@@ -78,9 +90,11 @@ async function main(): Promise<void> {
       }
 
       if (!shuttingDown && Date.now() - lastRoster >= ROSTER_INTERVAL_MS) {
-        await syncRoster(db, samsara).catch((e: unknown) =>
-          logger.error('roster sync failed', { error: String(e) }),
-        );
+        await syncRoster(db, samsara).catch(async (e: unknown) => {
+          const message = e instanceof Error ? e.message : String(e);
+          logger.error('roster sync failed', { error: message });
+          await recordFailure(db, `roster sync: ${message}`);
+        });
         lastRoster = Date.now();
       }
 
