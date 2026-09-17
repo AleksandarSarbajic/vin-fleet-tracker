@@ -1,35 +1,35 @@
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
+import { Console } from '@/components/console/Console';
+import { serverEnv } from '@/env/server';
 import { getSessionUser } from '@/lib/auth';
-import { signOut } from './login/actions';
+import { loadFleet } from '@/server/fleet';
 
-export default async function Home() {
+/** Live positions — never cached. */
+export const dynamic = 'force-dynamic';
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '??';
+  if (parts.length === 1) return (parts[0] ?? '').slice(0, 2).toUpperCase();
+  return `${parts[0]?.[0] ?? ''}${parts[parts.length - 1]?.[0] ?? ''}`.toUpperCase();
+}
+
+export default async function ConsolePage() {
   const user = await getSessionUser();
   if (!user) redirect('/login');
 
+  // Server component runs the query directly, so first paint has data and
+  // there is no loading flash before the first client poll.
+  const fleet = await loadFleet();
+
   return (
-    <main className="min-h-dvh p-10">
-      <h1 className="font-cond text-display uppercase">Fleet Tracker</h1>
-      <p className="mt-2 text-small text-text-secondary">
-        Phase 1 — scaffold, env, schema, RLS and auth. The console arrives in phase 3.
-      </p>
-
-      <dl className="mt-8 grid max-w-md grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
-        <dt className="text-text-muted">Signed in</dt>
-        <dd>{user.email}</dd>
-        <dt className="text-text-muted">Name</dt>
-        <dd>{user.fullName}</dd>
-        <dt className="text-text-muted">Role</dt>
-        <dd className="uppercase">{user.role}</dd>
-      </dl>
-
-      <form action={signOut} className="mt-8">
-        <button
-          type="submit"
-          className="h-10 border border-line-hair px-4 font-cond text-[12.5px] uppercase tracking-[.08em]"
-        >
-          Sign out
-        </button>
-      </form>
-    </main>
+    <Suspense fallback={null}>
+      <Console
+        initial={{ fleet, fetchedAt: new Date().toISOString() }}
+        dispatchTz={serverEnv.DISPATCH_TZ}
+        userInitials={initials(user.fullName)}
+      />
+    </Suspense>
   );
 }

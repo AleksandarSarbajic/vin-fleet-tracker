@@ -33,6 +33,16 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+
+  /**
+   * Route handlers answer for themselves. Redirecting /api/* to the login
+   * PAGE hands a JSON client a lump of HTML, so a session that expires
+   * mid-shift would surface as a parse error rather than a 401 — exactly the
+   * 3am confusion this app exists to avoid. The handlers call requireUser()
+   * and return a typed 401.
+   */
+  if (pathname.startsWith('/api/')) return response;
+
   if (!user && pathname !== '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/login';

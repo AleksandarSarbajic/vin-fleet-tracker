@@ -1,0 +1,50 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import type { FleetRow } from '@/server/fleet';
+
+/**
+ * The brief puts client polling at 15–30s. 20s against our own database keeps
+ * worst-case staleness around 50s once the worker's own 30s Samsara poll is
+ * added on top.
+ */
+export const FLEET_POLL_MS = 20_000;
+
+export interface FleetResponse {
+  fleet: FleetRow[];
+  fetchedAt: string;
+}
+
+async function fetchFleet(): Promise<FleetResponse> {
+  const response = await fetch('/api/fleet', { cache: 'no-store' });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      reference?: string;
+    } | null;
+    throw new Error(
+      body?.reference
+        ? `${body.error ?? 'Request failed'} (${body.reference})`
+        : (body?.error ?? `Request failed: ${response.status}`),
+    );
+  }
+  return (await response.json()) as FleetResponse;
+}
+
+export function useFleet(initial: FleetResponse) {
+  return useQuery({
+    queryKey: ['fleet'],
+    queryFn: fetchFleet,
+    refetchInterval: FLEET_POLL_MS,
+    // Just under the interval, so returning to the tab does not fire a second
+    // request on top of the one about to run.
+    staleTime: FLEET_POLL_MS - 1_000,
+    initialData: initial,
+    // Keeps the last good fleet on screen while a refetch is in flight. A
+    // console that blanks every 20 seconds is unusable on a night shift.
+    placeholderData: (previous) => previous,
+    // Object identity survives for rows whose values did not change, so
+    // memoised list rows do not re-render on every poll.
+    structuralSharing: true,
+  });
+}
