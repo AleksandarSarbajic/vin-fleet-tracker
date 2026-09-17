@@ -3,7 +3,7 @@
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
-import { milesText } from '../TruckRow';
+import { milesText, precisionNote } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
@@ -54,9 +54,13 @@ function projectedLine(row: FleetRow): string {
       const time = `ETA ${timeInZone(new Date(row.etaUtc), zone)}`;
       const miles = milesText(row.milesRemaining);
       const line = miles ? `${miles} · ${time}` : time;
-      // A city centroid can be several miles out. Saying so costs four words
-      // and stops the number being read as a rooftop promise.
-      return row.etaPrecision === 'city' ? `${line} · from city centre` : line;
+      // §12.30. Four words that stop a centroid being read as an address.
+      if (row.etaPrecision === 'zip') {
+        const pm = row.etaAccuracyMiles !== null ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi` : '';
+        return `${line} · from ZIP centroid${pm}`;
+      }
+      if (row.etaPrecision === 'block') return `${line} · nearest block`;
+      return line;
     }
     case 'address-not-located':
       return 'no ETA · address not located';
@@ -147,7 +151,15 @@ export function MapPopup({
           </Row>
           {row.nextStop ? (
             <Row label="Projected">
-              <span className="tabular-nums">{projectedLine(row)}</span>
+              <span className="tabular-nums" title={precisionNote(row)}>
+                {projectedLine(row)}
+              </span>
+            </Row>
+          ) : null}
+          {/* §12.30: the caveat in full, where there is room for it. */}
+          {row.etaPrecision === 'zip' || row.etaPrecision === 'block' ? (
+            <Row label="Accuracy">
+              <span className="text-status-risk-fg">{precisionNote(row)}</span>
             </Row>
           ) : null}
           {row.nextStop ? (

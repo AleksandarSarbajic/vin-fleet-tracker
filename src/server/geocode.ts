@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Db } from './audit';
 import { geocodeCache } from '@/db/schema';
 import { hasStreetLine, isAddressEmpty, normalizeAddress, type AddressParts } from '@/lib/address';
+import { ZIP_CENTROID_VINTAGE, zipCentroid } from '@/lib/geo/zip-centroid';
 
 /**
  * Forward geocoding, server-side only, one call per stop whose address
@@ -69,6 +70,18 @@ const TIMEOUT_MS = 2_500;
 export const CACHE_TTL_DAYS = { hit: 30, miss: 7 } as const;
 
 /**
+ * What produced a cache row. Bumped whenever the CHAIN changes, not just the
+ * provider — a row is only reusable if it would be reached the same way today.
+ *
+ * This is not bookkeeping. When the ZIP fallback landed, every address that
+ * had previously missed was sitting in the cache as a miss with days left on
+ * its TTL, so the new fallback would not have run for any of them until the
+ * following week. Stale misses are the failure mode a cache has that a bug
+ * does not: it keeps working, at the old answer.
+ */
+export const CHAIN_VERSION = 'census-v6+block+zcta2023';
+
+/**
  * Two matches this far apart are different places and the top one is a guess.
  *
  * The veto SURVIVED the provider swap in simplified form. Census returns no
@@ -78,6 +91,32 @@ export const CACHE_TTL_DAYS = { hit: 30, miss: 7 } as const;
  * passes, while two genuinely different places do not.
  */
 const AMBIGUITY_MILES = 1;
+
+/**
+ * House numbers probed on the same street when the typed one does not match
+ * (§12.30).
+ *
+ * Census requires a house number — a bare street name always returns zero
+ * matches, measured — so the only way to learn whether a street exists is to
+ * try numbers on it.
+ *
+ * These four were chosen by measurement, not taste. Probing ten numbers
+ * across four known streets, the ones that landed were:
+ *
+ *     W Buckeye Rd, Phoenix        1, 50, 200, 500, 1000, 2000, 4000, 8000
+ *     N Washington St, Grand Forks 1, 50, 200, 500, 1000, 2000, 4000, 8000
+ *     Fulton Industrial Blvd SW    200, 1000, 4000
+ *     Laraway Rd, New Lenox        500
+ *     Walton Dr, Elwood            none — the street is genuinely absent
+ *
+ * {200, 500, 1000, 4000} is the smallest set that finds all four real streets
+ * and still finds nothing on the absent one. One probe would have missed
+ * Fulton; two would have been luck.
+ *
+ * They run in PARALLEL, so the cost is four calls but one round trip —
+ * about 0.7 s measured — and only ever on an address that already failed.
+ */
+const PROBE_NUMBERS = [200, 500, 1000, 4000] as const;
 
 /* -------------------------------- outcomes ------------------------------- */
 
@@ -95,7 +134,9 @@ export interface GeocodeHit {
   ok: true;
   lat: number;
   lng: number;
-  precision: 'street' | 'city';
+  precision: 'street' | 'block' | 'zip';
+  /** The ± to show a dispatcher. Only meaningful below `street`. */
+  accuracyMiles?: number;
   /**
    * What the signal actually was, not a fabricated grade. Census returns no
    * confidence value, so inventing an `exact` here would be dressing a
@@ -303,8 +344,8 @@ export interface GeocodeOptions {
   now?: Date;
 }
 
-/** The network half, with no cache and no database. Exported for tests. */
-export async function geocodeOnce(
+/** One exact-address attempt. No fallback, no cache, no database. */
+export async function geocodeExact(
   parts: AddressParts,
   options: GeocodeOptions = {},
 ): Promise<GeocodeOutcome> {
@@ -334,6 +375,118 @@ export async function geocodeOnce(
   if (!parsed.success) return fail('provider-error', [], 'unreadable response');
 
   return outcomeFor(parsed.data.result.addressMatches, parts);
+}
+
+/* ------------------------------ the fallbacks ---------------------------- */
+
+/**
+ * The whole chain: exact address, then the street, then the ZIP (§12.30).
+ *
+ * Ordered by how much it claims to know, and each step is only reached
+ * because the one above it found nothing. A stop that geocodes normally —
+ * the common case — costs exactly one call and never touches any of this.
+ */
+export async function geocodeOnce(
+  parts: AddressParts,
+  options: GeocodeOptions = {},
+): Promise<GeocodeOutcome> {
+  if (isAddressEmpty(parts)) return fail('empty-address');
+
+  // 1. The address as typed.
+  const exact = hasStreetLine(parts)
+    ? await geocodeExact(parts, options)
+    : fail('no-street', ['the street']);
+
+  // Only `no-results` falls through. A LOW-CONFIDENCE or AMBIGUOUS match
+  // means Census found something and we refused it — falling back would be
+  // answering a question the cutoff already answered, and the dispatcher
+  // needs to see that their state or city is wrong (§12.24), not a centroid
+  // quietly standing in for it.
+  if (exact.ok || (exact.reason !== 'no-results' && exact.reason !== 'no-street')) {
+    return exact;
+  }
+
+  // 2. Is the street there at all? Four numbers, in parallel, one round trip.
+  if (hasStreetLine(parts)) {
+    const block = await probeStreet(parts, options);
+    if (block) return block;
+  }
+
+  // 3. The ZIP centroid. No network: a vendored static file, so the last
+  //    resort cannot fail because someone else's service is down.
+  const centroid = zipCentroid(parts.zip);
+  if (centroid) {
+    return {
+      ok: true,
+      lat: centroid.lat,
+      lng: centroid.lng,
+      precision: 'zip',
+      accuracyMiles: centroid.radiusMiles,
+      confidence: `census:zcta-centroid-${ZIP_CENTROID_VINTAGE}`,
+      matchedAddress: `ZIP ${parts.zip} centroid (±${centroid.radiusMiles.toFixed(1)} mi)`,
+    };
+  }
+
+  return exact;
+}
+
+/**
+ * Whether the street exists, and if so the nearest block to what was typed.
+ *
+ * Returns null when no probe lands, which is the honest reading of "Census
+ * does not have this street" — the Elwood intermodal case.
+ */
+async function probeStreet(
+  parts: AddressParts,
+  options: GeocodeOptions,
+): Promise<GeocodeHit | null> {
+  const typedNumber = Number.parseInt((parts.addressLine ?? '').trim(), 10);
+
+  const settled = await Promise.all(
+    PROBE_NUMBERS.map(async (number) => {
+      const street = withHouseNumber(parts.addressLine, number);
+      if (!street) return null;
+      const outcome = await geocodeExact({ ...parts, addressLine: street }, options);
+      return outcome.ok ? { number: number as number, outcome } : null;
+    }),
+  );
+
+  const landed = settled.filter(
+    (r): r is NonNullable<(typeof settled)[number]> => r !== null,
+  );
+  if (landed.length === 0) return null;
+
+  /**
+   * NEAREST to the typed number, not the first to answer.
+   *
+   * This is the entire value of the step. Taking any hit puts you at an
+   * arbitrary point on a road that can be nine miles long — measured, on
+   * W Buckeye Rd — which is worse than the ZIP centroid. Taking the nearest
+   * block measured 0.16–0.78 mi from truth on every address that could be
+   * checked.
+   */
+  const best = Number.isFinite(typedNumber)
+    ? landed.reduce((a, b) =>
+        Math.abs(a.number - typedNumber) <= Math.abs(b.number - typedNumber) ? a : b,
+      )
+    : landed[0]!;
+
+  return {
+    ...best.outcome,
+    precision: 'block',
+    // Half the gap to the next probe is a fair statement of what we know.
+    accuracyMiles: 0.8,
+    confidence: `census:block-${best.number}`,
+    matchedAddress: `${best.outcome.matchedAddress} (nearest block; ${typedNumber || 'the number'} is not in Census's range)`,
+  };
+}
+
+/** Swaps the leading house number, keeping the street as typed. */
+function withHouseNumber(addressLine: string | null, number: number): string | null {
+  const line = (addressLine ?? '').trim();
+  if (line === '') return null;
+  const withoutNumber = line.replace(/^\s*\d+\s*/, '').trim();
+  return withoutNumber === '' ? null : `${number} ${withoutNumber}`;
 }
 
 function messageOf(error: unknown): string {
@@ -366,7 +519,9 @@ export async function geocodeAddress(
     .where(eq(geocodeCache.normalizedAddress, key))
     .limit(1);
 
-  if (cached) {
+  // A row from an older chain is not a fact about the address, it is a fact
+  // about code that no longer exists.
+  if (cached && cached.provider === CHAIN_VERSION) {
     const ageDays = (now.getTime() - cached.fetchedAt.getTime()) / 86_400_000;
     const ttl = cached.lat === null ? CACHE_TTL_DAYS.miss : CACHE_TTL_DAYS.hit;
     if (ageDays < ttl) {
@@ -376,6 +531,7 @@ export async function geocodeAddress(
           lat: cached.lat,
           lng: cached.lng,
           precision: cached.precision,
+          ...(cached.accuracyMiles !== null ? { accuracyMiles: cached.accuracyMiles } : {}),
           confidence: cached.confidence ?? 'cached',
           matchedAddress: cached.matchedAddress ?? '',
         };
@@ -405,9 +561,11 @@ export async function geocodeAddress(
         lat: fresh.lat,
         lng: fresh.lng,
         precision: fresh.precision,
+        accuracyMiles: fresh.accuracyMiles ?? null,
         confidence: fresh.confidence,
         matchedAddress: fresh.matchedAddress,
         missReason: null,
+        provider: CHAIN_VERSION,
         fetchedAt: now,
       }
     : {
@@ -415,9 +573,11 @@ export async function geocodeAddress(
         lat: null,
         lng: null,
         precision: null,
+        accuracyMiles: null,
         confidence: null,
         matchedAddress: null,
         missReason: fresh.reason,
+        provider: CHAIN_VERSION,
         fetchedAt: now,
       };
 

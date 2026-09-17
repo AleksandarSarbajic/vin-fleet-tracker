@@ -117,7 +117,9 @@ export interface StopFacts {
    * centroid — which is the one that puts a dispatcher on the phone to a
    * broker — without having to re-plumb the engine to find out.
    */
-  precision: 'street' | 'city' | null;
+  precision: 'street' | 'block' | 'zip' | null;
+  /** The ± on those coordinates, when they are not a street match. */
+  accuracyMiles: number | null;
   /** True when a dispatcher typed an address, located or not. */
   hasAddress: boolean;
 }
@@ -198,8 +200,10 @@ export interface StatusResult {
    * computed to produce the ETA. Null whenever the ETA is null.
    */
   milesRemaining: number | null;
-  /** Carried beside the status so a future rule can weigh it — see StopFacts. */
-  precision: 'street' | 'city' | null;
+  /** Weighed by the AT_RISK rule, and by the worker's arrival detection. */
+  precision: 'street' | 'block' | 'zip' | null;
+  /** The ± to print beside a coarse ETA. Null for a street match. */
+  accuracyMiles: number | null;
   /**
    * The ETA the engine would have produced for an UNASSIGNED truck. The row
    * renders it struck through, so the number is visible as history without
@@ -352,6 +356,7 @@ export function evaluate(
     // would be the same fiction the suppression exists to avoid (§5.8).
     milesRemaining: shown === null ? null : (projection?.miles ?? null),
     precision: stop?.precision ?? null,
+    accuracyMiles: stop?.accuracyMiles ?? null,
     lastComputedEtaUtc: suppressed ? etaUtc : null,
     deadlineUtc,
   };
@@ -393,9 +398,26 @@ function computeStatus(
 
     if (projected !== null) {
       if (projected > deadline) return 'LATE';
-      // §12.22: an FCFS stop has a door closing, not a slot to miss.
+      /**
+       * §12.30: AT_RISK needs a coordinate the buffer can outrun.
+       *
+       * The buffer is 45 minutes. A ZIP centroid sits a median 2.14 mi and a
+       * p90 5.51 mi from the real address, which is 3 to 8 minutes of ETA —
+       * a fraction of the buffer, but AT_RISK is a statement about the last
+       * 45 minutes specifically, and inside that window the error is a
+       * meaningful share of what is being measured. "He might just miss it"
+       * computed from a point four miles from the dock is a guess wearing a
+       * number.
+       *
+       * LATE is different and stays: at hours out, being past the deadline
+       * survives five miles of error comfortably, and being late is the fact
+       * a dispatcher must act on.
+       *
+       * `block` keeps AT_RISK — measured at 0.16–0.78 mi, under a minute.
+       */
       if (
         stop?.apptType !== 'FCFS' &&
+        stop?.precision !== 'zip' &&
         projected > deadline - config.riskBufferMinutes * MINUTE
       ) {
         return 'AT_RISK';

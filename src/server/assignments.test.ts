@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq, isNull, and } from 'drizzle-orm';
+import { eq, isNull, and, inArray, sql } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { assignments, drivers, trucks } from '@/db/schema';
 import { AssignmentConflictError, loadAssignmentBoard, saveAssignments } from './assignments';
@@ -56,16 +56,55 @@ withDb('the assignment board', () => {
 });
 
 withDb('saving the board', () => {
+  /**
+   * These tests run against the real database inside a transaction that
+   * always rolls back — but a rollback does not hide rows COMMITTED outside
+   * it. They used to take "the first two trucks" and "the first two drivers"
+   * and assume both were free, which was true only while the board was empty.
+   *
+   * The moment a dispatcher actually used `/assignments`, five of them failed
+   * with "truck 136 and truck 147 both take Roman De Los Santos" — the
+   * conflict rule working exactly as designed, on a driver the fixture had no
+   * business claiming. Same shape as the geocode-cache collision in §12.29's
+   * neighbourhood: a test reading live data it does not own.
+   *
+   * So the fixture now CLEARS the open assignments for whatever it picks,
+   * inside the transaction. That rolls back with everything else, and the
+   * tests stop depending on who happens to be driving today.
+   */
   const twoTrucks = async (tx: Tx) => {
     const rows = await tx
       .select({ id: trucks.id, number: trucks.truckNumber })
       .from(trucks)
       .where(eq(trucks.active, true))
       .limit(2);
+    await freeUp(tx, rows.map((r) => r.id), []);
     return rows;
   };
-  const twoDrivers = async (tx: Tx) =>
-    tx.select({ id: drivers.id, name: drivers.name }).from(drivers).limit(2);
+  const twoDrivers = async (tx: Tx) => {
+    const rows = await tx
+      .select({ id: drivers.id, name: drivers.name })
+      .from(drivers)
+      .limit(2);
+    await freeUp(tx, [], rows.map((r) => r.id));
+    return rows;
+  };
+
+  /** Ends any open assignment touching these trucks or drivers. Rolls back. */
+  const freeUp = async (tx: Tx, truckIds: string[], driverIds: string[]) => {
+    if (truckIds.length === 0 && driverIds.length === 0) return;
+    await tx
+      .update(assignments)
+      .set({ endedAt: sql`now()` })
+      .where(
+        and(
+          isNull(assignments.endedAt),
+          truckIds.length > 0
+            ? inArray(assignments.truckId, truckIds)
+            : inArray(assignments.driverId, driverIds),
+        ),
+      );
+  };
 
   it('assigns, and the open row is readable in the same transaction', async () => {
     const result = await rolledBack(async (tx) => {

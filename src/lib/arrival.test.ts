@@ -20,6 +20,7 @@ const at = (s: number) => new Date(T0.getTime() + s * 1000).toISOString();
 
 const stop = (over: Partial<StopGeo> = {}): StopGeo => ({
   ...STOP,
+  precision: 'street',
   arrivedAt: null,
   departedAt: null,
   ...over,
@@ -145,7 +146,12 @@ describe('detectDeparture', () => {
  */
 describe('truck 143 into Grand Forks, from the real track', () => {
   const fixes: Fix[] = [...TRUCK_143_ARRIVING];
-  const realStop: StopGeo = { ...GRAND_FORKS_STOP, arrivedAt: null, departedAt: null };
+  const realStop: StopGeo = {
+    ...GRAND_FORKS_STOP,
+    precision: 'street',
+    arrivedAt: null,
+    departedAt: null,
+  };
 
   it('detects the arrival', () => {
     expect(detectArrival(realStop, fixes)).toBe('2026-09-17T20:15:49.033Z');
@@ -172,5 +178,57 @@ describe('truck 143 into Grand Forks, from the real track', () => {
     // arrival, the tests above are measuring nothing.
     const stopped = fixes.filter((f) => (f.speedMph ?? 0) === 0);
     expect(stopped.length).toBeGreaterThan(20);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.30 — coarse coordinates cannot be arrived at
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The sharp edge of the ZIP fallback: a coordinate calibrated for one rule
+ * quietly feeding another. The arrival radius is 0.25 mi; a ZIP centroid is a
+ * median 2.14 mi from the real address. Left ungated, trucks would be marked
+ * ARRIVED four miles from the dock — and §12.27 never unsets `arrived_at`, so
+ * nothing would take it back.
+ */
+describe('arrival refuses anything below street precision (§12.30)', () => {
+  /** Parked exactly ON the stop coordinate, stationary for a long time. */
+  const parkedOnTop = (count = 60): Fix[] =>
+    Array.from({ length: count }, (_, i) => ({
+      ...STOP,
+      speedMph: 0,
+      recordedAtUtc: at(-i * 6),
+    }));
+
+  it('fires at street precision, so the test below means something', () => {
+    expect(detectArrival(stop({ precision: 'street' }), parkedOnTop())).not.toBeNull();
+  });
+
+  it.each(['zip', 'block', null] as const)(
+    'never fires at %s precision, however close the truck parks',
+    (precision) => {
+      expect(detectArrival(stop({ precision }), parkedOnTop())).toBeNull();
+    },
+  );
+
+  it('never fires at zip precision even parked there for a whole day', () => {
+    const allDay = Array.from({ length: 2000 }, (_, i) => ({
+      ...STOP,
+      speedMph: 0,
+      recordedAtUtc: at(-i * 30),
+    }));
+    expect(detectArrival(stop({ precision: 'zip' }), allDay)).toBeNull();
+  });
+
+  it('will not record a departure from a coarse stop either', () => {
+    const leaving: Fix[] = Array.from({ length: 40 }, (_, i) => ({
+      lat: STOP.lat + 0.05,
+      lng: STOP.lng,
+      speedMph: 45,
+      recordedAtUtc: at(-i * 6),
+    }));
+    const arrived = stop({ precision: 'zip', arrivedAt: at(-3600) });
+    expect(detectDeparture(arrived, leaving)).toBeNull();
   });
 });

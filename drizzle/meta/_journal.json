@@ -50,6 +50,20 @@
       "when": 1789670795639,
       "tag": "0006_census_geocoder",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789670796639,
+      "tag": "0007_geocode_fallback_levels",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789670797639,
+      "tag": "0008_geocode_accuracy",
+      "breakpoints": true
     }
   ]
 }

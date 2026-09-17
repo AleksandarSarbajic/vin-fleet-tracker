@@ -54,6 +54,19 @@ export const ARRIVAL_DEFAULTS: ArrivalConfig = {
 export interface StopGeo {
   lat: number;
   lng: number;
+  /**
+   * §12.30. Arrival detection runs on `street` and NOTHING ELSE.
+   *
+   * The radius is 0.25 mi. A `block` coordinate is measured 0.16–0.78 mi
+   * from truth and a `zip` centroid a median 2.14 mi, so a 0.25 mi circle
+   * around either is noise: it would mark trucks ARRIVED four miles from the
+   * dock, and §12.27 never unsets `arrived_at`. A wrong arrival is not a
+   * cosmetic error — it removes the stop from every urgency signal that
+   * would otherwise chase it.
+   *
+   * Null means the stop has no coordinates at all, which also cannot arrive.
+   */
+  precision: 'street' | 'block' | 'zip' | null;
   /** Already arrived. Never re-detected, never unset by the worker. */
   arrivedAt: string | null;
   departedAt: string | null;
@@ -109,6 +122,8 @@ export function detectArrival(
   config: ArrivalConfig = ARRIVAL_DEFAULTS,
 ): string | null {
   if (stop.arrivedAt !== null) return null;
+  // Coarse coordinates cannot be arrived at, however close the truck gets.
+  if (stop.precision !== 'street') return null;
 
   const run = confirmedRun(
     fixes,
@@ -139,6 +154,9 @@ export function detectDeparture(
   config: ArrivalConfig = ARRIVAL_DEFAULTS,
 ): string | null {
   if (stop.arrivedAt === null || stop.departedAt !== null) return null;
+  // Symmetric with arrival: a coarse coordinate cannot be left either, and
+  // an arrival it could not have produced is a dispatcher's to undo.
+  if (stop.precision !== 'street') return null;
   if (fixes.length === 0) return null;
   if ((fixes[0]!.speedMph ?? 0) <= 0) return null;
 

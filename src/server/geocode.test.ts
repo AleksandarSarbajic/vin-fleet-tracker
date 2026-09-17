@@ -7,6 +7,7 @@ import {
   CACHE_TTL_DAYS,
   buildQuery,
   geocodeAddress,
+  geocodeExact,
   geocodeOnce,
   outcomeFor,
   type CensusMatch,
@@ -230,7 +231,7 @@ describe('the runner-up veto', () => {
 
 /* -------------------------------- transport ------------------------------ */
 
-describe('geocodeOnce', () => {
+describe('geocodeExact (one call, no fallback)', () => {
   const ok = (matches: CensusMatch[]) =>
     vi.fn(
       async () =>
@@ -239,7 +240,7 @@ describe('geocodeOnce', () => {
 
   it('never calls the provider for an empty address', async () => {
     const fetchImpl = ok([]);
-    const out = await geocodeOnce(
+    const out = await geocodeExact(
       { addressLine: null, city: null, state: null, zip: null },
       { fetchImpl },
     );
@@ -253,7 +254,7 @@ describe('geocodeOnce', () => {
    */
   it('refuses city-only input without spending a call', async () => {
     const fetchImpl = ok([]);
-    const out = await geocodeOnce(cityOnly, { fetchImpl });
+    const out = await geocodeExact(cityOnly, { fetchImpl });
     expect(!out.ok && out.reason).toBe('no-street');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -264,13 +265,13 @@ describe('geocodeOnce', () => {
       error.name = 'TimeoutError';
       throw error;
     });
-    const out = await geocodeOnce(address, { fetchImpl });
+    const out = await geocodeExact(address, { fetchImpl });
     expect(!out.ok && out.reason).toBe('timeout');
   });
 
   it('turns a provider 500 into a miss, never an exception', async () => {
     const fetchImpl = vi.fn(async () => new Response('upstream boom', { status: 500 }));
-    await expect(geocodeOnce(address, { fetchImpl })).resolves.toMatchObject({
+    await expect(geocodeExact(address, { fetchImpl })).resolves.toMatchObject({
       ok: false,
       reason: 'provider-error',
     });
@@ -283,18 +284,18 @@ describe('geocodeOnce', () => {
           status: 400,
         }),
     );
-    const out = await geocodeOnce(address, { fetchImpl });
+    const out = await geocodeExact(address, { fetchImpl });
     expect(!out.ok && out.reason).toBe('provider-error');
   });
 
   it('treats an unreadable body as a provider error', async () => {
     const fetchImpl = vi.fn(async () => new Response('not json', { status: 200 }));
-    const out = await geocodeOnce(address, { fetchImpl });
+    const out = await geocodeExact(address, { fetchImpl });
     expect(!out.ok && out.reason).toBe('provider-error');
   });
 
   it('reads x as longitude and y as latitude', async () => {
-    const out = await geocodeOnce(address, {
+    const out = await geocodeExact(address, {
       fetchImpl: ok([match({ lat: 47.9, lng: -97.05 })]),
     });
     expect(out.ok && out.lat).toBeCloseTo(47.9, 5);
@@ -338,21 +339,37 @@ withDb('the cache', () => {
     expect(calls).toBe(1);
   });
 
+  /**
+   * A genuine miss needs an address with NO usable ZIP. Since §12.30 a ZIP
+   * that the gazetteer carries always produces a `zip` hit, so the only way
+   * left to miss entirely is to have nothing to fall back to.
+   *
+   * The first attempt costs 5 calls — one exact, four street probes — and the
+   * second costs nothing, which is the property being asserted.
+   */
+  const unresolvable: AddressParts = {
+    addressLine: '1804 Vitest Fixture Street',
+    city: 'Nowhere',
+    state: 'ND',
+    zip: null,
+  };
+
   it('caches a miss, so a typo does not buy a call on every save', async () => {
     const result = await rolledBack(async (tx) => {
       const fetchImpl = vi.fn(
         async () =>
           new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
       );
-      await geocodeAddress(tx as never, address, { fetchImpl });
-      const second = await geocodeAddress(tx as never, address, { fetchImpl });
+      await geocodeAddress(tx as never, unresolvable, { fetchImpl });
+      const second = await geocodeAddress(tx as never, unresolvable, { fetchImpl });
       const [row] = await tx
         .select()
         .from(geocodeCache)
-        .where(eq(geocodeCache.normalizedAddress, normalizeAddress(address)));
+        .where(eq(geocodeCache.normalizedAddress, normalizeAddress(unresolvable)));
       return { calls: fetchImpl.mock.calls.length, second, row };
     });
-    expect(result.calls).toBe(1);
+    // 1 exact + 4 probes on the first attempt, nothing at all on the second.
+    expect(result.calls).toBe(5);
     expect(result.second.ok).toBe(false);
     expect(result.row?.lat).toBeNull();
     expect(result.row?.missReason).toBe('no-results');
@@ -365,16 +382,16 @@ withDb('the cache', () => {
           new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
       );
       const start = new Date('2026-09-01T12:00:00Z');
-      await geocodeAddress(tx as never, address, { fetchImpl, now: start });
+      await geocodeAddress(tx as never, unresolvable, { fetchImpl, now: start });
 
       const withinMissTtl = new Date(start.getTime() + (CACHE_TTL_DAYS.miss - 1) * 86_400_000);
-      await geocodeAddress(tx as never, address, { fetchImpl, now: withinMissTtl });
+      await geocodeAddress(tx as never, unresolvable, { fetchImpl, now: withinMissTtl });
       const afterMissTtl = new Date(start.getTime() + (CACHE_TTL_DAYS.miss + 1) * 86_400_000);
-      await geocodeAddress(tx as never, address, { fetchImpl, now: afterMissTtl });
+      await geocodeAddress(tx as never, unresolvable, { fetchImpl, now: afterMissTtl });
       return fetchImpl.mock.calls.length;
     });
-    // One on the way in, none inside the TTL, one after it lapsed.
-    expect(out).toBe(2);
+    // One attempt on the way in, none inside the TTL, one after it lapsed.
+    expect(out).toBe(10);
   });
 
   it('re-fetches a hit once it passes the 30-day storage TTL', async () => {
@@ -415,5 +432,131 @@ withDb('the cache', () => {
       return { row: found[0] };
     });
     expect(row).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.30 — the fallback chain
+ * ---------------------------------------------------------------------- */
+
+describe('the fallback chain', () => {
+  const ELWOOD: AddressParts = {
+    addressLine: '26416 S Walton Dr',
+    city: 'Elwood',
+    state: 'IL',
+    zip: '60421',
+  };
+
+  /** Census has neither the address nor any number on that street. */
+  const nothingEver = () =>
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
+    );
+
+  /**
+   * Census has the street but not the typed number: the probe numbers match,
+   * the real one does not. This is the Laraway Road / Fulton Industrial case.
+   */
+  const onlyProbeNumbers = () =>
+    vi.fn(async (url: string | URL | Request) => {
+      const street = new URL(String(url)).searchParams.get('street') ?? '';
+      const probed = /^(200|500|1000|4000)\s/.test(street);
+      const body = probed
+        ? {
+            result: {
+              addressMatches: [
+                {
+                  matchedAddress: `${street.split(' ')[0]} S WALTON DR, ELWOOD, IL, 60421`,
+                  // Nudged per probe so "nearest block" is observable.
+                  coordinates: { x: -88.2 + Number(street.split(' ')[0]) / 100000, y: 41.4 },
+                  addressComponents: { city: 'ELWOOD', state: 'IL', zip: '60421' },
+                },
+              ],
+            },
+          }
+        : { result: { addressMatches: [] } };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+
+  it('falls all the way to the ZIP centroid when the street does not exist', async () => {
+    const fetchImpl = nothingEver();
+    const out = await geocodeOnce(ELWOOD, { fetchImpl });
+
+    expect(out.ok).toBe(true);
+    expect(out.ok && out.precision).toBe('zip');
+    // Elwood IL, from the vendored 2023 gazetteer.
+    expect(out.ok && out.lat).toBeCloseTo(41.41, 1);
+    expect(out.ok && out.accuracyMiles).toBeGreaterThan(3);
+    expect(out.ok && out.confidence).toContain('zcta-centroid');
+    // 1 exact + 4 probes. The probes only ever run after a miss.
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+  });
+
+  it('prefers the nearest block when the street DOES exist', async () => {
+    const fetchImpl = onlyProbeNumbers();
+    const out = await geocodeOnce(ELWOOD, { fetchImpl });
+
+    expect(out.ok && out.precision).toBe('block');
+    // 26416 typed; 4000 is the nearest of {200,500,1000,4000}.
+    expect(out.ok && out.confidence).toBe('census:block-4000');
+    expect(out.ok && out.matchedAddress).toContain('not in Census');
+  });
+
+  it('spends exactly one call when the address geocodes normally', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ result: { addressMatches: [match({})] } }), {
+          status: 200,
+        }),
+    );
+    const out = await geocodeOnce(address, { fetchImpl });
+    expect(out.ok && out.precision).toBe('street');
+    // The common case must not pay for the rare one.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A refused match is not a missing one. The dispatcher typed a wrong state
+   * or city and needs to see that — a centroid quietly standing in would hide
+   * the very error §12.24's cutoff exists to surface.
+   */
+  it('does NOT fall back when the match was refused rather than absent', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            result: { addressMatches: [match({ city: 'WEST CHICAGO', zip: '60185' })] },
+          }),
+          { status: 200 },
+        ),
+    );
+    const out = await geocodeOnce(
+      { addressLine: '200 Center Street', city: 'Chicago', state: 'IL', zip: null },
+      { fetchImpl },
+    );
+    expect(out.ok).toBe(false);
+    expect(!out.ok && out.reason).toBe('low-confidence');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the ZIP even with no street typed, if a ZIP was', async () => {
+    const fetchImpl = nothingEver();
+    const out = await geocodeOnce(
+      { addressLine: null, city: 'Elwood', state: 'IL', zip: '60421' },
+      { fetchImpl },
+    );
+    expect(out.ok && out.precision).toBe('zip');
+    // No street means no exact attempt and no probes: zero calls.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('still misses when there is no street AND no usable ZIP', async () => {
+    const fetchImpl = nothingEver();
+    const out = await geocodeOnce(
+      { addressLine: null, city: 'Elwood', state: 'IL', zip: null },
+      { fetchImpl },
+    );
+    expect(out.ok).toBe(false);
   });
 });

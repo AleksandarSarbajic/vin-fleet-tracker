@@ -60,25 +60,33 @@ export const stopType = pgEnum('stop_type', ['PU', 'DEL']);
 export const appointmentType = pgEnum('appointment_type', ['APPT', 'FCFS']);
 
 /**
- * How precisely a stop's coordinates are known (§12.24).
+ * How precisely a stop's coordinates are known (§12.24, §12.30).
  *
- * `street` — interpolated along the matched TIGER street segment from its
- *            house-number range. Good to a block, typically much better.
- *            NOT a rooftop: the Census geocoder never returns a parcel point,
- *            and naming it `rooftop` would claim what the data cannot back.
- * `city`   — a locality centroid, potentially several miles out.
+ * Ordered most precise first, so a comparison reads the way it sounds.
  *
- * `city` is currently UNREACHABLE: the Census locations/address service
- * rejects city-only input with HTTP 400 rather than degrading to a centroid,
- * so every row written today reads `street`. Kept for a provider that can do
- * coarse matches — and flagged here, because a column that looks like a live
- * signal while carrying one value is worse than one that admits it.
+ * `street` — the house number matched inside a TIGER segment's range.
+ *            NOT a rooftop: Census interpolates along the street centreline
+ *            and never returns a parcel point.
+ * `block`  — the street matched but the house number did not, so this is the
+ *            nearest probed block on the correct street. Measured at
+ *            0.16–0.78 mi from truth, which beats a ZIP centroid three to
+ *            thirty times over and is still too coarse for arrival detection.
+ * `zip`    — the ZCTA centroid, the last resort. Median 2.14 mi from truth,
+ *            p90 5.51 mi, with the ZIP's own radius carried as the ±.
  *
- * Stored rather than collapsed into a boolean because the error is not a
- * detail: a LATE that puts a dispatcher on the phone to a broker deserves to
- * carry how well we actually know where the receiver is.
+ * Each level changes what the engine is allowed to conclude, which is the
+ * whole reason this is stored rather than thrown away:
+ *
+ *              arrival detection      AT_RISK
+ *     street          yes               yes
+ *     block           no                yes
+ *     zip             no                no
+ *
+ * `city` used to sit here and was retired in 0007. It was unreachable —
+ * Census rejects city-only input outright — and a level nothing can write is
+ * worse than no level, because it reads as a case that has been handled.
  */
-export const geocodePrecision = pgEnum('geocode_precision', ['street', 'city']);
+export const geocodePrecision = pgEnum('geocode_precision', ['street', 'block', 'zip']);
 
 export const overrideReason = pgEnum('override_reason', [
   'RECEIVER_CONFIRMED_DETENTION',
@@ -305,6 +313,8 @@ export const stops = pgTable(
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
     geocodePrecision: geocodePrecision('geocode_precision'),
+    /** The ± in miles. Null for a `street` match; set for `block` and `zip`. */
+    geocodeAccuracyMiles: doublePrecision('geocode_accuracy_miles'),
     /** Mapbox v6 `properties.match_code.confidence` — exact | high. */
     geocodeConfidence: text('geocode_confidence'),
     /** The address Mapbox says it matched, for eyeballing a suspect ETA. */
@@ -400,6 +410,7 @@ export const geocodeCache = pgTable(
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
     precision: geocodePrecision('precision'),
+    accuracyMiles: doublePrecision('accuracy_miles'),
     confidence: text('confidence'),
     /** What the provider says it matched, verbatim. */
     matchedAddress: text('matched_address'),

@@ -40,6 +40,7 @@ const CandidateRow = z.object({
   truck_number: z.number().int().nullable(),
   lat: z.number(),
   lng: z.number(),
+  precision: z.enum(['street', 'block', 'zip']).nullable(),
   arrived_at: z.string().nullable(),
   departed_at: z.string().nullable(),
 });
@@ -68,10 +69,11 @@ export async function sweepArrivals(
   const candidateResult = await db.execute(sql`
     select
       ns.stop_id, t.id::text as truck_id, t.truck_number,
-      ns.lat, ns.lng, ns.arrived_at, ns.departed_at
+      ns.lat, ns.lng, ns.precision, ns.arrived_at, ns.departed_at
     from trucks t
     join lateral (
       select s.id::text as stop_id, s.lat, s.lng,
+             s.geocode_precision::text as precision,
              to_char(s.arrived_at  at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as arrived_at,
              to_char(s.departed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as departed_at
       from loads l
@@ -80,6 +82,10 @@ export async function sweepArrivals(
         and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
         and s.departed_at is null
         and s.lat is not null and s.lng is not null
+        -- §12.30: only a street-level coordinate can be arrived at. Filtered
+        -- HERE as well as in the pure rule, so the sweep does not fetch
+        -- positions for stops it could never conclude anything about.
+        and s.geocode_precision = 'street'
       order by s.appointment_start_utc asc nulls last, s.sequence asc
       limit 1
     ) ns on true
@@ -130,6 +136,7 @@ export async function sweepArrivals(
     const stopGeo = {
       lat: candidate.lat,
       lng: candidate.lng,
+      precision: candidate.precision,
       arrivedAt: candidate.arrived_at,
       departedAt: candidate.departed_at,
     };

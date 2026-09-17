@@ -122,6 +122,31 @@ export function milesText(miles: number | null): string | null {
 }
 
 /**
+ * What KIND of number this ETA is (§12.30).
+ *
+ * A dispatcher deciding whether to phone a receiver needs to know whether
+ * they are looking at a street address or a ZIP centroid four miles wide.
+ * Printing the time alone makes those two look identical, which is the same
+ * mistake as the em dash that hid "we cannot project this" behind "nothing
+ * entered yet".
+ */
+export function precisionNote(row: {
+  etaPrecision: 'street' | 'block' | 'zip' | null;
+  etaAccuracyMiles: number | null;
+}): string {
+  const plusMinus =
+    row.etaAccuracyMiles !== null ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi` : '';
+  switch (row.etaPrecision) {
+    case 'zip':
+      return `Projected from the ZIP centroid${plusMinus} — Census does not have this street, so this is an area, not an address. At risk is suppressed for it.`;
+    case 'block':
+      return `Projected from the nearest block on this street${plusMinus} — the house number is outside the range Census carries.`;
+    default:
+      return '';
+  }
+}
+
+/**
  * The ETA cell.
  *
  * An absent ETA says WHY (§12.24), and says WHICH kind of absent: an address
@@ -164,13 +189,9 @@ function etaTitle(row: FleetRow): string | undefined {
     case 'has-eta': {
       const miles = milesText(row.milesRemaining);
       if (!miles) return undefined;
-      const how =
-        row.etaPrecision === 'city'
-          ? ' Projected from the city centre, so it can be several miles out.'
-          : '';
       // The ETA departs from the GPS fix, not from the clock — saying so here
       // is what makes a time in the past read as information rather than a bug.
-      return `${miles} remaining, from the last GPS fix.${how}`;
+      return `${miles} remaining, from the last GPS fix. ${precisionNote(row)}`.trim();
     }
     case 'address-not-located':
       return 'No ETA — this address could not be located, so nothing can be projected for it.';

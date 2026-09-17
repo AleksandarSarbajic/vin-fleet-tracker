@@ -38,6 +38,7 @@ const stop = (over: Partial<StopFacts> = {}): StopFacts => ({
   arrivedAt: null,
   ...STOP_COORDS,
   precision: 'street',
+  accuracyMiles: null,
   hasAddress: true,
   ...over,
 });
@@ -399,8 +400,8 @@ describe('the projection itself', () => {
   it('carries the coordinate precision beside the status', () => {
     expect(evaluate(truck(), config, NOW).precision).toBe('street');
     expect(
-      evaluate(truck({ stop: stop({ precision: 'city' }) }), config, NOW).precision,
-    ).toBe('city');
+      evaluate(truck({ stop: stop({ precision: 'zip' }) }), config, NOW).precision,
+    ).toBe('zip');
   });
 
   it('measures a known distance correctly', () => {
@@ -408,5 +409,60 @@ describe('the projection itself', () => {
     const miles = haversineMiles({ lat: 41.88, lng: -87.63 }, { lat: 39.74, lng: -104.99 });
     expect(miles).toBeGreaterThan(900);
     expect(miles).toBeLessThan(940);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.30 — AT_RISK needs a coordinate the buffer can outrun
+ * ---------------------------------------------------------------------- */
+
+describe('AT_RISK and coordinate precision (§12.30)', () => {
+  /** Inside the 45-minute buffer but not past the deadline. */
+  const nearlyLate = () =>
+    truck({
+      // ~40 miles out is about 58 minutes; put the deadline just beyond it.
+      stop: stop({ apptStartUtc: at(75), apptEndUtc: null }),
+    });
+
+  it('fires at street precision — the case it exists for', () => {
+    expect(statusOf(nearlyLate())).toBe('AT_RISK');
+  });
+
+  /**
+   * A ZIP centroid is a median 2.14 mi from the real address, p90 5.51 mi.
+   * That is 3–8 minutes of ETA, and AT_RISK is a claim about the last 45
+   * minutes specifically — inside that window the error is a meaningful share
+   * of what is being measured.
+   */
+  it('does NOT fire on a ZIP centroid', () => {
+    const facts = nearlyLate();
+    const zipStop = { ...facts.stop!, precision: 'zip' as const, accuracyMiles: 4.4 };
+    expect(statusOf({ ...facts, stop: zipStop })).not.toBe('AT_RISK');
+    expect(statusOf({ ...facts, stop: zipStop })).toBe('ON_TIME');
+  });
+
+  /** Measured at 0.16–0.78 mi — under a minute. The buffer outruns it easily. */
+  it('still fires at block precision', () => {
+    const facts = nearlyLate();
+    expect(
+      statusOf({ ...facts, stop: { ...facts.stop!, precision: 'block', accuracyMiles: 0.8 } }),
+    ).toBe('AT_RISK');
+  });
+
+  /**
+   * LATE is the one that must survive a coarse coordinate. At hours out,
+   * being past the deadline is robust to five miles of error, and it is the
+   * fact a dispatcher has to act on — the whole reason the fallback exists.
+   */
+  it('still reports LATE on a ZIP centroid', () => {
+    const late = truck({
+      stop: stop({
+        apptStartUtc: at(-60),
+        apptEndUtc: null,
+        precision: 'zip',
+        accuracyMiles: 4.4,
+      }),
+    });
+    expect(statusOf(late)).toBe('LATE');
   });
 });

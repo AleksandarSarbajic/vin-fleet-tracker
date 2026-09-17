@@ -2196,6 +2196,122 @@ call count. The test was written against the broken code first and failed with
 | search field | a guarded effect on the **settled** debounced value. A genuine effect: it reacts to a value changing over time, not to a render. |
 | split persistence | had the bug. Fixed. |
 
+## 12.30 Three precision levels, and what each one is allowed to conclude
+
+§12.24 chose Census and accepted a coverage tradeoff. This is that tradeoff
+arriving, on the fleet's busiest lanes.
+
+`26416 S Walton Dr, Elwood IL 60421` — the CenterPoint intermodal ramp —
+returns **nothing** from Census. Not a wrong match: no match, at any house
+number, and the bare street name too. TIGER does not carry new private
+industrial-park roads, and Elwood, Joliet and Willow Springs are where these
+lanes go. The stop projected no ETA, so LATE could only come from the clock,
+which is how truck 143 read ON TIME for 67 minutes while missing its window.
+
+### The levels
+
+| | what it is | measured error | arrival | AT_RISK |
+|---|---|---|---|---|
+| `street` | house number matched inside a TIGER range | interpolation only | **yes** | **yes** |
+| `block` | nearest probed block on the correct street | 0.16–0.78 mi | no | **yes** |
+| `zip` | ZCTA centroid, vintage 2023 | median 2.14 mi, p90 5.51 mi | no | no |
+
+`city` was retired. Census rejects city-only input with HTTP 400 rather than
+returning a centroid, so the level was unreachable by construction and zero
+rows ever carried it. **A level nothing can write is worse than no level,
+because it reads as a case someone handled.**
+
+### The chain, in order, and what it costs
+
+1. **The address as typed.** One call. The common case ends here and pays
+   nothing for the rest.
+2. **Four probes on the same street**, at house numbers {200, 500, 1000,
+   4000}, in parallel — four calls, one round trip, about 0.7 s measured.
+   Only ever reached after a miss.
+3. **The ZIP centroid.** Zero calls: a vendored static file, so the last
+   resort cannot fail because someone else's service is down.
+
+Only `no-results` falls through. A **refused** match — wrong state, wrong city
+— stops the chain, because the dispatcher needs to see that error, not have a
+centroid quietly stand in for it. That is how the Moorhead ND/MN typo was
+caught, and it stays caught.
+
+### Why the probe numbers are those four
+
+Census requires a house number: a bare street name always returns zero
+matches, measured. So street existence can only be established by trying
+numbers. Probing ten across four known streets:
+
+```
+W Buckeye Rd, Phoenix         1, 50, 200, 500, 1000, 2000, 4000, 8000
+N Washington St, Grand Forks  1, 50, 200, 500, 1000, 2000, 4000, 8000
+Fulton Industrial Blvd SW     200, 1000, 4000
+Laraway Rd, New Lenox         500
+Walton Dr, Elwood             none — genuinely absent
+```
+
+{200, 500, 1000, 4000} is the smallest set that finds all four real streets
+and still finds nothing on the absent one. One probe would have missed Fulton;
+two would have been luck.
+
+### Nearest block, not first hit — the measurement that set the design
+
+Taking *any* probe hit puts you at an arbitrary point on a road that can be
+**9.15 miles** long (W Buckeye Rd, measured), which is worse than the ZIP
+centroid. Taking the probe **nearest the typed number** was checked against
+the three addresses where a true coordinate existed:
+
+```
+4747 W Buckeye Rd               nearest probe 0.54 mi   ZIP centroid 2.45 mi
+4400 Fulton Industrial Blvd SW  nearest probe 0.78 mi   ZIP centroid 2.95 mi
+1804 N Washington St            nearest probe 0.16 mi   ZIP centroid 5.51 mi
+```
+
+Three to thirty times better. That is why `block` sits above `zip` — and why
+it is not `street`: 0.78 mi is larger than the arrival radius.
+
+### The two things a coarse coordinate must not be allowed to do
+
+**Arrival detection runs on `street` and nothing else.** The radius is 0.25 mi
+(§12.27). A 0.25 mi circle around a ZIP centroid is noise — trucks would be
+marked ARRIVED four miles from the dock, and `arrived_at` is never unset
+automatically, so nothing would take it back. A wrong arrival is not cosmetic:
+it removes the stop from every urgency signal that would otherwise chase it.
+Gated in the pure rule *and* in the worker's query.
+
+**AT_RISK does not fire on `zip`.** The buffer is 45 minutes; a centroid is
+3–8 minutes of ETA error. Small against the buffer, but AT_RISK is a claim
+about the last 45 minutes specifically, and inside that window the error is a
+meaningful share of what is being measured. "He might just miss it", computed
+from a point four miles from the dock, is a guess wearing a number.
+
+**LATE survives all three levels**, and that is the point of the whole
+feature. At hours out, being past the deadline is robust to five miles of
+error, and it is the fact a dispatcher has to act on.
+
+### Said out loud, wherever the number appears
+
+The row tooltip and the popup name the kind of number and its ±. A dispatcher
+deciding whether to phone a receiver needs to know whether they are looking at
+an address or an area, and a bare time makes those identical — the same
+mistake as the em dash that hid "cannot project" behind "nothing entered".
+
+### The cache knows which chain wrote it
+
+`geocode_cache.provider` carries a CHAIN version, bumped when the chain
+changes rather than only when the vendor does. Without it, every address that
+had already missed would have sat in the cache as a miss with days of TTL
+left, and the new fallback would not have run for any of them until the
+following week. **A stale cache keeps working, at the old answer** — which is
+the failure mode a cache has that a bug does not.
+
+### Getting a real hit rate
+
+`npm run geocode:probe -- <file>` takes a list of real destinations and
+reports the split by level. It is read-only — no database connection at all,
+and it writes nothing, not even cache rows — so it can be pointed at live lane
+data without touching dispatch records.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

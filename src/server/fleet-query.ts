@@ -55,7 +55,9 @@ export interface FleetRow {
   /** Straight-line miles left, from the same calculation as the ETA (§12.24). */
   milesRemaining: number | null;
   /** How well the stop's coordinates are known. Null when there are none. */
-  etaPrecision: 'street' | 'city' | null;
+  etaPrecision: 'street' | 'block' | 'zip' | null;
+  /** The ± to print beside a coarse ETA (§12.30). */
+  etaAccuracyMiles: number | null;
   /** Why there is no ETA, so the UI can say it rather than print a dash. */
   etaAbsence: EtaAbsence;
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
@@ -106,8 +108,10 @@ export interface NextStop {
    */
   lat: number | null;
   lng: number | null;
-  /** `street` is a TIGER segment interpolation; `city` is a centroid. */
-  precision: 'street' | 'city' | null;
+  /** `street` segment · `block` nearest block · `zip` centroid (§12.30). */
+  precision: 'street' | 'block' | 'zip' | null;
+  /** The ± in miles on those coordinates. Null for a street match. */
+  accuracyMiles: number | null;
   arrivedAt: string | null;
 }
 
@@ -147,7 +151,7 @@ export const LATEST_POSITION_SQL = sql`
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
-    ns.arrived_at,
+    ns.stop_accuracy_miles, ns.arrived_at,
     ov.forced_status, ov.reason, ov.reason_note, ov.set_by_name,
     ov.set_at, ov.expires_at,
     (select count(*) from loads ol
@@ -196,6 +200,7 @@ export const LATEST_POSITION_SQL = sql`
       s.lat                   as stop_lat,
       s.lng                   as stop_lng,
       s.geocode_precision::text as stop_precision,
+      s.geocode_accuracy_miles  as stop_accuracy_miles,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at
     from loads l
@@ -299,7 +304,8 @@ export const FleetQueryRow = z.object({
   /** Null on every stop a dispatcher typed — there is no geocoder (§12.24). */
   stop_lat: z.number().nullable(),
   stop_lng: z.number().nullable(),
-  stop_precision: z.enum(['street', 'city']).nullable(),
+  stop_precision: z.enum(['street', 'block', 'zip']).nullable(),
+  stop_accuracy_miles: z.number().nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
@@ -338,6 +344,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     etaUtc: null,
     milesRemaining: null,
     etaPrecision: null,
+    etaAccuracyMiles: null,
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
@@ -360,6 +367,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             lat: raw.stop_lat,
             lng: raw.stop_lng,
             precision: raw.stop_precision,
+            accuracyMiles: raw.stop_accuracy_miles,
             arrivedAt: raw.arrived_at,
           }
         : null,
@@ -425,6 +433,7 @@ export function applyStatus(
               lat: row.nextStop.lat,
               lng: row.nextStop.lng,
               precision: row.nextStop.precision,
+              accuracyMiles: row.nextStop.accuracyMiles,
               // Whether a dispatcher typed one, not whether it resolved.
               hasAddress: Boolean(
                 row.nextStop.addressLine ?? row.nextStop.city ?? row.nextStop.zip,
@@ -444,6 +453,7 @@ export function applyStatus(
       etaUtc: result.etaUtc,
       milesRemaining: result.milesRemaining,
       etaPrecision: result.precision,
+      etaAccuracyMiles: result.accuracyMiles,
       etaAbsence: result.etaAbsence,
       lastComputedEtaUtc: result.lastComputedEtaUtc,
       deadlineUtc: result.deadlineUtc,

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { assignments, drivers, loads, overrides, stops, trucks, auditLog } from '@/db/schema';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
@@ -43,6 +43,16 @@ async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
   return out!;
 }
 
+/**
+ * The two trucks and two drivers these tests move around — with any OPEN
+ * assignment on them ended first, inside the transaction that rolls back.
+ *
+ * Without that, the fixtures assumed the first two drivers were free, which
+ * stopped being true the moment a dispatcher used `/assignments`: four
+ * reassignment tests began failing with "The assignment changed while the
+ * confirmation was open", which is the stale-preview guard doing its job
+ * against a fixture that had no right to those drivers.
+ */
 const fixtures = async (tx: Tx) => {
   const t = await tx
     .select({ id: trucks.id, number: trucks.truckNumber })
@@ -50,6 +60,21 @@ const fixtures = async (tx: Tx) => {
     .where(eq(trucks.active, true))
     .limit(2);
   const d = await tx.select({ id: drivers.id, name: drivers.name }).from(drivers).limit(2);
+
+  const truckIds = t.map((r) => r.id);
+  const driverIds = d.map((r) => r.id);
+  if (truckIds.length > 0) {
+    await tx
+      .update(assignments)
+      .set({ endedAt: sql`now()` })
+      .where(and(isNull(assignments.endedAt), inArray(assignments.truckId, truckIds)));
+  }
+  if (driverIds.length > 0) {
+    await tx
+      .update(assignments)
+      .set({ endedAt: sql`now()` })
+      .where(and(isNull(assignments.endedAt), inArray(assignments.driverId, driverIds)));
+  }
   return { trucks: t, drivers: d };
 };
 
@@ -543,8 +568,10 @@ withDb('the forward geocode (§12.24)', () => {
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
-          // Same place, typed by a different dispatcher.
-          addressLine: '1804   north washington street',
+          // Same place, typed by a different dispatcher: different case,
+          // extra spaces, a ZIP+4. Must normalise to the SAME key as the
+          // base fixture above, or this asserts nothing.
+          addressLine: '1804   vitest   FIXTURE street',
           zip: '58203-4412',
         }),
         fetchImpl,
@@ -586,11 +613,15 @@ withDb('the forward geocode (§12.24)', () => {
   });
 
   /**
-   * Located once, not located now. Keeping the old coordinates would project
-   * an ETA to the PREVIOUS address — a confident wrong number, which is the
-   * thing the whole cutoff exists to refuse.
+   * Located once, not located now.
+   *
+   * Since §12.30 this no longer CLEARS the coordinates — it falls back to the
+   * new address's ZIP centroid, which is the whole point of the fallback. The
+   * property that still matters, and the one this guards, is that the stored
+   * coordinates describe the address that is there NOW. Keeping the previous
+   * street's point would project an ETA to a place the load is not going.
    */
-  it('clears stale coordinates when a re-typed address stops resolving', async () => {
+  it('replaces stale coordinates rather than keeping the old address', async () => {
     const after = await rolledBack(async (tx) => {
       const { trucks: t } = await fixtures(tx);
       const created = await saveStopEdit(tx as never, {
@@ -616,9 +647,11 @@ withDb('the forward geocode (§12.24)', () => {
       return stop;
     });
 
-    expect(after?.lat).toBeNull();
-    expect(after?.lng).toBeNull();
-    expect(after?.precision).toBeNull();
+    // Not the street coordinate the first save stored.
+    expect(after?.lat).not.toBeCloseTo(GRAND_FORKS.lat, 3);
+    // The ZIP centroid for the address as it stands now, honestly labelled.
+    expect(after?.precision).toBe('zip');
+    expect(after?.lat).not.toBeNull();
   });
 
   /** §12.23 — an edit writes only the fields the form owns. */
