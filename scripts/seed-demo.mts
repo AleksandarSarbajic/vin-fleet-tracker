@@ -13,7 +13,7 @@
  * produced.
  */
 import { config as loadEnv } from 'dotenv';
-import { and, eq, inArray, like, sql } from 'drizzle-orm';
+import { eq, inArray, like, or, sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 import { loads, stops, trucks } from '../src/db/schema.ts';
 import { AppointmentInput } from '../src/lib/appointment.ts';
@@ -32,15 +32,32 @@ const PREFIX = 'DEMO-';
  * exercised. A dispatcher-entered stop still has none, which is exactly the
  * case `etaAbsence: 'no-coordinates'` exists to render.
  */
+/**
+ * REAL addresses, in real industrial districts, with no coordinates.
+ *
+ * They used to be "1 DEMO Industrial Park" with hand-written lat/lng, which
+ * made the demo data the one thing on the board that could never exercise
+ * the geocoder — every seeded stop had coordinates no dispatcher-entered
+ * stop could get, so the ETA path looked healthy in development and was
+ * broken in production. Now the seed goes through the same forward geocode a
+ * save does, and a demo stop that fails to resolve fails the way a real one
+ * would.
+ *
+ * The DEMO marking moved to the load number and the dispatcher note, which
+ * is where a human actually reads it — and which is what `--clear` matches.
+ */
 const PLACES = [
-  { address: '1 DEMO Industrial Park', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago', lat: 41.5117, lng: -87.9656 },
-  { address: '2 DEMO Distribution Way', city: 'Fargo', state: 'ND', zip: '58078', tz: 'America/Chicago', lat: 46.8772, lng: -96.7898 },
-  { address: '3 DEMO Crossdock Road', city: 'Denver', state: 'CO', zip: '80239', tz: 'America/Denver', lat: 39.7392, lng: -104.9903 },
-  { address: '4 DEMO Produce Lane', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix', lat: 33.4484, lng: -112.074 },
-  { address: '5 DEMO Terminal Drive', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago', lat: 32.7767, lng: -96.797 },
-  { address: '6 DEMO Freezer Court', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York', lat: 33.749, lng: -84.388 },
-  { address: '7 DEMO Yard Street', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver', lat: 40.7608, lng: -111.891 },
+  { address: '1400 Laraway Road', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago' },
+  { address: '3902 Main Avenue', city: 'Fargo', state: 'ND', zip: '58103', tz: 'America/Chicago' },
+  { address: '5500 East 56th Avenue', city: 'Denver', state: 'CO', zip: '80216', tz: 'America/Denver' },
+  { address: '4747 West Buckeye Road', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix' },
+  { address: '2611 South Westmoreland Road', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago' },
+  { address: '4400 Fulton Industrial Boulevard SW', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York' },
+  { address: '1750 South 4800 West', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
 ] as const;
+
+/** On every demo stop. A human reads this; `--clear` matches it. */
+const DEMO_NOTE = 'DEMO SEED — safe to delete';
 
 const LOAD_STATUSES = ['DISPATCHED', 'AT_SHIPPER', 'LOADED', 'AT_RECEIVER'] as const;
 
@@ -60,11 +77,23 @@ if (process.env.NODE_ENV === 'production' && !clearOnly && !process.argv.include
   process.exit(1);
 }
 
-/** Everything this script has ever written, and nothing else. */
+/**
+ * Everything this script has ever written, and nothing else.
+ *
+ * Matched on the note as well as the load number. Matching the number alone
+ * missed one demo load in seven: §12.21 made an empty load number a real
+ * state, the seed writes some to exercise it, and `load_number LIKE 'DEMO-%'`
+ * does not match NULL. Those rows survived `--clear` — which is exactly the
+ * data that must not reach production, surviving the one command whose job
+ * is to remove it.
+ */
 const demoLoads = await db
-  .select({ id: loads.id })
+  .selectDistinct({ id: loads.id })
   .from(loads)
-  .where(like(loads.loadNumber, `${PREFIX}%`));
+  .leftJoin(stops, eq(stops.loadId, loads.id))
+  .where(
+    or(like(loads.loadNumber, `${PREFIX}%`), eq(stops.dispatcherNote, DEMO_NOTE)),
+  );
 
 if (demoLoads.length > 0) {
   await db.delete(loads).where(
@@ -144,11 +173,9 @@ for (const [index, truck] of fleet.entries()) {
       city: leg.place.city,
       state: leg.place.state,
       zip: leg.place.zip,
-      lat: leg.place.lat,
-      lng: leg.place.lng,
-      // Every fourth stop keeps NO coordinates, so the fallback is visible
-      // on screen in development and not only in a test (§12.24).
-      ...(index % 4 === 1 ? { lat: null, lng: null } : {}),
+      // No coordinates written here. `npm run geocode:backfill` resolves
+      // them through the same path a dispatcher's save uses (§12.24).
+      dispatcherNote: DEMO_NOTE,
       appointmentStartUtc: sql`${appt.startUtc}::timestamptz`,
       appointmentEndUtc: appt.endUtc ? sql`${appt.endUtc}::timestamptz` : null,
       appointmentTz: appt.tz,

@@ -259,7 +259,26 @@ withDb('setting an override', () => {
     });
     const overrideEntries = entries.filter((e) => e.entity === 'override');
     expect(overrideEntries).toHaveLength(2);
-    expect((overrideEntries[1]!.after as { cleared: boolean }).cleared).toBe(true);
+
+    /**
+     * Asserted as a SET, not as a sequence.
+     *
+     * This used to read `overrideEntries[1].after.cleared`, and that was
+     * never sound: the select has no ORDER BY, and ordering by `created_at`
+     * would not have saved it either — `now()` is transaction-stable in
+     * Postgres, so both rows written inside one transaction carry the
+     * IDENTICAL timestamp. There is no column that puts these two in order.
+     * It passed for a year on the planner's goodwill and failed the first
+     * time something upstream changed the timing.
+     *
+     * What the test actually means is "one entry set it and one cleared it",
+     * and that is a property of the pair, not of their order.
+     */
+    const cleared = overrideEntries.filter(
+      (e) => (e.after as { cleared?: boolean } | null)?.cleared === true,
+    );
+    expect(cleared).toHaveLength(1);
+    expect(overrideEntries.filter((e) => e.before === null)).toHaveLength(1);
   });
 });
 

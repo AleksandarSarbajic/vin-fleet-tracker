@@ -1721,45 +1721,174 @@ absent from others.** Both were invisible until someone exercised the path.
 Tested where it can actually go wrong: `override.test.ts` saves and clears an
 override and asserts every appointment column on the stop is byte-identical
 before and after. The override lives in its own table, so touching the stop at
-all would be the bug.
+all would be the bug. `stop-edit.test.ts` does the same across an
+address-only edit.
 
-## 12.24 No coordinates, no projection — and say so
+### Derived columns are not an exception to this
 
-`LATE` and `AT_RISK` are defined against **projected ETA** (§12.1), and a
-projection needs the stop's coordinates. `stops.lat` / `stops.lng` exist and
-**nothing populates them** — there is no geocoder, by design, and no
-dispatcher types coordinates off a rate confirmation.
+`stops.lat` / `lng` / `geocode_precision` are not form fields, and the save
+writes them (§12.24). That is the rule working, not a hole in it: they are
+**derived from four fields the form does own**, in the same save, from the
+same input. A derived column belongs to whatever it was derived from.
 
-So the engine takes the ETA as an argument and degrades honestly:
+What the rule still forbids is touching them when their inputs did not change
+— so an appointment-time edit leaves every coordinate column alone, and
+spends no geocoding call either.
+
+## 12.24 Coordinates, and what happens when there are none
+
+**Superseded in part.** This section used to record a gap: `LATE` and
+`AT_RISK` are defined against projected ETA (§12.1), the projection needs
+`stops.lat` / `stops.lng`, and nothing populated them. Measured at the time:
+44 stops, 44 with an address, 28 with coordinates — and all 28 from the seed.
+Not one dispatcher-entered stop had any, so the board could not warn anyone
+about a problem until it had already happened.
+
+The gap is closed. A **one-time forward geocode on stop save** fills the
+columns. What remains of the old section is the degradation, which still
+applies whenever an address cannot be located.
+
+### Why this is not the geocoder the brief bans
+
+The brief bans external geocoding, and it is right about what it was aimed at:
+**per-position reverse geocoding**, a call per truck per poll — roughly 86,000
+a day — to recompute a string Samsara already hands us free in
+`gps.reverseGeo.formattedLocation`.
+
+This is the other direction and a different order of magnitude.
+
+| | the banned thing | this |
+|---|---|---|
+| direction | reverse (coords → text) | forward (text → coords) |
+| trigger | every position, every poll | a stop save whose address changed |
+| volume | ~86,000/day | 20–40/day, cached |
+| purpose | replaces data we already have | supplies data we have never had |
+
+One call per distinct address, ever, because the cache is keyed on the
+normalised address and the same DC is entered over and over.
+
+### The confidence cutoff
+
+Mapbox Geocoding **v6 forward, structured input** — `address_line1`, `place`,
+`region`, `postcode` as separate parameters, never one concatenated string.
+Concatenating them just to make the provider re-split them is where "1804
+North Washington Street" becomes a match on "Washington". `country=us`,
+`types` matched to what was typed, `limit=5`.
+
+v6 rather than v5 because it returns `match_code`: each component reported
+`matched` / `unmatched` / `not_applicable`, plus an overall `confidence` of
+`exact | high | medium | low`. v5's `relevance` is one opaque float, and with
+it you cannot tell a confident rooftop from a confident city centroid.
+
+| Typed | Accepted when | Stored precision |
+|---|---|---|
+| street + city/state | `exact` or `high`, **and** `address_number` and `street` both `matched` | `rooftop` |
+| city/state only | `exact` or `high` on a `place` result | `city` |
+| anything else | — | nothing; a warning names what did not match |
+
+Two tiers rather than one threshold, because **the error matters differently
+by distance**: a city centroid is a couple of miles out, which is noise on a
+400-mile run and nonsense on a 12-mile one. A street that was typed but did
+not match is **refused rather than downgraded to its city** — returning a
+centroid as if it were the warehouse is a confident wrong number, and a
+confident wrong number is worse than no number.
+
+Precision is stored and carried beside the status. Nothing branches on it
+yet, deliberately: it is there so a future rule can be more cautious about a
+`LATE` built on a city centroid, which is the one that puts a dispatcher on
+the phone to a broker.
+
+### Multiple results
+
+Mapbox ranks, so #1 is the answer. The risk is not choosing badly between
+distinct candidates — it is a **tie**: the same street name, equally
+confident, in two different towns. So the runner-up gets a veto. If #2 shares
+#1's confidence and sits more than a mile away, that is ambiguity: store
+nothing, warn, name both. A weaker runner-up is ignored, and a close one is
+the same place ranked twice.
+
+### The ETA is anchored to the position, not the clock
+
+`projectEta` departs from `recordedAtUtc`, not from `now`.
+
+`now + travelTime` looks equivalent and is not. It means a truck whose feed
+froze forty minutes ago has an ETA that slides forward forever: every read
+re-promises a vehicle that has not moved, and the board stays quietly
+optimistic about the one truck nobody can see.
+
+Anchoring makes the drift **impossible rather than policed**. The ETA is a
+pure function of (position, stop coordinates, config), so it cannot disagree
+with its position — it *is* its position, moved forward by the distance left.
+It changes when a fix lands and at no other time. And because `now` is not an
+input, two renders a second apart produce the same string, which closes the
+hydration-mismatch class at the source rather than patching it at the seam.
+
+A frozen truck's ETA therefore sits in the past. That is the honest answer,
+and `STALE_GPS` is already saying so.
+
+### Miles
+
+The distance is computed to produce the time, so showing it is a render
+change, not new logic.
+
+- **Popup**: `412 mi · ETA 14:18 CDT`, on the line under Next stop, where a
+  dispatcher is already looking when they ask "can he still make it?"
+- **Row**: the time alone — the column is 128px and already tight. Miles go
+  in the tooltip.
+- Rounded whole. `412 mi`, never `411.7 mi`: a straight line times a fudge
+  factor does not have a decimal place in it. Under ten miles it reads
+  `arriving`, because what matters by then is that he is basically there.
+
+### When there are no coordinates — the degradation, unchanged
 
 | The stop has | `LATE` | `AT_RISK` | The ETA cell reads |
 |---|---|---|---|
 | coordinates | projected ETA past the deadline | ETA within 45 min of it | the projected time |
-| none | **the clock passing the deadline** | **never** | `no ETA`, with the reason on hover |
+| none | **the clock passing the deadline** | **never** | `no ETA`, with the reason |
 
 `AT_RISK` does not fire without a projection: you cannot be at risk of missing
-something nothing projected. An FCFS stop without coordinates therefore reads
-LATE at 15:01 rather than at 09:00 — later than the rule wants, but honest
-about what it knows. An honest "he's late" beats a fabricated "he'll be late".
+something nothing projected. An honest "he's late" beats a fabricated "he'll
+be late".
 
-**The absence is visible, not silent.** `no ETA` with a tooltip naming the
-cause, never an em dash: a dispatcher has to be able to tell "the board cannot
-project this stop" from "nothing entered yet", and as a dash those are
-identical.
+**And it says WHICH kind of nothing.** `address-not-located` means somebody
+should look at it; `no-address` means nobody has typed one yet. As a single
+`no-coordinates` those read identically and the one needing attention hides
+behind the one that does not. The popup prints the cause in full — `no ETA ·
+address not located` — where there is room for it.
 
-### The strongest argument yet for revisiting the geocoder rule
+### A failed geocode is not a failed save
 
-The brief bans external geocoding, and the ban is right about what it was
-aimed at — **per-position reverse geocoding**, which is a call per truck per
-poll, forever, to replace a string Samsara already gives us.
+The stop saves with null coordinates and the board falls back to the clock,
+exactly as it did before any of this existed. The modal shows a **warning**,
+not an error: the dispatcher's work is saved and correct, and colouring it red
+sends them hunting for a mistake they did not make. The modal stays open on a
+warning, because a banner nobody sees is not a banner.
 
-A **one-time city/state → coordinates lookup on save** is a different thing at
-a different cost: one call per stop entered, cached in the row, never repeated.
-That would give every stop a projection and make §12.1 true everywhere rather
-than where the seed happens to have filled in.
+A re-typed address that stops resolving **clears** the old coordinates rather
+than keeping them — stale coordinates project an ETA to the previous address.
 
-**Not now** — it is a brief-level change and phase 5 is not the place. Worth
-reconsidering after phase 6.
+### Where the call happens
+
+Immediately **before** the transaction, never inside it. An HTTP round trip
+inside an open transaction holds a pooler connection for as long as the vendor
+takes to answer, which is how a slow third party becomes "the app is down".
+Nothing is less atomic for it: the save still lands with the coordinates it
+resolved or does not land at all, and the only cost of a rolled-back save is a
+geocode already in the cache. Hard 2.5s timeout; a timeout is a warning.
+
+### Storage terms
+
+Requests send `permanent=true`, because we store the result. If the account
+cannot grant it, the coordinates are **discarded** and the refusal is logged
+loudly — storing under temporary terms would be a licence violation sitting in
+a database nobody remembers to check.
+
+The cache carries `fetched_at` and a **30-day TTL on hits**, 7 days on misses,
+built regardless of how the account answers. Coordinates re-derive from an
+address we already own, so expiry costs one call per stop per month. Misses
+expire sooner because a miss is usually a typo, and caching a typo for a month
+keeps punishing the corrected version.
+
 
 ## 12.25 Precedence is not urgency rank
 
@@ -1783,6 +1912,24 @@ because everything below it needs an appointment to measure against.
 
 
 ---
+
+## 12.26 Composed treatments are allowed to look odd
+
+**Accepted, not fixed.**
+
+While the feed is stale, an unassigned truck's ETA cell renders `stale`
+*struck through*: the offline treatment (§5.9) and the unassigned treatment
+(§5.8) compose literally, because both are true at once and each is drawn by
+the rule that owns it.
+
+It reads oddly. It is also rare — it needs a dead feed and an unassigned truck
+in the same row — and cosmetic: both treatments are saying something correct.
+
+The fix would be to special-case one inside the other, and that is how a
+composition rule starts growing exceptions. Two treatments that compose
+predictably are worth more than a set of pairwise special cases, because the
+next pair does not need a decision. Left as it is, on purpose, so nobody
+"fixes" it later and inherits the exception table.
 
 # 13. Still open
 
