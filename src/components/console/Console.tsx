@@ -53,7 +53,17 @@ export function Console({
   const reducedMotion = useReducedMotion();
 
   const { data } = useFleet(initial);
-  const rows = useMemo(() => data?.fleet ?? NO_ROWS, [data]);
+  /**
+   * The payload carries every truck, inactive included, so the Inactive chip
+   * (§12.14) has something to filter to. The default view is active only —
+   * applied here, on the real column, rather than hidden inside the chip.
+   *
+   * TODO(next commit): the Inactive chip flips this.
+   */
+  const rows = useMemo(
+    () => (data?.fleet ?? NO_ROWS).filter((row) => row.active),
+    [data],
+  );
 
   /** Typed immediately, applied 250ms later — the field never feels laggy. */
   const [typed, setTyped] = useState(initialQuery);

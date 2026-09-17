@@ -13,6 +13,9 @@ export const FLEET_POLL_MS = 20_000;
 export interface FleetResponse {
   fleet: FleetRow[];
   fetchedAt: string;
+  /** §5.9: the client withdraws schedule colour fleet-wide when this is true. */
+  feedStale: boolean;
+  feedNewestAt: string | null;
 }
 
 async function fetchFleet(): Promise<FleetResponse> {

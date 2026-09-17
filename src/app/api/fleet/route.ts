@@ -8,11 +8,10 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     await requireUser();
-    const fleet = await loadFleet();
-    return NextResponse.json(
-      { fleet, fetchedAt: new Date().toISOString() },
-      { headers: { 'cache-control': 'no-store' } },
-    );
+    // feedStale rides along with the fleet: one request, one consistent view.
+    return NextResponse.json(await loadFleet(), {
+      headers: { 'cache-control': 'no-store' },
+    });
   } catch (error: unknown) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

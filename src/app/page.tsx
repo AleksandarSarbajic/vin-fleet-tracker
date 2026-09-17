@@ -33,11 +33,11 @@ export default async function ConsolePage({
   const params = await searchParams;
   // The driver list feeds the edit modal's picker. Small, and it changes far
   // less often than positions do.
-  const [fleet, board] = await Promise.all([loadFleet(), loadAssignmentBoard(db)]);
+  const [payload, board] = await Promise.all([loadFleet(), loadAssignmentBoard(db)]);
 
   return (
     <Console
-      initial={{ fleet, fetchedAt: new Date().toISOString() }}
+      initial={payload}
       dispatchTz={serverEnv.DISPATCH_TZ}
       userInitials={initials(user.fullName)}
       initialQuery={first(params['q']) ?? ''}

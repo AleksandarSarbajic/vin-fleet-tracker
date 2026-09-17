@@ -1,7 +1,15 @@
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { cityState } from '@/samsara/schemas';
-import type { Status } from '@/lib/status';
+import {
+  FORCED_STATUSES,
+  OVERRIDE_REASONS,
+  evaluate,
+  type EtaAbsence,
+  type OverrideFacts,
+  type Status,
+  type StatusConfig,
+} from '@/lib/status';
 import { LOAD_STATUSES, type LoadStatus } from '@/lib/loads';
 
 /**
@@ -34,7 +42,22 @@ export interface FleetRow {
   formattedLocation: string | null;
   /** "New Lenox, IL" — what the Position column renders. */
   cityState: string | null;
+  /** Ours, not Samsara's. False rows are hidden unless the Inactive chip is on. */
+  active: boolean;
+
+  /* ------- what the engine said. `status` is what the row shows ------- */
   status: Status;
+  /** The engine's own answer, even when an override is showing (§9.5). */
+  computed: Status;
+  /** Live only; an expired override reads as none (expiry on read). */
+  override: OverrideFacts | null;
+  etaUtc: string | null;
+  /** Why there is no ETA, so the UI can say it rather than print a dash. */
+  etaAbsence: EtaAbsence;
+  /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
+  lastComputedEtaUtc: string | null;
+  deadlineUtc: string | null;
+
   /**
    * The next stop, by §12.13: the earliest undeparted stop across every OPEN
    * load the truck holds. Null when the truck has no load, which is an empty
@@ -72,6 +95,10 @@ export interface NextStop {
   /** The facility's IANA zone. The appointment renders in THIS zone (§7.1). */
   apptTz: string | null;
   apptType: 'APPT' | 'FCFS';
+  /** Null on every stop a dispatcher typed. See §12.24 and `etaAbsence`. */
+  lat: number | null;
+  lng: number | null;
+  arrivedAt: string | null;
 }
 
 /**
@@ -96,6 +123,8 @@ export const LATEST_POSITION_SQL = sql`
     t.id::text                as id,
     t.truck_number            as truck_number,
     t.samsara_name            as samsara_name,
+    t.active                  as active,
+    d.id::text                as driver_id,
     d.name                    as driver_name,
     p.lat                     as lat,
     p.lng                     as lng,
@@ -107,7 +136,9 @@ export const LATEST_POSITION_SQL = sql`
     ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.stop_type,
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
-    ns.appointment_type,
+    ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.arrived_at,
+    ov.forced_status, ov.reason, ov.reason_note, ov.set_by_name,
+    ov.set_at, ov.expires_at,
     (select count(*) from loads ol
       where ol.truck_id = t.id
         and ol.status not in ('DELIVERED', 'TONU', 'CANCELLED'))::int
@@ -150,7 +181,11 @@ export const LATEST_POSITION_SQL = sql`
               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as appointment_end_utc,
       s.appointment_tz        as appointment_tz,
-      s.appointment_type::text as appointment_type
+      s.appointment_type::text as appointment_type,
+      s.lat                   as stop_lat,
+      s.lng                   as stop_lng,
+      to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                              as arrived_at
     from loads l
     join stops s on s.load_id = l.id
     where l.truck_id = t.id
@@ -159,7 +194,34 @@ export const LATEST_POSITION_SQL = sql`
     order by s.appointment_start_utc asc nulls last, s.sequence asc
     limit 1
   ) ns on true
-  where t.active
+  -- The live override on that stop, if any (§9.5).
+  --
+  -- Filtered on cleared_at is null ONLY. Expiry is evaluated on READ, by the
+  -- engine, never by a scheduled job that might not run. Handing the engine
+  -- an expired row and letting it decide keeps ONE answer to "is this
+  -- override live", in a pure function a test can ask directly.
+  left join lateral (
+    select
+      o.forced_status::text as forced_status,
+      o.reason::text        as reason,
+      o.reason_note         as reason_note,
+      p2.full_name          as set_by_name,
+      to_char(o.set_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                            as set_at,
+      to_char(o.expires_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                            as expires_at
+    from overrides o
+    left join profiles p2 on p2.id = o.set_by
+    -- ns.stop_id is already ::text for the row schema, so the comparison
+    -- casts back rather than letting Postgres refuse uuid = text.
+    where o.stop_id::text = ns.stop_id and o.cleared_at is null
+    order by o.set_at desc
+    limit 1
+  ) ov on true
+  -- EVERY truck, not just the active ones. The Inactive chip (§12.14) needs
+  -- them in the payload, and a filter the client applies to a real column
+  -- beats a second query nobody remembers exists. The list and the map both
+  -- hide active = false unless that chip is on.
   order by t.truck_number asc nulls last
 `;
 
@@ -182,6 +244,9 @@ export const FleetQueryRow = z.object({
   /** int4. Null only for a vehicle whose name carries no digits. */
   truck_number: z.number().int().nullable(),
   samsara_name: z.string(),
+  active: z.boolean(),
+  /** Presence is what UNASSIGNED turns on — the name is for the cell. */
+  driver_id: z.string().uuid().nullable(),
   driver_name: z.string().nullable(),
   /** double precision -> number. */
   lat: z.number().nullable(),
@@ -219,6 +284,17 @@ export const FleetQueryRow = z.object({
     .nullable(),
   appointment_tz: z.string().nullable(),
   appointment_type: z.enum(['APPT', 'FCFS']).nullable(),
+  /** Null on every stop a dispatcher typed — there is no geocoder (§12.24). */
+  stop_lat: z.number().nullable(),
+  stop_lng: z.number().nullable(),
+  arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
+
+  forced_status: z.enum(FORCED_STATUSES).nullable(),
+  reason: z.enum(OVERRIDE_REASONS).nullable(),
+  reason_note: z.string().nullable(),
+  set_by_name: z.string().nullable(),
+  set_at: z.string().regex(ISO_UTC_MS).nullable(),
+  expires_at: z.string().regex(ISO_UTC_MS).nullable(),
   /** §12.13: the row names the load only when there is more than one. */
   open_load_count: z.number().int(),
 });
@@ -241,8 +317,15 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     recordedAt: raw.recorded_at,
     formattedLocation: raw.formatted_location,
     cityState: cityState(raw.formatted_location),
-    // Overwritten by applyPlaceholders in fleet.ts.
-    status: 'ON_TIME' as Status,
+    active: raw.active,
+    // Filled in by applyStatus(), below. Never left to a caller to remember.
+    status: 'ON_TIME',
+    computed: 'ON_TIME',
+    override: overrideOf(raw),
+    etaUtc: null,
+    etaAbsence: 'no-appointment',
+    lastComputedEtaUtc: null,
+    deadlineUtc: null,
     nextStop:
       raw.stop_id && raw.load_id && raw.load_status && raw.stop_type
         ? {
@@ -259,6 +342,9 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             apptEndUtc: raw.appointment_end_utc,
             apptTz: raw.appointment_tz,
             apptType: raw.appointment_type ?? 'APPT',
+            lat: raw.stop_lat,
+            lng: raw.stop_lng,
+            arrivedAt: raw.arrived_at,
           }
         : null,
     openLoadCount: raw.open_load_count,
@@ -280,4 +366,64 @@ export function parseFleetRows(result: unknown): FleetRow[] {
     );
   }
   return parsed.data.map(toFleetRow);
+}
+
+/** The override as the engine wants it, or null when the lateral found none. */
+function overrideOf(raw: FleetQueryRow): OverrideFacts | null {
+  if (!raw.forced_status || !raw.reason || !raw.set_at || !raw.expires_at) return null;
+  return {
+    forcedStatus: raw.forced_status,
+    reason: raw.reason,
+    reasonNote: raw.reason_note,
+    setByName: raw.set_by_name,
+    setAtUtc: raw.set_at,
+    expiresAtUtc: raw.expires_at,
+  };
+}
+
+/**
+ * Runs the engine over parsed rows.
+ *
+ * Separate from `parseFleetRows` and from any database handle, so a test can
+ * hand it rows and a `now` and get the same answer the console will show.
+ * The engine stays pure; this is the only place the two meet.
+ */
+export function applyStatus(
+  rows: FleetRow[],
+  config: StatusConfig,
+  now: Date,
+): FleetRow[] {
+  return rows.map((row) => {
+    const result = evaluate(
+      {
+        lat: row.lat,
+        lng: row.lng,
+        recordedAtUtc: row.recordedAt,
+        hasDriver: row.driverName !== null,
+        stop: row.nextStop
+          ? {
+              apptStartUtc: row.nextStop.apptStartUtc,
+              apptEndUtc: row.nextStop.apptEndUtc,
+              apptType: row.nextStop.apptType,
+              arrivedAt: row.nextStop.arrivedAt,
+              lat: row.nextStop.lat,
+              lng: row.nextStop.lng,
+            }
+          : null,
+        override: row.override,
+      },
+      config,
+      now,
+    );
+    return {
+      ...row,
+      status: result.status,
+      computed: result.computed,
+      override: result.override,
+      etaUtc: result.etaUtc,
+      etaAbsence: result.etaAbsence,
+      lastComputedEtaUtc: result.lastComputedEtaUtc,
+      deadlineUtc: result.deadlineUtc,
+    };
+  });
 }

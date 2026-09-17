@@ -23,15 +23,23 @@ loadEnv({ path: '.env.local' });
 
 const PREFIX = 'DEMO-';
 
-/** Addresses with the zone stated, because there is no geocoder (and won't be). */
+/**
+ * Addresses with the zone AND the coordinates stated, because there is no
+ * geocoder (and won't be — §12.24).
+ *
+ * The coordinates are what make the ETA path real in development: without
+ * them every seeded stop falls back to the clock and LATE/AT_RISK are never
+ * exercised. A dispatcher-entered stop still has none, which is exactly the
+ * case `etaAbsence: 'no-coordinates'` exists to render.
+ */
 const PLACES = [
-  { address: '1 DEMO Industrial Park', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago' },
-  { address: '2 DEMO Distribution Way', city: 'Fargo', state: 'ND', zip: '58078', tz: 'America/Chicago' },
-  { address: '3 DEMO Crossdock Road', city: 'Denver', state: 'CO', zip: '80239', tz: 'America/Denver' },
-  { address: '4 DEMO Produce Lane', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix' },
-  { address: '5 DEMO Terminal Drive', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago' },
-  { address: '6 DEMO Freezer Court', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York' },
-  { address: '7 DEMO Yard Street', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
+  { address: '1 DEMO Industrial Park', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago', lat: 41.5117, lng: -87.9656 },
+  { address: '2 DEMO Distribution Way', city: 'Fargo', state: 'ND', zip: '58078', tz: 'America/Chicago', lat: 46.8772, lng: -96.7898 },
+  { address: '3 DEMO Crossdock Road', city: 'Denver', state: 'CO', zip: '80239', tz: 'America/Denver', lat: 39.7392, lng: -104.9903 },
+  { address: '4 DEMO Produce Lane', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix', lat: 33.4484, lng: -112.074 },
+  { address: '5 DEMO Terminal Drive', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago', lat: 32.7767, lng: -96.797 },
+  { address: '6 DEMO Freezer Court', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York', lat: 33.749, lng: -84.388 },
+  { address: '7 DEMO Yard Street', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver', lat: 40.7608, lng: -111.891 },
 ] as const;
 
 const LOAD_STATUSES = ['DISPATCHED', 'AT_SHIPPER', 'LOADED', 'AT_RECEIVER'] as const;
@@ -136,6 +144,11 @@ for (const [index, truck] of fleet.entries()) {
       city: leg.place.city,
       state: leg.place.state,
       zip: leg.place.zip,
+      lat: leg.place.lat,
+      lng: leg.place.lng,
+      // Every fourth stop keeps NO coordinates, so the fallback is visible
+      // on screen in development and not only in a test (§12.24).
+      ...(index % 4 === 1 ? { lat: null, lng: null } : {}),
       appointmentStartUtc: sql`${appt.startUtc}::timestamptz`,
       appointmentEndUtc: appt.endUtc ? sql`${appt.endUtc}::timestamptz` : null,
       appointmentTz: appt.tz,
