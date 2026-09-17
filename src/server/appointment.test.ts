@@ -428,37 +428,12 @@ withDb('FCFS receiving hours, converted', () => {
   });
 });
 
-/* ---------------------- still owed by this suite ------------------------- */
-
-withDb('the dispatch-zone midnight rollover', () => {
-  /**
-   * The one case from PROJECT_BRIEF's timezone list that is NOT covered here.
-   *
-   * TOMORROW is "the appointment's calendar day in the DISPATCH zone is after
-   * today" — not the stop's zone, not the browser's. An appointment at 23:30
-   * CDT and one at 00:30 CDT forty minutes later fall on different sides of
-   * that line while being almost the same instant, and a dispatcher in
-   * Belgrade sees neither boundary on their own clock.
-   *
-   * It cannot be written yet: the rule lives in the status engine, which
-   * lands in phase 5. It is `todo` rather than a comment so that every run of
-   * this suite prints it — the rest of the timezone list passes, and a
-   * missing case in a green suite is the easiest kind of gap to never notice.
-   */
-  it.todo(
-    'TOMORROW rolls over at midnight in the DISPATCH zone — needs lib/status.ts (phase 5)',
-  );
-
-  /**
-   * §12.22's status rules, owed by the engine rather than by this file. Left
-   * here as `todo` so phase 5's test run prints them: the conversion half of
-   * FCFS is covered above and green, which is exactly the condition in which
-   * a missing rule goes unnoticed.
-   */
-  it.todo('FCFS is LATE from PROJECTED ARRIVAL against the latest hour, not from the clock');
-  it.todo('FCFS never reaches AT_RISK — a deadline to miss, but no slot (§12.2, §12.22)');
-  it.todo('ARRIVED wins once arrived_at is set, however late the truck was');
-});
+/*
+ * The four `it.todo` markers that lived here — TOMORROW's midnight rollover
+ * in the dispatch zone, and §12.22's three FCFS status rules — are now real
+ * tests in `lib/status.test.ts`, next to the engine that owns them. This
+ * suite keeps what it can assert on its own: the conversion.
+ */
 
 /* ------------------- the machine must not matter ------------------------- */
 
