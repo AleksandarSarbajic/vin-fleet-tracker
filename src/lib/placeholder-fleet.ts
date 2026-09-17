@@ -23,36 +23,61 @@ import type { Status } from '@/lib/status';
  */
 
 /**
- * A deliberate spread, not a random one. Every status appears at least once so
- * the whole palette is visible on real tiles before phase 5 makes it real —
- * including STALE_GPS, whose hatched marker is the one most likely to read
- * badly at small sizes.
+ * A deliberate spread, not a random one, and deliberately NOT in urgency
+ * order.
  *
- * Proportions follow the `3c` 30-truck console, scaled to ~23 active trucks.
+ * Every status appears at least once so the whole palette is visible on real
+ * tiles before phase 5 makes it real — including STALE_GPS, whose hatched
+ * marker is the one most likely to read badly at small sizes.
+ *
+ * The sequence is scattered on purpose. An earlier version listed the
+ * statuses in urgency order, which made the fabricated status a monotonic
+ * function of truck number: urgency order and truck-number order came out
+ * identical, so the list looked correct whether or not the sort ran at all.
+ * The sort was unverifiable on screen. Problem statuses now sit at both ends
+ * of the range and the two orders visibly disagree.
+ *
+ * Position in truck-number order, against the active fleet on 2026-09-17:
+ *
+ *   113 On time    128 At risk    137 Unassigned   144 On time
+ *   116 LATE       130 On time    138 On time      145 At risk
+ *   122 Stale GPS  132 Arrived    139 At risk      146 Arrived
+ *   124 Tomorrow   133 No appt    140 LATE         147 On time
+ *   126 On time    135 On time    141 On time      246 Tomorrow
+ *                  136 Tomorrow   142 Tomorrow
+ *                                 143 Stale GPS
+ *
+ * Those numbers move if the roster changes, since the index is a position and
+ * not the number itself. What survives a roster change is the property that
+ * matters: the sequence itself does not track the index.
+ *
+ * Proportions follow the `3c` 30-truck console, scaled to ~23 active trucks:
+ * 8 on time, 4 tomorrow, 3 at risk, 2 late, 2 stale, 2 arrived, 1 unassigned,
+ * 1 no appt.
  */
 const SPREAD: Status[] = [
-  'LATE',
+  'ON_TIME',
   'LATE',
   'STALE_GPS',
-  'STALE_GPS',
-  'UNASSIGNED',
+  'TOMORROW',
+  'ON_TIME',
   'AT_RISK',
-  'AT_RISK',
-  'AT_RISK',
+  'ON_TIME',
+  'ARRIVED',
   'NO_APPT',
+  'ON_TIME',
+  'TOMORROW',
+  'UNASSIGNED',
+  'ON_TIME',
+  'AT_RISK',
+  'LATE',
+  'ON_TIME',
+  'TOMORROW',
+  'STALE_GPS',
+  'ON_TIME',
+  'AT_RISK',
   'ARRIVED',
-  'ARRIVED',
   'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'ON_TIME',
-  'TOMORROW',
-  'TOMORROW',
-  'TOMORROW',
   'TOMORROW',
 ];
 

@@ -2,25 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
-import { urgencyRank } from '@/lib/status';
+import { compareFleet, type SortMode } from '@/lib/fleet-order';
 
-export type SortMode = 'urgency' | 'truck';
-
-/** Ordering rules. Urgency is the default and the design's first segment. */
-function compare(mode: SortMode) {
-  return (a: FleetRow, b: FleetRow): number => {
-    if (mode === 'urgency') {
-      const byUrgency = urgencyRank(a.status) - urgencyRank(b.status);
-      if (byUrgency !== 0) return byUrgency;
-      // TODO(phase 4): the documented secondary sort is appointment time
-      // ascending, nulls last (§12.4). No stop has an appointment yet, so
-      // every row falls through to truck number, which is the stable
-      // tiebreak underneath it either way.
-    }
-    return (a.truckNumber ?? Number.MAX_SAFE_INTEGER) -
-      (b.truckNumber ?? Number.MAX_SAFE_INTEGER);
-  };
-}
+export type { SortMode };
 
 export interface DisplayOrder {
   /** Rows in the order actually on screen. */
@@ -51,7 +35,7 @@ export function useDisplayOrder(
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 
   const computed = useMemo(
-    () => [...rows].sort(compare(mode)).map((r) => r.id),
+    () => [...rows].sort(compareFleet(mode)).map((r) => r.id),
     [rows, mode],
   );
 
