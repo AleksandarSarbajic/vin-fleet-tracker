@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
 import { SearchField } from './SearchField';
 
@@ -93,7 +94,16 @@ export function ConsoleHeader({
         totalCount={totalCount}
       />
 
-      <div />
+      {/* TODO(phase 5): the Unassigned filter chip links here too, once the
+          chips exist. Until then this is the only way in. */}
+      <div className="flex items-center">
+        <Link
+          href="/assignments"
+          className="border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+        >
+          Assignments
+        </Link>
+      </div>
 
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-[7px]">

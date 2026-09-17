@@ -1,36 +1,20 @@
 import 'server-only';
-import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { drivers } from '@/db/schema';
 import { applyPlaceholders } from '@/lib/placeholder-fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 
 export type { FleetRow } from './fleet-query';
 
 export async function loadFleet() {
-  const [result, driverRows] = await Promise.all([
-    db.execute(LATEST_POSITION_SQL),
-    // Only needed by the phase-3 placeholder. TODO(phase 4): drop this read
-    // once assignments carry real drivers.
-    db
-      .select({ name: drivers.name })
-      .from(drivers)
-      .where(eq(drivers.active, true))
-      .orderBy(asc(drivers.name)),
-  ]);
-
-  // Validated at the boundary, exactly like every Samsara response.
-  const rows = parseFleetRows(result);
+  // Validated at the boundary, exactly like every Samsara response. Drivers
+  // come from the lateral join's assignments row now — real ones, entered on
+  // the bulk assignment screen.
+  const rows = parseFleetRows(await db.execute(LATEST_POSITION_SQL));
 
   // ---------------------------------------------------------------------
-  // The ONE call that fabricates data. Delete this line and every invented
-  // status and driver name disappears from the app — nothing is hiding
-  // behind a flag elsewhere.
+  // The ONE call that fabricates data, down to status alone since phase 4.
+  // Delete this line and every invented value disappears from the app.
   // TODO(phase 5): replace with the real engine from lib/status.ts.
-  // TODO(phase 4): drop the driver half once assignments are written.
   // ---------------------------------------------------------------------
-  return applyPlaceholders(
-    rows,
-    driverRows.map((d) => d.name),
-  );
+  return applyPlaceholders(rows);
 }

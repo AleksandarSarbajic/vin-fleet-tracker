@@ -34,8 +34,6 @@ export interface FleetRow {
   /** "New Lenox, IL" — what the Position column renders. */
   cityState: string | null;
   status: Status;
-  /** True while the driver name comes from the phase-3 placeholder. */
-  driverIsPlaceholder: boolean;
 }
 
 /**
@@ -139,7 +137,6 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     cityState: cityState(raw.formatted_location),
     // Overwritten by applyPlaceholders in fleet.ts.
     status: 'ON_TIME' as Status,
-    driverIsPlaceholder: false,
   };
 }
 

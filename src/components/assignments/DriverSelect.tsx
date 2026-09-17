@@ -1,0 +1,165 @@
+'use client';
+
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { BoardDriver } from '@/server/assignments';
+
+/**
+ * Searchable driver picker (design-spec §9.9's assignment group, at board
+ * scale). Type a surname; the list filters.
+ *
+ * Each option carries the driver's CURRENT truck — and, while the board is
+ * dirty, the truck they are about to be on. Without that, the only way to
+ * discover that row 4 already took this driver is to save and be refused.
+ *
+ * Correction 1 applies here as everywhere: no HOS, no duty status. The only
+ * availability signal is `drivers.active`.
+ */
+
+interface Props {
+  drivers: BoardDriver[];
+  value: string | null;
+  /** Driver id -> the truck they are on in the CURRENT draft. */
+  claimedBy: Map<string, string>;
+  /** The truck this select belongs to, so it can ignore its own claim. */
+  truckLabel: string;
+  disabled: boolean;
+  disabledReason?: string | undefined;
+  onChange: (driverId: string | null) => void;
+}
+
+export function DriverSelect({
+  drivers,
+  value,
+  claimedBy,
+  truckLabel,
+  disabled,
+  disabledReason,
+  onChange,
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [cursor, setCursor] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const selected = drivers.find((d) => d.id === value) ?? null;
+
+  const matches = useMemo(() => {
+    const needle = typed.trim().toLowerCase();
+    const list = needle
+      ? drivers.filter((d) => d.name.toLowerCase().includes(needle))
+      : drivers;
+    return list.slice(0, 40);
+  }, [drivers, typed]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const pick = (driverId: string | null) => {
+    onChange(driverId);
+    setOpen(false);
+    setTyped('');
+  };
+
+  return (
+    <div ref={box} className="relative">
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-label={`Driver for truck ${truckLabel}`}
+        disabled={disabled}
+        title={disabled ? disabledReason : undefined}
+        value={open ? typed : (selected?.name ?? '')}
+        placeholder={selected ? '' : 'Unassigned'}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setTyped(e.target.value);
+          setCursor(0);
+          setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            setOpen(true);
+            setCursor((c) =>
+              Math.max(0, Math.min(matches.length - 1, c + (e.key === 'ArrowDown' ? 1 : -1))),
+            );
+          } else if (e.key === 'Enter' && open) {
+            e.preventDefault();
+            const hit = matches[cursor];
+            if (hit) pick(hit.id);
+          } else if (e.key === 'Escape' && open) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpen(false);
+            setTyped('');
+          } else if (e.key === 'Backspace' && !typed && selected) {
+            pick(null);
+          }
+        }}
+        className={`h-9 w-full border bg-surface-sunken px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
+          selected ? 'border-line-hair text-text' : 'border-line-soft text-text-muted'
+        }`}
+      />
+
+      {open ? (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 top-[38px] z-20 max-h-[264px] overflow-auto border border-line-hair bg-surface-raised py-1"
+        >
+          <li>
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              className="flex w-full items-center px-2.5 py-1.5 text-left text-body text-status-neutral-fg hover:bg-row-hover"
+            >
+              Unassigned — clear this truck
+            </button>
+          </li>
+          {matches.map((driver, index) => {
+            const claim = claimedBy.get(driver.id);
+            const takenElsewhere = claim !== undefined && claim !== truckLabel;
+            return (
+              <li key={driver.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={driver.id === value}
+                  onMouseEnter={() => setCursor(index)}
+                  onClick={() => pick(driver.id)}
+                  className={`flex w-full items-baseline justify-between gap-3 px-2.5 py-1.5 text-left text-body ${
+                    index === cursor ? 'bg-row-hover' : ''
+                  } ${takenElsewhere ? 'text-text-muted' : 'text-text'}`}
+                >
+                  <span>{driver.name}</span>
+                  <span className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
+                    {takenElsewhere
+                      ? `on truck ${claim}`
+                      : driver.truckLabel
+                        ? `currently ${driver.truckLabel}`
+                        : 'unassigned'}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          {matches.length === 0 ? (
+            <li className="px-2.5 py-2 text-body text-text-muted">
+              No driver matches “{typed}”.
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
+}

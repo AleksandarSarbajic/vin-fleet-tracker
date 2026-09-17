@@ -5,20 +5,18 @@ import type { Status } from '@/lib/status';
  * PHASE 3 SCAFFOLDING — FABRICATED DATA. NOT REAL.
  * ============================================================================
  *
- * Two things the console needs that the database cannot supply yet:
+ * ONE thing the console still needs that the database cannot supply:
  *
  *   status  TODO(phase 5): replaced by the real engine in `lib/status.ts`.
- *   driver  TODO(phase 4): replaced by real rows in `assignments`. Samsara
- *           returns data:null for this org (docs/samsara.md §6), so there is
- *           genuinely nothing to sync — dispatchers create assignments in the
- *           edit modal.
  *
- * Everything fabricated here is produced by ONE function, called from ONE
- * place. Deleting that call removes every invented value from the app; it
- * will not leave fabricated data hiding behind a flag somewhere.
+ * The driver half is GONE as of phase 4. Drivers are real rows in
+ * `assignments` now, entered on the bulk assignment screen — Samsara returns
+ * data:null for this org (docs/samsara.md §6), so there was never anything to
+ * sync and there is nothing left to fabricate.
  *
- * A real assignment always wins: if `assignments` has an open row for a truck,
- * the query returns that driver and the placeholder is not consulted.
+ * What remains is produced by ONE function, called from ONE place. Deleting
+ * that call removes every invented value from the app; nothing is hiding
+ * behind a flag somewhere. `placeholder-guard.test.ts` keeps it that way.
  * ============================================================================
  */
 
@@ -84,48 +82,28 @@ const SPREAD: Status[] = [
 export interface Placeholdable {
   id: string;
   truckNumber: number | null;
-  driverName: string | null;
   status: Status;
-  driverIsPlaceholder: boolean;
 }
 
 /**
- * Applies the fabricated overlay. Deterministic: the same fleet always gets
- * the same statuses and drivers, so a reload does not reshuffle the colours
- * and a screenshot stays meaningful.
+ * Applies the fabricated status. Deterministic: the same fleet always gets the
+ * same statuses, so a reload does not reshuffle the colours and a screenshot
+ * stays meaningful.
  *
  * Ordering is by truck number, NOT by database order, so the assignment does
  * not shift when a truck is added or its `active` flag flips.
  */
-export function applyPlaceholders<T extends Placeholdable>(
-  rows: T[],
-  driverNames: string[],
-): T[] {
+export function applyPlaceholders<T extends Placeholdable>(rows: T[]): T[] {
   const ordered = [...rows].sort(
     (a, b) => (a.truckNumber ?? 1e9) - (b.truckNumber ?? 1e9),
   );
   const statusByTruck = new Map<string, Status>();
-  const driverByTruck = new Map<string, string>();
-
   ordered.forEach((row, index) => {
     statusByTruck.set(row.id, SPREAD[index % SPREAD.length] ?? 'ON_TIME');
-    if (driverNames.length > 0) {
-      driverByTruck.set(row.id, driverNames[index % driverNames.length] ?? '');
-    }
   });
 
-  return rows.map((row) => {
-    const status = statusByTruck.get(row.id) ?? 'ON_TIME';
-    // A truck with no driver reads Unassigned in the UI (design-spec §5.8),
-    // so the placeholder must not hand one to an UNASSIGNED row.
-    const wantsDriver = status !== 'UNASSIGNED';
-    const placeholderDriver = wantsDriver ? driverByTruck.get(row.id) : undefined;
-
-    return {
-      ...row,
-      status,
-      driverName: row.driverName ?? placeholderDriver ?? null,
-      driverIsPlaceholder: row.driverName === null && placeholderDriver !== undefined,
-    };
-  });
+  return rows.map((row) => ({
+    ...row,
+    status: statusByTruck.get(row.id) ?? 'ON_TIME',
+  }));
 }

@@ -64,11 +64,11 @@ export function MapPopup({ row, onClose }: { row: FleetRow; onClose: () => void 
           <Row label="GPS age">
             <span className="tabular-nums">{age ?? '—'}</span>
           </Row>
-          {row.driverIsPlaceholder ? (
-            <Row label="Driver">
-              <span className="text-text-muted">placeholder — phase 4</span>
-            </Row>
-          ) : null}
+          <Row label="Driver">
+            {row.driverName ?? (
+              <span className="text-status-neutral-fg">Unassigned</span>
+            )}
+          </Row>
         </div>
       </div>
     </Popup>
