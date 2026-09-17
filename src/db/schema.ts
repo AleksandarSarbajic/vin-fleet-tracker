@@ -235,15 +235,28 @@ export const loads = pgTable(
   {
     id: uuid('id').primaryKey().default(newId),
     truckId: uuid('truck_id').references(() => trucks.id, { onDelete: 'set null' }),
-    /** Non-empty and trimmed, nothing more. Broker numbers come any shape. */
-    loadNumber: text('load_number').notNull(),
-    broker: text('broker'),
+    /**
+     * §12.21: optional. Broker paperwork does not always carry a number at
+     * the moment the load is entered, and a dispatcher who cannot save
+     * without one invents one — an invented number is worse than null,
+     * because it looks real.
+     *
+     * NULL, never ''. Two ways to say "not known yet" is one too many.
+     */
+    loadNumber: text('load_number'),
     status: loadStatus('status').notNull().default('AVAILABLE'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(now),
   },
   (t) => [
     index('loads_truck_idx').on(t.truckId),
-    check('loads_number_not_blank', sql`length(btrim(load_number)) > 0`),
+    /**
+     * A blank string is not a load number either — if it is present it has to
+     * be something. The not-NULL requirement is what §12.21 removed.
+     */
+    check(
+      'loads_number_not_blank',
+      sql`load_number is null or length(btrim(load_number)) > 0`,
+    ),
   ],
 );
 
@@ -259,15 +272,12 @@ export const stops = pgTable(
     type: stopType('type').notNull(),
     sequence: integer('sequence').notNull(),
 
-    facilityName: text('facility_name'),
     addressLine: text('address_line'),
     city: text('city'),
     state: text('state'),
     zip: text('zip'),
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
-    /** Free text, as the broker wrote it. Never validated against a door list. */
-    dockDoor: text('dock_door'),
 
     /**
      * Written from stop-local wall time + appointment_tz, converted
@@ -297,10 +307,26 @@ export const stops = pgTable(
       'stops_appointment_needs_tz',
       sql`appointment_start_utc is null or appointment_tz is not null`,
     ),
-    /** Spec §12.2: an FCFS cutoff carries no window. */
+    /**
+     * §12.22, superseding §12.2's last bullet: an FCFS stop carries RECEIVING
+     * HOURS, not a bare cutoff. `appointment_start_utc` is the earliest hour
+     * and `appointment_end_utc` the latest — the deadline the status engine
+     * measures against. So an FCFS stop with a start must have an end; the
+     * old constraint forbade exactly that.
+     */
     check(
-      'stops_fcfs_has_no_window',
-      sql`appointment_type <> 'FCFS' or appointment_end_utc is null`,
+      'stops_fcfs_has_window',
+      sql`appointment_type <> 'FCFS'
+          or appointment_start_utc is null
+          or appointment_end_utc is not null`,
+    ),
+    /** Receiving hours of zero length are a typo, not a facility. */
+    check(
+      'stops_fcfs_window_positive',
+      sql`appointment_type <> 'FCFS'
+          or appointment_start_utc is null
+          or appointment_end_utc is null
+          or appointment_end_utc > appointment_start_utc`,
     ),
     check(
       'stops_window_ordered',

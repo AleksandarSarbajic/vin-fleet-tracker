@@ -28,10 +28,24 @@ export function appointmentStartSql(input: AppointmentInput): SQL {
     make_timestamp(${y}::int, ${m}::int, ${d}::int, ${h}::int, ${min}::int, 0))`;
 }
 
-/** Start + window. Null for FCFS — a cutoff has no end (§12.2). */
+/**
+ * The end instant, which means two different things (§12.22):
+ *
+ *   APPT  start + the ± window, or null for an exact time.
+ *   FCFS  the LATEST receiving hour — a wall time in its own right, typed by
+ *         the dispatcher, and therefore converted the same way the start is
+ *         rather than derived by arithmetic.
+ */
 export function appointmentEndSql(input: AppointmentInput): SQL | null {
-  if (input.type === 'FCFS' || input.windowMinutes === null) return null;
-  return sql`${appointmentStartSql(input)}
+  if (input.type === 'FCFS') {
+    const end = input.endTime;
+    if (!end) return null;
+    const { y, m, d } = input.date;
+    return sql`timezone(${input.tz},
+      make_timestamp(${y}::int, ${m}::int, ${d}::int, ${end.h}::int, ${end.min}::int, 0))`;
+  }
+  if (input.windowMinutes === null) return null;
+  return sql`(${appointmentStartSql(input)})
     + make_interval(mins => ${input.windowMinutes}::int)`;
 }
 
@@ -48,6 +62,12 @@ const ResolveRow = z
     end_utc: z.string().regex(ISO_UTC).nullable(),
     /** The wall time Postgres reads back out of the instant it computed. */
     reads_back_as: z.string(),
+    /**
+     * Same check for the FCFS latest hour, which is typed rather than
+     * derived. Null for an APPT stop, whose end is start + window and so
+     * cannot land in an hour the start did not.
+     */
+    end_reads_back_as: z.string().nullable(),
     /** True when the hour before lands on the same wall time (fall-back). */
     ambiguous: z.boolean(),
   })
@@ -93,6 +113,8 @@ export async function resolveAppointment(
 ): Promise<ResolvedAppointment> {
   const start = appointmentStartSql(input);
   const end = appointmentEndSql(input);
+  /** Only a typed wall time needs checking; a derived one inherits the check. */
+  const typedEnd = input.type === 'FCFS' && end ? end : null;
 
   /**
    * Every expression is parenthesised. AT TIME ZONE binds TIGHTER than `+`
@@ -107,6 +129,11 @@ export async function resolveAppointment(
       ${end ? sql`to_char((${end}) at time zone 'UTC', ${sql.raw(ISO)})` : sql`null::text`}
                                                                        as end_utc,
       to_char((${start}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI') as reads_back_as,
+      ${
+        typedEnd
+          ? sql`to_char((${typedEnd}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')`
+          : sql`null::text`
+      }                                                                    as end_reads_back_as,
       to_char(((${start}) - interval '1 hour') at time zone ${input.tz},
               'YYYY-MM-DD HH24:MI')
         = to_char((${start}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')
@@ -117,9 +144,24 @@ export async function resolveAppointment(
   const row = rows[0];
   if (!row) throw new Error('The appointment conversion returned no row.');
 
-  const wall = wallText(input);
+  const wall = wallText(input, input.time);
   if (row.reads_back_as !== wall) {
     throw new AppointmentTimeError(wall, input.tz, row.reads_back_as);
+  }
+
+  // The FCFS latest hour is typed by a person too, so it can land in the
+  // hour that does not exist just as easily — 02:00-03:00 sits inside
+  // plausible night receiving hours.
+  if (input.endTime && row.end_reads_back_as !== null) {
+    const endWall = wallText(input, input.endTime);
+    if (row.end_reads_back_as !== endWall) {
+      throw new AppointmentTimeError(
+        endWall,
+        input.tz,
+        row.end_reads_back_as,
+        'appointment.endTime',
+      );
+    }
   }
 
   return {

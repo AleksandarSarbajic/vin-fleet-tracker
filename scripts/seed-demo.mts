@@ -1,11 +1,11 @@
 /**
  * Obviously-fake dispatch data for development. `npm run seed:demo`.
  *
- * Every row it writes is marked: load numbers are prefixed `DEMO-`, the
- * broker is literally `BROKER DEMO`. If this ever runs against the production
- * database by accident, the result is embarrassing rather than dangerous —
- * nobody mistakes DEMO-1147-A for a real load number, and
- * `npm run seed:demo -- --clear` removes exactly what it wrote.
+ * Every row it writes is marked: load numbers are prefixed `DEMO-` and every
+ * address says DEMO. If this ever runs against the production database by
+ * accident the result is embarrassing rather than dangerous — nobody mistakes
+ * DEMO-1147-A for a real load number, and `npm run seed:demo -- --clear`
+ * removes exactly what it wrote.
  *
  * It uses the app's own appointment conversion rather than writing timestamps
  * itself. A seed script that takes a shortcut around the boundary is a seed
@@ -22,17 +22,16 @@ import { resolveAppointment } from '../src/server/appointment.ts';
 loadEnv({ path: '.env.local' });
 
 const PREFIX = 'DEMO-';
-const BROKER = 'BROKER DEMO';
 
-/** Facilities with the zone stated, because there is no geocoder (and won't be). */
+/** Addresses with the zone stated, because there is no geocoder (and won't be). */
 const PLACES = [
-  { facility: 'DEMO Cold Storage', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago' },
-  { facility: 'DEMO Distribution', city: 'Fargo', state: 'ND', zip: '58078', tz: 'America/Chicago' },
-  { facility: 'DEMO Crossdock', city: 'Denver', state: 'CO', zip: '80239', tz: 'America/Denver' },
-  { facility: 'DEMO Produce', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix' },
-  { facility: 'DEMO Terminal', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago' },
-  { facility: 'DEMO Freezer', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York' },
-  { facility: 'DEMO Yard', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
+  { address: '1 DEMO Industrial Park', city: 'New Lenox', state: 'IL', zip: '60451', tz: 'America/Chicago' },
+  { address: '2 DEMO Distribution Way', city: 'Fargo', state: 'ND', zip: '58078', tz: 'America/Chicago' },
+  { address: '3 DEMO Crossdock Road', city: 'Denver', state: 'CO', zip: '80239', tz: 'America/Denver' },
+  { address: '4 DEMO Produce Lane', city: 'Phoenix', state: 'AZ', zip: '85043', tz: 'America/Phoenix' },
+  { address: '5 DEMO Terminal Drive', city: 'Dallas', state: 'TX', zip: '75212', tz: 'America/Chicago' },
+  { address: '6 DEMO Freezer Court', city: 'Atlanta', state: 'GA', zip: '30336', tz: 'America/New_York' },
+  { address: '7 DEMO Yard Street', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
 ] as const;
 
 const LOAD_STATUSES = ['DISPATCHED', 'AT_SHIPPER', 'LOADED', 'AT_RECEIVER'] as const;
@@ -96,8 +95,9 @@ for (const [index, truck] of fleet.entries()) {
     .insert(loads)
     .values({
       truckId: truck.id,
-      loadNumber: `${PREFIX}${label}-A`,
-      broker: BROKER,
+      // Every seventh load has no number, because §12.21 made that a real
+      // state and an empty column is how you find out whether the UI handles it.
+      loadNumber: index % 7 === 5 ? null : `${PREFIX}${label}-A`,
       status: LOAD_STATUSES[index % LOAD_STATUSES.length]!,
     })
     .returning({ id: loads.id });
@@ -108,14 +108,23 @@ for (const [index, truck] of fleet.entries()) {
   ];
 
   for (const leg of legs) {
-    // Every fifth stop is FCFS: a cutoff, not a slot, and no window (§12.2).
+    /**
+     * Every fifth stop is FCFS, which now carries RECEIVING HOURS (§12.22):
+     * earliest and latest, both stop-local, with the latest as the deadline.
+     * Two of them get hours other than the 07:00-15:00 default, so the
+     * console shows more than one window.
+     */
     const fcfs = (index + leg.seq) % 5 === 0;
+    const hours = index % 3 === 0 ? { from: 6, to: 14 } : { from: 7, to: 15 };
     const input = AppointmentInput.parse({
       type: fcfs ? 'FCFS' : 'APPT',
       date: dayIn(leg.day),
-      time: { h: leg.hour, min: leg.seq === 1 ? 0 : 30 },
+      time: fcfs
+        ? { h: hours.from, min: 0 }
+        : { h: leg.hour, min: leg.seq === 1 ? 0 : 30 },
       tz: leg.place.tz,
       windowMinutes: fcfs ? null : 30,
+      endTime: fcfs ? { h: hours.to, min: 0 } : null,
     });
     const appt = await resolveAppointment(db, input);
 
@@ -123,12 +132,10 @@ for (const [index, truck] of fleet.entries()) {
       loadId: load!.id,
       type: leg.type,
       sequence: leg.seq,
-      facilityName: leg.place.facility,
-      addressLine: '1 Demo Industrial Park',
+      addressLine: leg.place.address,
       city: leg.place.city,
       state: leg.place.state,
       zip: leg.place.zip,
-      dockDoor: leg.seq === 1 ? 'Door 14' : null,
       appointmentStartUtc: sql`${appt.startUtc}::timestamptz`,
       appointmentEndUtc: appt.endUtc ? sql`${appt.endUtc}::timestamptz` : null,
       appointmentTz: appt.tz,

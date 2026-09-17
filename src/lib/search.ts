@@ -15,10 +15,11 @@ export interface Searchable {
    * type stays the one the list renders from.
    */
   nextStop?: {
-    loadNumber: string;
-    facilityName: string | null;
+    loadNumber: string | null;
+    addressLine: string | null;
     city: string | null;
     state: string | null;
+    zip: string | null;
   } | null;
 }
 
@@ -36,9 +37,10 @@ function haystack(row: Searchable): string {
     row.cityState ?? '',
     row.formattedLocation ?? '',
     row.nextStop?.loadNumber ?? '',
-    row.nextStop?.facilityName ?? '',
+    row.nextStop?.addressLine ?? '',
     row.nextStop?.city ?? '',
     row.nextStop?.state ?? '',
+    row.nextStop?.zip ?? '',
   ]
     .join(FIELD_SEPARATOR)
     .toLowerCase();

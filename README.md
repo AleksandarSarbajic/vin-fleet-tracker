@@ -82,9 +82,16 @@ Every mutating route re-checks the role server-side. A viewer sees the same
 controls, disabled, with a tooltip naming why (§12.14) — hidden controls make
 people think the app is broken.
 
-### Appointments
+### Appointments and receiving hours
 
-Wall time at the facility plus an IANA zone, converted **by Postgres**. The
+Wall time at the facility plus an IANA zone, converted **by Postgres**.
+
+An **APPT** stop has an appointment and an optional ± window. An **FCFS** stop
+has **receiving hours** — earliest and latest — and the latest is the deadline
+the status engine measures projected arrival against (§12.22). Both reuse
+`appointment_start_utc` / `appointment_end_utc`; `appointment_type` says which
+reading applies. Overnight windows (22:00–06:00) are refused for now; see
+§12.22 for why and for what the fix is. The
 wire format carries integer parts (`{y,m,d}`, `{h,min}`) and the schema is
 `.strict()`, so a client sending `startUtc` is refused by name.
 
@@ -113,7 +120,9 @@ npm run seed:demo -- --clear # removes exactly what it wrote
 ```
 
 Everything it writes is marked `DEMO-` / `BROKER DEMO`. Nothing it creates
-could be mistaken for a real load.
+could be mistaken for a real load. It includes FCFS stops with receiving
+hours, stops with no appointment, and loads with no number — each a state the
+UI has to handle and the easiest kind to forget.
 
 **The demo data is kept on purpose through phase 5** — the status engine has
 nothing to compute against without loads and appointments — and **must be

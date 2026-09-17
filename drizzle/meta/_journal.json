@@ -29,6 +29,13 @@
       "when": 1789651439360,
       "tag": "0003_drop_redundant_positions_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789658575686,
+      "tag": "0004_stop_field_set_and_fcfs_hours",
+      "breakpoints": true
     }
   ]
 }

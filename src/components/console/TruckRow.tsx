@@ -52,60 +52,69 @@ const RAIL: Record<Status, string> = {
 
 /**
  * The Next stop cell: city first, because that is what a dispatcher scans
- * for, then the dock detail (§6.2 step 1 of the truncation ladder — the dock
- * is the first thing to go, so it only rides along in the wide layout), then
- * the load number, and ONLY when the truck holds more than one open load
- * (§12.13) — with one load the number is noise in a 191px column.
+ * for, then the load number — and ONLY when the truck holds more than one
+ * open load (§12.13), since with one load the number is noise in a 191px
+ * column.
+ *
+ * §6.2's truncation ladder began "Next stop drops its dock/door detail". That
+ * rung is gone with the column (§12.20); the street address lives in the
+ * tooltip, where it does not compete with the city.
  */
-function nextStopText(row: FleetRow, columns: 6 | 8): string {
+function nextStopText(row: FleetRow): string {
   const stop = row.nextStop;
   if (!stop) return '—';
   const place =
-    stop.city && stop.state ? `${stop.city}, ${stop.state}` : (stop.facilityName ?? '—');
-  const parts = [place];
-  if (columns === 8 && stop.dockDoor) parts.push(stop.dockDoor);
-  if (row.openLoadCount > 1) parts.push(stop.loadNumber);
-  return parts.join(' · ');
+    stop.city && stop.state ? `${stop.city}, ${stop.state}` : (stop.addressLine ?? '—');
+  return row.openLoadCount > 1 && stop.loadNumber
+    ? `${place} · ${stop.loadNumber}`
+    : place;
 }
 
 /** Everything the cell had to drop, plus the stop-local time (§6.2). */
 function stopTitle(row: FleetRow): string | null {
   const stop = row.nextStop;
   if (!stop) return null;
-  const when =
-    stop.apptStartUtc && stop.apptTz
-      ? timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true })
-      : 'no appointment';
   return [
-    `${stop.type === 'PU' ? 'Pick up' : 'Deliver'} — ${stop.facilityName ?? 'facility unnamed'}`,
-    [stop.city, stop.state].filter(Boolean).join(', '),
-    stop.dockDoor,
-    `Load ${stop.loadNumber}`,
-    when,
+    stop.type === 'PU' ? 'Pick up' : 'Deliver',
+    stop.addressLine,
+    [stop.city, stop.state, stop.zip].filter(Boolean).join(', '),
+    stop.loadNumber ? `Load ${stop.loadNumber}` : 'No load number yet',
+    apptTitle(row) ?? 'no appointment',
   ]
     .filter(Boolean)
     .join(' · ');
 }
 
 /**
- * The appointment, in the STOP's own zone (§7.1) — a single list carries
- * CST, MST and PST at once, which is exactly why every time is labelled.
- * Computed at render from the instant plus the IANA zone; nothing about the
- * abbreviation is stored.
+ * The appointment, in the STOP's own zone (§7.1) — a single list carries CST,
+ * MST and PST at once, which is why every time is labelled. Computed at
+ * render from the instant plus the IANA zone; nothing about the abbreviation
+ * is stored.
+ *
+ * An FCFS stop shows `by 15:00 CDT`: its receiving hours are a door that
+ * closes, and the closing time is what the status engine measures projected
+ * arrival against (§12.22). The full window is in the tooltip.
  */
-function apptText(row: FleetRow): string {
+function apptText(row: FleetRow): { prefix: string | null; time: string } {
   const stop = row.nextStop;
-  if (!stop?.apptStartUtc || !stop.apptTz) return '—';
-  return timeInZone(new Date(stop.apptStartUtc), stop.apptTz);
+  if (!stop?.apptTz) return { prefix: null, time: '—' };
+
+  if (stop.apptType === 'FCFS') {
+    if (!stop.apptEndUtc) return { prefix: null, time: '—' };
+    return { prefix: 'by', time: timeInZone(new Date(stop.apptEndUtc), stop.apptTz) };
+  }
+  if (!stop.apptStartUtc) return { prefix: null, time: '—' };
+  return { prefix: null, time: timeInZone(new Date(stop.apptStartUtc), stop.apptTz) };
 }
 
 function apptTitle(row: FleetRow): string | null {
   const stop = row.nextStop;
-  if (!stop?.apptStartUtc || !stop.apptTz) return null;
-  const full = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
-  // FCFS is a facility cutoff, not a slot (§12.2) — the row says so on hover
-  // rather than inventing a glyph the design never drew.
-  return stop.apptType === 'FCFS' ? `${full} · FCFS cutoff, not a slot` : full;
+  if (!stop?.apptTz || !stop.apptStartUtc) return null;
+  const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
+  if (stop.apptType !== 'FCFS' || !stop.apptEndUtc) return from;
+  // The whole window, since the cell only had room for the deadline.
+  const to = timeInZone(new Date(stop.apptEndUtc), stop.apptTz);
+  return `FCFS receiving hours ${from} to ${to} — no slot, the deadline is ${to}`;
 }
 
 /** The chip's own Unassigned glyph, at row scale. */
@@ -173,6 +182,8 @@ function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Pr
   const quiet = row.status === 'TOMORROW';
   const stale = row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
+
+  const appt = apptText(row);
 
   const position = stale
     ? `Last seen ${row.cityState ?? '—'}`
@@ -253,14 +264,28 @@ function TruckRowImpl({ row, fetchedAt, columns, selected, query, onSelect }: Pr
         title={stopTitle(row) ?? undefined}
         className={`truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
       >
-        {row.nextStop ? <Marked text={nextStopText(row, columns)} query={query} /> : '—'}
+        {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
       </div>
 
+      {/**
+        * Two slots, not one string.
+        *
+        * `by 15:00 CDT` as plain text pushes the number left and the column
+        * stops aligning — §2 sets tabular numerals on the body precisely so
+        * times line up down a column, and a scanning dispatcher loses that
+        * the moment one row indents. The prefix gets its own fixed cell, so
+        * every time in the column starts at the same x whether or not the
+        * row is FCFS, and the marker reads as an annotation rather than as
+        * part of the number.
+        */}
       <div
         title={apptTitle(row) ?? undefined}
-        className={`text-right text-body font-semibold tabular-nums ${quiet ? 'text-text-secondary' : 'text-text'}`}
+        className={`grid grid-cols-[18px_1fr] items-baseline justify-items-end text-body font-semibold tabular-nums ${quiet ? 'text-text-secondary' : 'text-text'}`}
       >
-        {apptText(row)}
+        <span className="font-cond text-[11px] font-medium uppercase tracking-[.06em] text-text-muted">
+          {appt.prefix ?? ''}
+        </span>
+        <span>{appt.time}</span>
       </div>
 
       {columns === 8 ? (

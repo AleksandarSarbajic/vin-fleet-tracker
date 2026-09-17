@@ -54,15 +54,21 @@ export interface FleetRow {
 export interface NextStop {
   stopId: string;
   loadId: string;
-  loadNumber: string;
+  /** Null until the broker's paperwork carries one (§12.21). */
+  loadNumber: string | null;
   loadStatus: LoadStatus;
   type: 'PU' | 'DEL';
-  facilityName: string | null;
+  addressLine: string | null;
   city: string | null;
   state: string | null;
-  dockDoor: string | null;
+  zip: string | null;
   /** ISO-8601 UTC, or null for a stop with no appointment yet. */
   apptStartUtc: string | null;
+  /**
+   * APPT: the end of the ± window, or null for an exact time.
+   * FCFS: the LATEST receiving hour — the deadline (§12.22).
+   */
+  apptEndUtc: string | null;
   /** The facility's IANA zone. The appointment renders in THIS zone (§7.1). */
   apptTz: string | null;
   apptType: 'APPT' | 'FCFS';
@@ -99,8 +105,9 @@ export const LATEST_POSITION_SQL = sql`
                               as recorded_at,
     p.formatted_location      as formatted_location,
     ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.stop_type,
-    ns.facility_name, ns.stop_city, ns.stop_state, ns.dock_door,
-    ns.appointment_start_utc, ns.appointment_tz, ns.appointment_type,
+    ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
+    ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
+    ns.appointment_type,
     (select count(*) from loads ol
       where ol.truck_id = t.id
         and ol.status not in ('DELIVERED', 'TONU', 'CANCELLED'))::int
@@ -132,13 +139,16 @@ export const LATEST_POSITION_SQL = sql`
       l.load_number           as load_number,
       l.status::text          as load_status,
       s.type::text            as stop_type,
-      s.facility_name         as facility_name,
+      s.address_line          as stop_address,
       s.city                  as stop_city,
       s.state                 as stop_state,
-      s.dock_door             as dock_door,
+      s.zip                   as stop_zip,
       to_char(s.appointment_start_utc at time zone 'UTC',
               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as appointment_start_utc,
+      to_char(s.appointment_end_utc at time zone 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                              as appointment_end_utc,
       s.appointment_tz        as appointment_tz,
       s.appointment_type::text as appointment_type
     from loads l
@@ -190,15 +200,20 @@ export const FleetQueryRow = z.object({
   /** The next-stop lateral. Every field is null when the truck has no load. */
   stop_id: z.string().uuid().nullable(),
   load_id: z.string().uuid().nullable(),
+  /** §12.21: a load may not have a number yet. */
   load_number: z.string().nullable(),
   load_status: z.enum(LOAD_STATUSES).nullable(),
   stop_type: z.enum(['PU', 'DEL']).nullable(),
-  facility_name: z.string().nullable(),
+  stop_address: z.string().nullable(),
   stop_city: z.string().nullable(),
   stop_state: z.string().nullable(),
-  dock_door: z.string().nullable(),
+  stop_zip: z.string().nullable(),
   /** Same to_char cast, same reason: a STRING, never a Date. */
   appointment_start_utc: z
+    .string()
+    .regex(ISO_UTC_MS, 'expected ISO-8601 UTC from to_char')
+    .nullable(),
+  appointment_end_utc: z
     .string()
     .regex(ISO_UTC_MS, 'expected ISO-8601 UTC from to_char')
     .nullable(),
@@ -229,18 +244,19 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     // Overwritten by applyPlaceholders in fleet.ts.
     status: 'ON_TIME' as Status,
     nextStop:
-      raw.stop_id && raw.load_id && raw.load_number && raw.load_status && raw.stop_type
+      raw.stop_id && raw.load_id && raw.load_status && raw.stop_type
         ? {
             stopId: raw.stop_id,
             loadId: raw.load_id,
             loadNumber: raw.load_number,
             loadStatus: raw.load_status,
             type: raw.stop_type,
-            facilityName: raw.facility_name,
+            addressLine: raw.stop_address,
             city: raw.stop_city,
             state: raw.stop_state,
-            dockDoor: raw.dock_door,
+            zip: raw.stop_zip,
             apptStartUtc: raw.appointment_start_utc,
+            apptEndUtc: raw.appointment_end_utc,
             apptTz: raw.appointment_tz,
             apptType: raw.appointment_type ?? 'APPT',
           }

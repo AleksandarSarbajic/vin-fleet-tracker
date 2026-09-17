@@ -20,11 +20,17 @@ export interface AppointmentDraft {
   type: 'APPT' | 'FCFS';
   /** yyyy-mm-dd, as the date input gives it. Split into parts on the wire. */
   date: string;
-  /** HH:mm, as the time input gives it. */
+  /** HH:mm. The appointment (APPT), or the EARLIEST receiving hour (FCFS). */
   time: string;
+  /** HH:mm. FCFS only: the LATEST receiving hour — the deadline (§12.22). */
+  endTime: string;
   tz: string;
   windowMinutes: number;
 }
+
+/** §12.22. A new FCFS stop starts at the commonest receiving hours. */
+export const FCFS_DEFAULT_EARLIEST = '07:00';
+export const FCFS_DEFAULT_LATEST = '15:00';
 
 /** A guess at the facility's zone from its state. Always overridable. */
 const ZONE_BY_STATE: Record<string, string> = {
@@ -67,6 +73,7 @@ export function AppointmentFields({
   dispatchTz,
   disabled,
   error,
+  endError,
   initialFocus = false,
 }: {
   draft: AppointmentDraft;
@@ -74,6 +81,8 @@ export function AppointmentFields({
   dispatchTz: string;
   disabled: boolean;
   error?: string | undefined;
+  /** Field error for the FCFS latest hour. */
+  endError?: string | undefined;
   /** Takes the modal's opening focus when the truck already has a driver. */
   initialFocus?: boolean;
 }) {
@@ -128,7 +137,20 @@ export function AppointmentFields({
               <button
                 key={type}
                 type="button"
-                onClick={() => set({ type })}
+                onClick={() =>
+                  // Switching to FCFS with an appointment time already typed
+                  // would leave "earliest 14:30, latest 15:00", which reads
+                  // like receiving hours and is not what anyone meant.
+                  set(
+                    type === 'FCFS'
+                      ? {
+                          type,
+                          time: FCFS_DEFAULT_EARLIEST,
+                          endTime: FCFS_DEFAULT_LATEST,
+                        }
+                      : { type },
+                  )
+                }
                 className={`h-9 px-3 font-cond text-micro uppercase tracking-[.08em] ${
                   draft.type === type
                     ? 'bg-accent text-text-inverse'
@@ -160,7 +182,7 @@ export function AppointmentFields({
 
             <label className="block">
               <span className="mb-1 block text-small text-text-secondary">
-                Time at the stop
+                {draft.type === 'FCFS' ? 'Earliest receiving hour' : 'Time at the stop'}
               </span>
               <span className="relative block">
                 <input
@@ -181,12 +203,30 @@ export function AppointmentFields({
 
             <label className="block">
               <span className="mb-1 block text-small text-text-secondary">
-                {draft.type === 'FCFS' ? 'Cutoff at the facility' : 'Window'}
+                {draft.type === 'FCFS' ? (
+                  <>
+                    Latest ·{' '}
+                    <span className="text-status-risk-fg">this is the deadline</span>
+                  </>
+                ) : (
+                  'Window'
+                )}
               </span>
               {draft.type === 'FCFS' ? (
-                <p className="flex h-10 items-center text-small text-text-muted">
-                  A cutoff, not a slot — no window.
-                </p>
+                <span className="relative block">
+                  <input
+                    type="time"
+                    value={draft.endTime}
+                    onChange={(e) => set({ endTime: e.target.value })}
+                    aria-describedby="appt-help"
+                    className={`h-10 w-full border bg-surface-sunken px-2.5 pr-14 text-body tabular-nums text-text ${
+                      endError ? 'border-status-late-fg' : 'border-line-hair'
+                    }`}
+                  />
+                  <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 border border-line-hair bg-surface-overlay px-1.5 py-0.5 font-cond text-[11px] uppercase tracking-[.09em] text-text-secondary">
+                    {preview?.abbrev ?? '—'}
+                  </span>
+                </span>
               ) : (
                 <select
                   value={draft.windowMinutes}
@@ -231,12 +271,13 @@ export function AppointmentFields({
             </p>
           </div>
 
-          {error ? (
-            <p className="mt-2 text-small text-status-late-fg">{error}</p>
+          {error || endError ? (
+            <p className="mt-2 text-small text-status-late-fg">{error ?? endError}</p>
           ) : (
             <p className="mt-2 text-small text-text-muted">
-              Typed as the facility reads it. The server converts to UTC — the
-              zone above is what it converts from.
+              {draft.type === 'FCFS'
+                ? 'Receiving hours, as the facility keeps them. A truck arriving after the latest hour is late for this stop.'
+                : 'Typed as the facility reads it. The server converts to UTC — the zone above is what it converts from.'}
             </p>
           )}
         </>

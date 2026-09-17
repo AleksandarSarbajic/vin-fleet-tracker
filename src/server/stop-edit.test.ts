@@ -144,13 +144,12 @@ withDb('the edit modal save', () => {
     StopEdit.parse({
       stopId: null,
       loadNumber: 'TEST-8841',
-      broker: 'Test Broker',
       loadStatus: 'DISPATCHED',
       stopType: 'DEL',
-      facilityName: 'Test Receiver',
+      addressLine: '1400 Laraway Road',
       city: 'New Lenox',
       state: 'IL',
-      dockDoor: 'Door 7',
+      zip: '60451',
       appointment: {
         type: 'APPT',
         date: { y: 2026, m: 9, d: 18 },
@@ -216,7 +215,7 @@ withDb('the edit modal save', () => {
       // Editing it again gives the audit row a `before`.
       await saveStopEdit(tx as never, {
         actorUserId: null,
-        edit: edit({ truckId: t[0]!.id, stopId: created.stopId, dockDoor: 'Door 9' }),
+        edit: edit({ truckId: t[0]!.id, stopId: created.stopId, zip: '60452' }),
       });
       return tx
         .select({ entity: auditLog.entity, entityId: auditLog.entityId, before: auditLog.before, after: auditLog.after })
@@ -227,8 +226,8 @@ withDb('the edit modal save', () => {
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.entity === 'stop')).toBe(true);
     const second = rows.find((r) => r.before !== null);
-    expect((second?.before as { dockDoor: string }).dockDoor).toBe('Door 7');
-    expect((second?.after as { dockDoor: string }).dockDoor).toBe('Door 9');
+    expect((second?.before as { zip: string }).zip).toBe('60451');
+    expect((second?.after as { zip: string }).zip).toBe('60452');
   });
 
   it('saves the stop and the two-sided move in the same transaction', async () => {

@@ -18,6 +18,20 @@ import { StatusChip } from '../StatusChip';
  * TODO(phase 5): `Projected` joins the fact list with the status engine.
  */
 
+/**
+ * FCFS prints its whole window here — the popup has the room the 128px
+ * column did not, and "07:00 to 15:00" is the fact a dispatcher needs before
+ * phoning a receiver (§12.22).
+ */
+function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
+  if (!stop.apptTz || !stop.apptStartUtc) return 'none';
+  const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
+  if (stop.apptType !== 'FCFS') return from;
+  return stop.apptEndUtc
+    ? `${from} to ${timeInZone(new Date(stop.apptEndUtc), stop.apptTz)}`
+    : from;
+}
+
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <>
     <span className="text-text-muted">{label}</span>
@@ -79,26 +93,27 @@ export function MapPopup({
           <Row label="Next stop">
             {row.nextStop
               ? `${row.nextStop.type === 'PU' ? 'Pick up' : 'Deliver'} — ${
-                  [row.nextStop.facilityName, row.nextStop.city, row.nextStop.state]
+                  [
+                    row.nextStop.addressLine,
+                    row.nextStop.city,
+                    row.nextStop.state,
+                    row.nextStop.zip,
+                  ]
                     .filter(Boolean)
                     .join(', ') || '—'
                 }`
               : 'No load on this truck'}
           </Row>
           {row.nextStop ? (
-            <Row label="Appt">
-              <span className="tabular-nums">
-                {row.nextStop.apptStartUtc && row.nextStop.apptTz
-                  ? timeInZone(new Date(row.nextStop.apptStartUtc), row.nextStop.apptTz, {
-                      weekday: true,
-                    })
-                  : 'none'}
-              </span>
+            <Row label={row.nextStop.apptType === 'FCFS' ? 'Receiving' : 'Appt'}>
+              <span className="tabular-nums">{apptLine(row.nextStop)}</span>
             </Row>
           ) : null}
           {row.nextStop ? (
             <Row label="Load">
-              {row.nextStop.loadNumber}
+              {row.nextStop.loadNumber ?? (
+                <span className="text-text-muted">no number yet</span>
+              )}
               {row.openLoadCount > 1 ? ` · ${row.openLoadCount} open loads` : ''}
             </Row>
           ) : null}

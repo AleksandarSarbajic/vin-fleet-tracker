@@ -72,6 +72,9 @@ export const AppointmentTime = z
   })
   .strict();
 
+/** The default receiving hours on a new FCFS stop (§12.22). Editable per stop. */
+export const DEFAULT_FCFS_HOURS = { earliest: { h: 7, min: 0 }, latest: { h: 15, min: 0 } };
+
 export const APPOINTMENT_TYPES = ['APPT', 'FCFS'] as const;
 export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
@@ -89,15 +92,41 @@ export const AppointmentInput = z
     date: AppointmentDate,
     time: AppointmentTime,
     tz: IanaZone,
-    /** Minutes after `time`. Null for FCFS: a cutoff is not a slot (§12.2). */
+    /** Minutes after `time`. APPT only — FCFS carries hours, not a window. */
     windowMinutes: z.number().int().min(0).max(MAX_WINDOW_MINUTES).nullable(),
+    /**
+     * FCFS only: the LATEST receiving hour, stop-local, same zone as `time`.
+     * `time` is then the earliest hour, and this is the deadline the status
+     * engine measures projected arrival against (§12.22).
+     */
+    endTime: AppointmentTime.nullable().optional(),
   })
   .strict()
   .refine((a) => a.type !== 'FCFS' || a.windowMinutes === null, {
     path: ['windowMinutes'],
-    message:
-      'An FCFS stop has a cutoff, not a window. appointment_end_utc stays null.',
-  });
+    message: 'An FCFS stop carries receiving hours, not a ± window.',
+  })
+  .refine((a) => a.type !== 'FCFS' || (a.endTime ?? null) !== null, {
+    path: ['endTime'],
+    message: 'Give the latest receiving hour. It is the deadline for this stop.',
+  })
+  .refine((a) => a.type !== 'APPT' || (a.endTime ?? null) === null, {
+    path: ['endTime'],
+    message: 'An appointment has a ± window, not receiving hours.',
+  })
+  .refine(
+    (a) =>
+      a.type !== 'FCFS' ||
+      !a.endTime ||
+      a.endTime.h * 60 + a.endTime.min > a.time.h * 60 + a.time.min,
+    {
+      path: ['endTime'],
+      message:
+        'The latest receiving hour must be after the earliest, on the same ' +
+        'day. Overnight receiving (22:00\u201306:00) is not supported yet \u2014 ' +
+        'see \u00a712.22.',
+    },
+  );
 
 export type AppointmentInput = z.infer<typeof AppointmentInput>;
 
@@ -110,11 +139,13 @@ export const APPOINTMENT_RESOLUTIONS = ['exact', 'ambiguous'] as const;
 export type AppointmentResolution = (typeof APPOINTMENT_RESOLUTIONS)[number];
 
 /** Zero-padded wall time, for comparing against what Postgres read back. */
-export function wallText(input: Pick<AppointmentInput, 'date' | 'time'>): string {
+export function wallText(
+  input: Pick<AppointmentInput, 'date'>,
+  time: { h: number; min: number },
+): string {
   const p = (n: number, width = 2) => String(n).padStart(width, '0');
   const { y, m, d } = input.date;
-  const { h, min } = input.time;
-  return `${p(y, 4)}-${p(m)}-${p(d)} ${p(h)}:${p(min)}`;
+  return `${p(y, 4)}-${p(m)}-${p(d)} ${p(time.h)}:${p(time.min)}`;
 }
 
 /**
@@ -127,6 +158,8 @@ export class AppointmentTimeError extends Error {
     readonly wall: string,
     readonly tz: string,
     readonly became: string,
+    /** Which field to hang the error on: the earliest hour, or the latest. */
+    readonly field: 'appointment.time' | 'appointment.endTime' = 'appointment.time',
   ) {
     super(
       `${wall} does not exist in ${tz} — the clocks jump that hour, and it ` +

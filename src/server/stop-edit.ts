@@ -107,13 +107,12 @@ export async function saveStopEdit(
               stopId: stops.id,
               loadId: loads.id,
               loadNumber: loads.loadNumber,
-              broker: loads.broker,
               loadStatus: loads.status,
               stopType: stops.type,
-              facilityName: stops.facilityName,
+              addressLine: stops.addressLine,
               city: stops.city,
               state: stops.state,
-              dockDoor: stops.dockDoor,
+              zip: stops.zip,
               appointmentStartUtc: stops.appointmentStartUtc,
               appointmentTz: stops.appointmentTz,
               dispatcherNote: stops.dispatcherNote,
@@ -146,7 +145,6 @@ export async function saveStopEdit(
         .update(loads)
         .set({
           loadNumber: edit.loadNumber,
-          broker: edit.broker,
           status: edit.loadStatus,
           truckId: edit.truckId,
         })
@@ -155,10 +153,10 @@ export async function saveStopEdit(
         .update(stops)
         .set({
           type: edit.stopType,
-          facilityName: edit.facilityName,
+          addressLine: edit.addressLine,
           city: edit.city,
           state: edit.state,
-          dockDoor: edit.dockDoor,
+          zip: edit.zip,
           dispatcherNote: edit.dispatcherNote,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
@@ -174,7 +172,6 @@ export async function saveStopEdit(
         .values({
           truckId: edit.truckId,
           loadNumber: edit.loadNumber,
-          broker: edit.broker,
           status: edit.loadStatus,
         })
         .returning({ id: loads.id });
@@ -186,10 +183,10 @@ export async function saveStopEdit(
           loadId,
           type: edit.stopType,
           sequence: 1,
-          facilityName: edit.facilityName,
+          addressLine: edit.addressLine,
           city: edit.city,
           state: edit.state,
-          dockDoor: edit.dockDoor,
+          zip: edit.zip,
           dispatcherNote: edit.dispatcherNote,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
@@ -208,13 +205,12 @@ export async function saveStopEdit(
       before: existing
         ? {
             loadNumber: existing.loadNumber,
-            broker: existing.broker,
             loadStatus: existing.loadStatus,
             stopType: existing.stopType,
-            facilityName: existing.facilityName,
+            addressLine: existing.addressLine,
             city: existing.city,
             state: existing.state,
-            dockDoor: existing.dockDoor,
+            zip: existing.zip,
             // Stored as an instant; logged as one, with the zone beside it.
             appointmentStartUtc: existing.appointmentStartUtc?.toISOString() ?? null,
             appointmentTz: existing.appointmentTz,
@@ -225,13 +221,12 @@ export async function saveStopEdit(
         truckId: edit.truckId,
         loadId,
         loadNumber: edit.loadNumber,
-        broker: edit.broker,
         loadStatus: edit.loadStatus,
         stopType: edit.stopType,
-        facilityName: edit.facilityName,
+        addressLine: edit.addressLine,
         city: edit.city,
         state: edit.state,
-        dockDoor: edit.dockDoor,
+        zip: edit.zip,
         appointmentStartUtc: appointment?.startUtc ?? null,
         appointmentTz: appointment?.tz ?? null,
         /** Kept: on the fall-back date this says which 01:30 was stored. */

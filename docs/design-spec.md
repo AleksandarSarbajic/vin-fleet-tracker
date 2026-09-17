@@ -1596,6 +1596,96 @@ naming itself as the next thing to remove. A guard that quietly passes over a
 module that no longer exists reads as protection nobody is getting.
 
 
+## 12.20 The stop field set
+
+**Supersedes §9.9's "Stop & load" grid.** A stop is:
+
+> street address · city · state · ZIP · stop type · load number · load status
+> · dispatcher note
+
+Three fields are **gone, columns included** — `stops.facility_name`,
+`stops.dock_door`, `loads.broker`. Not hidden from the form: dropped, because
+a column nothing writes is a column someone eventually reads and believes.
+
+`address_line` and `zip` existed in the schema from phase 1 and had never been
+surfaced. They are what a dispatcher actually reads off a rate confirmation.
+
+**Consequence for §6.2.** The truncation ladder began "Next stop drops its
+dock/door detail (` · Dock 14`)". That rung no longer exists. The cell is now
+`City, ST`, plus the load number when the truck holds more than one open load
+(§12.13); the street address and ZIP live in the tooltip, where they do not
+compete with the city for a 191px column.
+
+## 12.21 Load number is not required
+
+**Reverses the phase-3 position.** `loads.load_number` is nullable, and the
+modal marks it optional.
+
+Broker paperwork does not always carry a number at the moment the load is
+entered. A dispatcher who cannot save without one **types something** — and an
+invented load number is worse than an empty one, because it looks real to the
+next shift and to anyone reconciling against the broker.
+
+Stored as `NULL`, never `''`: two ways to say "not known yet" is one too many.
+The not-blank check constraint stays, now meaning *if present, it has to be
+something*.
+
+## 12.22 FCFS carries receiving hours
+
+**Supersedes §12.2's last bullet**, which said an FCFS stop hides the window
+control and leaves `appointment_end_utc` null. That left an FCFS stop with no
+time at all and therefore no way to be late — the opposite of the intent.
+
+An FCFS stop carries **receiving hours**: an earliest and a latest, both
+stop-local wall time in the same IANA zone, entered as integer parts and
+converted server-side exactly like an appointment. New stops default to
+**07:00–15:00**, editable per stop.
+
+**The columns are reused, not added to:**
+
+| `appointment_type` | `appointment_start_utc` | `appointment_end_utc` |
+|---|---|---|
+| `APPT` | the appointment | `start + window`, or null for an exact time |
+| `FCFS` | earliest receiving hour | **latest — the deadline** |
+
+Reuse because the next-stop lateral already orders by
+`appointment_start_utc asc nulls last`, and the earliest receiving hour is
+exactly the right sort key for an FCFS stop, so that query needs no branch.
+Separate columns would put a `coalesce` or a `CASE` in the fleet query, the
+reassignment preview, the audit payload and the seed — four places that must
+agree, to store two instants measured identically by identical code.
+
+The phase-1 constraint `stops_fcfs_has_no_window` is replaced by
+`stops_fcfs_has_window` (an FCFS stop with a start must have an end) and
+`stops_fcfs_window_positive` (hours of zero length are a typo, not a facility).
+
+### What the status engine does with it (phase 5)
+
+- **`LATE` is measured against projected arrival, not the clock.** A truck
+  whose ETA is 16:30 against a 15:00 close reads `LATE` from the moment that
+  ETA is computed — at 09:00, while a dispatcher can still phone the
+  receiver. It does not wait for 15:00 to pass. Identical in kind to an APPT
+  stop; only the deadline differs.
+- **`AT_RISK` never applies to FCFS**, exactly as §12.2 said. With receiving
+  hours there is a deadline to miss, but there is still no slot to be at risk
+  of missing.
+- **`ARRIVED` wins once `arrived_at` is set**, whether or not the truck made
+  the window. Lateness is then history rather than a live problem, and the row
+  stops competing for attention at the top of the list.
+
+### Overnight receiving — rejected for now, deliberately
+
+A window whose latest hour is at or before its earliest (`22:00–06:00`) is
+**refused with a field error**. Reading `06:00` as tomorrow would make a
+transposed typo look valid, and day-spanning logic belongs with the status
+engine rather than ahead of it.
+
+**This is a known gap, not a settled rule.** Overnight receiving is real —
+grocery and retail DCs routinely take trucks through the night, and this fleet
+runs to receivers that do. When a dispatcher hits it, the fix is an explicit
+**next-day control** on the latest hour, not a rethink of the model.
+
+
 ---
 
 # 13. Still open

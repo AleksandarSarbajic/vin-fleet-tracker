@@ -10,7 +10,13 @@ import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { DriverSelect } from '@/components/assignments/DriverSelect';
-import { AppointmentFields, zoneForState, type AppointmentDraft } from './AppointmentFields';
+import {
+  AppointmentFields,
+  FCFS_DEFAULT_EARLIEST,
+  FCFS_DEFAULT_LATEST,
+  zoneForState,
+  type AppointmentDraft,
+} from './AppointmentFields';
 import { ReassignConfirm } from './ReassignConfirm';
 import { useFocusTrap } from './useModalChrome';
 
@@ -76,20 +82,24 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const initialForm = useMemo(
     () => ({
       loadNumber: stop?.loadNumber ?? '',
-      broker: '',
       loadStatus: stop?.loadStatus ?? ('AVAILABLE' as (typeof LOAD_STATUSES)[number]),
       stopType: stop?.type ?? ('DEL' as 'PU' | 'DEL'),
-      facilityName: stop?.facilityName ?? '',
+      addressLine: stop?.addressLine ?? '',
       city: stop?.city ?? '',
       state: stop?.state ?? '',
-      dockDoor: stop?.dockDoor ?? '',
+      zip: stop?.zip ?? '',
       note: '',
       driverId: drivers.find((d) => d.truckId === row.id)?.id ?? null,
       appointment: {
         enabled: Boolean(stop?.apptStartUtc),
         type: stop?.apptType ?? ('APPT' as 'APPT' | 'FCFS'),
         date: isoDate(stop?.apptStartUtc ?? null, stop?.apptTz ?? null),
-        time: isoTime(stop?.apptStartUtc ?? null, stop?.apptTz ?? null),
+        time:
+          isoTime(stop?.apptStartUtc ?? null, stop?.apptTz ?? null) ||
+          (stop?.apptType === 'FCFS' ? FCFS_DEFAULT_EARLIEST : ''),
+        // §12.22: receiving hours default to 07:00–15:00 on a new FCFS stop.
+        endTime:
+          isoTime(stop?.apptEndUtc ?? null, stop?.apptTz ?? null) || FCFS_DEFAULT_LATEST,
         tz: stop?.apptTz ?? zoneForState(stop?.state ?? null),
         windowMinutes: 30,
       } as AppointmentDraft,
@@ -111,21 +121,22 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
       const trimmed = (value: string) => (value.trim() === '' ? null : value.trim());
       const [y, m, d] = f.appointment.date.split('-').map(Number);
       const [h, min] = f.appointment.time.split(':').map(Number);
+      const [endH, endMin] = f.appointment.endTime.split(':').map(Number);
       const hasAppointment =
         f.appointment.enabled &&
         [y, m, d, h, min].every((n) => n !== undefined && !Number.isNaN(n));
+      const isFcfs = f.appointment.type === 'FCFS';
 
       return {
         stopId: stop?.stopId ?? null,
         truckId: row.id,
         loadNumber: f.loadNumber,
-        broker: trimmed(f.broker),
         loadStatus: f.loadStatus,
         stopType: f.stopType,
-        facilityName: trimmed(f.facilityName),
+        addressLine: trimmed(f.addressLine),
         city: trimmed(f.city),
         state: trimmed(f.state),
-        dockDoor: trimmed(f.dockDoor),
+        zip: trimmed(f.zip),
         // Wall time and a zone. Never an instant — the server converts (§7).
         appointment: hasAppointment
           ? {
@@ -133,8 +144,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               date: { y: y!, m: m!, d: d! },
               time: { h: h!, min: min! },
               tz: f.appointment.tz,
-              windowMinutes:
-                f.appointment.type === 'FCFS' ? null : f.appointment.windowMinutes,
+              windowMinutes: isFcfs ? null : f.appointment.windowMinutes,
+              // FCFS carries the latest receiving hour as a typed wall time,
+              // converted server-side exactly like the earliest one.
+              endTime:
+                isFcfs && endH !== undefined && !Number.isNaN(endH)
+                  ? { h: endH, min: endMin ?? 0 }
+                  : null,
             }
           : null,
         dispatcherNote: trimmed(f.note),
@@ -185,10 +201,10 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                       nextStop: {
                         ...r.nextStop,
                         loadNumber: edit.loadNumber,
-                        facilityName: edit.facilityName,
+                        addressLine: edit.addressLine,
                         city: edit.city,
                         state: edit.state,
-                        dockDoor: edit.dockDoor,
+                        zip: edit.zip,
                       },
                     }
                   : r,
@@ -386,6 +402,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               disabled={!mayEdit}
               initialFocus={initialDriverId !== null}
               error={errorFor('appointment.time')}
+              endError={errorFor('appointment.endTime')}
             />
 
             {/* --------------------------- stop & load --------------------- */}
@@ -395,13 +412,12 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               </legend>
 
               <div className="grid grid-cols-[1.6fr_1fr_1fr] gap-3">
-                <Field label="Facility" value={form.facilityName} onChange={(v) => set('facilityName', v)} />
                 <Field
-                  label="Dock / door"
-                  value={form.dockDoor}
-                  onChange={(v) => set('dockDoor', v)}
-                  help="Free text — as the broker wrote it"
+                  label="Street address"
+                  value={form.addressLine}
+                  onChange={(v) => set('addressLine', v)}
                 />
+                <Field label="ZIP" value={form.zip} onChange={(v) => set('zip', v)} />
                 <label className="block">
                   <span className="mb-1 block text-small text-text-secondary">Stop type</span>
                   <select
@@ -437,13 +453,15 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               </div>
 
               <div className="mt-3 grid grid-cols-[1.6fr_1fr_1fr] gap-3">
+                {/* §12.21: no longer required. Broker paperwork does not
+                    always carry a number when the load is entered. */}
                 <Field
-                  label="Load number · required"
+                  label="Load number"
                   value={form.loadNumber}
                   onChange={(v) => set('loadNumber', v)}
                   error={errorFor('loadNumber')}
+                  help="Any format the broker uses, or leave it for now"
                 />
-                <Field label="Broker" value={form.broker} onChange={(v) => set('broker', v)} />
               </div>
             </fieldset>
 

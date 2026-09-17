@@ -26,16 +26,15 @@ export const StopEdit = z
     truckId: z.string().uuid(),
 
     loadNumber: LoadNumber,
-    broker: z.string().trim().max(120).nullable(),
     loadStatus: z.enum(LOAD_STATUSES),
 
     stopType: z.enum(['PU', 'DEL']),
-    facilityName: z.string().trim().max(160).nullable(),
+    /** The street line, as the rate confirmation gives it. */
+    addressLine: z.string().trim().max(200).nullable(),
     city: z.string().trim().max(120).nullable(),
     /** Two letters. The search maps full state names to these (§12.7). */
     state: z.string().trim().length(2).toUpperCase().nullable(),
-    /** Free text, as the broker wrote it. Never checked against a door list. */
-    dockDoor: z.string().trim().max(60).nullable(),
+    zip: z.string().trim().max(12).nullable(),
 
     /** Null leaves the stop with no appointment — a real state (NO_APPT). */
     appointment: AppointmentInput.nullable(),
@@ -64,13 +63,12 @@ export type StopEdit = z.infer<typeof StopEdit>;
 export function dirtyFields(before: Partial<StopEdit>, after: StopEdit): string[] {
   const named: [keyof StopEdit, string][] = [
     ['loadNumber', 'load number'],
-    ['broker', 'broker'],
     ['loadStatus', 'load status'],
     ['stopType', 'stop type'],
-    ['facilityName', 'facility'],
+    ['addressLine', 'address'],
     ['city', 'city'],
     ['state', 'state'],
-    ['dockDoor', 'dock / door'],
+    ['zip', 'ZIP'],
     ['dispatcherNote', 'note'],
     ['driverId', 'assigned driver'],
   ];

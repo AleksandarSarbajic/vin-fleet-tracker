@@ -201,7 +201,7 @@ withDb('conversion, against the real database', () => {
     expect(r.tz).toBe('America/Chicago');
   });
 
-  it('adds the window to the end, and only for APPT', async () => {
+  it('adds the ± window to the end, and leaves an exact time open-ended', async () => {
     const { db } = connect();
     const windowed = await resolveAppointment(
       db,
@@ -209,11 +209,13 @@ withDb('conversion, against the real database', () => {
     );
     expect(windowed.endUtc).toBe('2026-09-18T20:00:00.000Z');
 
-    const cutoff = await resolveAppointment(
+    // An APPT with no window is a single instant; FCFS is covered separately,
+    // because since §12.22 it carries receiving hours and MUST have an end.
+    const exact = await resolveAppointment(
       db,
-      appt({ y: 2026, m: 9, d: 18 }, 14, 30, 'America/Chicago', { type: 'FCFS' }),
+      appt({ y: 2026, m: 9, d: 18 }, 14, 30, 'America/Chicago'),
     );
-    expect(cutoff.endUtc).toBeNull();
+    expect(exact.endUtc).toBeNull();
   });
 
   it('round-trips every hour of an ordinary day', async () => {
@@ -334,6 +336,98 @@ withDb('DST, with every date derived', () => {
   });
 });
 
+/* --------------------------- FCFS hours ---------------------------------- */
+
+describe('FCFS receiving hours, on the wire', () => {
+  const fcfs = (over: Record<string, unknown> = {}) =>
+    AppointmentInput.safeParse({
+      type: 'FCFS',
+      date: { y: 2026, m: 9, d: 18 },
+      time: { h: 7, min: 0 },
+      tz: 'America/Chicago',
+      windowMinutes: null,
+      endTime: { h: 15, min: 0 },
+      ...over,
+    });
+
+  it('accepts an earliest and a latest hour', () => {
+    expect(fcfs().success).toBe(true);
+  });
+
+  it('refuses an FCFS stop with no latest hour — it is the deadline', () => {
+    expect(fcfs({ endTime: null }).success).toBe(false);
+  });
+
+  it('refuses a ± window on an FCFS stop', () => {
+    expect(fcfs({ windowMinutes: 30 }).success).toBe(false);
+  });
+
+  it('refuses receiving hours on an APPT stop', () => {
+    const appointment = AppointmentInput.safeParse({
+      type: 'APPT',
+      date: { y: 2026, m: 9, d: 18 },
+      time: { h: 14, min: 30 },
+      tz: 'America/Chicago',
+      windowMinutes: 30,
+      endTime: { h: 15, min: 0 },
+    });
+    expect(appointment.success).toBe(false);
+  });
+
+  it('refuses an overnight window, deliberately and for now (§12.22)', () => {
+    // 22:00-06:00 is real — grocery and retail DCs receive through the night.
+    // Reading 06:00 as tomorrow would make a transposed typo look valid, so
+    // it is refused until there is an explicit next-day control.
+    const overnight = fcfs({ time: { h: 22, min: 0 }, endTime: { h: 6, min: 0 } });
+    expect(overnight.success).toBe(false);
+    expect(JSON.stringify(overnight.error?.issues)).toMatch(/overnight/i);
+  });
+
+  it('refuses a zero-length window', () => {
+    expect(fcfs({ endTime: { h: 7, min: 0 } }).success).toBe(false);
+  });
+});
+
+withDb('FCFS receiving hours, converted', () => {
+  const hours = (from: number, to: number, date = { y: 2026, m: 9, d: 18 }) =>
+    AppointmentInput.parse({
+      type: 'FCFS',
+      date,
+      time: { h: from, min: 0 },
+      tz: 'America/Chicago',
+      windowMinutes: null,
+      endTime: { h: to, min: 0 },
+    });
+
+  it('stores both hours as the instants they name at the facility', async () => {
+    const { db } = connect();
+    const r = await resolveAppointment(db, hours(7, 15));
+    expect(r.startUtc).toBe('2026-09-18T12:00:00.000Z');
+    expect(r.endUtc).toBe('2026-09-18T20:00:00.000Z');
+  });
+
+  it('checks the LATEST hour for existence too, not just the earliest', async () => {
+    // The latest hour is typed by a person as well, and 02:00-03:00 sits
+    // inside plausible night receiving hours.
+    const { db } = connect();
+    const moment = springForward('America/Chicago', YEAR);
+    const date = localDateOf('America/Chicago', moment);
+    const skipped = Number(
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Chicago', hourCycle: 'h23', hour: '2-digit',
+      }).format(new Date(moment.getTime() - 60_000)),
+    );
+
+    await expect(
+      resolveAppointment(db, hours(skipped, skipped + 1, date)),
+    ).rejects.toMatchObject({
+      name: 'AppointmentTimeError',
+      // Hung on the field the dispatcher typed it into.
+      field: 'appointment.endTime',
+    });
+  });
+});
+
 /* ---------------------- still owed by this suite ------------------------- */
 
 withDb('the dispatch-zone midnight rollover', () => {
@@ -354,6 +448,16 @@ withDb('the dispatch-zone midnight rollover', () => {
   it.todo(
     'TOMORROW rolls over at midnight in the DISPATCH zone — needs lib/status.ts (phase 5)',
   );
+
+  /**
+   * §12.22's status rules, owed by the engine rather than by this file. Left
+   * here as `todo` so phase 5's test run prints them: the conversion half of
+   * FCFS is covered above and green, which is exactly the condition in which
+   * a missing rule goes unnoticed.
+   */
+  it.todo('FCFS is LATE from PROJECTED ARRIVAL against the latest hour, not from the clock');
+  it.todo('FCFS never reaches AT_RISK — a deadline to miss, but no slot (§12.2, §12.22)');
+  it.todo('ARRIVED wins once arrived_at is set, however late the truck was');
 });
 
 /* ------------------- the machine must not matter ------------------------- */
