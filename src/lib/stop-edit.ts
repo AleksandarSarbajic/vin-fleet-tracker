@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AppointmentInput } from './appointment';
 import { LOAD_STATUSES } from './loads';
+import { StopOverrideEdit } from './override';
 
 /**
  * What the edit modal sends. Shared by the client and the server; the server
@@ -64,6 +65,15 @@ export const StopEdit = z
      * goes through the two-sided transaction and the confirm dialog.
      */
     driverId: z.string().uuid().nullable().optional(),
+
+    /**
+     * §12.28: the status override travels WITH the save, not after it.
+     *
+     * It used to be a second request to a second route, so a dispatcher who
+     * changed an appointment and forced a status could get one and not the
+     * other. Undefined leaves any existing override alone.
+     */
+    override: StopOverrideEdit.optional(),
 
     /**
      * The hash of the server preview the dispatcher actually confirmed. Only

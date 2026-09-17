@@ -10,7 +10,7 @@ import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { DriverSelect } from '@/components/assignments/DriverSelect';
-import { OVERRIDE_REASON_LABEL, OverrideInput } from '@/lib/override';
+import { OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
 import { OverrideBlock, type OverrideDraft } from './OverrideBlock';
 import {
   AppointmentFields,
@@ -209,11 +209,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     override.forced !== (row.override?.forcedStatus ?? 'AUTO') ||
     (override.forced !== 'AUTO' && override.reason !== (row.override?.reason ?? ''));
 
+  /**
+   * §12.28: the override travels INSIDE the stop save now, so it carries no
+   * stopId — the server uses the row it just wrote, which on a new load did
+   * not exist when this was built.
+   */
   const overridePayload =
     override.forced === 'AUTO'
       ? null
-      : OverrideInput.safeParse({
-          stopId: stop?.stopId ?? '',
+      : StopOverrideEdit.safeParse({
+          action: 'set',
           forcedStatus: override.forced,
           reason: override.reason === '' ? undefined : override.reason,
           reasonNote: override.reasonNote.trim() === '' ? null : override.reasonNote,
@@ -250,28 +255,25 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     (dirty.length > 0 || overrideChanged) &&
     !saving;
 
-  /** Writes the override after the stop save. Its own table, its own route. */
-  const sendOverride = useCallback(async (): Promise<boolean> => {
-    if (!overrideChanged) return true;
-
-    const response =
-      override.forced === 'AUTO'
-        ? await fetch('/api/overrides', {
-            method: 'DELETE',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ stopId: stop?.stopId }),
-          })
-        : await fetch('/api/overrides', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(overridePayload?.success ? overridePayload.data : null),
-          });
-
-    if (response.ok) return true;
-    const body = (await response.json()) as { error?: string; fields?: FieldError[] };
-    setErrors(body.fields?.length ? body.fields : [{ field: '*', message: body.error ?? 'The override failed.' }]);
-    return false;
-  }, [override.forced, overrideChanged, overridePayload, stop?.stopId]);
+  /**
+   * What the save sends for the override, or undefined to leave it alone.
+   *
+   * §12.28. This used to be a SECOND request to a second route, fired after
+   * the stop save came back. A dispatcher who moved an appointment and forced
+   * a status could get one and not the other, and the error explaining it was
+   * on a screen nobody would be looking at when the next shift read the row.
+   */
+  const overrideEdit: StopOverrideEdit | undefined = useMemo(
+    () =>
+      !overrideChanged
+        ? undefined
+        : override.forced === 'AUTO'
+          ? { action: 'clear' }
+          : overridePayload?.success
+            ? overridePayload.data
+            : undefined,
+    [override.forced, overrideChanged, overridePayload],
+  );
 
   /** `Clear now` from the block — immediate, not part of the save (§9.5). */
   const clearOverrideNow = useCallback(async () => {
@@ -324,10 +326,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
       );
 
       try {
+        // One request. The stop, the appointment, the assignment and the
+        // override are one act and land in one transaction (§12.28).
         const response = await fetch('/api/stops', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(token ? { ...parsed.data, previewToken: token } : parsed.data),
+          body: JSON.stringify({
+            ...parsed.data,
+            ...(token ? { previewToken: token } : {}),
+            ...(overrideEdit ? { override: overrideEdit } : {}),
+          }),
         });
 
         if (response.status === 409) {
@@ -354,11 +362,6 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
         const saved = (await response.json()) as { warnings?: FieldError[] };
 
-        // The override is a second request to a second table. If it fails the
-        // stop edit still stands and the field error says why, rather than the
-        // whole save being rolled back on the client's behalf.
-        if (!(await sendOverride())) return;
-
         await queryClient.invalidateQueries({ queryKey: key });
 
         if (saved.warnings?.length) {
@@ -375,7 +378,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         setSaving(false);
       }
     },
-    [edit, onClose, parsed, queryClient, row.id, sendOverride],
+    [edit, onClose, overrideEdit, parsed, queryClient, row.id],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */

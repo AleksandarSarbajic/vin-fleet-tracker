@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
-import { assignments, drivers, loads, stops, trucks, auditLog } from '@/db/schema';
+import { assignments, drivers, loads, overrides, stops, trucks, auditLog } from '@/db/schema';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
@@ -19,6 +19,7 @@ import type { Tx } from './audit';
  * from inside one.
  */
 
+const DISPATCH_TZ = 'America/Chicago';
 const url = process.env.DATABASE_URL;
 const withDb = url ? describe : describe.skip;
 
@@ -168,6 +169,7 @@ withDb('the edit modal save', () => {
       await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
       });
       const [stop] = await tx
@@ -216,6 +218,7 @@ withDb('the edit modal save', () => {
         await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
         const result = await saveStopEdit(tx as never, {
           actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
           edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
         });
         const [load] = await tx
@@ -233,6 +236,7 @@ withDb('the edit modal save', () => {
         await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
         await saveStopEdit(tx as never, {
           actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
           edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
         });
         const rows = parseFleetRows(await tx.execute(LATEST_POSITION_SQL));
@@ -249,6 +253,7 @@ withDb('the edit modal save', () => {
         await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
         const created = await saveStopEdit(tx as never, {
           actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
           edit: edit({ truckId: t[0]!.id, loadNumber: '' }),
         });
         const read = async () =>
@@ -262,11 +267,13 @@ withDb('the edit modal save', () => {
         const empty = await read();
         await saveStopEdit(tx as never, {
           actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
           edit: edit({ truckId: t[0]!.id, stopId: created.stopId, loadNumber: 'VL-99120' }),
         });
         const given = await read();
         await saveStopEdit(tx as never, {
           actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
           // Whitespace is not a load number either.
           edit: edit({ truckId: t[0]!.id, stopId: created.stopId, loadNumber: '   ' }),
         });
@@ -281,6 +288,7 @@ withDb('the edit modal save', () => {
       const { trucks: t } = await fixtures(tx);
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           appointment: {
@@ -304,11 +312,13 @@ withDb('the edit modal save', () => {
       const { trucks: t } = await fixtures(tx);
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
       });
       // Editing it again gives the audit row a `before`.
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id, stopId: created.stopId, zip: '60452' }),
       });
       return tx
@@ -331,6 +341,7 @@ withDb('the edit modal save', () => {
       const preview = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[1]!.id,
           driverId: d[0]!.id,
@@ -419,6 +430,7 @@ withDb('the forward geocode (§12.24)', () => {
       const fetchImpl = located();
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl,
       });
@@ -460,6 +472,7 @@ withDb('the forward geocode (§12.24)', () => {
       const fetchImpl = located();
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl,
       });
@@ -467,6 +480,7 @@ withDb('the forward geocode (§12.24)', () => {
 
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
@@ -494,11 +508,13 @@ withDb('the forward geocode (§12.24)', () => {
       const fetchImpl = located();
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl,
       });
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
@@ -517,11 +533,13 @@ withDb('the forward geocode (§12.24)', () => {
       const fetchImpl = located();
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl,
       });
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
@@ -542,6 +560,7 @@ withDb('the forward geocode (§12.24)', () => {
       const { trucks: t } = await fixtures(tx);
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           addressLine: '9999 Nowhere At All Parkway',
@@ -576,11 +595,13 @@ withDb('the forward geocode (§12.24)', () => {
       const { trucks: t } = await fixtures(tx);
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl: located(),
       });
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
@@ -606,6 +627,7 @@ withDb('the forward geocode (§12.24)', () => {
       const { trucks: t } = await fixtures(tx);
       const created = await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id }),
         fetchImpl: located(),
       });
@@ -619,6 +641,7 @@ withDb('the forward geocode (§12.24)', () => {
 
       await saveStopEdit(tx as never, {
         actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
         edit: edit({ truckId: t[0]!.id, stopId: created.stopId, city: 'Fargo' }),
         fetchImpl: located(),
       });
@@ -630,5 +653,161 @@ withDb('the forward geocode (§12.24)', () => {
     expect(seen.after?.end?.toISOString()).toBe(seen.before?.end?.toISOString());
     expect(seen.after?.tz).toBe(seen.before?.tz);
     expect(seen.after?.type).toBe(seen.before?.type);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.28 — the override rides inside the save
+ * ---------------------------------------------------------------------- */
+
+withDb('the override is part of the save (§12.28)', () => {
+  const base = (over: Partial<StopEdit> & { truckId: string }) =>
+    StopEdit.parse({
+      stopId: null,
+      loadNumber: 'TEST-ATOMIC',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: '1804 Vitest Fixture Street',
+      city: 'Grand Forks',
+      state: 'ND',
+      zip: '58203',
+      appointment: {
+        type: 'APPT',
+        date: { y: 2026, m: 9, d: 18 },
+        time: { h: 14, min: 30 },
+        tz: 'America/Chicago',
+        windowMinutes: 30,
+      },
+      dispatcherNote: null,
+      ...over,
+    });
+
+  const forced = {
+    action: 'set' as const,
+    forcedStatus: 'LATE' as const,
+    reason: 'DRIVER_REPORTED_DELAY' as const,
+    reasonNote: null,
+    expiry: 'PLUS_4H' as const,
+    customExpiry: null,
+  };
+
+  it('writes the stop and the override in ONE transaction', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: base({ truckId: t[0]!.id, override: forced }),
+      });
+      // Readable INSIDE the transaction is the whole claim: there is no
+      // window where the stop exists and the override does not.
+      const [row] = await tx
+        .select({ forcedStatus: overrides.forcedStatus, clearedAt: overrides.clearedAt })
+        .from(overrides)
+        .where(eq(overrides.stopId, result.stopId));
+      return { stopId: result.stopId, row };
+    });
+    expect(seen.row?.forcedStatus).toBe('LATE');
+    expect(seen.row?.clearedAt).toBeNull();
+  });
+
+  /** A new load has no stopId when the request is built. The server fills it. */
+  it('attaches the override to a stop that did not exist when it was sent', async () => {
+    const attached = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: base({ truckId: t[0]!.id, stopId: null, override: forced }),
+      });
+      const rows = await tx
+        .select({ stopId: overrides.stopId })
+        .from(overrides)
+        .where(eq(overrides.stopId, result.stopId));
+      return { stopId: result.stopId, count: rows.length };
+    });
+    expect(attached.count).toBe(1);
+  });
+
+  /**
+   * The failure that motivated the change. Before this, the stop save landed
+   * and the override request failed separately, leaving a board that
+   * disagreed with what the dispatcher intended and an error message on a
+   * screen nobody would be reading at 4am.
+   */
+  it('rolls the STOP back when the override fails', async () => {
+    const after = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const [before] = await tx
+        .select({ note: stops.dispatcherNote, id: stops.id })
+        .from(stops)
+        .innerJoin(loads, eq(loads.id, stops.loadId))
+        .where(eq(loads.truckId, t[0]!.id))
+        .limit(1);
+
+      let threw = false;
+      try {
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: base({
+            truckId: t[0]!.id,
+            stopId: before!.id,
+            dispatcherNote: 'THIS MUST NOT SURVIVE',
+            override: {
+              ...forced,
+              // An expiry already in the past. server/override.ts refuses it.
+              expiry: 'CUSTOM',
+              customExpiry: {
+                date: { y: 2020, m: 1, d: 1 },
+                time: { h: 0, min: 0 },
+                tz: 'America/Chicago',
+              },
+            },
+          }),
+        });
+      } catch {
+        threw = true;
+      }
+
+      const [now] = await tx
+        .select({ note: stops.dispatcherNote })
+        .from(stops)
+        .where(eq(stops.id, before!.id));
+      return { threw, before: before!.note, now: now?.note };
+    });
+
+    expect(after.threw).toBe(true);
+    // Neither write happened. Not one of them.
+    expect(after.now).toBe(after.before);
+    expect(after.now).not.toBe('THIS MUST NOT SURVIVE');
+  });
+
+  it('clears an override through the same save', async () => {
+    const cleared = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: base({ truckId: t[0]!.id, override: forced }),
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: base({
+          truckId: t[0]!.id,
+          stopId: created.stopId,
+          override: { action: 'clear' },
+        }),
+      });
+      const rows = await tx
+        .select({ clearedAt: overrides.clearedAt })
+        .from(overrides)
+        .where(eq(overrides.stopId, created.stopId));
+      return rows;
+    });
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]?.clearedAt).not.toBeNull();
   });
 });

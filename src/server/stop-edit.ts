@@ -5,6 +5,7 @@ import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, type ResolvedAppointment } from './appointment';
 import { writeAudit, type AuditEntry, type Db } from './audit';
 import { geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
+import { clearOverride, setOverride } from './override';
 import { applyReassignment, type ReassignPreview } from './reassign';
 
 /**
@@ -51,6 +52,8 @@ export async function saveStopEdit(
   input: {
     actorUserId: string | null;
     edit: StopEdit;
+    /** For the override's CUSTOM expiry and END_OF_DAY — see server/override.ts. */
+    dispatchTz: string;
     /** Injected by the tests; production uses the real network. */
     fetchImpl?: typeof fetch;
   },
@@ -301,6 +304,33 @@ export async function saveStopEdit(
         })
         .returning({ id: stops.id });
       stopId = stop!.id;
+    }
+
+    /* ---------------------------- the override -------------------------- */
+
+    /**
+     * §12.28. INSIDE the same transaction, using the stopId this save just
+     * resolved — which on a new load did not exist when the request was sent.
+     *
+     * It was two requests to two routes. A dispatcher who moved an
+     * appointment and forced a status could get one and not the other, and
+     * the error explaining it was on a screen nobody would be looking at when
+     * the next shift read the row at 4am. Both writes or neither.
+     *
+     * setOverride/clearOverride open transactions of their own; nested here
+     * they become savepoints, so their failure rolls back this save too.
+     */
+    if (edit.override) {
+      if (edit.override.action === 'clear') {
+        await clearOverride(tx, { actorUserId: input.actorUserId, clear: { stopId } });
+      } else {
+        const { action: _action, ...fields } = edit.override;
+        await setOverride(tx, {
+          actorUserId: input.actorUserId,
+          dispatchTz: input.dispatchTz,
+          override: { stopId, ...fields },
+        });
+      }
     }
 
     /* ------------------------------ audit ------------------------------ */

@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { overrides, stops } from '@/db/schema';
 import type { ClearOverrideInput, OverrideInput } from '@/lib/override';
 import { appointmentStartSql } from './appointment';
-import { writeAudit, type Db, type Tx } from './audit';
+/**
+ * `Writer`, not `Db`: these are called both on their own (the overrides
+ * route) and from INSIDE the stop save's transaction (§12.28), where they
+ * receive a Tx and their own `.transaction` becomes a savepoint.
+ */
+import { writeAudit, type Tx, type Writer } from './audit';
 
 /**
  * Writing a status override (§9.5).
@@ -97,7 +102,7 @@ export interface OverrideResult {
 }
 
 export async function setOverride(
-  db: Db,
+  db: Writer,
   input: { actorUserId: string | null; dispatchTz: string; override: OverrideInput },
 ): Promise<OverrideResult> {
   return db.transaction(async (tx) => {
@@ -162,7 +167,7 @@ export async function setOverride(
 
 /** `Clear now` (§9.5). Clearing is its own action and its own audit entry. */
 export async function clearOverride(
-  db: Db,
+  db: Writer,
   input: { actorUserId: string | null; clear: ClearOverrideInput },
 ): Promise<{ cleared: boolean }> {
   return db.transaction(async (tx) => {

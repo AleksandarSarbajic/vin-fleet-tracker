@@ -55,36 +55,70 @@ export const CustomExpiry = z
   .object({ date: AppointmentDate, time: AppointmentTime, tz: IanaZone })
   .strict();
 
-export const OverrideInput = z
-  .object({
-    stopId: z.string().uuid(),
-    forcedStatus: z.enum(FORCED_STATUSES),
-    reason: z.enum(OVERRIDE_REASONS),
-    reasonNote: z.string().trim().max(500).nullable(),
-    expiry: z.enum(EXPIRY_PRESETS),
-    /** Required when `expiry` is CUSTOM, refused otherwise. */
-    customExpiry: CustomExpiry.nullable(),
-  })
-  .strict()
-  .refine(
-    (o) => o.reason !== 'OTHER' || (o.reasonNote ?? '').trim().length > 0,
-    {
-      path: ['reasonNote'],
-      // Overrides are countable in review rather than merely readable only if
-      // "Other" carries its note (§9.5).
-      message: 'Say what "Other" means here — this note is the only record of it.',
-    },
-  )
-  .refine((o) => o.expiry !== 'CUSTOM' || o.customExpiry !== null, {
-    path: ['customExpiry'],
-    message: 'Give the date and time this override should stop applying.',
-  })
-  .refine((o) => o.expiry === 'CUSTOM' || o.customExpiry === null, {
-    path: ['customExpiry'],
-    message: 'A preset expiry does not take a custom time.',
-  });
+/**
+ * Everything about an override EXCEPT which stop it is on.
+ *
+ * Split out because the override now travels inside the stop save (§12.28),
+ * and on a new load the stop does not have an id yet — it is created in the
+ * same transaction. The server fills `stopId` in from the row it just wrote,
+ * which is also the only version it would be right to trust.
+ *
+ * The refinements are applied to both shapes below rather than to this
+ * object, because Zod cannot `.omit()` from a schema that already carries
+ * them — and two hand-maintained copies of a validation rule is exactly how
+ * §12.21 survived in one layer after being removed from another.
+ */
+const overrideFields = {
+  forcedStatus: z.enum(FORCED_STATUSES),
+  reason: z.enum(OVERRIDE_REASONS),
+  reasonNote: z.string().trim().max(500).nullable(),
+  expiry: z.enum(EXPIRY_PRESETS),
+  /** Required when `expiry` is CUSTOM, refused otherwise. */
+  customExpiry: CustomExpiry.nullable(),
+} as const;
+
+/** The three rules, applied identically wherever the fields appear. */
+function withOverrideRules<T extends z.ZodTypeAny>(schema: T) {
+  return schema
+    .refine(
+      (o: z.infer<T>) => o.reason !== 'OTHER' || (o.reasonNote ?? '').trim().length > 0,
+      {
+        path: ['reasonNote'],
+        // Overrides are countable in review rather than merely readable only
+        // if "Other" carries its note (§9.5).
+        message: 'Say what "Other" means here — this note is the only record of it.',
+      },
+    )
+    .refine((o: z.infer<T>) => o.expiry !== 'CUSTOM' || o.customExpiry !== null, {
+      path: ['customExpiry'],
+      message: 'Give the date and time this override should stop applying.',
+    })
+    .refine((o: z.infer<T>) => o.expiry === 'CUSTOM' || o.customExpiry === null, {
+      path: ['customExpiry'],
+      message: 'A preset expiry does not take a custom time.',
+    });
+}
+
+/** Standalone: `Clear now`'s sibling, and what server/override.ts takes. */
+export const OverrideInput = withOverrideRules(
+  z.object({ stopId: z.string().uuid(), ...overrideFields }).strict(),
+);
 
 export type OverrideInput = z.infer<typeof OverrideInput>;
+
+/**
+ * What rides inside a stop save. No `stopId` — the server uses the stop it
+ * just wrote, so a new load's override lands in the same transaction as the
+ * load, the stop and the appointment (§12.28).
+ */
+export const StopOverrideEdit = z.union([
+  z.object({ action: z.literal('clear') }).strict(),
+  // A plain union rather than discriminatedUnion: the refinements turn the
+  // `set` branch into a ZodEffects, which discriminatedUnion will not take.
+  withOverrideRules(z.object({ action: z.literal('set'), ...overrideFields }).strict()),
+]);
+
+export type StopOverrideEdit = z.infer<typeof StopOverrideEdit>;
 
 /** Clearing is its own action — `Clear now` in the detail block (§9.5). */
 export const ClearOverrideInput = z.object({ stopId: z.string().uuid() }).strict();

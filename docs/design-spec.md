@@ -2085,6 +2085,46 @@ Every write — arrival and departure — puts a row in `audit_log` with
 convinced it, so a stop that changed state overnight can be explained, and the
 threshold argued with, after the fact.
 
+## 12.28 The override rides inside the save
+
+A dispatcher who changes an appointment **and** forces a status is doing one
+thing. It used to be two HTTP requests to two routes against two tables: the
+stop save, then the override. Either could land without the other.
+
+The failure is not hypothetical and it is not loud. The dispatcher sees an
+error on a screen they are about to close; the next shift sees a board that
+disagrees with what was intended and no indication why. At 4am the error
+message is long gone and the row is all there is.
+
+**One endpoint, one transaction, both writes or neither.** `StopEdit` carries
+an optional `override` — `{ action: 'set', … }` or `{ action: 'clear' }` — and
+`saveStopEdit` applies it inside the transaction that wrote the stop.
+
+### It carries no `stopId`
+
+The embedded form deliberately omits it. On a new load the stop does not exist
+when the request is built, so the client could not supply one — and the server
+knows the right answer anyway, because it just wrote the row. `OverrideInput`
+keeps its `stopId` for the standalone route; the two share one field set and
+one copy of the three validation rules, because §12.21 survived precisely by
+having a rule in two places.
+
+### Nested transactions are savepoints
+
+`setOverride` and `clearOverride` open transactions of their own. Called from
+inside the save they become savepoints, so an override that fails rolls the
+stop write back with it. That is asserted directly: a save carrying an expiry
+already in the past throws, and the dispatcher note it also carried is
+**unchanged** afterwards — checked inside the transaction, where a partial
+commit would be visible if one existed.
+
+### `Clear now` stays its own request
+
+The block's `Clear now` button is not part of a save. It is an immediate,
+deliberate act with its own audit entry, and it is atomic by itself. Folding
+it into the save would mean a dispatcher had to press Save to undo something
+they had already decided to undo.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

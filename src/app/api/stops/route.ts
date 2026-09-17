@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { AuthError, requireRole } from '@/lib/auth';
 import { StopEdit } from '@/lib/stop-edit';
+import { statusConfig } from '@/server/fleet';
 import { saveStopEdit, StopEditError } from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
 
@@ -30,6 +31,9 @@ export async function POST(request: Request) {
     const result = await saveStopEdit(db, {
       actorUserId: user.id,
       edit: parsed.data,
+      // §12.28: the override rides along, and END_OF_DAY / UNTIL_APPT are
+      // resolved against the dispatch zone, not the browser's.
+      dispatchTz: statusConfig.dispatchTz,
     });
     return NextResponse.json(result);
   } catch (error: unknown) {

@@ -49,6 +49,7 @@ async function aStop(tx: Tx) {
 
   const saved = await saveStopEdit(tx as never, {
     actorUserId: null,
+    dispatchTz: DISPATCH_TZ,
     edit: StopEdit.parse({
       stopId: null,
       truckId: truck!.id,
