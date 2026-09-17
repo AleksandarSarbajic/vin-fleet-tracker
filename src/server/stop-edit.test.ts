@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { assignments, drivers, loads, stops, trucks, auditLog } from '@/db/schema';
@@ -348,5 +348,291 @@ withDb('the edit modal save', () => {
     expect(seen.result.reassignment).not.toBeNull();
     expect(seen.losing).toBeNull();
     expect(seen.gaining).toBe(seen.driverId);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.24 — the geocode on save
+ * ---------------------------------------------------------------------- */
+
+withDb('the forward geocode (§12.24)', () => {
+  const GEO_TOKEN = 'sk.test-geocoding-token';
+  const GRAND_FORKS = { lat: 47.9253, lng: -97.0329 };
+
+  const located = () =>
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            features: [
+              {
+                properties: {
+                  full_address: '1804 N Washington St, Grand Forks, ND 58203',
+                  coordinates: {
+                    latitude: GRAND_FORKS.lat,
+                    longitude: GRAND_FORKS.lng,
+                  },
+                  match_code: {
+                    confidence: 'exact',
+                    address_number: 'matched',
+                    street: 'matched',
+                  },
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+
+  const unlocatable = () =>
+    vi.fn(async () => new Response(JSON.stringify({ features: [] }), { status: 200 }));
+
+  const edit = (over: Partial<StopEdit> & { truckId: string }) =>
+    StopEdit.parse({
+      stopId: null,
+      loadNumber: 'TEST-GEO',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: '1804 North Washington Street',
+      city: 'Grand Forks',
+      state: 'ND',
+      zip: '58203',
+      appointment: {
+        type: 'APPT',
+        date: { y: 2026, m: 9, d: 18 },
+        time: { h: 14, min: 30 },
+        tz: 'America/Chicago',
+        windowMinutes: 30,
+      },
+      dispatcherNote: null,
+      ...over,
+    });
+
+  it('stores the coordinates, the precision and what was matched', async () => {
+    const saved = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const fetchImpl = located();
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      const [stop] = await tx
+        .select({
+          lat: stops.lat,
+          lng: stops.lng,
+          precision: stops.geocodePrecision,
+          confidence: stops.geocodeConfidence,
+          matched: stops.geocodedAddress,
+          at: stops.geocodedAt,
+        })
+        .from(stops)
+        .where(eq(stops.id, result.stopId));
+      return { stop, warnings: result.warnings, calls: fetchImpl.mock.calls.length };
+    });
+
+    expect(saved.calls).toBe(1);
+    expect(saved.stop?.lat).toBeCloseTo(GRAND_FORKS.lat, 4);
+    expect(saved.stop?.lng).toBeCloseTo(GRAND_FORKS.lng, 4);
+    expect(saved.stop?.precision).toBe('rooftop');
+    expect(saved.stop?.confidence).toBe('exact');
+    expect(saved.stop?.matched).toContain('Grand Forks');
+    expect(saved.stop?.at).not.toBeNull();
+    expect(saved.warnings).toEqual([]);
+  });
+
+  /**
+   * The rule that stops this costing money on every save. It rots silently if
+   * nobody asserts the CALL COUNT — the coordinates would still be right.
+   */
+  it('spends nothing when only the appointment time changed', async () => {
+    const calls = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const fetchImpl = located();
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      const afterCreate = fetchImpl.mock.calls.length;
+
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          stopId: created.stopId,
+          appointment: {
+            type: 'APPT',
+            date: { y: 2026, m: 9, d: 18 },
+            // Same address, different hour.
+            time: { h: 16, min: 0 },
+            tz: 'America/Chicago',
+            windowMinutes: 30,
+          },
+        }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      return { afterCreate, total: fetchImpl.mock.calls.length };
+    });
+
+    expect(calls.afterCreate).toBe(1);
+    expect(calls.total).toBe(1);
+  });
+
+  it('spends one call when an address field actually changed', async () => {
+    const total = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const fetchImpl = located();
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          stopId: created.stopId,
+          addressLine: '2100 South Columbia Road',
+        }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      return fetchImpl.mock.calls.length;
+    });
+    expect(total).toBe(2);
+  });
+
+  it('does not re-geocode when the address was only retyped differently', async () => {
+    const total = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const fetchImpl = located();
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          stopId: created.stopId,
+          // Same place, typed by a different dispatcher.
+          addressLine: '1804   north washington street',
+          zip: '58203-4412',
+        }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl,
+      });
+      return fetchImpl.mock.calls.length;
+    });
+    expect(total).toBe(1);
+  });
+
+  /** A geocode that fails is not a save that fails. */
+  it('saves the stop with null coordinates and warns, rather than refusing', async () => {
+    const saved = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          addressLine: '9999 Nowhere At All Parkway',
+          city: 'Xytherium',
+          state: 'ZZ',
+          zip: '00000',
+        }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl: unlocatable(),
+      });
+      const [stop] = await tx
+        .select({ lat: stops.lat, city: stops.city, precision: stops.geocodePrecision })
+        .from(stops)
+        .where(eq(stops.id, result.stopId));
+      return { stop, warnings: result.warnings };
+    });
+
+    // The dispatcher's work is saved and correct. It simply has no ETA.
+    expect(saved.stop?.city).toBe('Xytherium');
+    expect(saved.stop?.lat).toBeNull();
+    expect(saved.stop?.precision).toBeNull();
+    expect(saved.warnings).toHaveLength(1);
+    expect(saved.warnings[0]?.message).toMatch(/could not be located/i);
+  });
+
+  /**
+   * Located once, not located now. Keeping the old coordinates would project
+   * an ETA to the PREVIOUS address — a confident wrong number, which is the
+   * thing the whole cutoff exists to refuse.
+   */
+  it('clears stale coordinates when a re-typed address stops resolving', async () => {
+    const after = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl: located(),
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          stopId: created.stopId,
+          addressLine: '9999 Nowhere At All Parkway',
+        }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl: unlocatable(),
+      });
+      const [stop] = await tx
+        .select({ lat: stops.lat, lng: stops.lng, precision: stops.geocodePrecision })
+        .from(stops)
+        .where(eq(stops.id, created.stopId));
+      return stop;
+    });
+
+    expect(after?.lat).toBeNull();
+    expect(after?.lng).toBeNull();
+    expect(after?.precision).toBeNull();
+  });
+
+  /** §12.23 — an edit writes only the fields the form owns. */
+  it('leaves the appointment columns byte-identical when only the address changed', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl: located(),
+      });
+      const columns = {
+        start: stops.appointmentStartUtc,
+        end: stops.appointmentEndUtc,
+        tz: stops.appointmentTz,
+        type: stops.appointmentType,
+      };
+      const [before] = await tx.select(columns).from(stops).where(eq(stops.id, created.stopId));
+
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id, stopId: created.stopId, city: 'Fargo' }),
+        geocodeToken: GEO_TOKEN,
+        fetchImpl: located(),
+      });
+      const [after] = await tx.select(columns).from(stops).where(eq(stops.id, created.stopId));
+      return { before, after };
+    });
+
+    expect(seen.after?.start?.toISOString()).toBe(seen.before?.start?.toISOString());
+    expect(seen.after?.end?.toISOString()).toBe(seen.before?.end?.toISOString());
+    expect(seen.after?.tz).toBe(seen.before?.tz);
+    expect(seen.after?.type).toBe(seen.before?.type);
   });
 });

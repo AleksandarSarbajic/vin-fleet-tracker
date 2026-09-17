@@ -123,6 +123,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     setForm((f) => ({ ...f, [key]: value }));
 
   const [errors, setErrors] = useState<FieldError[]>([]);
+  /**
+   * §12.24. The save SUCCEEDED and something about it is worth knowing —
+   * today, that the address could not be located so the stop has no ETA.
+   *
+   * Deliberately not an error: the dispatcher's work is saved and correct,
+   * and colouring it red would send them looking for what they got wrong.
+   * The modal stays open on a warning rather than closing over it, because a
+   * banner nobody sees is the same as no banner.
+   */
+  const [saveWarnings, setSaveWarnings] = useState<FieldError[]>([]);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
   const [discarding, setDiscarding] = useState(false);
@@ -342,12 +352,19 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           return;
         }
 
+        const saved = (await response.json()) as { warnings?: FieldError[] };
+
         // The override is a second request to a second table. If it fails the
         // stop edit still stands and the field error says why, rather than the
         // whole save being rolled back on the client's behalf.
         if (!(await sendOverride())) return;
 
         await queryClient.invalidateQueries({ queryKey: key });
+
+        if (saved.warnings?.length) {
+          setSaveWarnings(saved.warnings);
+          return;
+        }
         onClose();
       } catch (error: unknown) {
         queryClient.setQueryData(key, snapshot);
@@ -440,6 +457,19 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
               Unsaved changes — {dirty.join(', ')}.
             </p>
+          ) : null}
+
+          {saveWarnings.length > 0 ? (
+            <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
+              <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
+                Saved · one thing to know
+              </p>
+              {saveWarnings.map((warning) => (
+                <p key={warning.field + warning.message} className="mt-0.5 text-body text-text">
+                  {warning.message}
+                </p>
+              ))}
+            </div>
           ) : null}
 
           <div className="p-4">

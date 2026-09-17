@@ -1,8 +1,10 @@
 import { eq, sql } from 'drizzle-orm';
 import { loads, stops, trucks } from '@/db/schema';
+import { normalizeAddress, type AddressParts } from '@/lib/address';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, type ResolvedAppointment } from './appointment';
 import { writeAudit, type AuditEntry, type Db } from './audit';
+import { geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
 import { applyReassignment, type ReassignPreview } from './reassign';
 
 /**
@@ -15,11 +17,23 @@ import { applyReassignment, type ReassignPreview } from './reassign';
  * saved.
  */
 
+export interface SaveWarning {
+  field: string;
+  message: string;
+}
+
 export interface StopEditResult {
   stopId: string;
   loadId: string;
   appointment: ResolvedAppointment | null;
   reassignment: ReassignPreview | null;
+  /**
+   * Things that went wrong without failing the save. Today that is only a
+   * geocode that could not place the address (§12.24): the stop is saved and
+   * correct, it simply has no ETA. The modal shows these as WARNINGS — an
+   * error would imply the dispatcher's work was lost, and it was not.
+   */
+  warnings: SaveWarning[];
 }
 
 export class StopEditError extends Error {
@@ -34,9 +48,69 @@ export class StopEditError extends Error {
 
 export async function saveStopEdit(
   db: Db,
-  input: { actorUserId: string | null; edit: StopEdit },
+  input: {
+    actorUserId: string | null;
+    edit: StopEdit;
+    /**
+     * `serverEnv.MAPBOX_GEOCODING_TOKEN`, passed in by the route rather than
+     * read here — same reason as in geocode.ts: it keeps the env boundary in
+     * one place, keeps this file out of `server-only` so it stays testable,
+     * and makes it visible at the call site which of the two Mapbox tokens
+     * this spends. Undefined degrades to a warning, never to a failed save.
+     */
+    geocodeToken?: string | undefined;
+    /** Injected by the tests; production uses the real network. */
+    fetchImpl?: typeof fetch;
+  },
 ): Promise<StopEditResult> {
   const { edit } = input;
+  const warnings: SaveWarning[] = [];
+
+  const typed: AddressParts = {
+    addressLine: edit.addressLine,
+    city: edit.city,
+    state: edit.state,
+    zip: edit.zip,
+  };
+
+  /* --------------------------- the geocode --------------------------- */
+
+  /**
+   * BEFORE the transaction, deliberately.
+   *
+   * An HTTP round trip inside an open transaction holds a pooler connection
+   * for as long as the vendor takes to answer — which is how a slow third
+   * party turns into "the app is down". Nothing here is less atomic for it:
+   * the save still lands with the coordinates it resolved or does not land
+   * at all. The only cost of a rolled-back save is a geocode we already
+   * cached.
+   *
+   * The pre-read decides whether to SPEND a call, nothing more. If it races
+   * with another edit the worst case is a wasted call, or the stale-address
+   * branch below, which refuses to keep coordinates that no longer describe
+   * the address being written.
+   */
+  const previousAddress = edit.stopId ? await readAddress(db, edit.stopId) : null;
+  const addressChanged =
+    previousAddress === null || normalizeAddress(previousAddress) !== normalizeAddress(typed);
+
+  let geocode: GeocodeOutcome | null = null;
+  if (addressChanged) {
+    geocode = await geocodeAddress(db, typed, {
+      token: input.geocodeToken,
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+    });
+    if (!geocode.ok && geocode.reason !== 'empty-address') {
+      const named =
+        geocode.unmatched.length > 0
+          ? ` Could not match ${geocode.unmatched.join(' or ')}.`
+          : '';
+      warnings.push({
+        field: 'addressLine',
+        message: `${MISS_MESSAGE[geocode.reason]}${named}`,
+      });
+    }
+  }
 
   return db.transaction(async (tx) => {
     /* -------------------------- the assignment ------------------------- */
@@ -128,6 +202,46 @@ export async function saveStopEdit(
       throw new StopEditError('That stop no longer exists.', 'stopId');
     }
 
+    /**
+     * §12.23 — an edit writes only the fields the form owns. Coordinates are
+     * not a form field, but they are DERIVED from four that are, in the same
+     * save, from the same input, so writing them here is the rule working
+     * rather than an exception to it. What the rule does forbid is touching
+     * them when the address did not change, which is the middle branch.
+     */
+    const geocodeColumns = geocode
+      ? geocode.ok
+        ? {
+            lat: geocode.lat,
+            lng: geocode.lng,
+            geocodePrecision: geocode.precision,
+            geocodeConfidence: geocode.confidence,
+            geocodedAddress: geocode.matchedAddress,
+            geocodedAt: sql`now()`,
+          }
+        : {
+            // Located once, not located now. Keeping the old coordinates
+            // would project an ETA to the PREVIOUS address, which is the
+            // confident wrong number the cutoff exists to refuse.
+            lat: null,
+            lng: null,
+            geocodePrecision: null,
+            geocodeConfidence: null,
+            geocodedAddress: null,
+            geocodedAt: null,
+          }
+      : existingAddressStillMatches(existing, typed)
+        ? {}
+        : {
+            // The address moved under us between the pre-read and here.
+            lat: null,
+            lng: null,
+            geocodePrecision: null,
+            geocodeConfidence: null,
+            geocodedAddress: null,
+            geocodedAt: null,
+          };
+
     const appointmentColumns = {
       appointmentStartUtc: appointment ? sql`${appointment.startUtc}::timestamptz` : null,
       appointmentEndUtc: appointment?.endUtc ? sql`${appointment.endUtc}::timestamptz` : null,
@@ -160,6 +274,7 @@ export async function saveStopEdit(
           dispatcherNote: edit.dispatcherNote,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
+          ...geocodeColumns,
           ...appointmentColumns,
         })
         .where(eq(stops.id, stopId));
@@ -190,6 +305,7 @@ export async function saveStopEdit(
           dispatcherNote: edit.dispatcherNote,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
+          ...geocodeColumns,
           ...appointmentColumns,
         })
         .returning({ id: stops.id });
@@ -229,6 +345,22 @@ export async function saveStopEdit(
         zip: edit.zip,
         appointmentStartUtc: appointment?.startUtc ?? null,
         appointmentTz: appointment?.tz ?? null,
+        /**
+         * What the geocoder did, or that it was not asked. An ETA a
+         * dispatcher disputes is answerable from here: which address was
+         * matched, how confidently, and whether this save even looked.
+         */
+        geocode: geocode
+          ? geocode.ok
+            ? {
+                lat: geocode.lat,
+                lng: geocode.lng,
+                precision: geocode.precision,
+                confidence: geocode.confidence,
+                matched: geocode.matchedAddress,
+              }
+            : { missed: geocode.reason, unmatched: geocode.unmatched }
+          : 'address unchanged — not re-geocoded',
         /** Kept: on the fall-back date this says which 01:30 was stored. */
         appointmentResolution: appointment?.resolution ?? null,
         dispatcherNote: edit.dispatcherNote,
@@ -237,8 +369,31 @@ export async function saveStopEdit(
     };
     await writeAudit(tx, entry);
 
-    return { stopId, loadId, appointment, reassignment };
+    return { stopId, loadId, appointment, reassignment, warnings };
   });
+}
+
+/** The address as stored, for the "did it actually change?" test. */
+async function readAddress(db: Db, stopId: string): Promise<AddressParts | null> {
+  const [row] = await db
+    .select({
+      addressLine: stops.addressLine,
+      city: stops.city,
+      state: stops.state,
+      zip: stops.zip,
+    })
+    .from(stops)
+    .where(eq(stops.id, stopId))
+    .limit(1);
+  return row ?? null;
+}
+
+function existingAddressStillMatches(
+  existing: { addressLine: string | null; city: string | null; state: string | null; zip: string | null } | undefined,
+  typed: AddressParts,
+): boolean {
+  if (!existing) return false;
+  return normalizeAddress(existing) === normalizeAddress(typed);
 }
 
 /** Only an admin may flip this, and only from the edit modal (§12.14). */
