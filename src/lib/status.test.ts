@@ -37,6 +37,8 @@ const stop = (over: Partial<StopFacts> = {}): StopFacts => ({
   apptType: 'APPT',
   arrivedAt: null,
   ...STOP_COORDS,
+  precision: 'rooftop',
+  hasAddress: true,
   ...over,
 });
 
@@ -164,7 +166,7 @@ describe('no coordinates (§12.24)', () => {
     const result = evaluate(blind(), config, NOW);
     expect(result.etaUtc).toBeNull();
     // A dispatcher has to tell "we cannot project this" from "nothing here".
-    expect(result.etaAbsence).toBe('no-coordinates');
+    expect(result.etaAbsence).toBe('address-not-located');
   });
 
   it('falls back to the clock for LATE', () => {
@@ -295,14 +297,110 @@ describe('the feed, which is not the same as a truck (§12.3)', () => {
 describe('the projection itself', () => {
   it('is straight-line × road factor ÷ average speed', () => {
     const miles = haversineMiles(NEARBY, STOP_COORDS);
-    const eta = projectEta(truck(), config, NOW)!;
-    const hours = (new Date(eta).getTime() - NOW.getTime()) / 3_600_000;
+    const facts = truck();
+    const eta = projectEta(facts, config)!;
+    // Measured from the FIX, not from `now` — see below.
+    const from = new Date(facts.recordedAtUtc!).getTime();
+    const hours = (new Date(eta).getTime() - from) / 3_600_000;
     expect(hours).toBeCloseTo((miles * config.roadFactor) / config.avgSpeedMph, 6);
   });
 
   it('is null when either end has no coordinates', () => {
-    expect(projectEta(truck({ lat: null, lng: null }), config, NOW)).toBeNull();
-    expect(projectEta(truck({ stop: stop({ lat: null }) }), config, NOW)).toBeNull();
+    expect(projectEta(truck({ lat: null, lng: null }), config)).toBeNull();
+    expect(projectEta(truck({ stop: stop({ lat: null }) }), config)).toBeNull();
+  });
+
+  it('is null for a truck that has never reported a position', () => {
+    expect(projectEta(truck({ recordedAtUtc: null }), config)).toBeNull();
+  });
+
+  /* ------------------------ anchored, not floating --------------------- */
+
+  /**
+   * The ETA departs from the GPS fix, not from the clock.
+   *
+   * `now + travelTime` means a truck whose feed froze has an ETA that slides
+   * forward forever — the board quietly re-promising a vehicle that has not
+   * moved. Anchoring makes that drift impossible rather than policed.
+   */
+  describe('the ETA is anchored to the position (§12.24)', () => {
+    it('does not move when only the clock moves', () => {
+      const facts = truck();
+      const first = evaluate(facts, config, NOW);
+      const anHourLater = evaluate(facts, config, new Date(NOW.getTime() + 60 * 60_000));
+      expect(anHourLater.etaUtc).toBe(first.etaUtc);
+    });
+
+    it('moves when a new fix lands, and only then', () => {
+      const before = evaluate(truck(), config, NOW);
+      // Same truck, same stop, a fix taken ten minutes later.
+      const after = evaluate(truck({ recordedAtUtc: at(8) }), config, NOW);
+      expect(after.etaUtc).not.toBe(before.etaUtc);
+      expect(new Date(after.etaUtc!).getTime() - new Date(before.etaUtc!).getTime()).toBe(
+        10 * 60_000,
+      );
+    });
+
+    it('puts a frozen truck’s ETA in the past rather than sliding it forward', () => {
+      // A fix from four hours ago, on a truck 40 miles out. Honest: the
+      // arrival it implies has already been and gone.
+      const frozen = truck({ recordedAtUtc: at(-240) });
+      const result = evaluate(frozen, config, NOW);
+      expect(new Date(result.etaUtc!).getTime()).toBeLessThan(NOW.getTime());
+    });
+  });
+
+  /* ------------------------------- miles ------------------------------- */
+
+  describe('miles remaining (§12.24)', () => {
+    it('is the same distance the ETA was built from', () => {
+      const result = evaluate(truck(), config, NOW);
+      expect(result.milesRemaining).toBeCloseTo(haversineMiles(NEARBY, STOP_COORDS), 6);
+    });
+
+    it('is null exactly when the ETA is null', () => {
+      const noCoords = evaluate(truck({ stop: stop({ lat: null, lng: null }) }), config, NOW);
+      expect(noCoords.etaUtc).toBeNull();
+      expect(noCoords.milesRemaining).toBeNull();
+    });
+
+    /** §5.8: a distance beside a withheld time is the same fiction. */
+    it('is withheld with the ETA on an unassigned truck', () => {
+      const unassigned = evaluate(truck({ hasDriver: false }), config, NOW);
+      expect(unassigned.etaUtc).toBeNull();
+      expect(unassigned.milesRemaining).toBeNull();
+      expect(unassigned.lastComputedEtaUtc).not.toBeNull();
+    });
+  });
+
+  /* ------------------------ which kind of nothing ---------------------- */
+
+  describe('the absence says which kind it is (§12.24)', () => {
+    it('reads `address-not-located` when an address was typed', () => {
+      const result = evaluate(
+        truck({ stop: stop({ lat: null, lng: null, hasAddress: true }) }),
+        config,
+        NOW,
+      );
+      expect(result.etaAbsence).toBe('address-not-located');
+    });
+
+    it('reads `no-address` when nothing was entered', () => {
+      const result = evaluate(
+        truck({ stop: stop({ lat: null, lng: null, hasAddress: false }) }),
+        config,
+        NOW,
+      );
+      expect(result.etaAbsence).toBe('no-address');
+    });
+  });
+
+  /** Nothing branches on precision yet — it rides along for a future rule. */
+  it('carries the coordinate precision beside the status', () => {
+    expect(evaluate(truck(), config, NOW).precision).toBe('rooftop');
+    expect(
+      evaluate(truck({ stop: stop({ precision: 'city' }) }), config, NOW).precision,
+    ).toBe('city');
   });
 
   it('measures a known distance correctly', () => {

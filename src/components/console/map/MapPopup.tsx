@@ -3,6 +3,7 @@
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
+import { milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
@@ -17,7 +18,10 @@ import { STATUS_LABEL } from '@/lib/status';
  * this org, so every value would be null today. It joins when a dispatcher
  * has somewhere to type one.
  *
- * TODO(phase 5): `Projected` joins the fact list with the status engine.
+ * §12.24: `Projected` carries the distance AND the time — "412 mi · ETA
+ * 14:18 CDT" — because the popup has the room the 128px ETA column does not,
+ * and it sits directly under Next stop, where the dispatcher is already
+ * looking when they ask "can he still make it?".
  */
 
 /**
@@ -32,6 +36,41 @@ function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
   return stop.apptEndUtc
     ? `${from} to ${timeInZone(new Date(stop.apptEndUtc), stop.apptTz)}`
     : from;
+}
+
+/**
+ * The projection line, or the reason there isn't one.
+ *
+ * An absent ETA names its cause here in full — "no ETA · address not
+ * located" — rather than the row's bare `no ETA`. A dispatcher has to be
+ * able to tell "the board cannot project this stop" from "nobody has typed
+ * anything yet", and as an em dash those are the same pixel.
+ */
+function projectedLine(row: FleetRow): string {
+  const zone = row.nextStop?.apptTz;
+  switch (row.etaAbsence) {
+    case 'has-eta': {
+      if (!row.etaUtc || !zone) return '—';
+      const time = `ETA ${timeInZone(new Date(row.etaUtc), zone)}`;
+      const miles = milesText(row.milesRemaining);
+      const line = miles ? `${miles} · ${time}` : time;
+      // A city centroid can be several miles out. Saying so costs four words
+      // and stops the number being read as a rooftop promise.
+      return row.etaPrecision === 'city' ? `${line} · from city centre` : line;
+    }
+    case 'address-not-located':
+      return 'no ETA · address not located';
+    case 'no-address':
+      return 'no ETA · no address entered';
+    case 'suppressed-unassigned':
+      return row.lastComputedEtaUtc && zone
+        ? `last computed ${timeInZone(new Date(row.lastComputedEtaUtc), zone)} · no driver`
+        : 'no ETA · no driver assigned';
+    case 'arrived':
+      return 'arrived';
+    case 'no-appointment':
+      return 'no appointment';
+  }
 }
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -106,6 +145,11 @@ export function MapPopup({
                 }`
               : 'No load on this truck'}
           </Row>
+          {row.nextStop ? (
+            <Row label="Projected">
+              <span className="tabular-nums">{projectedLine(row)}</span>
+            </Row>
+          ) : null}
           {row.nextStop ? (
             <Row label={row.nextStop.apptType === 'FCFS' ? 'Receiving' : 'Appt'}>
               <span className="tabular-nums">{apptLine(row.nextStop)}</span>

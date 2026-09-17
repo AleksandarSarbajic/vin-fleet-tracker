@@ -107,6 +107,9 @@ withDb('the fleet query, against the real database', () => {
       appointment_type: 'string',
       stop_lat: 'number',
       stop_lng: 'number',
+      // Cast to text in the lateral: a pg enum read through db.execute comes
+      // back as a driver value, and the row type must not claim otherwise.
+      stop_precision: 'string',
       arrived_at: 'string',
       forced_status: 'string',
       reason: 'string',
@@ -192,6 +195,7 @@ describe('the schema guard itself', () => {
     appointment_type: null,
     stop_lat: null,
     stop_lng: null,
+    stop_precision: null,
     arrived_at: null,
     forced_status: null,
     reason: null,

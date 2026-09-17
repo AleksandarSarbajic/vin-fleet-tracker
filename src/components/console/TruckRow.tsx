@@ -108,12 +108,29 @@ function apptText(row: FleetRow): { prefix: string | null; time: string } {
 }
 
 /**
+ * Miles remaining, rounded the way a dispatcher would say it.
+ *
+ * "412 mi", never "411.7 mi" — the projection is a straight line times a
+ * fudge factor, and a decimal place claims a precision it does not have.
+ * Under ten miles the number stops being useful at all: what matters then is
+ * that he is basically there, so it says so.
+ */
+export function milesText(miles: number | null): string | null {
+  if (miles === null) return null;
+  if (miles < 10) return 'arriving';
+  return `${Math.round(miles)} mi`;
+}
+
+/**
  * The ETA cell.
  *
- * An absent ETA says WHY (§12.24). A stop a dispatcher typed has no
- * coordinates — there is no geocoder — so nothing can be projected for it,
- * and that is a different fact from "no appointment" or "not computed yet".
- * All three rendered as an em dash before, which is the same as not saying.
+ * An absent ETA says WHY (§12.24), and says WHICH kind of absent: an address
+ * that failed to locate needs somebody to look at it, an empty one does not.
+ * Both rendered as an em dash before, which is the same as not saying.
+ *
+ * Miles are NOT here. The column is 128px and already tight with a time in
+ * it; the distance goes in the tooltip, and on the map popup where there is
+ * room to read it (§12.24).
  *
  * UNASSIGNED keeps its last computed value, struck through by the class
  * above: an ETA with no driver is fiction, but blanking it loses information
@@ -131,7 +148,9 @@ function etaText(row: FleetRow, feedStale: boolean): string {
       return row.lastComputedEtaUtc && zone
         ? timeInZone(new Date(row.lastComputedEtaUtc), zone)
         : '—';
-    case 'no-coordinates':
+    case 'address-not-located':
+      return 'no ETA';
+    case 'no-address':
       return 'no ETA';
     case 'arrived':
       return 'arrived';
@@ -142,8 +161,21 @@ function etaText(row: FleetRow, feedStale: boolean): string {
 
 function etaTitle(row: FleetRow): string | undefined {
   switch (row.etaAbsence) {
-    case 'no-coordinates':
-      return 'No ETA — this stop has no coordinates, so nothing can be projected for it.';
+    case 'has-eta': {
+      const miles = milesText(row.milesRemaining);
+      if (!miles) return undefined;
+      const how =
+        row.etaPrecision === 'city'
+          ? ' Projected from the city centre, so it can be several miles out.'
+          : '';
+      // The ETA departs from the GPS fix, not from the clock — saying so here
+      // is what makes a time in the past read as information rather than a bug.
+      return `${miles} remaining, from the last GPS fix.${how}`;
+    }
+    case 'address-not-located':
+      return 'No ETA — this address could not be located, so nothing can be projected for it.';
+    case 'no-address':
+      return 'No ETA — no address has been entered for this stop yet.';
     case 'suppressed-unassigned':
       return 'Last computed ETA. No driver is assigned, so it is not a projection any more.';
     case 'arrived':

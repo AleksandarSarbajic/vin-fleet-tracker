@@ -52,6 +52,10 @@ export interface FleetRow {
   /** Live only; an expired override reads as none (expiry on read). */
   override: OverrideFacts | null;
   etaUtc: string | null;
+  /** Straight-line miles left, from the same calculation as the ETA (§12.24). */
+  milesRemaining: number | null;
+  /** How well the stop's coordinates are known. Null when there are none. */
+  etaPrecision: 'rooftop' | 'city' | null;
   /** Why there is no ETA, so the UI can say it rather than print a dash. */
   etaAbsence: EtaAbsence;
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
@@ -95,9 +99,15 @@ export interface NextStop {
   /** The facility's IANA zone. The appointment renders in THIS zone (§7.1). */
   apptTz: string | null;
   apptType: 'APPT' | 'FCFS';
-  /** Null on every stop a dispatcher typed. See §12.24 and `etaAbsence`. */
+  /**
+   * Written by the forward geocoder from the address above (§12.24), never
+   * typed. Null when the address could not be located, or when there is
+   * none — `etaAbsence` says which.
+   */
   lat: number | null;
   lng: number | null;
+  /** `rooftop` is a building; `city` is a centroid, several miles wide. */
+  precision: 'rooftop' | 'city' | null;
   arrivedAt: string | null;
 }
 
@@ -136,7 +146,8 @@ export const LATEST_POSITION_SQL = sql`
     ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.stop_type,
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
-    ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.arrived_at,
+    ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
+    ns.arrived_at,
     ov.forced_status, ov.reason, ov.reason_note, ov.set_by_name,
     ov.set_at, ov.expires_at,
     (select count(*) from loads ol
@@ -184,6 +195,7 @@ export const LATEST_POSITION_SQL = sql`
       s.appointment_type::text as appointment_type,
       s.lat                   as stop_lat,
       s.lng                   as stop_lng,
+      s.geocode_precision::text as stop_precision,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at
     from loads l
@@ -287,6 +299,7 @@ export const FleetQueryRow = z.object({
   /** Null on every stop a dispatcher typed — there is no geocoder (§12.24). */
   stop_lat: z.number().nullable(),
   stop_lng: z.number().nullable(),
+  stop_precision: z.enum(['rooftop', 'city']).nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
@@ -323,6 +336,8 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     computed: 'ON_TIME',
     override: overrideOf(raw),
     etaUtc: null,
+    milesRemaining: null,
+    etaPrecision: null,
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
@@ -344,6 +359,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             apptType: raw.appointment_type ?? 'APPT',
             lat: raw.stop_lat,
             lng: raw.stop_lng,
+            precision: raw.stop_precision,
             arrivedAt: raw.arrived_at,
           }
         : null,
@@ -408,6 +424,11 @@ export function applyStatus(
               arrivedAt: row.nextStop.arrivedAt,
               lat: row.nextStop.lat,
               lng: row.nextStop.lng,
+              precision: row.nextStop.precision,
+              // Whether a dispatcher typed one, not whether it resolved.
+              hasAddress: Boolean(
+                row.nextStop.addressLine ?? row.nextStop.city ?? row.nextStop.zip,
+              ),
             }
           : null,
         override: row.override,
@@ -421,6 +442,8 @@ export function applyStatus(
       computed: result.computed,
       override: result.override,
       etaUtc: result.etaUtc,
+      milesRemaining: result.milesRemaining,
+      etaPrecision: result.precision,
       etaAbsence: result.etaAbsence,
       lastComputedEtaUtc: result.lastComputedEtaUtc,
       deadlineUtc: result.deadlineUtc,

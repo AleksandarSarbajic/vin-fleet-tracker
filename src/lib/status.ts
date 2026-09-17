@@ -101,9 +101,25 @@ export interface StopFacts {
   apptEndUtc: string | null;
   apptType: 'APPT' | 'FCFS';
   arrivedAt: string | null;
-  /** Null on every stop a dispatcher typed — see `etaAbsence`. */
+  /**
+   * Written only by the forward geocoder (§12.24). Null when the address
+   * could not be located, or when there is no address at all — `hasAddress`
+   * tells those two apart, and the row says which.
+   */
   lat: number | null;
   lng: number | null;
+  /**
+   * How well we know where this is. `city` is a centroid and can be several
+   * miles out; `rooftop` is a building.
+   *
+   * Nothing branches on this yet, deliberately. It rides alongside the status
+   * so that a future rule can be more cautious about a LATE built on a city
+   * centroid — which is the one that puts a dispatcher on the phone to a
+   * broker — without having to re-plumb the engine to find out.
+   */
+  precision: 'rooftop' | 'city' | null;
+  /** True when a dispatcher typed an address, located or not. */
+  hasAddress: boolean;
 }
 
 export const OVERRIDE_REASONS = [
@@ -151,8 +167,20 @@ export type EtaAbsence =
   | 'has-eta'
   | 'arrived'
   | 'no-appointment'
-  /** §12.24: the stop has no coordinates, so nothing can be projected. */
-  | 'no-coordinates'
+  /**
+   * §12.24. Two reasons, not one, because a dispatcher has to be able to
+   * tell them apart at a glance:
+   *
+   *   `address-not-located` — an address was typed and the geocoder could
+   *                           not place it. Somebody should look at it.
+   *   `no-address`          — nothing was entered yet. Normal, and nobody's
+   *                           fault.
+   *
+   * As a single `no-coordinates` these read identically, and the one that
+   * needs attention hides behind the one that does not.
+   */
+  | 'address-not-located'
+  | 'no-address'
   /** An ETA for a truck with no driver is fiction (§5.8). */
   | 'suppressed-unassigned';
 
@@ -165,6 +193,13 @@ export interface StatusResult {
   override: OverrideFacts | null;
   etaUtc: string | null;
   etaAbsence: EtaAbsence;
+  /**
+   * Straight-line miles from the truck's last position to the stop, already
+   * computed to produce the ETA. Null whenever the ETA is null.
+   */
+  milesRemaining: number | null;
+  /** Carried beside the status so a future rule can weigh it — see StopFacts. */
+  precision: 'rooftop' | 'city' | null;
   /**
    * The ETA the engine would have produced for an UNASSIGNED truck. The row
    * renders it struck through, so the number is visible as history without
@@ -196,25 +231,58 @@ export function haversineMiles(
  * Straight line × road factor ÷ average speed, from the truck's last known
  * position (PROJECT_BRIEF). Null when either end has no coordinates.
  *
+ * ## The ETA is anchored to the POSITION, not to the clock
+ *
+ * It departs from `recordedAtUtc` — the instant the GPS fix was taken — not
+ * from `now`. This is deliberate and it is load-bearing.
+ *
+ * `now + travelTime` looks equivalent and is not. It means a truck whose feed
+ * froze forty minutes ago has an ETA that slides forward forever: every read
+ * re-promises a truck that has not moved, and the board quietly stays
+ * optimistic about the one vehicle nobody can see. That is an ETA drifting
+ * away from the position it was computed from, with nothing to stop it.
+ *
+ * Anchoring makes the drift impossible rather than policed. The ETA becomes a
+ * pure function of (position, stop coordinates, config), so it cannot
+ * disagree with its position — it IS its position, moved forward by the
+ * distance left. It changes when and only when a new fix lands, which is what
+ * "recompute on each position update" means when there is nothing to
+ * recompute. And because `now` is not an input, two renders a second apart
+ * produce the same string, which is the hydration-mismatch class closed off
+ * at the source rather than patched at the seam.
+ *
+ * On a fresh fix the two differ by under a minute. On a frozen one the ETA
+ * sits in the past, which is honest — and STALE_GPS is already saying so.
+ *
  * Phase 2 of the brief swaps this for a routing provider behind the same
  * signature — which is why it takes facts and returns an instant rather than
  * reaching for anything.
  */
-export function projectEta(
+export function projectEta(facts: TruckFacts, config: StatusConfig): string | null {
+  const projection = project(facts, config);
+  return projection?.etaUtc ?? null;
+}
+
+/** Miles and ETA together: the distance is computed to produce the time. */
+export function project(
   facts: TruckFacts,
   config: StatusConfig,
-  now: Date,
-): string | null {
+): { etaUtc: string; miles: number } | null {
   const stop = facts.stop;
   if (!stop || stop.lat === null || stop.lng === null) return null;
   if (facts.lat === null || facts.lng === null) return null;
+  // No fix, no anchor. A truck that has never reported cannot be projected.
+  if (facts.recordedAtUtc === null) return null;
 
   const miles = haversineMiles(
     { lat: facts.lat, lng: facts.lng },
     { lat: stop.lat, lng: stop.lng },
   );
   const hours = (miles * config.roadFactor) / config.avgSpeedMph;
-  return new Date(now.getTime() + hours * 3_600_000).toISOString();
+  const from = new Date(facts.recordedAtUtc).getTime();
+  if (Number.isNaN(from)) return null;
+
+  return { etaUtc: new Date(from + hours * 3_600_000).toISOString(), miles };
 }
 
 /** The calendar date in a zone, as YYYY-MM-DD. */
@@ -249,7 +317,8 @@ export function evaluate(
   const deadlineUtc = stop ? (stop.apptEndUtc ?? stop.apptStartUtc) : null;
   const hasAppointment = Boolean(stop?.apptStartUtc);
 
-  const etaUtc = projectEta(facts, config, now);
+  const projection = project(facts, config);
+  const etaUtc = projection?.etaUtc ?? null;
   const computed = computeStatus(facts, config, now, {
     hasAppointment,
     deadlineUtc,
@@ -265,14 +334,24 @@ export function evaluate(
   if (computed === 'ARRIVED') etaAbsence = 'arrived';
   else if (suppressed) etaAbsence = 'suppressed-unassigned';
   else if (!hasAppointment) etaAbsence = 'no-appointment';
-  else if (etaUtc === null) etaAbsence = 'no-coordinates';
+  else if (etaUtc === null) {
+    // §12.24: which kind of nothing this is. An address that failed to
+    // locate needs somebody to look at it; an empty one does not.
+    etaAbsence = stop?.hasAddress ? 'address-not-located' : 'no-address';
+  }
+
+  const shown = suppressed || computed === 'ARRIVED' ? null : etaUtc;
 
   return {
     status: override ? override.forcedStatus : computed,
     computed,
     override,
-    etaUtc: suppressed || computed === 'ARRIVED' ? null : etaUtc,
+    etaUtc: shown,
     etaAbsence,
+    // Miles follow the ETA exactly. A distance shown next to a withheld time
+    // would be the same fiction the suppression exists to avoid (§5.8).
+    milesRemaining: shown === null ? null : (projection?.miles ?? null),
+    precision: stop?.precision ?? null,
     lastComputedEtaUtc: suppressed ? etaUtc : null,
     deadlineUtc,
   };
