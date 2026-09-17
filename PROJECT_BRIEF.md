@@ -41,12 +41,27 @@ Next.js App Router, TypeScript `strict`, Tailwind, shadcn/ui, **Supabase** (Post
 
 ### Supabase specifics
 
-- **Two connection strings.** Use the transaction-mode pooler (port 6543) from Next.js route handlers, and the direct connection (port 5432) for Drizzle migrations and for the long-running ingestion worker. Getting this backwards produces intermittent failures under load that look like application bugs. Disable prepared statements on the pooled connection.
+- **Two connection strings.** Transaction pooler (`…pooler.supabase.com:6543`, username `postgres.<ref>`) from Next.js route handlers, with prepared statements disabled — transaction mode does not support them. For Drizzle migrations and the long-running worker, use the **session pooler** (`…pooler.supabase.com:5432`, same username), not the direct `db.<ref>.supabase.co:5432` string: direct connections are IPv6-only without the paid add-on, and common worker hosts have no outbound IPv6. Session mode is a persistent connection like a direct one and supports prepared statements. Env names: `DATABASE_URL` for the transaction pooler, `DIRECT_URL` for the session pooler. Getting these backwards produces intermittent failures under load that look like application bugs.
 - **The worker does not run on Supabase.** `pg_cron` has a one-minute floor and Edge Functions aren't built for a persistent poller, so the worker stays a standalone Node process (`npm run worker`) on a small VM, Railway or Fly. It connects directly, not through the pooler.
 - **Secret keys are server-side only.** Use the publishable/secret key system, not the legacy `anon` and `service_role` JWTs — those are deprecated and newer projects don't have them at all. The browser gets `sb_publishable_…`; `sb_secret_…` never leaves the server, never `NEXT_PUBLIC_*`, never in a client bundle. Issue one secret key for the Next.js app and a separate one for the ingestion worker so either can be rotated alone. Env names: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`.
 - **RLS on every table, no exceptions.** All application reads and writes go through our own route handlers using a secret key, so the policies are a backstop: enable RLS and write deny-by-default policies so an exposed publishable key reads nothing. Do not build the app on client-side Supabase calls with permissive policies.
 - **Auth** is Supabase Auth (email/password, or Google Workspace if they want it later). Roles live in a `profiles` table keyed to `auth.users.id` with `role` in `admin | dispatcher | viewer`. Check the role server-side on every mutating route; never trust a role claim from the client.
 - **Realtime is not in scope for v1.** Clients poll our API with TanStack Query at 15–30s. Once the app is stable, subscribing to `positions` via Realtime instead of polling is a reasonable phase-6 optimisation — propose it then, don't build it now.
+
+### Verified against the real account
+
+These were confirmed by calling the live Samsara org on 2026-09-16. Build to them; do not re-derive them.
+
+- **`gps.reverseGeo.formattedLocation` exists and is populated.** Confirmed shape: `"Maple Road, New Lenox, IL, 60451"`. This is why no geocoding service is used. Store the string whole; the Position column renders city and state, the detail panel and tooltip get the full string.
+- **The stats feed returns every vehicle ever registered, including dead ones.** One response contained fixes ranging from seconds old to seven months old — trucks parked or decommissioned since 2019 are still in the feed with their last known position. Samsara exposes no active flag on vehicles. Therefore `trucks.active` is ours: seed it from position recency (a fix within the last 24h = active), let an admin flip it, show only active trucks in the console, and put the rest behind a filter. Never render the raw Samsara vehicle list as the fleet — half of it is history.
+- **Vehicle `name` is `"Truck #147"`, not `147`.** Store the raw Samsara name and a parsed `truck_number`; display the bare number in the tabular-figure column.
+- **Do not use the `tags` field for truck numbers.** Tags disagree with names on at least one vehicle in this org (`Truck #147` carries tag `Kamion 129`). `name` is the source of truth.
+- **`headingDegrees` is 0 on stationary vehicles.** Don't rotate the map marker when `speedMilesPerHour` is 0.
+- **Drivers: store `id`, `name`, and `driverActivationStatus` only.** The payload also contains `licenseNumber`, `licenseState`, `eldSettings` and `hosSetting` — store none of it. Licence data is liability with no use here, and the ELD fields are the HOS data we cut.
+- **Samsara returns no driver phone numbers for this org.** Driver cell is a field dispatchers fill in our app, not a Samsara field. The detail panel's "Call driver" control depends on that field being populated; hide it when empty rather than rendering a dead button.
+- **Every driver's `timezone` is `America/Chicago`**, consistent with the dispatch timezone above.
+- **`/fleet/driver-vehicle-assignments` requires `filterBy=vehicles` or `filterBy=drivers`.** Without it the endpoint returns 400, which is a parameter error, not a scope error.
+- **Token scopes granted:** Read Vehicles, Read Vehicle Statistics, Read Drivers, Read Assignments. Nothing else. If an endpoint you want returns 403, do not ask for a broader token — find another way or raise it with me.
 
 ## Hard rules
 
@@ -91,12 +106,17 @@ Persist the feed cursor in the DB, not in memory.
 
 ```
 profiles       id (= auth.users.id), full_name, role, created_at
-trucks         id, samsara_vehicle_id, truck_number, active, notes
+trucks         id, samsara_vehicle_id, samsara_name, truck_number,
+               active, last_seen_at, notes
+               -- active is OURS, not Samsara's; see Verified against the
+               -- real account. samsara_name is the raw "Truck #147".
 drivers        id, samsara_driver_id, name, phone, active
+               -- phone is entered by dispatchers; Samsara returns none.
+               -- Never store licenseNumber, licenseState, or eldSettings.
 assignments    id, truck_id, driver_id, started_at, ended_at, created_by
                -- history, never a column on trucks
 positions      truck_id, lat, lng, heading, speed_mph, recorded_at,
-               formatted_location        -- from Samsara, never computed here
+               formatted_location        -- from Samsara reverseGeo, never computed here
 loads          id, truck_id, load_number, broker, status
 stops          id, load_id, type (PU|DEL), sequence,
                facility_name, address_line, city, state, zip, lat, lng,
