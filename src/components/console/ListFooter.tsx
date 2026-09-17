@@ -38,7 +38,7 @@ export function ListFooter({
   const to = nothingVisible ? 0 : Math.min(lastVisible + 1, rows.length);
 
   return (
-    <div className="flex h-[30px] shrink-0 items-center justify-between border-t border-line-hair bg-[#1a2027] px-4 text-small text-text-secondary">
+    <div className="flex h-[30px] shrink-0 items-center justify-between border-t border-line-hair bg-surface-bar px-4 text-small text-text-secondary">
       <span>
         Showing <span className="tabular-nums text-text">{from}–{to}</span> of{' '}
         <span className="tabular-nums text-text">{rows.length}</span>

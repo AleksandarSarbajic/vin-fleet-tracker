@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /**
+   * The 3px status rail in column one (spec §5.5). Every other rail state is
+   * a flat token and uses a `bg-*` utility directly; these two are repeating
+   * gradients, which Tailwind has no utility for. The colour still comes from
+   * the token table — `theme()` reads the same value as `bg-status-neutral-fg`
+   * — so there is exactly one place a neutral grey is written down.
+   *
+   * They repeat the chip's border style: dashed for No appt, dotted for
+   * Stale GPS, so the rail and the chip never disagree.
+   */
+  .rail-dashed {
+    background: repeating-linear-gradient(
+      180deg,
+      theme('colors.status.neutral.fg') 0 4px,
+      transparent 4px 8px
+    );
+  }
+
+  .rail-dotted {
+    background: repeating-linear-gradient(
+      180deg,
+      theme('colors.status.neutral.fg') 0 1.5px,
+      transparent 1.5px 5px
+    );
+  }
+}
+
 @layer base {
   /* Spec §2: set on body and never turned off — truck numbers, times, ETAs,
      counts and mileages all align down the column. */

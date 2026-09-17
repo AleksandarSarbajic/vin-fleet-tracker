@@ -1,4 +1,5 @@
 import type { Status } from '@/lib/status';
+import { palette } from '@/design/tokens';
 
 /**
  * The eight status markers, drawn once to canvases and handed to Mapbox with
@@ -18,10 +19,14 @@ export const MARKER_SIZE = 26;
 const SCALE = 2;
 const C = MARKER_SIZE / 2;
 
-/** Every colour comes from the token table — no invented values. */
-const INK = '#15181b';
-const NEUTRAL = '#b3bac0';
-const NEUTRAL_FILL = '#262a2f';
+/**
+ * A canvas context takes a colour string, not a class, so this is one of the
+ * two places allowed to read the palette directly. Nothing here is invented:
+ * every value is the same token the chips use.
+ */
+const INK = palette.surface.base;
+const NEUTRAL = palette.status.neutral.fg;
+const NEUTRAL_FILL = palette.status.neutral.bg;
 
 interface Shape {
   draw: (ctx: CanvasRenderingContext2D) => void;
@@ -80,7 +85,7 @@ const SHAPES: Record<Status, Shape> = {
       ctx.lineTo(22, 20);
       ctx.lineTo(4, 20);
       ctx.closePath();
-      ctx.fillStyle = '#ff8a7a';
+      ctx.fillStyle = palette.status.late.fg;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = INK;
@@ -97,7 +102,7 @@ const SHAPES: Record<Status, Shape> = {
       ctx.lineTo(C, 20);
       ctx.lineTo(5, C);
       ctx.closePath();
-      ctx.fillStyle = '#f2b23f';
+      ctx.fillStyle = palette.status.risk.fg;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = INK;
@@ -105,14 +110,14 @@ const SHAPES: Record<Status, Shape> = {
     },
   },
 
-  ON_TIME: filledCircle('#5ed69b', 7.5),
+  ON_TIME: filledCircle(palette.status.ontime.fg, 7.5),
 
   // Hollow circle, no fill — the quietest marker in the set.
   TOMORROW: {
     draw: (ctx) => {
       circlePath(ctx, 7);
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#858d94';
+      ctx.strokeStyle = palette.status.tomorrow.fg;
       ctx.stroke();
     },
   },
@@ -122,7 +127,7 @@ const SHAPES: Record<Status, Shape> = {
     draw: (ctx) => {
       ctx.beginPath();
       ctx.rect(6, 6, 14, 14);
-      ctx.fillStyle = '#9cc4e8';
+      ctx.fillStyle = palette.status.arrived.fg;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = INK;

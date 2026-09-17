@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
+import type { Status } from '@/lib/status';
 import { elapsed } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';
@@ -30,33 +31,24 @@ export const GRID_6 = 'grid-cols-[3px_72px_148px_minmax(0,1fr)_128px_128px]';
 
 export const ROW_HEIGHT = 44;
 
-/** The 3px status rail. Dashed for No appt, dotted for Stale GPS (§5.5). */
-function railStyle(row: FleetRow): React.CSSProperties {
-  switch (row.status) {
-    case 'LATE':
-      return { background: '#ff8a7a' };
-    case 'AT_RISK':
-      return { background: '#f2b23f' };
-    case 'ON_TIME':
-      return { background: '#5ed69b' };
-    case 'ARRIVED':
-      return { background: '#9cc4e8' };
-    case 'TOMORROW':
-      return { background: 'rgba(255,255,255,.14)' };
-    case 'NO_APPT':
-      return {
-        background:
-          'repeating-linear-gradient(180deg,#b3bac0 0 4px,transparent 4px 8px)',
-      };
-    case 'STALE_GPS':
-      return {
-        background:
-          'repeating-linear-gradient(180deg,#b3bac0 0 1.5px,transparent 1.5px 5px)',
-      };
-    case 'UNASSIGNED':
-      return { background: '#b3bac0' };
-  }
-}
+/**
+ * The 3px status rail (spec §5.5). A class per state, never a hex: the flat
+ * states are token utilities and the two patterned ones are the component
+ * classes in globals.css, which read the same token.
+ *
+ * A static map because Tailwind cannot see a class name assembled at runtime.
+ */
+const RAIL: Record<Status, string> = {
+  LATE: 'bg-status-late-fg',
+  AT_RISK: 'bg-status-risk-fg',
+  ON_TIME: 'bg-status-ontime-fg',
+  ARRIVED: 'bg-status-arrived-fg',
+  // The quietest rail in the set: the Tomorrow chip's border, not its ink.
+  TOMORROW: 'bg-status-tomorrow-bd',
+  UNASSIGNED: 'bg-status-neutral-fg',
+  NO_APPT: 'rail-dashed',
+  STALE_GPS: 'rail-dotted',
+};
 
 function Marked({ text, query }: { text: string; query: string }) {
   const parts = highlight(text, query);
@@ -125,7 +117,7 @@ function TruckRowImpl({ row, columns, selected, query, onSelect }: Props) {
         selected ? 'border-l-[3px] border-l-accent' : 'border-l-[3px] border-l-transparent',
       ].join(' ')}
     >
-      <div className="h-full" style={railStyle(row)} aria-hidden="true" />
+      <div className={`h-full ${RAIL[row.status]}`} aria-hidden="true" />
 
       <div
         className={`font-sans text-data tabular-nums ${quiet ? 'font-medium text-text-secondary' : 'font-bold text-text'}`}

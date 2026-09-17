@@ -24,38 +24,50 @@ const KEY_ROWS: Status[] = [
   'STALE_GPS',
 ];
 
-/** Small flat swatches matching the marker shapes, at legend scale. */
+/**
+ * Small flat swatches matching the marker shapes, at legend scale.
+ *
+ * `fill-*` and `stroke-*` are Tailwind utilities over the same colour tokens
+ * as the chips, so the key cannot drift from the markers it explains.
+ */
 function Swatch({ status }: { status: Status }) {
   const common = { width: 14, height: 14, viewBox: '0 0 26 26' } as const;
   switch (status) {
     case 'LATE':
       return (
         <svg {...common} aria-hidden="true">
-          <path d="M13 4 22 20H4Z" fill="#ff8a7a" />
+          <path d="M13 4 22 20H4Z" className="fill-status-late-fg" />
         </svg>
       );
     case 'AT_RISK':
       return (
         <svg {...common} aria-hidden="true">
-          <path d="M13 4 21 12l-8 8-8-8Z" fill="#f2b23f" />
+          <path d="M13 4 21 12l-8 8-8-8Z" className="fill-status-risk-fg" />
         </svg>
       );
     case 'ON_TIME':
       return (
         <svg {...common} aria-hidden="true">
-          <circle cx="13" cy="13" r="7.5" fill="#5ed69b" />
+          <circle cx="13" cy="13" r="7.5" className="fill-status-ontime-fg" />
         </svg>
       );
     case 'ARRIVED':
       return (
         <svg {...common} aria-hidden="true">
-          <rect x="6" y="6" width="14" height="14" fill="#9cc4e8" />
+          <rect x="6" y="6" width="14" height="14" className="fill-status-arrived-fg" />
         </svg>
       );
     case 'TOMORROW':
       return (
         <svg {...common} aria-hidden="true">
-          <circle cx="13" cy="13" r="7" fill="none" stroke="#858d94" strokeWidth="1.5" />
+          <circle
+            cx="13"
+            cy="13"
+            r="7"
+            fill="none"
+            strokeWidth="1.5"
+            className="stroke-status-tomorrow-fg"
+          />
         </svg>
       );
     default:
@@ -65,10 +77,9 @@ function Swatch({ status }: { status: Status }) {
             cx="13"
             cy="13"
             r="7.2"
-            fill="#262a2f"
-            stroke="#b3bac0"
             strokeWidth="1.5"
             strokeDasharray="1.5 2.2"
+            className="fill-status-neutral-bg stroke-status-neutral-fg"
           />
         </svg>
       );
@@ -99,7 +110,7 @@ export function ZoomControl({
 
 export function MarkerKey() {
   return (
-    <div className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-[rgba(21,24,27,.92)] px-[11px] py-[9px]">
+    <div className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px]">
       <span className="mb-0.5 font-cond text-micro uppercase text-text-muted">
         Marker key
       </span>

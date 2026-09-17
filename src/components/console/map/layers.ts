@@ -1,5 +1,6 @@
 import type { CircleLayerSpecification, SymbolLayerSpecification } from 'mapbox-gl';
 import { STATUSES } from '@/lib/status';
+import { palette } from '@/design/tokens';
 import { markerImageId } from './markers';
 
 /**
@@ -57,9 +58,9 @@ export const selectionLayer: CircleLayerSpecification = {
   source: SOURCE_SELECTION,
   paint: {
     'circle-radius': 17,
-    'circle-color': 'rgba(148,188,227,0.14)',
+    'circle-color': palette.accent.veil,
     'circle-stroke-width': 2,
-    'circle-stroke-color': '#94bce3',
+    'circle-stroke-color': palette.accent.DEFAULT,
   },
 };
 
@@ -91,11 +92,11 @@ export const clusterCountLayer = {
     'text-ignore-placement': true,
   },
   paint: {
-    'text-color': '#e9ebed',
+    'text-color': palette.text.DEFAULT,
     // Problem markers are drawn ABOVE cluster bubbles on purpose, so a
     // co-located late truck can land on top of a bubble and bury its count.
     // The halo keeps the number readable through it.
-    'text-halo-color': '#1d2126',
+    'text-halo-color': palette.surface.raised,
     'text-halo-width': 1.5,
   },
 } as unknown as SymbolLayerSpecification;
@@ -139,10 +140,10 @@ export function renderClusterImages(): { id: string; data: ImageData }[] {
     const ctx = canvas.getContext('2d');
     if (!ctx) continue;
     ctx.scale(dpr, dpr);
-    ctx.fillStyle = '#1d2126';
+    ctx.fillStyle = palette.surface.raised;
     ctx.fillRect(0, 0, size, size);
     ctx.lineWidth = 1;
-    ctx.strokeStyle = '#94bce3';
+    ctx.strokeStyle = palette.accent.DEFAULT;
     ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
     out.push({
       id: clusterImageId(size),

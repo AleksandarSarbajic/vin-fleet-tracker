@@ -189,7 +189,7 @@ export function Split({ list, map, onResizeEnd }: Props) {
           {Array.from({ length: 6 }, (_, i) => (
             <span
               key={i}
-              className={`h-[2px] w-[2px] ${dragging ? 'bg-text-inverse' : 'bg-[#5d646b]'}`}
+              className={`h-[2px] w-[2px] ${dragging ? 'bg-text-inverse' : 'bg-line-grip'}`}
             />
           ))}
         </span>
