@@ -14,6 +14,8 @@ const config: Config = {
     extend: {
       colors: palette,
       borderRadius: { DEFAULT: '0px', sm: '2px', md: '4px' },
+      // §9.9's modal shadow. A component may not spell this out itself.
+      boxShadow: { modal: '0 16px 48px rgba(0,0,0,.55)' },
       fontFamily: {
         sans: ['Barlow', 'system-ui', 'sans-serif'],
         cond: ['Barlow Condensed', 'system-ui', 'sans-serif'],

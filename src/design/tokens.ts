@@ -71,4 +71,6 @@ export const palette = {
   },
   // Search match plate — steel, never yellow; yellow is At risk (2d).
   highlight: '#3d4a57',
+  /** The modal scrim (§9.9). */
+  scrim: 'rgba(9,11,13,.62)',
 } as const;

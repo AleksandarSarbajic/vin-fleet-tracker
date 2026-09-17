@@ -6,6 +6,9 @@ import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
+import type { BoardDriver } from '@/server/assignments';
+import type { Role } from '@/lib/roles';
+import { EditStopModal } from '@/components/edit/EditStopModal';
 import { ConsoleHeader } from './ConsoleHeader';
 import { FleetList } from './FleetList';
 import { Split } from './Split';
@@ -31,6 +34,9 @@ interface Props {
    */
   initialQuery: string;
   initialTruck: string | null;
+  /** For the edit modal's driver picker. */
+  drivers: BoardDriver[];
+  role: Role;
 }
 
 export function Console({
@@ -39,6 +45,8 @@ export function Console({
   userInitials,
   initialQuery,
   initialTruck,
+  drivers,
+  role,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -60,6 +68,8 @@ export function Console({
    * dispatcher can read off the screen, verify, and say down a phone.
    */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** §12.10: Enter opens the edit modal on the selected row. */
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [missingTruck, setMissingTruck] = useState<string | null>(null);
   const resolvedInitialTruck = useRef(false);
 
@@ -107,6 +117,11 @@ export function Console({
     [rows, syncUrl],
   );
 
+  const editingRow = useMemo(
+    () => (editingId ? (rows.find((r) => r.id === editingId) ?? null) : null),
+    [editingId, rows],
+  );
+
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
   const { ordered, drift, resort } = useDisplayOrder(filtered, 'urgency', query);
 
@@ -115,6 +130,15 @@ export function Console({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      // The modal owns the keyboard while it is open — Esc there raises the
+      // discard confirm rather than clearing the console's selection.
+      if (editingId) return;
+
+      if (event.key === 'Enter' && selectedId) {
+        event.preventDefault();
+        setEditingId(selectedId);
+        return;
+      }
 
       if (event.key === 'Escape') {
         if (query) setTyped('');
@@ -134,7 +158,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ordered, selectedId, select, query]);
+  }, [ordered, selectedId, select, query, editingId]);
 
   /** Bumped on split drag-end; the map reflows then and only then. */
   const [resizeSignal, setResizeSignal] = useState(0);
@@ -213,6 +237,16 @@ export function Console({
           }
         />
       </div>
+
+      {editingRow ? (
+        <EditStopModal
+          row={editingRow}
+          drivers={drivers}
+          role={role}
+          dispatchTz={dispatchTz}
+          onClose={() => setEditingId(null)}
+        />
+      ) : null}
     </div>
   );
 }

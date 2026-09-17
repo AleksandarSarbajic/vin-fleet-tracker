@@ -1,0 +1,259 @@
+import { afterAll, describe, expect, it } from 'vitest';
+import { and, eq, isNull } from 'drizzle-orm';
+import { createPooledDb } from '@/db/connection';
+import { assignments, drivers, loads, stops, trucks, auditLog } from '@/db/schema';
+import { AppointmentTimeError } from '@/lib/appointment';
+import { StopEdit } from '@/lib/stop-edit';
+import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
+import { saveStopEdit } from './stop-edit';
+import type { Tx } from './audit';
+
+/**
+ * The two-sided reassignment and the edit modal's save, against the real
+ * database, inside transactions that always roll back.
+ *
+ * The property that matters is the one the design states twice: there is
+ * never a window where one truck holds the driver and the other still claims
+ * them. It cannot be observed from outside a transaction, so it is asserted
+ * from inside one.
+ */
+
+const url = process.env.DATABASE_URL;
+const withDb = url ? describe : describe.skip;
+
+let handle: ReturnType<typeof createPooledDb> | null = null;
+const connect = () => (handle ??= createPooledDb(url!));
+afterAll(async () => {
+  await handle?.client.end({ timeout: 5 });
+});
+
+async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
+  const { db } = connect();
+  let out: T;
+  try {
+    await db.transaction(async (tx) => {
+      out = await body(tx);
+      tx.rollback();
+    });
+  } catch (error) {
+    if (out! === undefined) throw error;
+  }
+  return out!;
+}
+
+const fixtures = async (tx: Tx) => {
+  const t = await tx
+    .select({ id: trucks.id, number: trucks.truckNumber })
+    .from(trucks)
+    .where(eq(trucks.active, true))
+    .limit(2);
+  const d = await tx.select({ id: drivers.id, name: drivers.name }).from(drivers).limit(2);
+  return { trucks: t, drivers: d };
+};
+
+const openDriverFor = async (tx: Tx, truckId: string) => {
+  const rows = await tx
+    .select({ driverId: assignments.driverId })
+    .from(assignments)
+    .where(and(eq(assignments.truckId, truckId), isNull(assignments.endedAt)));
+  return rows[0]?.driverId ?? null;
+};
+
+withDb('reassignment', () => {
+  it('moves the driver and closes the losing side in one transaction', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      // Driver starts on truck A.
+      await applyReassignment(tx, {
+        truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null,
+      });
+      const preview = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
+      await applyReassignment(tx, {
+        truckId: t[1]!.id,
+        driverId: d[0]!.id,
+        actorUserId: null,
+        previewToken: preview.token,
+      });
+      return {
+        losing: await openDriverFor(tx, t[0]!.id),
+        gaining: await openDriverFor(tx, t[1]!.id),
+        driverId: d[0]!.id,
+        preview,
+      };
+    });
+
+    // Both sides, together: never one truck holding the driver while the
+    // other still claims them.
+    expect(seen.losing).toBeNull();
+    expect(seen.gaining).toBe(seen.driverId);
+    expect(seen.preview.losing?.driverId).toBe(seen.driverId);
+  });
+
+  it('previews from the server, including the losing truck the client cannot know', async () => {
+    const preview = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      return previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
+    });
+    expect(preview.losing).not.toBeNull();
+    expect(preview.summary).toMatch(/Reassigns .* from .* to /);
+    // Nothing is sent to anyone, and the dialog says so.
+    expect(preview.note).toMatch(/notifications aren/i);
+  });
+
+  it('refuses a confirmation whose preview went stale', async () => {
+    const outcome = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      const stale = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
+
+      // Someone else moves the driver away while the dialog is open.
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[1]!.id, actorUserId: null });
+      await applyReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id, actorUserId: null,
+        previewToken: stale.token });
+      return 'accepted';
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(StalePreviewError);
+  });
+
+  it('refuses a two-sided move that was never confirmed at all', async () => {
+    // Taking a driver off another truck without a confirmed preview is the
+    // one case the design names twice. No token, no move.
+    const outcome = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await applyReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id, actorUserId: null });
+      return 'accepted';
+    }).catch((error: unknown) => error);
+    expect(outcome).toBeInstanceOf(StalePreviewError);
+  });
+
+  it('does nothing when the driver is already the one asked for', async () => {
+    const result = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      return applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+    });
+    expect(result.changed).toBe(false);
+  });
+});
+
+withDb('the edit modal save', () => {
+  const edit = (over: Partial<StopEdit> & { truckId: string }) =>
+    StopEdit.parse({
+      stopId: null,
+      loadNumber: 'TEST-8841',
+      broker: 'Test Broker',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      facilityName: 'Test Receiver',
+      city: 'New Lenox',
+      state: 'IL',
+      dockDoor: 'Door 7',
+      appointment: {
+        type: 'APPT',
+        date: { y: 2026, m: 9, d: 18 },
+        time: { h: 14, min: 30 },
+        tz: 'America/Chicago',
+        windowMinutes: 30,
+      },
+      dispatcherNote: null,
+      ...over,
+    });
+
+  it('creates the load and its stop when the truck has none', async () => {
+    const saved = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+      });
+      const [stop] = await tx
+        .select({ apptUtc: stops.appointmentStartUtc, tz: stops.appointmentTz })
+        .from(stops)
+        .where(eq(stops.id, result.stopId));
+      return { result, stop };
+    });
+
+    // 14:30 at the receiver, stored as the instant 14:30 happens there.
+    expect(saved.result.appointment?.startUtc).toBe('2026-09-18T19:30:00.000Z');
+    expect(saved.stop?.tz).toBe('America/Chicago');
+    expect(saved.stop?.apptUtc?.toISOString()).toBe('2026-09-18T19:30:00.000Z');
+  });
+
+  it('refuses an appointment in the hour that does not exist', async () => {
+    const outcome = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[0]!.id,
+          appointment: {
+            type: 'APPT',
+            // 2026-03-08 02:30 America/Chicago: the clocks jump that hour.
+            date: { y: 2026, m: 3, d: 8 },
+            time: { h: 2, min: 30 },
+            tz: 'America/Chicago',
+            windowMinutes: null,
+          },
+        }),
+      });
+      return 'accepted';
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AppointmentTimeError);
+  });
+
+  it('writes an audit row naming the stop, with before and after', async () => {
+    const rows = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id }),
+      });
+      // Editing it again gives the audit row a `before`.
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({ truckId: t[0]!.id, stopId: created.stopId, dockDoor: 'Door 9' }),
+      });
+      return tx
+        .select({ entity: auditLog.entity, entityId: auditLog.entityId, before: auditLog.before, after: auditLog.after })
+        .from(auditLog)
+        .where(eq(auditLog.entityId, created.stopId));
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.entity === 'stop')).toBe(true);
+    const second = rows.find((r) => r.before !== null);
+    expect((second?.before as { dockDoor: string }).dockDoor).toBe('Door 7');
+    expect((second?.after as { dockDoor: string }).dockDoor).toBe('Door 9');
+  });
+
+  it('saves the stop and the two-sided move in the same transaction', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      const preview = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        edit: edit({
+          truckId: t[1]!.id,
+          driverId: d[0]!.id,
+          previewToken: preview.token,
+        }),
+      });
+      return {
+        result,
+        losing: await openDriverFor(tx, t[0]!.id),
+        gaining: await openDriverFor(tx, t[1]!.id),
+        driverId: d[0]!.id,
+      };
+    });
+
+    expect(seen.result.reassignment).not.toBeNull();
+    expect(seen.losing).toBeNull();
+    expect(seen.gaining).toBe(seen.driverId);
+  });
+});

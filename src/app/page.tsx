@@ -3,6 +3,8 @@ import { Console } from '@/components/console/Console';
 import { serverEnv } from '@/env/server';
 import { getSessionUser } from '@/lib/auth';
 import { loadFleet } from '@/server/fleet';
+import { loadAssignmentBoard } from '@/server/assignments';
+import { db } from '@/db';
 
 /** Live positions — never cached. */
 export const dynamic = 'force-dynamic';
@@ -29,7 +31,9 @@ export default async function ConsolePage({
   // in the client component with useSearchParams opts its whole subtree out
   // of server rendering, which threw away this prefetch entirely.
   const params = await searchParams;
-  const fleet = await loadFleet();
+  // The driver list feeds the edit modal's picker. Small, and it changes far
+  // less often than positions do.
+  const [fleet, board] = await Promise.all([loadFleet(), loadAssignmentBoard(db)]);
 
   return (
     <Console
@@ -38,6 +42,8 @@ export default async function ConsolePage({
       userInitials={initials(user.fullName)}
       initialQuery={first(params['q']) ?? ''}
       initialTruck={first(params['truck'])}
+      drivers={board.drivers}
+      role={user.role}
     />
   );
 }
