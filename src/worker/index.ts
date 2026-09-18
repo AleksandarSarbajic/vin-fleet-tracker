@@ -12,6 +12,9 @@ import { MapboxDirections } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
 import { STALL_SECONDS } from './ingest';
 import {
+  summarizeStalls,
+  utcDayStart,
+  type StallDay,
   flattenFeed,
   prunePositions,
   readCursor,
@@ -70,6 +73,8 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
 
+  await reportDay(db, utcDayStart(new Date(), 1), 'the day before this start');
+
   try {
     // Startup runs inside the same reporting path as a poll. Without this a
     // bad token or a dead API kills the process with feed_health untouched,
@@ -98,9 +103,24 @@ async function main(): Promise<void> {
      * measuring it.
      */
     let lastSuccessAt = Date.now();
+    /**
+     * The UTC day this process has already reported on (§12.42).
+     *
+     * The startup line alone would not have answered the question it was
+     * asked: if the stall fix works, this process runs for weeks and never
+     * starts again, so the report that says "yesterday was clean" is exactly
+     * the one that never prints. The rollover is what makes it arrive daily.
+     */
+    let reportedDay = utcDayStart(new Date()).getTime();
 
     while (!shuttingDown) {
       const startedAt = Date.now();
+
+      const today = utcDayStart(new Date(startedAt)).getTime();
+      if (today !== reportedDay) {
+        await reportDay(db, new Date(reportedDay), 'yesterday');
+        reportedDay = today;
+      }
       const gapSeconds = (startedAt - lastSuccessAt) / 1000;
       try {
         await pollOnce(db, samsara, router, gapSeconds);
@@ -156,6 +176,56 @@ async function main(): Promise<void> {
     logger.info('worker stopped');
     await client.end({ timeout: 5 });
   }
+}
+
+/**
+ * One day of stall history, logged (§12.42).
+ *
+ * WARN when the day had any stall at all, INFO when it was clean, so the line
+ * that matters is not the same colour as the line that says nothing happened.
+ *
+ * Its own try: a reporting query must not be able to stop the worker from
+ * polling. Logged, never swallowed — the failure mode this whole section
+ * exists to prevent is an outage that leaves no trace.
+ */
+async function reportDay(
+  db: ReturnType<typeof createDirectDb>['db'],
+  dayStart: Date,
+  label: string,
+): Promise<void> {
+  let day: StallDay;
+  try {
+    day = await summarizeStalls(db, dayStart);
+  } catch (error: unknown) {
+    logger.error('feed health report failed', {
+      error: error instanceof Error ? error.message : String(error),
+      day: dayStart.toISOString().slice(0, 10),
+    });
+    return;
+  }
+
+  const detail = {
+    covering: label,
+    day: day.day,
+    stalls: day.stalls,
+    missedCycles: day.missedCycles,
+    longestStallSeconds: day.longestSeconds,
+    longestStallMinutes: Math.round((day.longestSeconds / 60) * 10) / 10,
+    longestStallAt: day.longestAt,
+    totalStalledMinutes: Math.round((day.totalSeconds / 60) * 10) / 10,
+    // Cumulative, since 0011 — the figure that is comparable across restarts.
+    everMissedCycles: day.everMissedCycles,
+    everLongestStallMinutes: Math.round((day.everLongestSeconds / 60) * 10) / 10,
+    everLongestStallAt: day.everLongestAt,
+    // Never let a zero stand in for "we were not recording".
+    ...(day.complete ? {} : { partial: 'stall logging began part-way through this day' }),
+  };
+
+  if (day.stalls > 0) logger.warn?.('feed health: the fleet was unobserved', detail);
+  // "No stalls" and "not recorded" read identically at a glance, and only one
+  // of them is good news. The message, not just a field, has to say which.
+  else if (!day.complete) logger.info('feed health: this day was not fully recorded', detail);
+  else logger.info('feed health: no stalls', detail);
 }
 
 /** One poll: feed → positions → heartbeat. The cursor advances only on success. */

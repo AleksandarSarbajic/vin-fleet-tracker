@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { createDirectDb } from '@/db/connection';
-import { feedHealth, positions, trucks } from '@/db/schema';
+import { feedHealth, feedStalls, positions, trucks } from '@/db/schema';
 import type { Logger } from '@/samsara/client';
 import {
   parseTruckNumber,
@@ -299,6 +299,108 @@ export async function recordSuccess(
         ...stallColumns(gapSeconds),
       },
     });
+
+  /**
+   * And one row per stall (§12.42), AFTER the heartbeat, because the
+   * heartbeat is what the board reads and the log is what a human reads
+   * tomorrow. Not wrapped in its own catch: a silent catch here would be the
+   * §12.39 shape again — an outage that leaves no trace because the thing
+   * recording it failed quietly.
+   */
+  if (isStall(gapSeconds)) {
+    await db.insert(feedStalls).values({
+      startedAt: new Date(at.getTime() - gapSeconds * 1000),
+      endedAt: at,
+      seconds: Math.round(gapSeconds),
+      missedCycles: Math.floor(gapSeconds / POLL_SECONDS),
+    });
+  }
+}
+
+/* --------------------------- reading it back ----------------------------- */
+
+/** One UTC day of stall history, as the worker reports it. */
+export interface StallDay {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  /** False when per-stall recording began part-way through this day. */
+  complete: boolean;
+  stalls: number;
+  missedCycles: number;
+  longestSeconds: number;
+  longestAt: string | null;
+  totalSeconds: number;
+  /**
+   * The cumulative counters from feed_health, carried alongside (§12.39).
+   *
+   * They bridge the gap this table cannot: on the first days after it ships
+   * the day figures are partial, while these have been counting since 0011.
+   * "Ever" and "yesterday" are different questions and the line answers both.
+   */
+  everMissedCycles: number;
+  everLongestSeconds: number;
+  everLongestAt: string | null;
+}
+
+/** Midnight UTC on the day `offsetDays` before `at`. */
+export function utcDayStart(at: Date, offsetDays = 0): Date {
+  return new Date(
+    Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() - offsetDays),
+  );
+}
+
+/**
+ * What one UTC day looked like (§12.42).
+ *
+ * `complete` is the part that stops this line lying: the first day after this
+ * table is deployed has no rows for the hours before the migration ran, and a
+ * zero reported for the day the fleet lost 5.5 hours would be worse than
+ * saying nothing. It is read from `feed_health.stall_log_since` rather than
+ * from the absence of rows, because absence is exactly the ambiguity.
+ */
+export async function summarizeStalls(db: Db, dayStart: Date): Promise<StallDay> {
+  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+  const [totals] = await db
+    .select({
+      stalls: sql<number>`count(*)::int`,
+      missedCycles: sql<number>`coalesce(sum(${feedStalls.missedCycles}), 0)::int`,
+      longestSeconds: sql<number>`coalesce(max(${feedStalls.seconds}), 0)::int`,
+      totalSeconds: sql<number>`coalesce(sum(${feedStalls.seconds}), 0)::int`,
+    })
+    .from(feedStalls)
+    .where(and(gte(feedStalls.endedAt, dayStart), lt(feedStalls.endedAt, dayEnd)));
+
+  const [worst] = await db
+    .select({ endedAt: feedStalls.endedAt, seconds: feedStalls.seconds })
+    .from(feedStalls)
+    .where(and(gte(feedStalls.endedAt, dayStart), lt(feedStalls.endedAt, dayEnd)))
+    .orderBy(sql`${feedStalls.seconds} desc`)
+    .limit(1);
+
+  const [health] = await db
+    .select({
+      since: feedHealth.stallLogSince,
+      missedCycles: feedHealth.missedCycles,
+      longestSeconds: feedHealth.longestStallSeconds,
+      longestAt: feedHealth.longestStallAt,
+    })
+    .from(feedHealth)
+    .where(eq(feedHealth.id, 1))
+    .limit(1);
+
+  return {
+    day: dayStart.toISOString().slice(0, 10),
+    // No row at all means nothing has been recorded, which is not a quiet day.
+    complete: health?.since !== undefined && health.since !== null && health.since <= dayStart,
+    stalls: totals?.stalls ?? 0,
+    missedCycles: totals?.missedCycles ?? 0,
+    longestSeconds: totals?.longestSeconds ?? 0,
+    longestAt: worst?.endedAt?.toISOString() ?? null,
+    totalSeconds: totals?.totalSeconds ?? 0,
+    everMissedCycles: health?.missedCycles ?? 0,
+    everLongestSeconds: health?.longestSeconds ?? 0,
+    everLongestAt: health?.longestAt?.toISOString() ?? null,
+  };
 }
 
 /**

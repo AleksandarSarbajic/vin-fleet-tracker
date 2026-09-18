@@ -3379,6 +3379,50 @@ A test asserted that one bad fix mid-dwell returns null. It now returns the
 dwell around the glitch, and the test states why rather than being deleted. A
 GPS glitch should cost the fixes around it, not the arrival.
 
+## 12.42 A counter cannot say which day
+
+§12.39 added `missed_cycles`, `longest_stall_seconds` and `longest_stall_at`
+to `feed_health`, and they were the right columns for the question that had
+been unanswerable: **has this ever been broken?** They answer it and nothing
+clears them.
+
+They cannot answer **was it broken yesterday**, which is the question the
+morning after a fix. A cumulative total and an all-time maximum have no day in
+them. The §12.39 diagnosis — eleven stalls, 5.8 to 51.1 minutes, 329 in total
+— was only possible by reconstructing gaps out of `positions`, inside a
+retention window that deletes the evidence after seven days.
+
+So `feed_stalls`: one row per stall, written by the poll that recovers it. A
+stall is rare and a row is 40 bytes, so the distribution is readable from psql
+months later without the worker's stdout.
+
+### A startup line is the wrong place for a daily report
+
+The obvious implementation logs the previous day at startup. It is also
+exactly backwards: **if the fix works, the process runs for weeks and the
+report never prints.** The line that says "yesterday was clean" is the one
+that only ever arrives after a restart, which is to say after a failure.
+
+The report is emitted on a UTC day rollover from inside the poll loop, and
+also at startup — the second for a process that has just come up, the first
+for one that never does.
+
+### The zero that would have lied
+
+On the first morning after this table ships, the day before it has no rows.
+Reporting `0 stalls` for the day that in fact lost 5.5 hours would be worse
+than reporting nothing at all: an absence of records rendered as good news.
+
+`feed_health.stall_log_since` records when the log began, so an unrecorded day
+can be told from a quiet one. It is checked rather than inferred from the
+absence of rows, because that absence is precisely the ambiguity — and the
+distinction is carried by the message string, not only by a field, since
+"no stalls" and "not recorded" read identically at a glance and only one of
+them is good news.
+
+A missing `feed_health` row counts as unrecorded for the same reason. §12.34
+deleted that row once already.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

@@ -85,6 +85,13 @@
       "when": 1789863569664,
       "tag": "0011_feed_stall_record",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789949969664,
+      "tag": "0012_feed_stall_log",
+      "breakpoints": true
     }
   ]
 }

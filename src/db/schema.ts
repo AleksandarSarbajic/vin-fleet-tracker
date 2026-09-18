@@ -693,7 +693,39 @@ export const feedHealth = pgTable(
     longestStallSeconds: integer('longest_stall_seconds'),
     longestStallAt: timestamp('longest_stall_at', { withTimezone: true }),
     missedCycles: integer('missed_cycles').notNull().default(0),
+    /**
+     * When per-stall recording began (§12.42). An empty day and an unrecorded
+     * day are different facts, and the counters above cannot tell them apart.
+     */
+    stallLogSince: timestamp('stall_log_since', { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(now),
   },
   () => [check('feed_health_singleton', sql`id = 1`)],
+);
+
+/* ------------------------------- feed_stalls --------------------------- */
+
+/**
+ * One row per stall, written when the poll that recovers it succeeds (§12.42).
+ *
+ * The counters on feed_health are cumulative, so they answer "has it ever
+ * been" and never "was it broken yesterday". This is the table that makes the
+ * second question answerable — and answerable from psql, months later,
+ * without the worker's stdout.
+ */
+export const feedStalls = pgTable(
+  'feed_stalls',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    /** The last poll that succeeded, and the one that recovered. */
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }).notNull(),
+    seconds: integer('seconds').notNull(),
+    missedCycles: integer('missed_cycles').notNull(),
+  },
+  (t) => [
+    index('feed_stalls_ended_idx').on(t.endedAt.desc()),
+    check('feed_stalls_ordered', sql`ended_at >= started_at`),
+    check('feed_stalls_positive', sql`seconds > 0`),
+  ],
 );
