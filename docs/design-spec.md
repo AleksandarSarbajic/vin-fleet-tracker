@@ -4356,6 +4356,23 @@ geocoder being unreliable.
 
 **n=13 across 4 facilities is thin. Re-derive both numbers on real loads.**
 
+Two things had to follow it, and neither was obvious until the board was
+checked rather than the code:
+
+- **Migration 0015 backfills the 54 existing `street` stops, and the geocode
+  cache.** A new constant applied only to rows written after it is half a
+  rule, and the missing half was every stop already on the board. The cache
+  matters for the reason §12.30 states outright — *"a stale cache keeps
+  working, at the old answer"* — a cached street hit carrying null accuracy
+  writes null onto the next stop that matches it. No `CHAIN_VERSION` bump: the
+  coordinates, the precision and the match are unchanged, and only a derived
+  constant is added.
+- **`toFixed(1)` printed 0.15 as `±0.1`.** Floating point rounds it down, so
+  the board understated a measured number in the one field whose entire job is
+  to say how wrong the point might be. **Rounding a tolerance down is the
+  direction that misleads.** Two decimals under a mile now, one above, trailing
+  zero stripped — `±0.15`, `±0.8`, `±4.6`.
+
 ### `route_samples`: every row kept, `stop_id` demoted
 
 The stale cache pointed at Dallas and so did three samples, on a stop now in

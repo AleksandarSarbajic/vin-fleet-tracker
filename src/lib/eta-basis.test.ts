@@ -212,3 +212,43 @@ describe('the miles line under the ETA (§12.47)', () => {
     expect(etaMilesLine(noAppt, false, miles)).toBe('412 mi');
   });
 });
+
+
+/**
+ * §12.54. The ± is a tolerance, and rounding a tolerance DOWN is the
+ * direction that misleads.
+ */
+describe('the ± prints the number that was measured', () => {
+  it('does not round the street dock offset from 0.15 down to 0.1', () => {
+    // `toFixed(1)` did exactly that — floating point rounds 0.15 down — so
+    // the board understated a measured value in the one field whose job is
+    // to say how wrong the point might be.
+    const detail = etaDetails(
+      facts({ etaPrecision: 'street', etaAccuracyMiles: 0.15, distanceBasis: 'routed' }),
+    ).find((d) => d.label === 'Accuracy');
+    expect(detail?.value).toContain('0.15 mi');
+    expect(detail?.value).not.toContain('0.1 mi.');
+  });
+
+  it('keeps one decimal above a mile, where the second is noise', () => {
+    const caution = etaCaution(
+      facts({ etaPrecision: 'zip', etaAccuracyMiles: 4.63, distanceBasis: 'routed' }),
+    );
+    expect(caution).toContain('±4.6 mi');
+  });
+
+  it('strips a trailing zero rather than printing 0.80', () => {
+    const caution = etaCaution(
+      facts({ etaPrecision: 'block', etaAccuracyMiles: 0.8, distanceBasis: 'routed' }),
+    );
+    expect(caution).toContain('±0.8 mi');
+    expect(caution).not.toContain('0.80');
+  });
+
+  it('says nothing at all when there is no measurement', () => {
+    const detail = etaDetails(
+      facts({ etaPrecision: 'street', etaAccuracyMiles: null, distanceBasis: 'routed' }),
+    ).find((d) => d.label === 'Accuracy');
+    expect(detail?.value).toBe('Street address, interpolated along the block — not a rooftop');
+  });
+});

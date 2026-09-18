@@ -37,9 +37,21 @@ export function basisShort(row: BasisFacts): string {
 
 /** ` ±4.6 mi`, or nothing when the accuracy is unknown or exact. */
 function plusMinus(row: BasisFacts): string {
-  return row.etaAccuracyMiles !== null && row.etaAccuracyMiles > 0
-    ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi`
-    : '';
+  const miles = row.etaAccuracyMiles;
+  if (miles === null || miles <= 0) return '';
+  /**
+   * Two decimals under a mile, one above, trailing zero stripped.
+   *
+   * `toFixed(1)` printed the street offset of **0.15 as "0.1"** — floating
+   * point rounds it down — so the board understated a measured number, in the
+   * one field whose entire job is to say how wrong the point might be.
+   * Rounding a tolerance DOWN is the direction that misleads.
+   *
+   * Above a mile the second decimal is noise: a ZIP centroid at ±4.63 is not
+   * meaningfully different from ±4.6.
+   */
+  const text = miles < 1 ? miles.toFixed(2) : miles.toFixed(1);
+  return ` ±${text.replace(/0$/, '').replace(/\.$/, '')} mi`;
 }
 
 const ratio = (row: BasisFacts) => (row.laneRatio ? `×${row.laneRatio.toFixed(2)}` : null);
