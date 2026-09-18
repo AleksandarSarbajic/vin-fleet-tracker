@@ -61,7 +61,8 @@ other. The legacy `anon` / `service_role` JWTs are deprecated and unused.
 | `npm run check` | typecheck + lint + test. **Must pass before a phase is done.** |
 | `npm run db:generate` | Generate a migration from `src/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations (session pooler) |
-| `npm run db:verify` | Assert RLS, policies and grants are intact |
+| `npm run db:verify` | Assert RLS, policies, grants and the `feed_health` singleton. **Required before deploy** |
+| `npm run bootstrap:admin` | Give an existing auth user a role — the first admin on a fresh database |
 | `npm run db:studio` | Drizzle Studio |
 | `npm run worker` | Ingestion worker — the only thing that calls Samsara |
 | `npm run samsara:probe` | Re-verify `docs/samsara.md` against the live org |

@@ -209,11 +209,29 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
 5. Status engine, colour coding, filter chips, footer bar, urgency groups, offline rule — with the full timezone test suite.
 6. Hardening: roles enforced server-side, rate-limit tuning, Sentry, Playwright on the critical flows, deploy.
    **Clear the demo data before deploying — `npm run seed:demo -- --clear`.**
-   **`npm run preflight` must pass before deploying — it is a gate, not a note.**
-   The suite runs against a local Postgres (§12.32), which cannot exercise the
-   real Supabase pooler. `prepare: false` in `createPooledDb` is the setting
-   whose absence fails only under concurrency, in production, as a stall rather
-   than an error. `preflight` is the only thing that checks it.
+
+   **Two gates, not notes. Both must pass before deploying.**
+
+   **`npm run preflight`** — the real transaction pooler. The suite runs
+   against a local Postgres (§12.32), which cannot reproduce prepared
+   statements being rejected in transaction mode. That is a bug class which
+   only appears under production load, and its failure mode is a **stall, not
+   an error**: measured, `prepare:true` over one connection succeeds and over
+   five connections never returns. `preflight` is the only thing that checks
+   it, along with the fleet query's row shape and the session pooler.
+
+   **`npm run db:verify`** — deploying into an empty database. The §12.32
+   truncate was an accidental dry run of exactly that, and it found a real
+   phase 6 bug: `feed_health` is a singleton written by migration 0001 that
+   nothing recreated, and losing it left the board permanently and silently
+   colourless (§12.34). Fixed, but the lesson generalises — **anything that
+   needs a row nobody recreates is a fresh-deploy bug.** `db:verify` was the
+   only thing that noticed, so it runs as a gate.
+
+   Also on an empty database: the first admin. The signup trigger only ever
+   assigns `viewer`, and promotion requires an admin to already exist, so a
+   fresh deployment has nobody who can promote anyone. `npm run bootstrap:admin
+   -- <email> admin` is the deliberate act that breaks the cycle.
    Phase 4 seeded `DEMO-` loads and stops so the console and the status engine
    have something to compute against. They are kept deliberately through
    phase 5 and must not ship.

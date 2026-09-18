@@ -24,6 +24,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:verify": "tsx scripts/verify-db.mts",
+    "bootstrap:admin": "tsx scripts/bootstrap-admin.mts",
     "db:explain": "tsx scripts/explain-fleet.mts",
     "worker": "tsx src/worker/index.ts",
     "samsara:probe": "tsx scripts/samsara-probe.mts",

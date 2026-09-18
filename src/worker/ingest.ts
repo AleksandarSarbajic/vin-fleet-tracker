@@ -216,35 +216,60 @@ export async function writePositions(
   };
 }
 
-/** Heartbeat + cursor, persisted so a restart resumes instead of going cold. */
+/**
+ * Heartbeat + cursor, persisted so a restart resumes instead of going cold.
+ *
+ * UPSERT, not UPDATE (§12.34). Migration 0001 seeds the singleton and nothing
+ * else ever wrote one, so every path here was `update … where id = 1` — and an
+ * UPDATE matching zero rows is not an error. Lose the row and three things
+ * fail at once, silently:
+ *
+ *   - the cursor is never persisted, so every restart re-fetches from cold;
+ *   - last_error is never recorded, so the offline banner has no cause;
+ *   - newest_position_at stays null, and `isFeedStale(null, …)` is TRUE, so
+ *     the console withdraws schedule colour from every row, permanently.
+ *
+ * None of it logs anything. The row came back the moment the worker ran again,
+ * which is the property worth having: the feed's own health should not depend
+ * on a row only a migration knows how to create.
+ */
 export async function recordSuccess(
   db: Db,
   cursor: string,
   newestPositionAt: Date | null,
 ): Promise<void> {
   const at = new Date();
+  // Same Date-in-sql`` trap as above — pass an ISO string and cast.
+  const newest = newestPositionAt
+    ? {
+        newestPositionAt: sql`greatest(coalesce(${feedHealth.newestPositionAt}, 'epoch'::timestamptz), ${newestPositionAt.toISOString()}::timestamptz)`,
+      }
+    : {};
   await db
-    .update(feedHealth)
-    .set({
+    .insert(feedHealth)
+    .values({
+      id: 1,
       cursor,
       lastSuccessAt: at,
       lastError: null,
       updatedAt: at,
-      // Same Date-in-sql`` trap as above — pass an ISO string and cast.
-      ...(newestPositionAt
-        ? {
-            newestPositionAt: sql`greatest(coalesce(${feedHealth.newestPositionAt}, 'epoch'::timestamptz), ${newestPositionAt.toISOString()}::timestamptz)`,
-          }
-        : {}),
+      ...(newestPositionAt ? { newestPositionAt } : {}),
     })
-    .where(eq(feedHealth.id, 1));
+    .onConflictDoUpdate({
+      target: feedHealth.id,
+      // Inside DO UPDATE, `feed_health.newest_position_at` is the EXISTING
+      // row, which is what makes greatest() keep the high-water mark.
+      set: { cursor, lastSuccessAt: at, lastError: null, updatedAt: at, ...newest },
+    });
 }
 
 export async function recordFailure(db: Db, message: string): Promise<void> {
+  const at = new Date();
+  const lastError = message.slice(0, 1000);
   await db
-    .update(feedHealth)
-    .set({ lastError: message.slice(0, 1000), updatedAt: new Date() })
-    .where(eq(feedHealth.id, 1));
+    .insert(feedHealth)
+    .values({ id: 1, lastError, updatedAt: at })
+    .onConflictDoUpdate({ target: feedHealth.id, set: { lastError, updatedAt: at } });
 }
 
 export async function readCursor(db: Db): Promise<string | null> {

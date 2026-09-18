@@ -2473,16 +2473,27 @@ session means the fifth was already written and simply had not failed yet.
 
 ### Raising the isolation level would have made it worse
 
-The tempting fix is `REPEATABLE READ`. It takes its snapshot at transaction
-start, so it hides rows another process commits *during* the test — which
-fixes the sweep race and nothing else. The other three read rows that were
-already committed before the transaction opened, and no isolation level hides
-those; that is what a snapshot is.
+**This is the tempting wrong answer. Write it down, because the next person
+will reach for it.**
 
-So it would have fixed one fault in four while making the remaining three
-*less* likely to show, because the symptom is flakiness and the flakiness is
-what got them noticed. **A fix that reduces flakiness without reducing
-wrongness is worse than no fix**, and this one would have been called done.
+`REPEATABLE READ` takes its snapshot at transaction start, so it hides rows
+another process commits *during* the test — which fixes the sweep race and
+nothing else. The other three read rows that were already committed before the
+transaction opened, and no isolation level hides those; that is what a snapshot
+is.
+
+So it fixes one fault in four, and makes the remaining three *less* likely to
+show, because the symptom is flakiness and flakiness is the only reason any of
+them were noticed. The suite would get quieter and no more correct, and the
+change would have been called done.
+
+> **A fix that reduces flakiness without reducing wrongness is worse than no
+> fix.** Flakiness is not the defect. It is the only evidence the defect is
+> there.
+
+The same test is worth applying to anything that makes a symptom
+intermittent rather than absent: retries, sleeps, longer timeouts, wider
+tolerances.
 
 ### What was built instead
 
@@ -2514,6 +2525,50 @@ read rows another test left. Four guards do:
 
 `src/test/guards.test.ts` asserts all four are in force, so removing one fails
 the suite rather than quietly restoring the conditions for the bug.
+
+### The guard that ran too late — the canonical example
+
+Guard 1 was written into `vitest.setup.ts`. **`globalSetup` runs before the
+test workers, and `setupFiles` runs inside them.** So the truncate had already
+happened by the time the guard refused.
+
+It was verified. The verification was pointing `TEST_DATABASE_URL` at
+production and showing that the suite refused to run:
+
+```
+Error: TEST_DATABASE_URL points at the same database as DATABASE_URL
+(aws-1-eu-west-1.pooler.supabase.com/postgres). … Refusing to run.
+```
+
+That output is real. It is also what a database being truncated looks like,
+because the refusal printed *after* `globalSetup` had emptied every table in
+`public`. **The act of verifying the guard is what destroyed the data** — the
+production database, not the demo rows: every load, stop, assignment, override,
+the geocode cache, the audit log, and the `profiles` row the owner logs in with.
+
+Proven rather than deduced, afterwards, with a `canary` database holding three
+rows: point `TEST_DATABASE_URL` at it, run the suite, three rows become zero.
+
+This is the shape of **every** bug in this session, and it is worth naming
+because it keeps coming back wearing different clothes:
+
+| § | rule present in | absent from |
+|---|---|---|
+| 12.21 | the modal's validation | the shared schema, then the server re-parse |
+| 12.28 | the stop save's transaction | the override write beside it |
+| 12.29 | the click handler | the render path that also wrote the URL |
+| 12.31 | the config's road factor | the lane it was applied to |
+| 12.32 | `vitest.setup.ts` | `globalSetup`, which runs first |
+
+**A rule enforced in one layer and absent from the layer that acts first is
+not a rule.** It is documentation that reads like a rule, and it is more
+dangerous than no rule at all, because it produces evidence of safety.
+
+The refusal now lives in `src/test/url.ts` — a module with no side effects,
+because importing `globalSetup` re-ran its `dotenv` call and restored the very
+credentials guard 1 deletes — and `globalSetup` calls it before it opens a
+connection. It also refuses any non-loopback host outright, which does not
+depend on `DATABASE_URL` being set correctly by anyone.
 
 ### What the inventory actually contained
 
@@ -2579,6 +2634,136 @@ execution to a backend that has never seen the name — and the result is not an
 error but a **stall**. No exception, no log line, just route handlers that stop
 returning. That is the incident the gate exists to prevent, and it is only
 visible under concurrency.
+
+## 12.33 The tooltip had four clauses and needed two
+
+Truck 137's row tooltip read:
+
+> Distance is a routed road distance for a car, so it can read short of a
+> truck-mile figure on a rate confirmation. The destination is a ZIP-code
+> centre ±4.6 mi, not a street address — Census has no record of this street.
+> At risk is suppressed here because the area is wider than the warning is
+> worth. The route starts from the nearest road, about 379 m from that point.
+> Arrival time counts driving only — no rest breaks.
+
+Every clause is true. Four is more than anyone parses at 4am, and **a label
+that does not get finished is worse than a shorter one that does.**
+
+Ranked by what changes a decision:
+
+| clause | verdict |
+|---|---|
+| ZIP centre ±4.6 mi | decides whether to trust the ETA at all. **Keep, first.** |
+| driving only, no rest breaks | moves the number by hours on a long lane. **Keep, second.** |
+| car profile vs truck miles | matters when reconciling a rate confirmation, which is not what a hover is. **Demote.** |
+| 379 m snap | already inside the ±4.6, and answers a question nobody asks. **Demote.** |
+
+### The one demotion that would have been wrong
+
+The original ranking also demoted *"at risk is suppressed here"*. That is the
+one clause that must stay, and the reason generalises:
+
+**Every other demoted clause makes the board say less about a number that is
+on screen. Suppression makes the board withhold a warning it would otherwise
+show.** A dispatcher reading a row with no AT_RISK chip concludes the stop is
+fine — an inference from absence, where the label carries the whole meaning
+and there is nothing else on screen to correct it.
+
+It survives as four trailing words rather than a clause, which is the right
+weight for it:
+
+```
+zip, routed      The destination is a ZIP-code centre ±4.6 mi, not a street
+                 address, so no at-risk warning will fire. Arrival time counts
+                 driving only — no rest breaks.
+
+street, routed   Arrival time counts driving only — no rest breaks.
+
+straight-line    Distance is a straight line, not a road route, so the miles
+                 read short. Arrival time counts driving only — no rest breaks.
+
+lane-estimate    Distance is estimated from this lane's last route (×1.32),
+                 not routed again yet. Arrival time counts driving only — no
+                 rest breaks.
+```
+
+Exactly **one** trust clause fires, and coarse coordinates beat a degraded
+distance — being three miles from the right place outranks the miles being
+measured differently. When both are true they combine into one sentence rather
+than queueing:
+
+```
+zip + straight-line   The destination is a ZIP-code centre ±4.6 mi and the
+                      distance is not a measured route — treat the time as a
+                      rough guide, and note that no at-risk warning will fire.
+```
+
+A street stop on a routed lane says the minimum, which is the point: when
+nothing is wrong, nothing is said.
+
+### Where the rest went
+
+`etaDetails()` returns labelled lines for a surface someone opens on purpose —
+a collapsed `<details>` in the map popup, and open in the edit modal, where
+anyone reconciling against a rate confirmation has already gone deliberately.
+
+```
+Accuracy   ZIP-code centre, ±4.6 mi — Census has no record of this street
+Distance   Routed road miles for a car; a truck-mile figure on a rate
+           confirmation will read longer
+Route      Starts 379 m from the destination point, at the nearest road
+Lane       ×1.22 measured straight-line-to-road on this lane
+Measured   22s ago
+```
+
+`Lane` and `Measured` are new. Both were already in `stop_routes` and nothing
+surfaced them, so a lane whose route had gone stale looked identical to one
+measured a minute ago.
+
+The popup previously rendered the whole sentence **twice** — once as a `title`
+on the Projected line and again in full in an Accuracy row beneath it.
+
+`<details>` rather than state: the browser owns whether it is open, which is
+one fewer thing that can write during a render (§12.29).
+
+### Tested as a rule, not as strings
+
+`eta-basis.test.ts` asserts the two-clause ceiling across every combination of
+precision × basis × accuracy the board can produce, that the constant clause is
+always last, and that at-risk suppression appears on every zip row and no other
+row. The strings will be reworded; the ceiling must not move.
+
+## 12.34 The singleton nothing recreates
+
+`feed_health` holds one row, written by migration 0001. Every worker path
+against it was `update … where id = 1`, and **an UPDATE matching zero rows is
+not an error.**
+
+Lose the row and three things fail at once, silently:
+
+| path | consequence |
+|---|---|
+| `recordSuccess` | the cursor is never persisted, so every restart re-fetches from cold |
+| `recordFailure` | `last_error` is never written, so the offline banner has no cause |
+| `loadFleet` | `newest_position_at` stays null, and `isFeedStale(null, …)` is **true** |
+
+The third is the serious one. The console withdraws schedule colour from every
+row when the feed is stale (§5.9), so a missing singleton means **the board is
+permanently and silently colourless** — the one state that looks like the rule
+working correctly.
+
+Found because the §12.32 truncate removed it, which made that truncate an
+accidental dry run of a fresh deploy. A genuine fresh deploy is covered, since
+migrations run first and 0001 seeds the row; what is not covered is anything
+that loses it afterwards, and the failure is invisible in logs either way.
+
+Fixed by making the writes upserts, so the worker recreates the row rather
+than depending on a row only a migration knows how to create. Confirmed on the
+real database: the worker was restarted with the row absent and wrote it on its
+first successful poll, cursor and all.
+
+`npm run db:verify` already checked this (`feed_health rows : 0 (singleton)` →
+`FAILED`) and was the only thing that noticed.
 
 # 13. Still open
 
