@@ -154,8 +154,13 @@ const OCCUPIED_TRUCK: Board = {
   ],
 };
 
-const render = (board: Board = server.board!) => {
-  act(() => {
+/**
+ * ASYNC: the board mounts MergePrompt, which fetches on mount. A synchronous
+ * act returns before that settles, so its setState lands outside any act
+ * scope and the assertions run against a tree mid-update.
+ */
+const render = async (board: Board = server.board!) => {
+  await act(async () => {
     root!.render(createElement(AssignmentBoard, { board, role: 'admin' as const }));
   });
   return container!;
@@ -199,7 +204,7 @@ async function addDriverNamed(name: string) {
 
 describe('adding a driver from the board assigns them to the truck', () => {
   it('puts the new driver on the truck, not merely into the roster', async () => {
-    render();
+    await render();
     await addDriverNamed('Ada Lovelace');
 
     // The driver was created.
@@ -211,7 +216,7 @@ describe('adding a driver from the board assigns them to the truck', () => {
   });
 
   it('sends the assignment, rather than leaving it in an unsaved draft', async () => {
-    render();
+    await render();
     await addDriverNamed('Ada Lovelace');
 
     // One action from the dispatcher's side is one write from ours (§12.28).
@@ -225,7 +230,7 @@ describe('adding a driver from the board assigns them to the truck', () => {
 describe('an occupied truck is a reassignment, not a create-and-assign', () => {
   it('says "Add driver", because that is all the button can do there', async () => {
     server.board = structuredClone(OCCUPIED_TRUCK);
-    render();
+    await render();
     const picker = container!.querySelector<HTMLInputElement>('input[role="combobox"]')!;
     act(() => picker.focus());
     act(() => setValue(picker, 'Ada Lovelace'));
@@ -240,7 +245,7 @@ describe('an occupied truck is a reassignment, not a create-and-assign', () => {
 
   it('does not send a truckId, so nothing bypasses the confirm', async () => {
     server.board = structuredClone(OCCUPIED_TRUCK);
-    render();
+    await render();
     const picker = container!.querySelector<HTMLInputElement>('input[role="combobox"]')!;
     act(() => picker.focus());
     act(() => setValue(picker, 'Ada Lovelace'));
@@ -267,7 +272,7 @@ describe('a refresh no longer eats a pending edit', () => {
    * `save()` both call router.refresh(), and the reset effect threw away any
    * edit made before the new props landed.
    */
-  it('keeps an edit made on another truck while the board refreshes', () => {
+  it('keeps an edit made on another truck while the board refreshes', async () => {
     server.board = {
       trucks: [
         { ...EMPTY_TRUCK.trucks[0]! },
@@ -295,7 +300,7 @@ describe('a refresh no longer eats a pending edit', () => {
         },
       ],
     };
-    render();
+    await render();
 
     // Stage a driver on truck 143.
     const pickers = container!.querySelectorAll<HTMLInputElement>('input[role="combobox"]');

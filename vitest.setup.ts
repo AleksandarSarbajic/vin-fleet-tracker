@@ -112,3 +112,25 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
+
+// ---------------------------------------------------------------------------
+// The act() environment flag.
+// ---------------------------------------------------------------------------
+
+/**
+ * React only honours `act()` when this is set, and without it every single
+ * render logged "The current testing environment is not configured to support
+ * act(...)" — around 150 lines per run.
+ *
+ * That is not cosmetic. `act` warnings are how React reports a state update
+ * that escaped a test's control, which is exactly the class of render-phase
+ * bug the component tests exist to catch (§12.29). Buried in 150 identical
+ * lines, a real one is invisible. A warning nobody can see is not a warning.
+ *
+ * Harmless in the node-environment files: nothing there renders.
+ */
+declare global {
+  // eslint-disable-next-line no-var
+  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;

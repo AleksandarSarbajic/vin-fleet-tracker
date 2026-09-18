@@ -104,42 +104,50 @@ function board(over: Partial<Board> = {}): Board {
   };
 }
 
-function render(role: 'admin' | 'dispatcher' | 'viewer' = 'dispatcher') {
-  act(() => {
+/**
+ * ASYNC, because the board mounts MergePrompt and MergePrompt fetches on
+ * mount. A synchronous `act` returns before that promise settles, so the
+ * `setCandidates` it causes lands outside anyone's act scope — React says so,
+ * and with IS_REACT_ACT_ENVIRONMENT now set we can hear it. The await inside
+ * `act` flushes the microtask, so the assertions run against a settled tree
+ * rather than one mid-update.
+ */
+async function render(role: 'admin' | 'dispatcher' | 'viewer' = 'dispatcher') {
+  await act(async () => {
     root!.render(createElement(AssignmentBoard, { board: board(), role }));
   });
   return container!;
 }
 
 describe('the No ELD tag is on the board, not just in a dropdown', () => {
-  it('tags the hand-entered driver on the truck row', () => {
-    const html = render().innerHTML;
+  it('tags the hand-entered driver on the truck row', async () => {
+    const html = (await render()).innerHTML;
     // Both names render; only one carries the tag.
     expect(html).toContain('Hand Entered Hal');
     expect(html).toContain('Samsara Sam');
     expect(html).toContain('No ELD');
   });
 
-  it('renders exactly as many tags as there are ELD-less drivers on screen', () => {
-    const tags = render().querySelectorAll('[title*="not in Samsara"]');
+  it('renders exactly as many tags as there are ELD-less drivers on screen', async () => {
+    const tags = (await render()).querySelectorAll('[title*="not in Samsara"]');
     // One truck row (Hand Entered Hal) + one panel entry (Unassigned Hal).
     // The two Samsara drivers must contribute none — a tag on everything
     // would pass a naive "contains No ELD" check and mean nothing.
     expect(tags.length).toBe(2);
   });
 
-  it('says why, so the tag is not a mystery', () => {
-    const tag = render().querySelector('[title*="not in Samsara"]');
+  it('says why, so the tag is not a mystery', async () => {
+    const tag = (await render()).querySelector('[title*="not in Samsara"]');
     expect(tag?.getAttribute('title')).toMatch(/position comes from the vehicle/);
   });
 });
 
 describe('the retire control is admin-only', () => {
-  it('is absent for a dispatcher', () => {
-    expect(render('dispatcher').innerHTML).not.toContain('Retire');
+  it('is absent for a dispatcher', async () => {
+    expect((await render('dispatcher')).innerHTML).not.toContain('Retire');
   });
 
-  it('is present for an admin', () => {
-    expect(render('admin').innerHTML).toContain('Retire');
+  it('is present for an admin', async () => {
+    expect((await render('admin')).innerHTML).toContain('Retire');
   });
 });
