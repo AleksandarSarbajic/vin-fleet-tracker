@@ -3651,6 +3651,109 @@ unmeasured list renders zero rows and looks exactly like a broken one.
 `src/test/layout.ts` states a size; the components still run their own logic
 against it, including the 6/8 column switch.
 
+## 12.47 Miles in the row, without moving a column
+
+The ETA cell showed the time alone, with miles in the tooltip. That was
+decided when the column was assumed to be tight. Measured in Chromium against
+the real Barlow at the real sizes:
+
+```
+14:18 CDT        64.0px    the ETA column is 100px
+09:05 CEST       70.6px    a four-letter zone, the worst normal case
+no ETA           40.7px
+arrived          40.7px
+stale            28.0px
+412 mi (small)   38.0px
+~412 mi          45.3px
+~1204 mi         52.6px
+412 mi · 14:18 CDT  115.5px   ← inline does not fit, and never did
+```
+
+Two things fell out of that. **Inline needs the column at ~138px**, which at a
+1728 viewport takes 38px from the two flexible columns — they only have 341px
+between them, and at the 8-column floor (900px of list) only 204px. And **the
+degraded strings are all shorter than the normal one**, so the column's worst
+case is `14:18 CDT`, not `no ETA`.
+
+So the miles go **under** the time, and nothing moves.
+
+### The second line is out of flow, and that is the whole trick
+
+Stacked normally the two lines form a 35.3px block, which `items-center`
+centres in a 44px row. Measured:
+
+```
+variant   rowH   apptMid   etaMid   delta
+none        44        22       22       0
+block       44        22     13.4    -8.6   ← the ETA time, 8.6px too high
+abs         44        22       22       0
+```
+
+Two adjacent numeric columns out of line by 8.6px reads as a bug. Absolutely
+positioned at `top-full`, the time stays exactly where it was and the miles
+sit at 42.6px of the 44px row.
+
+This is the same reasoning as the Appt cell's fixed 18px prefix slot: the
+annotation gets its own space so the **number** never moves.
+
+### Three bases, two signals
+
+```
+routed           412 mi     measured for THIS position
+lane-estimate   ~412 mi     measured for this lane, not this position
+straight-line   ~412 mi     quiet ink — no road measured at all
+```
+
+Two signals rather than one, because three states cannot be told apart by a
+single glyph at 11.5px. The tilde says "not measured for where the truck is
+now"; the muted token says "no road measured at all". `basisShort` keeps the
+words for the popup, where there is room.
+
+### When there is no second line
+
+Four cases, each for its own reason:
+
+- **feed stale** — the time already reads `stale`, and a precise mileage under
+  it would undo that in the same glance (§5.9);
+- **arrived** — no miles left worth printing;
+- **suppressed-unassigned** — the strike says "this number is not being
+  maintained", and live miles under it would contradict it;
+- **under ten miles**, where `milesText` says `arriving` — a word, not a
+  number, and the line exists to carry the number. It is also the only string
+  here with a descender, which is what would have reached the row's border.
+
+### What the tests can and cannot see
+
+happy-dom computes no layout, so the alignment property — the entire reason
+for the design — cannot be asserted in the suite. It was measured in Chromium
+and is recorded above. What the test asserts is the **mechanism**: that the
+miles element is `absolute top-full`. A test that cannot see the property has
+to say which proxy it is checking instead.
+
+## 12.48 Double-click opens the edit modal
+
+The mouse form of §12.10's Enter, not a new behaviour. The whole row, with the
+status chip excluded — it is the only cell likely to grow a click target of
+its own.
+
+Not a subset of cells: a gesture that works on five columns of eight is
+unlearnable, and a dispatcher who finds it on the driver column and finds it
+dead on the truck column concludes the app is broken.
+
+### The collision, and why the row stays selectable
+
+Nothing in the console is `select-none`, so double-click's existing meaning is
+"select a word" — and the truck number, the load number and the address are
+exactly the things somebody copies out of a row.
+
+Disabling selection would buy a clean gesture at the price of a real one. So
+the handler calls `getSelection()?.removeAllRanges()` instead: click-drag
+copying keeps working, and only the stray word-select goes — which the modal
+would have covered anyway.
+
+Selection needs no extra work. `dblclick` is preceded by two `click`s, so the
+existing `onSelect` has already run and the map is already on the right truck.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

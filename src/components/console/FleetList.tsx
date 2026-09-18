@@ -40,6 +40,8 @@ interface Props {
   drift: number;
   onResort: () => void;
   onSelect: (id: string) => void;
+  /** §12.48: double-click a row to edit, the mouse form of Enter. */
+  onEdit: (id: string) => void;
 }
 
 export function FleetList({
@@ -51,6 +53,7 @@ export function FleetList({
   drift,
   onResort,
   onSelect,
+  onEdit,
 }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -156,6 +159,7 @@ export function FleetList({
                   selected={row.id === selectedId}
                   query={query}
                   onSelect={onSelect}
+                  onEdit={onEdit}
                 />
               </div>
             );

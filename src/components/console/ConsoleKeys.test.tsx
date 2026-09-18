@@ -36,15 +36,21 @@ const { Console } = await import('./Console');
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+/** Both carry a routed distance, so the §12.47 miles line has something to say. */
 const ROW_A = fleetRow({
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   truckNumber: 101,
   samsaraName: 'Truck #101',
+  milesRemaining: 412,
+  distanceBasis: 'routed',
 });
 const ROW_B = fleetRow({
   id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   truckNumber: 202,
   samsaraName: 'Truck #202',
+  milesRemaining: 88,
+  distanceBasis: 'lane-estimate',
+  laneRatio: 1.24,
 });
 
 const INITIAL: FleetResponse = {
@@ -182,5 +188,134 @@ describe('Enter has one owner (§12.46)', () => {
 
     expect(rowFor('202')?.getAttribute('aria-selected')).toBe('true');
     expect(rowFor('101')?.getAttribute('aria-selected')).toBe('false');
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.47 — the miles line, and §12.48 — double-click to edit
+ * ---------------------------------------------------------------------- */
+
+const etaCell = (truck: string) => {
+  const row = rowFor(truck)!;
+  // Seventh grid child: rail, truck, driver, position, next stop, appt, ETA.
+  return row.children[6] as HTMLElement;
+};
+
+describe('miles hang under the ETA (§12.47)', () => {
+  it('renders the time and the miles as two lines in one cell', async () => {
+    await render();
+    const cell = etaCell('101');
+    expect(cell.textContent).toContain('412 mi');
+    // Two children: the time, and the miles out of flow beneath it.
+    expect(cell.children).toHaveLength(2);
+  });
+
+  /**
+   * The alignment property this design rests on cannot be asserted here —
+   * happy-dom computes no layout. It was measured in Chromium instead: the
+   * time stays at 22px from the row top, identical to the single-line cell,
+   * while a normally-stacked block put it at 13.4px and 8.6px out of line
+   * with the Appt column. What CAN be asserted is the mechanism that keeps
+   * it there.
+   */
+  it('takes the miles out of flow, which is what keeps the time aligned', async () => {
+    await render();
+    const cell = etaCell('101');
+    const milesEl = cell.children[1] as HTMLElement;
+    expect(milesEl.className).toContain('absolute');
+    expect(milesEl.className).toContain('top-full');
+  });
+
+  it('marks a straight-line distance with the quiet token', async () => {
+    await act(async () => {
+      root!.unmount();
+    });
+    root = createRoot(container!);
+    // Rebuilt rather than mutated: a shared fixture that one test edits is
+    // how the next test starts passing for the wrong reason.
+    const straight = fleetRow({
+      id: ROW_A.id,
+      truckNumber: 101,
+      samsaraName: 'Truck #101',
+      distanceBasis: 'straight-line',
+      milesRemaining: 412,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(Console, {
+            initial: { ...INITIAL, fleet: [straight] },
+            dispatchTz: 'America/Chicago',
+            user: { fullName: 'S L', email: null, role: 'admin' as const },
+            initialQuery: '',
+            initialTruck: null,
+            initialChips: [],
+            drivers: [],
+            role: 'admin' as const,
+          }),
+        ),
+      );
+    });
+
+    const milesEl = etaCell('101').children[1] as HTMLElement;
+    expect(milesEl.textContent).toBe('~412 mi');
+    expect(milesEl.className).toContain('text-text-muted');
+  });
+});
+
+describe('double-click opens the edit modal (§12.48)', () => {
+  const dblclick = async (el: HTMLElement) => {
+    await act(async () => {
+      el.click();
+      el.click();
+      el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+  };
+
+  it('opens on the row that was double-clicked', async () => {
+    await render();
+    await dblclick(rowFor('202')!);
+    expect(openModalTruck()).toBe('202');
+  });
+
+  it('selects that row too, so the map is not showing someone else', async () => {
+    await render();
+    await dblclick(rowFor('202')!);
+    expect(rowFor('202')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  /**
+   * The status chip is the one cell likely to grow its own click target.
+   *
+   * Both halves in one test on purpose: an exclusion asserted on its own
+   * passes just as happily when the whole feature is dead, which is exactly
+   * the test that goes green against a wrong fix (§12.38).
+   */
+  it('does not open from the status chip, but does from the cell beside it', async () => {
+    await render();
+    const row = rowFor('202')!;
+
+    await dblclick(row.children[7] as HTMLElement);
+    expect(container!.querySelector('[role="dialog"]')).toBeNull();
+
+    await dblclick(row.children[6] as HTMLElement);
+    expect(openModalTruck()).toBe('202');
+  });
+
+  it('clears the word the double-click selected', async () => {
+    await render();
+    const row = rowFor('202')!;
+    // A real double-click leaves a selection behind; nothing here is
+    // select-none, deliberately, so click-drag copying still works.
+    const range = document.createRange();
+    range.selectNodeContents(row);
+    window.getSelection()?.addRange(range);
+    expect(window.getSelection()?.rangeCount).toBeGreaterThan(0);
+
+    await dblclick(row);
+    expect(window.getSelection()?.rangeCount).toBe(0);
   });
 });

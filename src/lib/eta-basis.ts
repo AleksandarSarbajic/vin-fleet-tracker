@@ -1,5 +1,6 @@
 import { elapsed } from './format';
 import type { DistanceBasis } from './routing';
+import type { EtaAbsence } from './status';
 
 /**
  * The words a dispatcher reads next to an ETA (§12.30, §12.31, §12.33).
@@ -195,4 +196,70 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
   if (age) details.push({ label: 'Measured', value: `${age} ago` });
 
   return details;
+}
+
+/* --------------------------- the row's miles line ------------------------ */
+
+/**
+ * What the second line of the ETA cell says, or null for no second line
+ * (§12.47).
+ *
+ * Miles used to live only in the tooltip, because the ETA column is 100px and
+ * `14:18 CDT` measures 64 of them. Measured in Chromium against the real
+ * Barlow: `~1204 mi` at `text-small` is 44.8px, so it fits under the time
+ * without moving a single column.
+ *
+ * Three bases, two signals, so the degraded ones stay apart at a glance:
+ *
+ *     routed          412 mi     measured for THIS position
+ *     lane-estimate  ~412 mi     measured for this lane, not this position
+ *     straight-line  ~412 mi     quiet — no road has been measured at all
+ *
+ * The tilde says "not measured for where the truck is now"; the muted token
+ * says "no road measured at all". `basisShort` keeps the words for the popup,
+ * where there is room for them.
+ */
+export interface MilesFacts extends BasisFacts {
+  milesRemaining: number | null;
+  etaAbsence: EtaAbsence;
+}
+
+export interface MilesLine {
+  text: string;
+  /** The straight-line case: quieter ink, because nothing has been measured. */
+  quiet: boolean;
+}
+
+export function etaMilesLine(
+  row: MilesFacts,
+  feedStale: boolean,
+  milesText: (miles: number | null) => string | null,
+): MilesLine | null {
+  /**
+   * The feed is down, so the distance is computed from a position nobody
+   * trusts. The time already reads `stale`; a precise-looking mileage under
+   * it would undo that in the same glance (§5.9).
+   */
+  if (feedStale) return null;
+
+  /**
+   * An arrived truck has no miles left worth printing, and a struck-through
+   * ETA must not have live miles under it — the strike says "this number is
+   * not being maintained", and a second number would contradict it.
+   */
+  if (row.etaAbsence === 'arrived' || row.etaAbsence === 'suppressed-unassigned') return null;
+
+  const base = milesText(row.milesRemaining);
+  /**
+   * `null` is no distance at all. `arriving` is what milesText says under ten
+   * miles — a word, not a number, and the second line exists to carry the
+   * number. It is also the only string here with a descender, which is what
+   * would have touched the row's bottom border.
+   */
+  if (base === null || base === 'arriving') return null;
+
+  return {
+    text: row.distanceBasis === 'routed' ? base : `~${base}`,
+    quiet: row.distanceBasis === 'straight-line',
+  };
 }

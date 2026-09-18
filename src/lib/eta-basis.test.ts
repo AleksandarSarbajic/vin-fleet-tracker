@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { basisShort, etaCaution, etaDetails, type BasisFacts } from './eta-basis';
+import {
+  basisShort,
+  etaCaution,
+  etaDetails,
+  etaMilesLine,
+  type BasisFacts,
+  type MilesFacts,
+} from './eta-basis';
 import type { DistanceBasis } from './routing';
 
 /**
@@ -109,5 +116,78 @@ describe('a street stop on a routed lane says the minimum', () => {
 
   it('still calls the distance routed in the short form', () => {
     expect(basisShort(facts())).toBe('routed road miles');
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.47 — the miles line under the ETA
+ * ---------------------------------------------------------------------- */
+
+/** The real one from TruckRow: `arriving` under ten, whole miles above. */
+const miles = (m: number | null): string | null =>
+  m === null ? null : m < 10 ? 'arriving' : `${Math.round(m)} mi`;
+
+function milesFacts(over: Partial<MilesFacts> = {}): MilesFacts {
+  return { ...facts(), milesRemaining: 412, etaAbsence: 'has-eta', ...over };
+}
+
+describe('the miles line under the ETA (§12.47)', () => {
+  it('separates the three bases by two signals, not one', () => {
+    const routed = etaMilesLine(milesFacts({ distanceBasis: 'routed' }), false, miles);
+    const lane = etaMilesLine(milesFacts({ distanceBasis: 'lane-estimate' }), false, miles);
+    const straight = etaMilesLine(milesFacts({ distanceBasis: 'straight-line' }), false, miles);
+
+    expect(routed).toEqual({ text: '412 mi', quiet: false });
+    expect(lane).toEqual({ text: '~412 mi', quiet: false });
+    expect(straight).toEqual({ text: '~412 mi', quiet: true });
+
+    // The point of two signals: no two of the three render identically.
+    const rendered = [routed, lane, straight].map((m) => `${m?.text}|${m?.quiet}`);
+    expect(new Set(rendered).size).toBe(3);
+  });
+
+  it('shows no miles while the feed is stale', () => {
+    // The time already reads `stale`; a precise mileage under it would undo
+    // that in the same glance (§5.9).
+    expect(etaMilesLine(milesFacts(), true, miles)).toBeNull();
+  });
+
+  it('shows no miles for a truck that has arrived', () => {
+    expect(etaMilesLine(milesFacts({ etaAbsence: 'arrived' }), false, miles)).toBeNull();
+  });
+
+  it('shows no miles under a struck-through ETA', () => {
+    // The strike says "this number is not being maintained". Live miles under
+    // it would contradict it.
+    const suppressed = milesFacts({ etaAbsence: 'suppressed-unassigned' });
+    expect(etaMilesLine(suppressed, false, miles)).toBeNull();
+  });
+
+  it('shows no miles when there is no distance at all', () => {
+    for (const absence of ['address-not-located', 'no-address'] as const) {
+      const none = milesFacts({ milesRemaining: null, etaAbsence: absence });
+      expect(etaMilesLine(none, false, miles)).toBeNull();
+    }
+  });
+
+  /**
+   * `arriving` is a word, and the second line exists to carry a number. It is
+   * also the only string here with a descender, which is what would have
+   * touched the row's bottom border at 42.6px of a 44px row.
+   */
+  it('shows no miles when milesText has no number to give', () => {
+    expect(etaMilesLine(milesFacts({ milesRemaining: 4 }), false, miles)).toBeNull();
+    expect(etaMilesLine(milesFacts({ milesRemaining: 9.9 }), false, miles)).toBeNull();
+    expect(etaMilesLine(milesFacts({ milesRemaining: 10 }), false, miles)?.text).toBe('10 mi');
+  });
+
+  it('carries a four-figure distance, which our own lanes reach', () => {
+    // route_samples holds a real 2207-mile measurement.
+    expect(etaMilesLine(milesFacts({ milesRemaining: 2207 }), false, miles)?.text).toBe('2207 mi');
+  });
+
+  it('keeps the miles even with no appointment, because distance is not a deadline', () => {
+    const noAppt = milesFacts({ etaAbsence: 'no-appointment' });
+    expect(etaMilesLine(noAppt, false, miles)?.text).toBe('412 mi');
   });
 });

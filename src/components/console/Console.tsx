@@ -283,6 +283,7 @@ export function Console({
               drift={drift}
               onResort={resort}
               onSelect={select}
+              onEdit={setEditingId}
             />
           }
           map={

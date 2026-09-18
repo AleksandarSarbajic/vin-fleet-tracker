@@ -2,7 +2,13 @@
 
 import { memo } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
-import { basisShort, etaCaution, etaDetails, type BasisFacts } from '@/lib/eta-basis';
+import {
+  basisShort,
+  etaCaution,
+  etaDetails,
+  etaMilesLine,
+  type BasisFacts,
+} from '@/lib/eta-basis';
 import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
@@ -268,6 +274,11 @@ interface Props {
   selected: boolean;
   query: string;
   onSelect: (id: string) => void;
+  /**
+   * §12.48. Double-click opens the edit modal — the mouse equivalent of the
+   * Enter binding (§12.10), not a new behaviour.
+   */
+  onEdit: (id: string) => void;
 }
 
 function TruckRowImpl({
@@ -278,11 +289,14 @@ function TruckRowImpl({
   selected,
   query,
   onSelect,
+  onEdit,
 }: Props) {
   const reference = fetchedAt ? new Date(fetchedAt) : undefined;
   const quiet = !feedStale && row.status === 'TOMORROW';
   const stale = feedStale || row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
+  /** §12.47. Null means the cell keeps its single line. */
+  const milesLine = columns === 8 ? etaMilesLine(row, feedStale, milesText) : null;
 
   const appt = apptText(row);
 
@@ -310,6 +324,25 @@ function TruckRowImpl({
        */
       data-row-id={row.id}
       onClick={() => onSelect(row.id)}
+      /**
+       * §12.48. The whole row, because a gesture that works on five cells of
+       * eight is unlearnable — a dispatcher who finds it on the driver column
+       * and finds it dead on the truck column concludes the app is broken.
+       *
+       * The status chip is the one exclusion: it is the only cell likely to
+       * grow a click target of its own.
+       *
+       * `removeAllRanges` because nothing here is `select-none` and double
+       * click's existing meaning is "select a word". Clearing the selection
+       * rather than disabling it keeps click-drag copying of a load number or
+       * an address working, and loses only the stray word-select that the
+       * modal would have covered anyway.
+       */
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest('[data-no-dblclick]')) return;
+        window.getSelection()?.removeAllRanges();
+        onEdit(row.id);
+      }}
       onKeyDown={(e) => {
         /**
          * Space only. Enter used to be handled here TOO — this selected, the
@@ -419,18 +452,41 @@ function TruckRowImpl({
         <span>{appt.time}</span>
       </div>
 
+      {/**
+        * The time, with the miles hanging under it (§12.47).
+        *
+        * The second line is ABSOLUTELY positioned, which is the whole trick.
+        * Stacked normally, the two lines form a 35.3px block that `items-
+        * center` centres in a 44px row — and measured in Chromium, that puts
+        * the ETA time 8.6px above the Appt time in the very next column. Two
+        * adjacent numeric columns out of line by 8.6px reads as a bug.
+        *
+        * Out of flow, the time stays exactly where it was (measured: 22px
+        * from the row top, identical to before) and the miles sit at 42.6px
+        * in a 44px row.
+        */}
       {columns === 8 ? (
-        <div
-          title={etaTitle(row)}
-          className={`truncate text-right text-body tabular-nums ${
-            unassigned ? 'text-text-muted line-through' : 'text-text-secondary'
-          }`}
-        >
-          {etaText(row, feedStale)}
+        <div title={etaTitle(row)} className="relative text-right">
+          <div
+            className={`truncate text-body tabular-nums ${
+              unassigned ? 'text-text-muted line-through' : 'text-text-secondary'
+            }`}
+          >
+            {etaText(row, feedStale)}
+          </div>
+          {milesLine ? (
+            <div
+              className={`absolute inset-x-0 top-full truncate text-small leading-none tabular-nums ${
+                milesLine.quiet ? 'text-text-muted' : 'text-text-secondary'
+              }`}
+            >
+              {milesLine.text}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end" data-no-dblclick="">
         {/* A dotted neutral chip carrying the age, fleet-wide (§5.9). */}
         <StatusChip
           status={feedStale ? 'STALE_GPS' : row.status}
