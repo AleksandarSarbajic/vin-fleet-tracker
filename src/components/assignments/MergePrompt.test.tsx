@@ -21,14 +21,24 @@ import type { OpenMergeCandidate } from '@/server/drivers';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+/**
+ * Spied, not silenced. §12.43 says the failure is surfaced TWICE — on the
+ * board for the dispatcher and in the console for whoever debugs it — and
+ * only the first half was asserted. This asserts the second and stops four
+ * deliberate errors printing on every run, which is the noise that teaches
+ * people to skim output.
+ */
+let logged: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  logged = vi.spyOn(console, 'error').mockImplementation(() => {});
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
 });
 
 afterEach(() => {
+  logged.mockRestore();
   act(() => root?.unmount());
   container?.remove();
   root = null;
@@ -75,6 +85,9 @@ describe('a merge check that could not run does not render as "nothing to merge"
     // The bug: this was '' — indistinguishable from a clean roster.
     expect(el.innerHTML).not.toBe('');
     expect(el.textContent).toContain('Could not check for duplicate drivers');
+    // And the other half of the handler: the CAUSE reaches the console. A
+    // message says what, never why.
+    expect(logged).toHaveBeenCalledWith('merge candidate check failed', expect.any(Error));
   });
 
   it('says so when the request is refused', async () => {
@@ -100,6 +113,8 @@ describe('a merge check that could not run does not render as "nothing to merge"
 
     // The whole point of the distinction: this silence is earned.
     expect(el.innerHTML).toBe('');
+    // Nothing logged either: a successful check is not an incident.
+    expect(logged).not.toHaveBeenCalled();
   });
 
   it('renders the prompt when the check found something', async () => {
