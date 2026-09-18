@@ -2,7 +2,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { BoardDriver } from '@/server/assignments';
-import { NO_ELD_LABEL, isEldBacked } from '@/lib/driver';
+import { isEldBacked } from '@/lib/driver';
+import { NoEldTag } from '@/components/DriverName';
+import { AddDriverInline } from './AddDriverInline';
 
 /**
  * Searchable driver picker (design-spec §9.9's assignment group, at board
@@ -28,6 +30,13 @@ interface Props {
   /** Marks this as the modal's opening focus target (see useFocusTrap). */
   autoFocus?: boolean;
   onChange: (driverId: string | null) => void;
+  /**
+   * §12.37: refreshes the board after a driver is created here, so the new
+   * row reaches every other surface. Absent means the picker offers no
+   * "+ Add driver" — the edit modal passes it too, but a caller that cannot
+   * refresh must not offer a control that appears to do nothing.
+   */
+  onDriverCreated?: (driverId: string, name: string) => void | Promise<void>;
 }
 
 export function DriverSelect({
@@ -39,10 +48,12 @@ export function DriverSelect({
   disabledReason,
   autoFocus = false,
   onChange,
+  onDriverCreated,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const [cursor, setCursor] = useState(0);
+  const [adding, setAdding] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const listId = useId();
 
@@ -69,7 +80,15 @@ export function DriverSelect({
     onChange(driverId);
     setOpen(false);
     setTyped('');
+    setAdding(false);
   };
+
+  /**
+   * Offered when the search finds nothing, or so few that the driver they
+   * want is evidently not there. Not offered on an unfiltered list: the
+   * control belongs to the moment of not finding someone.
+   */
+  const offerAdd = onDriverCreated !== undefined && typed.trim() !== '' && matches.length <= 2;
 
   return (
     <div ref={box} className="relative">
@@ -155,11 +174,7 @@ export function DriverSelect({
                      * and that decides whether a truck with no position is
                      * expected or broken.
                      */}
-                    {isEldBacked(driver) ? null : (
-                      <span className="border border-line-hair px-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
-                        {NO_ELD_LABEL}
-                      </span>
-                    )}
+                    {isEldBacked(driver) ? null : <NoEldTag />}
                   </span>
                   <span className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
                     {takenElsewhere
@@ -172,9 +187,44 @@ export function DriverSelect({
               </li>
             );
           })}
-          {matches.length === 0 ? (
+          {matches.length === 0 && !adding ? (
             <li className="px-2.5 py-2 text-body text-text-muted">
               No driver matches “{typed}”.
+            </li>
+          ) : null}
+          {/**
+           * §12.37: the answer sits directly under the empty result, because
+           * that is the moment a dispatcher needs it. A new hire is on the
+           * board before anyone has added them to the ELD.
+           */}
+          {offerAdd && !adding ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="w-full border-t border-line-hair px-2.5 py-2 text-left text-body text-text-secondary hover:bg-row-hover"
+              >
+                + Add “{typed.trim()}” as a new driver
+              </button>
+            </li>
+          ) : null}
+          {adding ? (
+            <li>
+              <AddDriverInline
+                suggestedName={typed.trim()}
+                onCancel={() => setAdding(false)}
+                onCreated={(driverId, name) => {
+                  setAdding(false);
+                  setTyped('');
+                  setOpen(false);
+                  // The caller refreshes the board FIRST, so the driver exists
+                  // in `drivers` before the select points at them — otherwise
+                  // the input renders empty until the next fetch lands.
+                  void Promise.resolve(onDriverCreated?.(driverId, name)).then(() =>
+                    onChange(driverId),
+                  );
+                }}
+              />
             </li>
           ) : null}
         </ul>

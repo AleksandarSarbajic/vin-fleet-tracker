@@ -19,6 +19,9 @@ export interface BoardTruck {
   samsaraName: string;
   driverId: string | null;
   driverName: string | null;
+  /** §12.37: provenance travels with the name, everywhere it renders. */
+  driverSource: DriverSource | null;
+  driverSamsaraId: string | null;
   /** ISO 8601 UTC. When the current assignment started. */
   since: string | null;
 }
@@ -70,6 +73,8 @@ export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard>
         samsaraName: trucks.samsaraName,
         driverId: drivers.id,
         driverName: drivers.name,
+        driverSource: drivers.source,
+        driverSamsaraId: drivers.samsaraDriverId,
         since: assignments.startedAt,
       })
       .from(trucks)
@@ -115,6 +120,8 @@ export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard>
       samsaraName: t.samsaraName,
       driverId: t.driverId,
       driverName: t.driverName,
+      driverSource: t.driverSource,
+      driverSamsaraId: t.driverSamsaraId,
       since: t.since ? t.since.toISOString() : null,
     })),
     drivers: driverRows.map((d) => ({

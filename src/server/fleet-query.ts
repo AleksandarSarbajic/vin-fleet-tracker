@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
+import type { DriverSource } from '@/lib/driver';
 import {
   needsRecompute,
   type CachedRoute,
@@ -36,6 +37,13 @@ export interface FleetRow {
    *  literally named "Truck"). */
   samsaraName: string;
   driverName: string | null;
+  /**
+   * §12.35/§12.37: whether this driver has an ELD behind them. Two fields,
+   * not a precomputed boolean, so `isEldBacked` stays the single
+   * implementation rather than the SQL growing a second one.
+   */
+  driverSource: DriverSource | null;
+  driverSamsaraId: string | null;
   lat: number | null;
   lng: number | null;
   /** Already NULL on stationary trucks — the worker normalises it. */
@@ -155,6 +163,8 @@ export const LATEST_POSITION_SQL = sql`
     t.active                  as active,
     d.id::text                as driver_id,
     d.name                    as driver_name,
+    d.source::text            as driver_source,
+    d.samsara_driver_id       as driver_samsara_id,
     p.lat                     as lat,
     p.lng                     as lng,
     p.heading                 as heading,
@@ -296,6 +306,8 @@ export const FleetQueryRow = z.object({
   /** Presence is what UNASSIGNED turns on — the name is for the cell. */
   driver_id: z.string().uuid().nullable(),
   driver_name: z.string().nullable(),
+  driver_source: z.enum(['samsara', 'app']).nullable(),
+  driver_samsara_id: z.string().nullable(),
   /** double precision -> number. */
   lat: z.number().nullable(),
   lng: z.number().nullable(),
@@ -369,6 +381,8 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     truckNumber: raw.truck_number,
     samsaraName: raw.samsara_name,
     driverName: raw.driver_name,
+    driverSource: raw.driver_source,
+    driverSamsaraId: raw.driver_samsara_id,
     lat: raw.lat,
     lng: raw.lng,
     heading: raw.heading,

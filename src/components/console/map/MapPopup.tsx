@@ -6,6 +6,7 @@ import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
 import { basisShort, etaCaution, etaDetails, milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
+import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
 
@@ -152,6 +153,12 @@ export function MapPopup({
             {row.truckNumber ?? row.samsaraName}
             {row.driverName ? ` · ${row.driverName}` : ''}
           </span>
+          {needsNoEldTag({
+            source: row.driverSource,
+            samsaraDriverId: row.driverSamsaraId,
+          }) ? (
+            <NoEldTag />
+          ) : null}
           <StatusChip status={row.status} forced={row.override !== null} />
         </div>
 
@@ -231,9 +238,12 @@ export function MapPopup({
             </>
           ) : null}
           <Row label="Driver">
-            {row.driverName ?? (
-              <span className="text-status-neutral-fg">Unassigned</span>
-            )}
+            <DriverName
+              name={row.driverName}
+              source={row.driverSource}
+              samsaraDriverId={row.driverSamsaraId}
+              fallback={<span className="text-status-neutral-fg">Unassigned</span>}
+            />
           </Row>
         </div>
 

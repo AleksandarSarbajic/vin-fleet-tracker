@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import { basisShort, etaCaution, etaDetails, type BasisFacts } from '@/lib/eta-basis';
+import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
 import { elapsed, timeInZone } from '@/lib/format';
@@ -339,7 +340,16 @@ function TruckRowImpl({
         className={`truncate text-body ${unassigned ? 'text-status-neutral-fg' : quiet ? 'text-text-muted' : 'text-text-secondary'}`}
       >
         {row.driverName ? (
-          <Marked text={row.driverName} query={query} />
+          <span className="inline-flex items-baseline gap-1.5">
+            <Marked text={row.driverName} query={query} />
+            {/* §12.37: the tag goes wherever the name goes. */}
+            {needsNoEldTag({
+              source: row.driverSource,
+              samsaraDriverId: row.driverSamsaraId,
+            }) ? (
+              <NoEldTag />
+            ) : null}
+          </span>
         ) : (
           /**
            * §12.18: the word `Unassigned` is said ONCE per row, by the chip.

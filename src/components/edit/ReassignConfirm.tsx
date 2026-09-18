@@ -3,6 +3,7 @@
 import type { ReassignPreview } from '@/server/reassign';
 import { timeInZone } from '@/lib/format';
 import { useFocusTrap } from './useModalChrome';
+import { DriverName } from '@/components/DriverName';
 
 /**
  * §9.10 — two trucks affected, both sides stated, rendered entirely from the
@@ -57,7 +58,14 @@ export function ReassignConfirm({
                 gains a driver
               </p>
               <Line label="From">
-                <span className="line-through">{gaining.driverName ?? 'Unassigned'}</span>
+                <span className="line-through">
+                  <DriverName
+                    name={gaining.driverName}
+                    source={gaining.driverSource}
+                    samsaraDriverId={gaining.driverSamsaraId}
+                    fallback="Unassigned"
+                  />
+                </span>
               </Line>
               <Line label="To">{gaining.toDriverName ?? 'Unassigned'}</Line>
               <Line label="Next appt">
@@ -75,7 +83,14 @@ export function ReassignConfirm({
                     loses its driver
                   </p>
                   <Line label="Was">
-                    <span className="line-through">{losing.driverName ?? '—'}</span>
+                    <span className="line-through">
+                      <DriverName
+                        name={losing.driverName}
+                        source={losing.driverSource}
+                        samsaraDriverId={losing.driverSamsaraId}
+                        fallback="—"
+                      />
+                    </span>
                   </Line>
                   <Line label="Becomes">
                     <span className="text-status-neutral-fg">Unassigned</span>

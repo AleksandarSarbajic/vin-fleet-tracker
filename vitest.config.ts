@@ -2,6 +2,19 @@ import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  /**
+   * The automatic JSX runtime (§12.37).
+   *
+   * tsconfig says `"jsx": "preserve"` because Next compiles the app, and
+   * esbuild then defaulted to the CLASSIC runtime for tests — which needs
+   * `React` in scope and throws "React is not defined" for any component that
+   * contains JSX. So no component could be rendered in a test at all, and the
+   * only .tsx test in the suite was a hook exercised through createElement.
+   *
+   * That is the structural reason a whole feature shipped with no UI and
+   * every test passing: nothing could render a screen, so nothing did.
+   */
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

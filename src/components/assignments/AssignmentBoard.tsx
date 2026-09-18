@@ -8,6 +8,8 @@ import { can } from '@/lib/roles';
 import { CONFLICT_HEADLINE, type AssignmentConflict } from '@/lib/assignments';
 import type { AssignmentBoard as Board } from '@/server/assignments';
 import { DriverSelect } from './DriverSelect';
+import { DriverName } from '@/components/DriverName';
+import { MergePrompt } from './MergePrompt';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -149,6 +151,27 @@ export function AssignmentBoard({ board, role }: Props) {
   }, [dirty, mayEdit, saving, save]);
 
   const driversWithoutTruck = board.drivers.filter((d) => !claimedBy.has(d.id));
+  const canRetire = can(role, 'admin');
+
+  /**
+   * §12.37. Never a delete — `assignments.driver_id` is ON DELETE RESTRICT and
+   * the history is the record of who drove what. Confirmed first, because it
+   * is the one control here that removes something from the board.
+   */
+  const retire = async (driverId: string, name: string) => {
+    if (!window.confirm(`Retire ${name}? Their assignment history is kept.`)) return;
+    const response = await fetch('/api/drivers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'retire', driverId, retired: true }),
+    });
+    if (!response.ok) {
+      const body = (await response.json()) as { error?: string };
+      window.alert(body.error ?? 'That driver could not be retired.');
+      return;
+    }
+    router.refresh();
+  };
   const trucksWithoutDriver = board.trucks.filter((t) => !(draft.get(t.id) ?? null));
 
   return (
@@ -172,6 +195,10 @@ export function AssignmentBoard({ board, role }: Props) {
 
       <div className="flex min-h-0 flex-1 gap-5 overflow-auto p-5">
         <section className="min-w-0 flex-1">
+          {/* §12.37: above the board, where a dispatcher is already thinking
+              about who is on what. Renders nothing when there is nothing to
+              ask. */}
+          <MergePrompt role={role} />
           <div className="grid grid-cols-[92px_1fr_200px] items-center gap-x-4 border-b border-line-hair pb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
             <span>Truck</span>
             <span>Driver</span>
@@ -202,9 +229,25 @@ export function AssignmentBoard({ board, role }: Props) {
                   onChange={(driverId) =>
                     setDraft((d) => new Map(d).set(truck.id, driverId))
                   }
+                  /**
+                   * §12.37: the board refreshes BEFORE the select points at
+                   * the new driver, so `board.drivers` already contains them.
+                   * Only passed where a refresh is possible — a picker that
+                   * offered "+ Add driver" and then could not show the result
+                   * would look broken.
+                   */
+                  onDriverCreated={async () => {
+                    router.refresh();
+                    await new Promise((r) => setTimeout(r, 0));
+                  }}
                 />
                 <span className="truncate text-body text-text-muted">
-                  {truck.driverName ?? 'Unassigned'}
+                  <DriverName
+                    name={truck.driverName}
+                    source={truck.driverSource}
+                    samsaraDriverId={truck.driverSamsaraId}
+                    fallback="Unassigned"
+                  />
                 </span>
               </div>
             );
@@ -215,12 +258,39 @@ export function AssignmentBoard({ board, role }: Props) {
           <Panel
             title={`Drivers with no truck (${driversWithoutTruck.length})`}
             empty="Every active driver has a truck."
-            items={driversWithoutTruck.map((d) => d.name)}
+            items={driversWithoutTruck.map((d) => ({
+              key: d.id,
+              node: (
+                <span className="flex items-baseline justify-between gap-2">
+                  <DriverName
+                    name={d.name}
+                    source={d.source}
+                    samsaraDriverId={d.samsaraDriverId}
+                  />
+                  {/**
+                   * §12.37: ADMIN only — it takes someone off the board.
+                   * Offered only for a driver with no truck, because retiring
+                   * one that is assigned is refused server-side anyway and a
+                   * control that always errors is worse than no control.
+                   */}
+                  {canRetire ? (
+                    <button
+                      type="button"
+                      onClick={() => void retire(d.id, d.name)}
+                      title={`Retire ${d.name} — keeps their history, removes them from the board.`}
+                      className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
+                    >
+                      Retire
+                    </button>
+                  ) : null}
+                </span>
+              ),
+            }))}
           />
           <Panel
             title={`Trucks with no driver (${trucksWithoutDriver.length})`}
             empty="Every active truck has a driver."
-            items={trucksWithoutDriver.map(label)}
+            items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
           />
         </aside>
       </div>
@@ -289,7 +359,11 @@ function Panel({
   empty,
 }: {
   title: string;
-  items: string[];
+  /**
+   * Nodes, not strings — the drivers panel renders a name plus its `No ELD`
+   * tag (§12.37), and a string list could only have shown the name.
+   */
+  items: { key: string; node: React.ReactNode }[];
   empty: string;
 }) {
   return (
@@ -302,8 +376,8 @@ function Panel({
       ) : (
         <ul className="space-y-1">
           {items.map((item) => (
-            <li key={item} className="truncate text-body text-text-secondary">
-              {item}
+            <li key={item.key} className="truncate text-body text-text-secondary">
+              {item.node}
             </li>
           ))}
         </ul>

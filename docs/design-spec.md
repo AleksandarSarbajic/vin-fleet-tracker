@@ -3029,6 +3029,106 @@ The first instrumented sweep changed the picture immediately:
 these stops; it passes *through* them at 52 mph, and the speed gate rejects it
 correctly. A week of `arrived: 0` had hidden that entirely.
 
+## 12.37 The fifth instance, and the first where the missing layer was the UI
+
+§12.35 shipped a migration, a schema, a server module, an API route and 28
+passing tests. It shipped **no way to add a driver**, and the `No ELD` tag on
+one of nine surfaces.
+
+Everything was green. `npm run check` passed. The feature was unusable.
+
+### Why the tests could not have caught it
+
+They test the server, and **nothing rendered a screen**. Not because nobody
+wrote one, but because nobody *could*:
+
+`tsconfig.json` says `"jsx": "preserve"` — correct, Next compiles the app —
+and esbuild therefore defaulted to the **classic** JSX runtime under Vitest,
+which needs `React` in scope. Any component containing JSX threw
+`React is not defined` on render. The one `.tsx` test in the suite was a hook,
+exercised through `createElement`, with no JSX at all.
+
+So the suite could not render a component, had never rendered one, and nothing
+said so. `esbuild: { jsx: 'automatic' }` in `vitest.config.ts` is a one-line
+change that had been missing since phase 3.
+
+### The tell
+
+> "the `No ELD` tag will appear beside any driver you add by hand"
+
+Written without opening the board. The seven design questions in the plan were
+all answered — including "whether the UI shows the source" — and answering the
+design question was treated as satisfying it.
+
+### The same shape, five times
+
+| § | rule present in | absent from |
+|---|---|---|
+| 12.21 | the modal's validation | the shared schema, then the server re-parse |
+| 12.28 | the stop save's transaction | the override write beside it |
+| 12.29 | the click handler | the render path that also wrote the URL |
+| 12.32 | `vitest.setup.ts` | `globalSetup`, which runs first |
+| **12.37** | **every server layer** | **the screen** |
+
+The fourth cost a production database. This one cost a feature that reported
+as done.
+
+### The grep, which is the lesson from §12.21
+
+Nine sites render a driver name. Fixing the three that were visible would have
+left six, because **three separate data shapes never carried provenance at
+all** — `FleetRow`, `BoardTruck` and `ReassignPreview`. Each now carries
+`source` and `samsaraDriverId` rather than a precomputed boolean, so
+`isEldBacked` stays the single implementation and the SQL does not grow a
+second one (§12.35's name-matching lesson).
+
+| site | |
+|---|---|
+| `DriverSelect` dropdown options | tagged |
+| `DriverSelect` closed input | tagged |
+| `AssignmentBoard` truck rows | tagged |
+| `AssignmentBoard` drivers-without-truck panel | tagged — `Panel` takes nodes now, not strings |
+| `TruckRow` driver column | tagged |
+| `MapPopup` header | tagged |
+| `MapPopup` Driver row | tagged |
+| `ReassignConfirm` gaining / losing | tagged |
+| `reassign.ts` summary prose | **deliberately not** |
+
+The prose is excluded on purpose: those are sentences — *"Reassigns 137 from
+Jo Martinez to Pat Lee."* — and a tag inside one reads as part of the name.
+`ReassignConfirm` renders both names visually directly above that sentence, so
+the information is present where it is legible.
+
+### Placement
+
+**"+ Add driver" lives at the bottom of the picker's dropdown**, surfacing
+once a search returns two matches or fewer. That is the moment the need is
+felt: a dispatcher types a surname, does not find them, and the answer is
+directly under the empty result. A button elsewhere on the board is something
+you have to already know exists.
+
+It returns to the picker **with the new driver selected**, and refreshes the
+board *before* selecting, so the row exists in `drivers` before the select
+points at it. The affordance is only offered when the caller passes
+`onDriverCreated` — a picker that offered it and could not show the result
+would look broken.
+
+**The merge prompt sits above the assignment board**, where a dispatcher is
+already thinking about who is on what. Not deferred, because the worker
+records a candidate every poll and acts on none: **an unshown candidate is
+worse than an undetected one**, since the data claims the question was asked.
+
+### What would have caught it
+
+A smoke test that renders the board. Deliberately shallow — no layout, no
+styling, no interaction depth — asserting only that what is claimed to be on
+screen is on screen.
+
+It counts tags rather than searching for the string, because
+`toContain('No ELD')` passes if *everything* is tagged. And it is verified to
+discriminate: reverted to the original `{truck.driverName ?? 'Unassigned'}` it
+fails with `expected 1 to be 2`, and passes on the fix.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

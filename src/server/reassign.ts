@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import type { DriverSource } from '@/lib/driver';
 import { assignments, drivers } from '@/db/schema';
 import { truckLabel } from './assignments';
 import type { Db, Tx } from './audit';
@@ -19,6 +20,9 @@ export interface PreviewSide {
   truckLabel: string;
   driverId: string | null;
   driverName: string | null;
+  /** §12.37: the confirm dialog shows these names, so it needs the tag too. */
+  driverSource: DriverSource | null;
+  driverSamsaraId: string | null;
   /** ISO-8601 UTC + the stop's zone, so the dialog can print it correctly. */
   nextApptUtc: string | null;
   nextApptTz: string | null;
@@ -46,6 +50,8 @@ const SideRow = z.object({
   samsara_name: z.string(),
   driver_id: z.string().uuid().nullable(),
   driver_name: z.string().nullable(),
+  driver_source: z.enum(['samsara', 'app']).nullable(),
+  driver_samsara_id: z.string().nullable(),
   next_appt_utc: z.string().nullable(),
   next_appt_tz: z.string().nullable(),
 });
@@ -60,6 +66,8 @@ async function sideOf(executor: Db | Tx, truckId: string): Promise<PreviewSide |
         t.samsara_name    as samsara_name,
         d.id::text        as driver_id,
         d.name            as driver_name,
+        d.source::text    as driver_source,
+        d.samsara_driver_id as driver_samsara_id,
         to_char(ns.appointment_start_utc at time zone 'UTC',
                 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as next_appt_utc,
         ns.appointment_tz as next_appt_tz
@@ -85,6 +93,8 @@ async function sideOf(executor: Db | Tx, truckId: string): Promise<PreviewSide |
     truckLabel: truckLabel({ truckNumber: row.truck_number, samsaraName: row.samsara_name }),
     driverId: row.driver_id,
     driverName: row.driver_name,
+    driverSource: row.driver_source,
+    driverSamsaraId: row.driver_samsara_id,
     nextApptUtc: row.next_appt_utc,
     nextApptTz: row.next_appt_tz,
   };
