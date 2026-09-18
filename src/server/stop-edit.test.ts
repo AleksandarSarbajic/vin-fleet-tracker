@@ -202,6 +202,99 @@ withDb('the edit modal save', () => {
       expect(parsed.success && parsed.data.loadNumber).toBeNull();
     });
 
+    /**
+     * The layer that was still standing after two fixes: `.nullable()` without
+     * `.optional()`. The modal always sends the key, so only an API client
+     * ever hit it — with `400 Required`, which is not a thing "permanently
+     * optional" can mean.
+     */
+    it('accepts the key being ABSENT, not merely empty', () => {
+      const parsed = StopEdit.safeParse({
+        stopId: null,
+        truckId: '00000000-0000-4000-8000-000000000000',
+        // loadNumber deliberately not present
+        loadStatus: 'AVAILABLE',
+        stopType: 'DEL',
+        addressLine: null,
+        city: null,
+        state: null,
+        zip: null,
+        appointment: null,
+        dispatcherNote: null,
+      });
+      expect(parsed.success).toBe(true);
+      // undefined, NOT null: absent means "leave it alone", and null means
+      // "clear it". Collapsing them would be §12.23's broker wipe.
+      expect(parsed.success && parsed.data.loadNumber).toBeUndefined();
+    });
+
+    it('distinguishes all four ways the field can arrive', () => {
+      const base = {
+        stopId: null,
+        truckId: '00000000-0000-4000-8000-000000000000',
+        loadStatus: 'AVAILABLE' as const,
+        stopType: 'DEL' as const,
+        addressLine: null,
+        city: null,
+        state: null,
+        zip: null,
+        appointment: null,
+        dispatcherNote: null,
+      };
+      const of = (over: Record<string, unknown>) => {
+        const r = StopEdit.safeParse({ ...base, ...over });
+        return r.success ? r.data.loadNumber : 'REJECTED';
+      };
+      expect(of({ loadNumber: 'LD-4417' })).toBe('LD-4417');
+      expect(of({ loadNumber: '   LD-4417  ' })).toBe('LD-4417');
+      expect(of({ loadNumber: '' })).toBeNull();
+      expect(of({ loadNumber: '   ' })).toBeNull();
+      expect(of({ loadNumber: null })).toBeNull();
+      expect(of({})).toBeUndefined();
+    });
+
+    it('leaves a stored number alone when the key is absent, and clears it when null', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, loadNumber: 'LD-4417' }),
+        });
+        const read = async () =>
+          (
+            await tx
+              .select({ number: loads.loadNumber })
+              .from(loads)
+              .where(eq(loads.id, created.loadId))
+          )[0]?.number ?? null;
+
+        // The key omitted entirely — an API client that only wanted to change
+        // the status. The number must survive.
+        const { loadNumber: _omitted, ...withoutKey } = edit({
+          truckId: t.trucks[0]!.id,
+          stopId: created.stopId,
+        });
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: StopEdit.parse(withoutKey),
+        });
+        const afterOmit = await read();
+
+        // And null, which IS a request to clear it.
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, stopId: created.stopId, loadNumber: null }),
+        });
+        return { afterOmit, afterNull: await read() };
+      });
+
+      expect(seen.afterOmit).toBe('LD-4417');
+      expect(seen.afterNull).toBeNull();
+    });
+
     it('is stored as NULL, not as an empty string', async () => {
       const saved = await rolledBack(async (tx) => {
         const { trucks: t } = await fixtures(tx);

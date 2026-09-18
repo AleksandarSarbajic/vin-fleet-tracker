@@ -255,7 +255,12 @@ export async function saveStopEdit(
       await tx
         .update(loads)
         .set({
-          loadNumber: edit.loadNumber,
+          // §12.21/§12.23: an ABSENT key is not a request to erase anything.
+          // Spread rather than `loadNumber: edit.loadNumber`, because drizzle
+          // happens to skip undefined in `set()` and that is its behaviour to
+          // change, not a contract of ours. The column the caller never
+          // mentioned is the one the broker wipe nulled.
+          ...(edit.loadNumber !== undefined ? { loadNumber: edit.loadNumber } : {}),
           status: edit.loadStatus,
           truckId: edit.truckId,
         })
@@ -283,7 +288,9 @@ export async function saveStopEdit(
         .insert(loads)
         .values({
           truckId: edit.truckId,
-          loadNumber: edit.loadNumber,
+          // A brand new load has nothing to leave alone, so omitted and empty
+          // are the same thing here: no number yet.
+          loadNumber: edit.loadNumber ?? null,
           status: edit.loadStatus,
         })
         .returning({ id: loads.id });
@@ -360,7 +367,9 @@ export async function saveStopEdit(
       after: {
         truckId: edit.truckId,
         loadId,
-        loadNumber: edit.loadNumber,
+        // What was WRITTEN, not what was sent — an omitted key leaves the
+        // stored value, and an audit row that claimed null would be a lie.
+        loadNumber: edit.loadNumber !== undefined ? edit.loadNumber : (existing?.loadNumber ?? null),
         loadStatus: edit.loadStatus,
         stopType: edit.stopType,
         addressLine: edit.addressLine,

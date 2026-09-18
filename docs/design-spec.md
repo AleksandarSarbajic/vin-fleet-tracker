@@ -1649,6 +1649,78 @@ modal header the same way, because one of two renderers was updated.
 Covered by `stop-edit.test.ts`, which asserts the schema, the stored value and
 the round trip back through the fleet query rather than the state of a button.
 
+### The last two layers (third fix, and the one that finished it)
+
+Two things survived every previous pass, both invisible from the modal.
+
+**1. `.nullable()` without `.optional()`.** An API client that omitted the key
+got `400 Required`. The modal always sends it, so only a client ever hit it —
+which is why three sessions of testing through the UI never saw it. Now four
+distinct inputs, and they do not all mean the same thing:
+
+```
+"LD-4417"   set it
+""          clear it — the modal's empty box
+null        clear it — the same intent, said explicitly
+omitted     LEAVE IT ALONE
+```
+
+Omitted deliberately is **not** null. Writing a column the caller never
+mentioned is §12.23's broker wipe exactly. The server spreads the key in
+conditionally rather than relying on drizzle skipping `undefined` in `set()` —
+that is drizzle's behaviour to change, not a contract of ours — and the audit
+row logs what was *written*, not what was sent.
+
+**2. The optimistic cache held a shape the server cannot produce.** The modal
+patched the fleet row from `edit`, its own form object, rather than from
+`parsed.data`:
+
+```
+             form (edit)      server (parsed.data)
+loadNumber   ""               null
+state        "il"             "IL"
+```
+
+Both renderers of the load number use `??`, which does not catch `''`, so a
+cleared number rendered as blank space instead of "no number yet" until the
+refetch corrected it. The `state` mismatch was worse in a quieter way: the row
+simply changed case under the dispatcher a second later.
+
+> **The cache must never hold a shape the server cannot produce.**
+
+The fix is the patch reading `parsed.data`, not `??` being loosened to `||`.
+Loosening the renderer would have made both symptoms disappear while leaving
+two representations of the same value in play — and every future reader of
+that cache would have had to know which one it held. ESLint then flagged
+`edit` as an unnecessary dependency of `send`, which is the fix confirming
+itself: the raw form shape no longer leaves the component.
+
+### The audit that found the rest
+
+Checking every other field in that patch, as the third fix should have:
+
+| field | `''` became | `'  x  '` became |
+|---|---|---|
+| `loadNumber` | `null` | `'x'` |
+| `addressLine` | **`''`** | `'x'` |
+| `city` | **`''`** | `'x'` |
+| `zip` | **`''`** | `'x'` |
+| `dispatcherNote` | **`''`** | `'x'` |
+
+Only `loadNumber` had the `'' -> null` transform. The modal hid it — its own
+`trimmed()` nulls a blank before validating — but an API client posting
+`{"city": ""}` stored an empty string in a column the modal could only ever
+have nulled. The same defect one layer out, breaking the same `??` renderers
+for the same reason.
+
+All four now share **one** definition, `blankIsNull(max)`, because four copies
+is how layers drift apart in the first place. `state` needs none of it:
+`.length(2)` rejects a blank outright.
+
+`lib/stop-edit.test.ts` pins the whole contract, including a test that asserts
+*no* free-text field can store an empty string — so the next field added to
+this schema is caught by a test rather than by a fourth session.
+
 ## 12.22 FCFS carries receiving hours
 
 **Supersedes §12.2's last bullet**, which said an FCFS stop hides the window

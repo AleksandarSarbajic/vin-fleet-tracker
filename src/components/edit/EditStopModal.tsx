@@ -307,9 +307,30 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
       setSaving(true);
       setErrors([]);
 
-      // Optimistic: patch the row in place, keep the snapshot to roll back to.
+      /**
+       * Optimistic: patch the row in place, keep the snapshot to roll back to.
+       *
+       * From `parsed.data`, NEVER from `edit` (§12.21). `edit` is the form's
+       * own shape and the schema is what turns it into the server's:
+       *
+       *     loadNumber   ''      ->  null        and untrimmed -> trimmed
+       *     state        'il'    ->  'IL'
+       *
+       * Patching from `edit` put `''` in the cache where the server would have
+       * written `null`, and both renderers of that field use `??`, which does
+       * not catch `''` — so a cleared load number rendered as empty space
+       * instead of "no number yet", until the refetch replaced it. The same
+       * bug in a second coat of paint: the form's layer and the wire's layer
+       * disagreeing about what the value is.
+       *
+       * The fix is not to loosen `??` to `||`. **The cache must never hold a
+       * shape the server cannot produce** — a renderer written against the
+       * server's contract is then correct everywhere, and anything that reads
+       * the cache later does not need to know an optimistic write happened.
+       */
       const key = ['fleet'];
       const snapshot = queryClient.getQueryData<FleetResponse>(key);
+      const patch = parsed.data;
       queryClient.setQueryData<FleetResponse>(key, (current) =>
         current
           ? {
@@ -320,11 +341,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                       ...r,
                       nextStop: {
                         ...r.nextStop,
-                        loadNumber: edit.loadNumber,
-                        addressLine: edit.addressLine,
-                        city: edit.city,
-                        state: edit.state,
-                        zip: edit.zip,
+                        // Undefined means "leave it alone" on the wire, so it
+                        // has to mean the same here (§12.23).
+                        loadNumber:
+                          patch.loadNumber === undefined
+                            ? r.nextStop.loadNumber
+                            : patch.loadNumber,
+                        addressLine: patch.addressLine,
+                        city: patch.city,
+                        state: patch.state,
+                        zip: patch.zip,
                       },
                     }
                   : r,
@@ -386,7 +412,9 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         setSaving(false);
       }
     },
-    [edit, onClose, overrideEdit, parsed, queryClient, row.id],
+    // `edit` is deliberately absent: this function reads `parsed.data` only.
+    // The raw form shape does not leave the component (§12.21).
+    [onClose, overrideEdit, parsed, queryClient, row.id],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */

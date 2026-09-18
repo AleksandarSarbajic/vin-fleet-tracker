@@ -28,13 +28,50 @@ import { StopOverrideEdit } from './override';
  *
  * This is the schema the client validates with AND the one the route
  * re-parses, so a form cannot start blocking a save the API would accept.
+ *
+ * `.optional()` as well as `.nullable()`, and the two mean different things:
+ *
+ *     "LD-4417"   set it
+ *     ""          clear it — the modal's empty box
+ *     null        clear it — the same intent, said explicitly
+ *     omitted     LEAVE IT ALONE
+ *
+ * Without `.optional()` an API client that simply did not send the key got
+ * `400 Required`, which is not what "permanently optional" can mean. That was
+ * the last layer of §12.21 still standing: the modal had stopped requiring it,
+ * the column was nullable, and the wire contract still was not.
+ *
+ * Omitted deliberately does NOT mean null. Writing a column the caller never
+ * mentioned is §12.23's broker wipe exactly — `loads.broker` went to null
+ * because a write listed a field the form did not render. A key that is absent
+ * is not a request to erase anything.
  */
-export const LoadNumber = z
-  .string()
-  .trim()
-  .max(64)
-  .transform((value) => (value === '' ? null : value))
-  .nullable();
+export const LoadNumber = blankIsNull(64).optional();
+
+/**
+ * A free-text field where blank means "not known", not "known to be empty".
+ *
+ * ONE definition, because four copies is how layers drift apart. `loadNumber`
+ * had the `'' -> null` transform and `addressLine`, `city`, `zip` and
+ * `dispatcherNote` did not, so the same empty box produced NULL in one column
+ * and `''` in the others.
+ *
+ * The modal hid it: its own `trimmed()` nulls a blank before validating, so
+ * the UI never sent `''`. An API client posting `{"city": ""}` did, and the
+ * database then held a value the modal could not have produced — the mirror
+ * of the optimistic-cache bug in §12.21, and it breaks the same `??`
+ * renderers for the same reason.
+ *
+ * `state` needs none of this: `.length(2)` rejects a blank outright.
+ */
+function blankIsNull(max: number) {
+  return z
+    .string()
+    .trim()
+    .max(max)
+    .transform((value) => (value === '' ? null : value))
+    .nullable();
+}
 
 export const StopEdit = z
   .object({
@@ -47,17 +84,17 @@ export const StopEdit = z
 
     stopType: z.enum(['PU', 'DEL']),
     /** The street line, as the rate confirmation gives it. */
-    addressLine: z.string().trim().max(200).nullable(),
-    city: z.string().trim().max(120).nullable(),
+    addressLine: blankIsNull(200),
+    city: blankIsNull(120),
     /** Two letters. The search maps full state names to these (§12.7). */
     state: z.string().trim().length(2).toUpperCase().nullable(),
-    zip: z.string().trim().max(12).nullable(),
+    zip: blankIsNull(12),
 
     /** Null leaves the stop with no appointment — a real state (NO_APPT). */
     appointment: AppointmentInput.nullable(),
 
     /** Visible to the next shift. */
-    dispatcherNote: z.string().trim().max(2000).nullable(),
+    dispatcherNote: blankIsNull(2000),
 
     /**
      * The driver this truck should end up with. Undefined leaves the
@@ -99,11 +136,15 @@ export function dirtyFields(before: Partial<StopEdit>, after: StopEdit): string[
     ['driverId', 'assigned driver'],
   ];
   const changed = named
-    .filter(([key]) => before[key] !== undefined && before[key] !== after[key])
+    .filter(
+      ([key]) =>
+        before[key] !== undefined && after[key] !== undefined && before[key] !== after[key],
+    )
     .map(([, label]) => label);
 
-  // `driverId` is optional on the wire (undefined means "leave it alone"), so
-  // a null-to-null comparison must not read as a change.
+  // `driverId` and `loadNumber` are optional on the wire (undefined means
+  // "leave it alone"), so an absent key must not read as a change. The filter
+  // above already skips a `before` of undefined; this skips an `after` of it.
 
   if (JSON.stringify(before.appointment ?? null) !== JSON.stringify(after.appointment ?? null)) {
     changed.push('appointment time');
