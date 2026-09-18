@@ -29,7 +29,10 @@ whole. From phase 1 onward build from `docs/design-spec.md`, not the HTML.
 
 - SMS or any driver notification. Nothing is sent to anyone.
 - Dock/door validation against a facility door list. Free text only.
-- Load-number format validation. Non-empty and trimmed, nothing more.
+- Load-number validation of any kind. Load numbers are **permanently
+  optional** (§12.21) — trimmed, and blank means blank. No format check, and
+  **no non-empty check either**: a dispatcher who cannot save without a number
+  invents one. Do not reintroduce the constraint.
 - Anything HOS-derived. We do not pull Hours of Service from Samsara.
 - Any external geocoding service. Position strings come from Samsara's
   `gps.reverseGeo.formattedLocation`. No cache or debounce layer — there is

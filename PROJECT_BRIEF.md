@@ -81,6 +81,9 @@ Five things appear in superseded screens or earlier drafts and are explicitly cu
 - **Dock/door validation against a facility door list.** Free text, as the broker wrote it.
 - **Load-number format validation.** Non-empty and trimmed, nothing more — broker numbers come in any shape.
 - **Anything HOS-derived.**
+- **A trailer field** (§12.53). Drawn in `3a`'s assignment group and `2b`'s
+  detail panel; no data model ever had the column. Dispatchers type a trailer
+  number on paperwork, not here. Cut, not pending.
 - **Any external geocoding service.** Position strings come from Samsara's `gps.reverseGeo.formattedLocation`, returned in the same Vehicle Stats response as the coordinates. Store that string on the position row. No Mapbox Geocoding, no Google, and no reverse-geocoding cache or debounce layer — there is nothing to cache.
 
 If you think you need one of these, ask first.
@@ -117,10 +120,15 @@ assignments    id, truck_id, driver_id, started_at, ended_at, created_by
                -- history, never a column on trucks
 positions      truck_id, lat, lng, heading, speed_mph, recorded_at,
                formatted_location        -- from Samsara reverseGeo, never computed here
-loads          id, truck_id, load_number, broker, status
+loads          id, truck_id, load_number, status
+               -- load_number is PERMANENTLY OPTIONAL (§12.21). Not "non-empty
+               -- and trimmed" — blank means blank, at every layer.
+               -- `broker` was DROPPED, column included (§12.20).
 stops          id, load_id, type (PU|DEL), sequence,
-               facility_name, address_line, city, state, zip, lat, lng,
-               dock_door TEXT,                       -- free text
+               address_line, city, state, zip, lat, lng,
+               -- `facility_name` and `dock_door` were DROPPED, columns
+               -- included (§12.20): a column nothing writes is a column
+               -- someone eventually reads and believes.
                appointment_start_utc, appointment_end_utc, appointment_tz,
                appointment_type (FCFS|APPT),
                arrived_at, departed_at,
@@ -153,15 +161,30 @@ Rules:
 - **UNASSIGNED** — computed, never stored: no open `assignments` row and a live appointment. Suppress the ETA (an ETA with no driver is fiction) but return the last computed value separately so the UI can strike it through.
 - **NO_APPT** — no `appointment_start_utc`.
 - **TOMORROW** — appointment's calendar day in the **dispatch** timezone is after today. Not the stop's zone, not the browser's.
-- **LATE** — projected ETA past the appointment by ≥30 min, or the appointment has passed with no arrival.
-- **AT_RISK** — projected ETA inside 45 min of the appointment, or past it by <30 min.
+- **LATE** — projected ETA past the **deadline**. Nothing more (§12.1).
+- **AT_RISK** — projected ETA inside `riskBufferMinutes` (45) of the deadline, and not already LATE (§12.1). **Never applies to an FCFS stop** (§12.2, §12.22) — there is no slot to be at risk of missing, only doors that close.
 - **ON_TIME** — everything else.
+
+```
+deadline = appointment_end_utc ?? appointment_start_utc
+```
+
+> **§12.1 supersedes the original wording here.** It stacked a 30-minute grace
+> on top of a ±30 window — 90 minutes of slack measured from the start time.
+> **The window *is* the grace.** A 14:00–15:00 window is late at 15:01, which
+> is what a receiver means by it. "The appointment has passed with no arrival"
+> needed no separate clause: an ETA past the deadline already produces LATE.
 
 An active override returns the forced status, but the engine keeps computing the real one. The API always returns **both**, plus the override metadata, because the detail panel renders them adjacent.
 
-ETA: phase 1 is straight-line distance × 1.25 road factor ÷ 52 mph, recomputed on each position update. Phase 2 swaps in a routing ETA behind an `EtaProvider` interface, cached per stop, recomputed only on meaningful movement or an appointment change. Never call a routing API per render or per poll.
+ETA: **both halves of this are built, and the road factor is no longer 1.25** (§12.31). A routed distance comes from the `EtaProvider`, cached per stop and recomputed only on meaningful movement or an appointment change — never per render, never per poll. When there is no route, the fallback is straight-line distance × a **measured lane ratio**, learned from the routes already fetched rather than assumed. `roadFactor` (1.25) survives only as the last resort beneath that, for a truck with no measured lane to borrow from — it was never measured and is no longer the normal path. The row says which basis it used (§12.47): a routed number plain, an estimated one prefixed `~`.
 
-Config in one object, no magic numbers scattered around: `riskBufferMinutes`, `lateThresholdMinutes`, `avgSpeedMph`, `roadFactor`, `staleMinutes`, `dispatchTz`.
+Config in one object, no magic numbers scattered around: `riskBufferMinutes`, `avgSpeedMph`, `roadFactor`, `staleMinutes`, `feedStaleMinutes`, `dispatchTz`.
+
+> **`lateThresholdMinutes` is retired** (§12.1) — the window is the grace, so
+> there is no second threshold to configure. And `staleMinutes` (45, per
+> truck, drives `STALE_GPS`) and `feedStaleMinutes` (5, fleet-wide, triggers
+> the §5.9 withdrawal) are **two different numbers** (§12.3), not one.
 
 **Offline rule — hard requirement.** When `feed_health.newest_position_at` exceeds the stale threshold, the API returns `feedStale: true` and the client withdraws schedule colour **fleet-wide**: every row drops to the stale treatment. A green row built on nine-minute-old GPS is worse than no row. Appointment times stay full strength because they come from our DB, not the feed.
 
@@ -183,9 +206,14 @@ Follow `docs/design-spec.md` for everything visual. The behaviour that isn't obv
 
 **Split** — draggable, default 60/40 in the list's favour, map hard minimum 520px, list minimum 560px, below 1086px total the split disables and the map becomes a toggle. Persist to `localStorage["ft.splitPct"]` on release, one decimal, fall back to 60 if missing or unparseable. Handle is focusable, `← →` move it 2%, `Home` and double-click reset. No column transition while dragging; defer the map reflow to drag-end.
 
-**List** — virtualize with TanStack Virtual regardless of current fleet size. Column header sticky inside the scroller. Footer bar counts what's below the fold by status, including the explicit "0 problems below the fold" when that's true. Above 40 trucks, urgency becomes collapsible group heads with counts; On time and Tomorrow default collapsed.
+**List** — virtualize with TanStack Virtual regardless of current fleet size. Column header sticky inside the scroller. Footer bar counts what's below the fold by status, including the explicit "0 problems below the fold" when that's true. Above 40 trucks, urgency becomes collapsible group heads with counts; On time and Tomorrow default collapsed — **specified, not built** (§5.7). The real fleet is 23 active of 34, so the flat list is the whole requirement and the group-head code path stays unwritten until the fleet actually crosses 40.
 
-**Map** — clustered, but **problem markers never cluster**; cluster counts include on-time and tomorrow trucks only. Markers differ by shape before hue. Selection is two-way: marker click scrolls and rails the row, row click pans the map, 120ms.
+**Map** — clustered, but **problem markers never cluster**. The problem set is `LATE · STALE_GPS · UNASSIGNED · AT_RISK · NO_APPT`; **everything else clusters, Arrived included** (§12.5). Markers differ by shape before hue. Selection is two-way: marker click scrolls and rails the row, row click pans the map, 120ms.
+
+> **§12.5 corrects the original bullet here**, which said cluster counts were
+> on-time and tomorrow only and left Arrived unaccounted for — it belonged to
+> neither set. 30 trucks collapsing into clusters can never hide a late truck;
+> an arrived one is not a problem and may cluster freely.
 
 **Search** — debounced 250ms across truck number, driver, load number, city, state, destination. Filters list and map together. Never re-sorts, only removes rows. URL reflects search and filters so a dispatcher can send a colleague a link.
 

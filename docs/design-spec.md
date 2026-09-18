@@ -202,7 +202,7 @@ MacBook 16 both land. Header is 56px; everything below it is the split.
 
 | Width | Behaviour |
 |---|---|
-| **≥ 2200** | Ultrawide. Map grows to 980px; list keeps its 8 columns and gains Trailer + Broker. All header chips visible. |
+| **≥ 2200** | Ultrawide. Map grows to 980px; list keeps its 8 columns (Trailer and Broker are both cut — §12.20, §12.53). All header chips visible. |
 | **1440–2199** | Reference layout. Header 56, then the `3b` draggable split — default 60/40 in the list's favour (at 1728: list 1037, map 685, handle 6). Map hard minimum 520px, list minimum 560px. Position persisted per dispatcher. **The map is never a fixed width.** |
 | **1280–1439** | Split still draggable, range narrows to map 520–620. Driver column drops to **120px**; Position and Next stop share the remainder. **Below 900px of list width the row drops to six columns** (§12.17). |
 | **1024–1279** | Below **1086** total the split is **disabled**: map collapses to a toggle, list runs full width. Toggle state persists per dispatcher. **The detail panel becomes a full-screen sheet over the list** (§12.12). |
@@ -846,7 +846,7 @@ Each group has a Micro heading with a `line.soft` underline, then an
 `Miles out`.
 *The `HOS drive left` row is deleted (correction 1).*
 
-**Load & contacts** — `Broker` · `Trailer` · `Driver cell` · `Dispatcher` ·
+**Load & contacts** — `Driver cell` · `Dispatcher` ·
 `Last note` (timestamped, `text.secondary`).
 
 ## 9.5 Status override (`4c`)
@@ -970,6 +970,8 @@ explanation that names the actual cause and the next action.
 
 ## 9.8 Offline / sync failed (`2e`)
 
+> Built in §12.53, two phases after §5.9's withdrawal it explains.
+
 A **38px banner** below the header: `status.late.bg` ground,
 `status.late.bd` border, warning icon, then in sans 500 12.5
 `status.late.fg`:
@@ -1005,7 +1007,7 @@ Grid `110px 1fr 150px` at `gap: 12px`. Header row carries
 
 - `Truck no.` — read-only, sans 700 14, tabular
 - `Assigned driver` — searchable select, open by default when focused
-- `Trailer` — text, tabular
+- ~~`Trailer`~~ — **cut (§12.53)**. No data model ever carried the column, and the slot is now §12.14's `Active` checkbox.
 
 **Driver picker** (correction 1 — no HOS): `surface.raised` panel, `line.hair`
 border. Each option shows the driver's name and **current truck assignment
@@ -1489,7 +1491,7 @@ deliberately out of v1 scope.
 | Surface | Referenced by |
 |---|---|
 | **History** | `History` button in the `2b` detail panel; `4a`'s "reversible from truck 1088's history for the rest of the shift" |
-| **Toast preferences** | `2h`'s "status-change toasts are opt-in per chip" — there is no settings surface |
+| ~~**Toast preferences**~~ | **Superseded by §12.50** — the event set was narrowed until a preference had nothing to do. Not deferred; resolved. |
 | **Audit log view** | `audit_log` is written on every edit; nothing reads it back |
 | **Override review** | `4c`'s "reviewable at the end of a week"; `4c`'s own follow-up list offers the screen as unbuilt |
 
@@ -4034,6 +4036,180 @@ So the stall diagnosis is **not re-openable from this machine.** It becomes a
 phase 6 question, answered by the first day of numbers from the deployed
 worker, and the counters are only evidence about the database once the process
 is somewhere that stays awake.
+
+## 12.53 The audit, and the four things it found that were already broken
+
+A systematic gap audit before phase 6, read out of `PROJECT_BRIEF.md` and
+this file rather than out of memory, and checked against the code rather than
+against a recollection of having built it. §12.37 is why: a feature reported
+done with 28 passing tests and no UI at all.
+
+Most of what it produced is a list of things that were never built, which is
+a scoping question and not a ruling. Four items were different — they were
+**specified, apparently built, and wrong**, and three of them could only be
+found by reading the document beside the code.
+
+### 1. The documents disagreed with themselves
+
+The §12 rulings carry brief-level authority and supersede both other
+documents, and neither other document was ever amended to match. So the
+precedence was clear and the reading order was not: anyone starting from
+`CLAUDE.md` or the brief got the superseded answer first.
+
+- **`CLAUDE.md` held the older load-number rule.** Its never-build list read
+  "Load-number format validation. Non-empty and trimmed, nothing more."
+  §12.21 makes load numbers **permanently optional** and says do not
+  reintroduce the constraint. This was the worst of the set, because
+  `CLAUDE.md` is the file every session reads first and its rules override
+  everything — the one place a stale rule gets re-implemented rather than
+  merely believed. §12.21 took four passes to finish; a fifth was one session
+  away.
+- **`PROJECT_BRIEF.md` carried five stale facts**: the ≥30 min LATE grace and
+  `lateThresholdMinutes` (§12.1), `facility_name` / `dock_door` /
+  `loads.broker` in the data model (§12.20), cluster counts as on-time and
+  tomorrow only (§12.5), the straight-line ETA as the current one (§12.31),
+  and urgency groups without §5.7's "specified, not built".
+
+Both are corrected in place, each pointing at the ruling that moved it. **A
+ruling that supersedes a document has not landed until the document says so**
+— precedence is a rule for resolving a conflict, not a substitute for not
+having one.
+
+### 2. The dispatcher note was destroyed by every save
+
+`EditStopModal` initialised its note box to `''` and never loaded the stored
+value. `StopEdit` required the key. `updateStop` wrote it unconditionally,
+along with `note_by` and `note_at`. So opening a stop that carried a note and
+saving **anything at all** — a load status, a city — nulled the note and its
+authorship, and the dispatcher who did it could not see that there had been
+one.
+
+This is **§12.23's broker wipe, a third time**, in the field whose own label
+promises it is *visible to the next shift*:
+
+```
+loads.broker            column existed, form did not render it, write listed it
+loads.load_number       four layers, four passes (§12.21)
+stops.dispatcher_note   form rendered it, never LOADED it, write listed it
+```
+
+A new failure mode in the same family: the first two were fields the form did
+not own, and this one the form did own and had never populated. **A form that
+renders a field it did not load is a delete button with a text cursor in it.**
+
+The fix is the §12.21 mechanism, unchanged, plus one addition:
+
+1. `dispatcherNote` is `.optional()` — omitted means leave it alone.
+2. The modal loads the stored value, so the box shows what is there.
+3. **`note_by` and `note_at` move only when the TEXT moves**, compared
+   against the stored value on the server. This rule only exists *because* of
+   the load: a modal that now sends the same note back on every unrelated save
+   would otherwise re-stamp the authorship of somebody else's note with the
+   current user and the current time — §12.45's rename, in a column.
+
+The note is carried on `FleetRow.nextStop` so the modal can load it. **Nothing
+renders it on the board yet** — the detail panel (§9.4) is where it belongs
+and does not exist, so a note is still a thing you can write and only find
+again by opening the same modal. That is a gap; it is no longer a shredder.
+
+> **The test that had to be rewritten.** The authorship test first asserted
+> `note_at` and passed against the broken code: `now()` in Postgres is the
+> TRANSACTION's start time, and the harness runs both saves in one rolled-back
+> transaction, so the two stamps were identical whether or not the column was
+> rewritten. It asserts `note_by` with two distinct actors instead. §12.38's
+> rule, met again from a new direction: a test must fail for the reason you
+> think it fails, and "it passed" is not evidence that it could have failed.
+
+### 3. The board went grey and nothing said why
+
+§5.9's fleet-wide withdrawal shipped in phase 5. §9.8's banner and §9.1's sync
+cluster did not. The result was the worst available pairing:
+
+| What the dispatcher saw | What it meant |
+|---|---|
+| Every row dimmed to .72, every stripe dotted | the feed is down |
+| Every ETA reading `stale`, every chip neutral | the feed is down |
+| A **green** dot reading **`Synced 12s ago`** | everything is fine |
+
+A board that looks broken with nothing claiming to be broken reads as **the
+app failing, not the feed**, and the dispatcher's next move is to reload the
+page rather than to phone whoever owns the worker. The dimming was doing half
+a job and the header was actively arguing against it.
+
+The header's half had a specific and instructive cause: `feedNewestAt` was
+**declared in `Props` and never destructured**. TypeScript accepts a prop
+nobody reads, so typecheck, lint and 644 tests could all pass over it. The
+call site had been passing the right value down for two phases.
+
+Two numbers, and the distinction is the point:
+
+- **`fetchedAt`** — how long ago the browser talked to us. Stays healthy while
+  the feed is dead, which is exactly why it must not be the only one shown.
+- **`feedNewestAt`** — how old the positions are. The number a dispatcher is
+  actually deciding on.
+
+So the dot goes `status.late.fg` and the label becomes `Last sync 06:41 · 9m
+ago`, naming the instant as well as the age because the instant is what gets
+said down a phone. The banner carries the spec's sentence, including the
+clause it exists to deliver — **do not quote an ETA from this screen** — with
+the age in words, because `9m` is the chip's format and not this sentence's.
+
+Two details worth keeping:
+
+- **The countdown is real.** `auto-retry in 14s` counts from the fetch instant
+  plus the actual poll interval. A number that describes nothing is worse than
+  no number: the first time a dispatcher watches it reach zero with nothing
+  happening, every other countdown in the product stops being believed.
+- **`feedNewestAt` can be null** — §12.34's singleton, on a fresh deployment or
+  a worker that has never completed a poll, and `isFeedStale` returns true for
+  it. `since —` would read as a formatting bug, so both surfaces say the true
+  thing instead: `No position has ever reached this database`.
+
+`status.late.dim` (`#d79b91`) is added for the countdown: **6.45** on
+`status.late.bg`, against 6.58 for `late.fg` on the same ground. A step down
+in weight, not in legibility.
+
+### 4. `trucks.active` could not be flipped from anywhere
+
+§12.14 built the `Inactive` chip because the Samsara stats feed returns every
+vehicle ever registered, some dead since 2019, and made the edit modal the
+only surface the flag is editable from — "No separate admin screen."
+
+The checkbox was `defaultChecked`, uncontrolled, with no `onChange`, and was
+never sent. `/api/trucks` and `setTruckActive` — role-gated to `admin`, with
+an audit row, inside a transaction — had **zero callers**. §12.37's shape a
+sixth time, and this one was visible from the chip: the console could show you
+an inactive truck and offer no way to change it, which §12.14 had already
+named as the failure ("without a way to see and flip inactive trucks, seeding
+is a dead end").
+
+It is **its own request, not part of the stop's save**, because it is a
+different entity behind a different gate: `/api/stops` requires `dispatcher`
+and `/api/trucks` requires `admin`. Folding an admin-only field into a
+dispatcher-level transaction would have made the whole save admin-only, or
+made one of the two role checks a lie. Same reasoning as `Clear now` keeping
+its own request (§12.28). It fires **after** the stop save — a truck vanishing
+from the console while its stop failed to save is the worse half to land
+alone — and a refusal surfaces as a warning saying the stop DID save, so
+nobody redoes work that landed.
+
+### What was ruled and not built
+
+- **Trailer is cut.** §9.9 put it in the assignment grid, §9.4 under Load &
+  contacts, §3 in the ultrawide column set — and no data model ever had a
+  column for it, including §12.20's prune, which does not mention it either
+  way. Dispatchers type a trailer number on paperwork, not here, and its grid
+  slot is now §12.14's `Active` checkbox. **Recorded as cut, not pending** —
+  the distinction §12.20 exists to protect.
+- **Google Workspace stays unbuilt.** The brief offers it ("or Google
+  Workspace if they want it later"); §9.12 draws it as a 46px secondary
+  button with no qualifier. The brief wins: it is OPTIONAL, and the button
+  does not render until somebody asks for it.
+- **Toast preferences move from deferred to superseded.** §12.15 lists them
+  under "Deferred to v2" because `2h` made status-change toasts opt-in per
+  chip and there was no settings surface. §12.50 resolved it by narrowing the
+  event set until a preference had nothing to do. There is nothing left
+  deferred.
 
 # 13. Still open
 

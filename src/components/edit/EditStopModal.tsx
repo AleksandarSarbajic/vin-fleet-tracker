@@ -98,7 +98,15 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
       city: stop?.city ?? '',
       state: stop?.state ?? '',
       zip: stop?.zip ?? '',
-      note: '',
+      /**
+       * §12.53. This was `''` unconditionally, which made the modal a
+       * data-destruction path: it opened with an empty box over a stored note,
+       * the dispatcher saw nothing to preserve, and the save wrote that
+       * emptiness back over the note AND its authorship. The same shape as
+       * §12.23's broker wipe, in the one field the label promises is
+       * "visible to the next shift".
+       */
+      note: stop?.dispatcherNote ?? '',
       driverId: drivers.find((d) => d.truckId === row.id)?.id ?? null,
       appointment: {
         enabled: Boolean(stop?.apptStartUtc),
@@ -129,6 +137,23 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   }));
   const set = <K extends keyof typeof initialForm>(key: K, value: (typeof initialForm)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  /**
+   * §12.14's `trucks.active`, which §12.53 found inert.
+   *
+   * It was `defaultChecked` with no `onChange` and nothing reading it, so the
+   * one surface the ruling names as the ONLY place the flag is editable could
+   * not edit it — while `/api/trucks` and `setTruckActive`, audit row and all,
+   * sat there with zero callers. §12.37's shape a sixth time.
+   *
+   * Its own state and its own request, not part of the stop's save, because it
+   * is a different entity behind a different gate: the stop route requires
+   * `dispatcher` and this requires `admin`. Folding an admin-only field into a
+   * dispatcher-level transaction would have made the whole save admin-only, or
+   * made the route's role check a lie. Same reasoning as `Clear now` keeping
+   * its own request (§12.28).
+   */
+  const [active, setActive] = useState(row.active);
 
   const [errors, setErrors] = useState<FieldError[]>([]);
   /**
@@ -202,8 +227,14 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const errorFor = (field: string) => allErrors.find((e) => e.field === field)?.message;
 
   const dirty = useMemo(
-    () => dirtyFields(initialEdit as StopEdit, edit as StopEdit),
-    [edit, initialEdit],
+    () => [
+      ...dirtyFields(initialEdit as StopEdit, edit as StopEdit),
+      // Not a StopEdit field — it is a different entity on a different route —
+      // but it is unsaved work in this modal, and the banner names what is
+      // unsaved rather than what is in one particular request.
+      ...(active === row.active ? [] : ['active flag']),
+    ],
+    [active, edit, initialEdit, row.active],
   );
 
   const driverChanged = driverId !== initialDriverId;
@@ -351,6 +382,12 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                         city: patch.city,
                         state: patch.state,
                         zip: patch.zip,
+                        // Same rule, same reason: the cache must never hold a
+                        // shape the server cannot produce (§12.21).
+                        dispatcherNote:
+                          patch.dispatcherNote === undefined
+                            ? r.nextStop.dispatcherNote
+                            : patch.dispatcherNote,
                       },
                     }
                   : r,
@@ -396,6 +433,40 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
         const saved = (await response.json()) as { warnings?: FieldError[] };
 
+        /**
+         * §12.14. A second request, deliberately, and only when the flag
+         * actually moved — see the note on `active` above for why it cannot
+         * ride inside the stop's transaction.
+         *
+         * After the stop save, not before: a truck vanishing from the console
+         * while its stop failed to save would be the worse half to land alone.
+         */
+        if (active !== row.active) {
+          const flipped = await fetch('/api/trucks', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ truckId: row.id, active }),
+          });
+          if (!flipped.ok) {
+            const body = (await flipped.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            await queryClient.invalidateQueries({ queryKey: key });
+            // The stop IS saved. Saying otherwise would send the dispatcher
+            // back to redo work that landed (§12.24's warning-not-error rule).
+            setActive(row.active);
+            setSaveWarnings([
+              {
+                field: 'active',
+                message: `The stop saved. The active flag did not: ${
+                  body?.error ?? 'the change was refused.'
+                }`,
+              },
+            ]);
+            return;
+          }
+        }
+
         await queryClient.invalidateQueries({ queryKey: key });
 
         if (saved.warnings?.length) {
@@ -414,7 +485,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     },
     // `edit` is deliberately absent: this function reads `parsed.data` only.
     // The raw form shape does not leave the component (§12.21).
-    [onClose, overrideEdit, parsed, queryClient, row.id],
+    [active, onClose, overrideEdit, parsed, queryClient, row.active, row.id],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
@@ -575,7 +646,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                     title={mayFlipActive ? undefined : 'Only an admin may change this.'}
                     className="flex h-10 items-center gap-2 text-body text-text-secondary"
                   >
-                    <input type="checkbox" defaultChecked disabled={!mayFlipActive} />
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      disabled={!mayFlipActive || saving}
+                      aria-label="Active — on the console"
+                      onChange={(e) => setActive(e.target.checked)}
+                    />
                     On the console
                   </span>
                 </label>

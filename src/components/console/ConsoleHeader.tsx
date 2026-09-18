@@ -49,7 +49,19 @@ interface Props {
   matchCount: number;
   totalCount: number;
   fetchedAt: string | null;
+  /**
+   * `feed_health.newest_position_at`. This was DECLARED here and never
+   * destructured — the sync dot was hardcoded to the healthy token, so a
+   * dimmed §5.9 board sat under a green dot reading "Synced 12s ago" (§12.53).
+   *
+   * Two different ages, and the difference is the whole point: "Synced" is
+   * how long ago the BROWSER talked to us, which stays healthy while the feed
+   * is dead. `feedNewestAt` is how old the POSITIONS are, which is the number
+   * a dispatcher is actually deciding on.
+   */
   feedNewestAt: string | null;
+  /** §5.9. True when the positions are too old to colour a schedule with. */
+  feedStale: boolean;
   dispatchTz: string;
   /**
    * The whole account, not just its initials (§12.45). The circle used to be
@@ -69,6 +81,8 @@ export function ConsoleHeader({
   matchCount,
   totalCount,
   fetchedAt,
+  feedNewestAt,
+  feedStale,
   dispatchTz,
   user,
 }: Props) {
@@ -89,6 +103,8 @@ export function ConsoleHeader({
   }, []);
 
   const age = elapsed(fetchedAt, now);
+  /** The age of the POSITIONS, which is a different number from `age`. */
+  const feedAge = elapsed(feedNewestAt, now);
   // The browser's own zone — "CET · YOU" for a dispatcher working from Europe.
   const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -130,13 +146,29 @@ export function ConsoleHeader({
       </div>
 
       <div className="flex items-center gap-4">
+        {/**
+          * §9.1. The dot is `status.ontime.fg` when healthy and
+          * `status.late.fg` when the feed is down, and the label changes with
+          * it: `Last sync 06:41 · 9m ago`, naming the instant rather than only
+          * the age, because the instant is what gets said down a phone.
+          */}
         <div className="flex items-center gap-[7px]">
           <span
-            className="h-[7px] w-[7px] bg-status-ontime-fg"
+            className={`h-[7px] w-[7px] ${feedStale ? 'bg-status-late-fg' : 'bg-status-ontime-fg'}`}
             aria-hidden="true"
           />
-          <span className="font-sans text-[12px] tabular-nums text-text-secondary">
-            {age ? `Synced ${age} ago` : 'Syncing…'}
+          <span
+            className={`font-sans text-[12px] tabular-nums ${feedStale ? 'text-status-late-fg' : 'text-text-secondary'}`}
+          >
+            {feedStale
+              ? feedNewestAt
+                ? `Last sync ${timeInZone(new Date(feedNewestAt), dispatchTz)}${
+                    feedAge ? ` · ${feedAge} ago` : ''
+                  }`
+                : 'No positions yet'
+              : age
+                ? `Synced ${age} ago`
+                : 'Syncing…'}
           </span>
         </div>
 

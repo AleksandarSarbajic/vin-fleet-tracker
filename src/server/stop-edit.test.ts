@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import { assignments, loads, overrides, stops, auditLog } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
-import { makeDriver, makeTruck } from '@/test/fleet';
+import { makeDispatcher, makeDriver, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
@@ -363,6 +363,192 @@ withDb('the edit modal save', () => {
         return { empty, given, removed: await read() };
       });
       expect(values).toEqual({ empty: null, given: 'VL-99120', removed: null });
+    });
+  });
+
+  describe('the dispatcher note (§12.53)', () => {
+    /**
+     * The note is the field whose own label promises it is "visible to the
+     * next shift". It was the third column to be wiped by a write that listed
+     * a field the form had not loaded — after `loads.broker` (§12.23) and the
+     * load number's four layers (§12.21).
+     *
+     * Every test here asserts something does NOT happen, because the failure
+     * is silent by construction: the dispatcher who destroys the note is the
+     * one person who cannot see that it was there.
+     */
+    const readNote = async (tx: Tx, stopId: string) =>
+      (
+        await tx
+          .select({
+            note: stops.dispatcherNote,
+            by: stops.noteBy,
+            at: stops.noteAt,
+          })
+          .from(stops)
+          .where(eq(stops.id, stopId))
+      )[0] ?? null;
+
+    it('survives a save that never mentions it', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t.trucks[0]!.id,
+            dispatcherNote: 'Call the receiver before 14:00 — gate code 4417.',
+          }),
+        });
+
+        // An API client changing only the load status, exactly as the load
+        // number's own test does. The note must survive untouched.
+        const { dispatcherNote: _omitted, ...withoutKey } = edit({
+          truckId: t.trucks[0]!.id,
+          stopId: created.stopId,
+          loadStatus: 'DELIVERED',
+        });
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: StopEdit.parse(withoutKey),
+        });
+        return readNote(tx, created.stopId);
+      });
+
+      expect(seen?.note).toBe('Call the receiver before 14:00 — gate code 4417.');
+    });
+
+    /**
+     * The bug as the dispatcher met it. The modal initialised its note box to
+     * `''` and never loaded the stored value, so the box was empty, the
+     * dispatcher had nothing to preserve, and the save sent an explicit null.
+     * This is the shape of that request.
+     */
+    it('is cleared by an explicit null, which is the request the old modal sent', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, dispatcherNote: 'keep me' }),
+        });
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t.trucks[0]!.id,
+            stopId: created.stopId,
+            dispatcherNote: null,
+          }),
+        });
+        return readNote(tx, created.stopId);
+      });
+
+      // Clearing is a real intent and stays available. What changed is that it
+      // now takes saying so.
+      expect(seen?.note).toBeNull();
+      expect(seen?.by).toBeNull();
+      expect(seen?.at).toBeNull();
+    });
+
+    /**
+     * The half that a load of the stored value creates on its own: the modal
+     * now sends the SAME note back on every unrelated save. Re-stamping
+     * `note_by` and `note_at` would rewrite who said it and when, which is
+     * history changing with nothing behind it — §12.45's rename, in a column.
+     */
+    it('does not re-stamp authorship when the text did not change', async () => {
+      /**
+       * TWO actors, and the assertion is on `note_by`, not on `note_at`.
+       *
+       * The first version of this test asserted the timestamp and passed
+       * against the broken code — `now()` in Postgres is the TRANSACTION's
+       * start time, and `rolledBack` runs both saves in one transaction, so
+       * the two stamps were identical whether or not the column was rewritten.
+       * A test that cannot fail is not evidence (§12.38).
+       */
+      const seen = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        const wrote = await makeDispatcher(tx, 'Note Author');
+        const saved = await makeDispatcher(tx, 'Unrelated Saver');
+
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: wrote.id,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, dispatcherNote: 'Dock 12 after 18:00.' }),
+        });
+        const first = await readNote(tx, created.stopId);
+
+        // Somebody else saves the stop for an unrelated reason. The modal now
+        // loads the note, so it sends the same text back verbatim.
+        await saveStopEdit(tx as never, {
+          actorUserId: saved.id,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t.trucks[0]!.id,
+            stopId: created.stopId,
+            loadStatus: 'DELIVERED',
+            dispatcherNote: 'Dock 12 after 18:00.',
+          }),
+        });
+        return { first, second: await readNote(tx, created.stopId), wrote, saved };
+      });
+
+      expect(seen.second?.note).toBe('Dock 12 after 18:00.');
+      // Still attributed to whoever actually wrote it.
+      expect(seen.second?.by).toBe(seen.wrote.id);
+      expect(seen.second?.by).not.toBe(seen.saved.id);
+      expect(seen.first?.by).toBe(seen.wrote.id);
+    });
+
+    it('records a genuine change, and says so in the audit row', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, dispatcherNote: 'first' }),
+        });
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t.trucks[0]!.id,
+            stopId: created.stopId,
+            dispatcherNote: 'second',
+          }),
+        });
+        const rows = await tx
+          .select({ after: auditLog.after })
+          .from(auditLog)
+          .where(eq(auditLog.entityId, created.stopId));
+        return { note: (await readNote(tx, created.stopId))?.note, rows };
+      });
+
+      expect(seen.note).toBe('second');
+      const wrote = seen.rows.filter(
+        (r) => (r.after as { dispatcherNote?: string | null }).dispatcherNote !== undefined,
+      );
+      // Two saves, two genuine changes, two audit rows carrying the note.
+      expect(wrote).toHaveLength(2);
+    });
+
+    it('comes back through the fleet query, so the modal can load it', async () => {
+      const note = await rolledBack(async (tx) => {
+        const t = await fixtures(tx);
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t.trucks[0]!.id, dispatcherNote: 'Gate code 4417.' }),
+        });
+        const raw = await tx.execute(LATEST_POSITION_SQL);
+        const rows = parseFleetRows(raw as never);
+        return rows.find((r) => r.id === t.trucks[0]!.id)?.nextStop?.dispatcherNote ?? null;
+      });
+
+      // A note the board cannot read is a note nobody wrote.
+      expect(note).toBe('Gate code 4417.');
     });
   });
 

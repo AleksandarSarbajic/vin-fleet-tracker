@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useFleet, type FleetResponse } from '@/hooks/useFleet';
+import { FLEET_POLL_MS, useFleet, type FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
@@ -11,6 +11,7 @@ import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
 import { ConsoleHeader } from './ConsoleHeader';
+import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
 import { Toasts } from './Toasts';
 import {
@@ -94,7 +95,7 @@ export function Console({
    */
   const { chips, toggleChip, resetChips } = useChipFilters(initialChips, syncUrl);
 
-  const { data } = useFleet(initial);
+  const { data, refetch, isFetching } = useFleet(initial);
   /**
    * Every truck, inactive included, so the Inactive chip (§12.14) has
    * something to filter to. The default view is active only — applied on the
@@ -311,9 +312,26 @@ export function Console({
         totalCount={rows.length}
         fetchedAt={data?.fetchedAt ?? null}
         feedNewestAt={data?.feedNewestAt ?? null}
+        feedStale={feedStale}
         dispatchTz={dispatchTz}
         user={user}
       />
+
+      {/**
+        * §9.8. The half that makes §5.9's dimming legible: the board going
+        * grey says something is wrong, and only this says what, since when,
+        * and that an ETA read off this screen must not be quoted to a broker.
+        */}
+      {feedStale ? (
+        <FeedBanner
+          feedNewestAt={data?.feedNewestAt ?? null}
+          fetchedAt={data?.fetchedAt ?? null}
+          pollMs={FLEET_POLL_MS}
+          dispatchTz={dispatchTz}
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      ) : null}
 
       {missingTruck ? (
         <div className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg">

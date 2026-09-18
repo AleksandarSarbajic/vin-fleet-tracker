@@ -246,6 +246,34 @@ export async function saveStopEdit(
       appointmentType: edit.appointment?.type ?? ('APPT' as const),
     };
 
+    /**
+     * The dispatcher note, and the two columns that record who wrote it.
+     *
+     * Two rules, and they are not the same rule:
+     *
+     * 1. **Omitted means leave it alone** (§12.21). The key being absent is
+     *    not a request to erase a note the caller never mentioned.
+     * 2. **`noteBy`/`noteAt` move only when the TEXT moves.** Sending the
+     *    same note back — which is exactly what a modal that loads the stored
+     *    value does on every unrelated save — must not re-stamp it with a
+     *    different dispatcher and the current time. That is history changing
+     *    without anything having happened, the same class as §12.45's rename.
+     *
+     * Compared against the stored value rather than trusting the client to
+     * omit correctly: the server is the layer that knows what is already
+     * there, and a rule that depends on the caller behaving is not a rule.
+     */
+    const noteChanged =
+      edit.dispatcherNote !== undefined &&
+      edit.dispatcherNote !== (existing?.dispatcherNote ?? null);
+    const noteColumns = noteChanged
+      ? {
+          dispatcherNote: edit.dispatcherNote ?? null,
+          noteBy: edit.dispatcherNote ? input.actorUserId : null,
+          noteAt: edit.dispatcherNote ? sql`now()` : null,
+        }
+      : {};
+
     let loadId: string;
     let stopId: string;
 
@@ -273,9 +301,7 @@ export async function saveStopEdit(
           city: edit.city,
           state: edit.state,
           zip: edit.zip,
-          dispatcherNote: edit.dispatcherNote,
-          noteBy: edit.dispatcherNote ? input.actorUserId : null,
-          noteAt: edit.dispatcherNote ? sql`now()` : null,
+          ...noteColumns,
           ...geocodeColumns,
           ...appointmentColumns,
         })
@@ -306,7 +332,9 @@ export async function saveStopEdit(
           city: edit.city,
           state: edit.state,
           zip: edit.zip,
-          dispatcherNote: edit.dispatcherNote,
+          // A brand new stop has nothing to leave alone, so omitted and empty
+          // mean the same thing here: no note yet.
+          dispatcherNote: edit.dispatcherNote ?? null,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
           ...geocodeColumns,
@@ -397,7 +425,9 @@ export async function saveStopEdit(
           : 'address unchanged — not re-geocoded',
         /** Kept: on the fall-back date this says which 01:30 was stored. */
         appointmentResolution: appointment?.resolution ?? null,
-        dispatcherNote: edit.dispatcherNote,
+        // What was WRITTEN, not what was sent (§12.21). A save that left the
+        // note alone must not appear in history as having set it.
+        ...(noteChanged ? { dispatcherNote: edit.dispatcherNote ?? null } : {}),
         source: 'edit-modal',
       },
     };

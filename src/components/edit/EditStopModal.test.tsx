@@ -53,14 +53,14 @@ afterEach(() => {
   container = null;
 });
 
-const render = async () => {
+const render = async (row = ROW) => {
   await act(async () => {
     root!.render(
       createElement(
         QueryClientProvider,
         { client },
         createElement(EditStopModal, {
-          row: ROW,
+          row,
           drivers: [],
           role: 'admin' as const,
           dispatchTz: 'America/Chicago',
@@ -168,5 +168,80 @@ describe('the modal renders at all', () => {
     expect(fieldLabelled('City').value).toBe('Chicago');
     expect(fieldLabelled('State').value).toBe('IL');
     expect(fieldLabelled('ZIP').value).toBe('60601');
+  });
+});
+
+describe('the Active checkbox actually flips the flag (§12.14, §12.53)', () => {
+  /**
+   * The checkbox was `defaultChecked` with no `onChange`, so it moved on
+   * screen and nowhere else. §12.14 names this modal as the ONLY surface the
+   * flag is editable from — "No separate admin screen" — which made
+   * `trucks.active` uneditable in the whole product while `/api/trucks` and
+   * `setTruckActive` sat there fully built and audited, with zero callers.
+   *
+   * That is §12.37's shape: a feature reported done, the server half present,
+   * and no render path reaching it.
+   */
+  const activeBox = (): HTMLInputElement => {
+    const found = container!.querySelector('input[type="checkbox"]');
+    if (!found) throw new Error('No Active checkbox');
+    return found as HTMLInputElement;
+  };
+
+  const posted = (url: string) =>
+    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.filter(
+      ([called]) => called === url,
+    );
+
+  it('starts from the truck, not from `true`', async () => {
+    /**
+     * An INACTIVE truck, because an active one cannot tell the two apart:
+     * `defaultChecked` renders a tick, `checked={row.active}` renders a tick,
+     * and the test passes either way. The `Inactive` chip's whole job is to
+     * surface exactly this truck so somebody can turn it back on, and the old
+     * checkbox showed it as already on.
+     */
+    await render(fleetRow({ active: false }));
+    expect(activeBox().checked).toBe(false);
+  });
+
+  it('sends the flip to the route that writes it', async () => {
+    await render();
+    await act(async () => {
+      activeBox().click();
+    });
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+
+    const calls = posted('/api/trucks');
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0]![1].body))).toEqual({
+      truckId: ROW.id,
+      active: !ROW.active,
+    });
+  });
+
+  it('says nothing to that route when the flag did not move', async () => {
+    // An unrelated save must not write a column it was not asked to write —
+    // §12.23, in the entity next door.
+    await render();
+    await act(async () => {
+      setValue(fieldLabelled('City'), 'Joliet');
+    });
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+
+    expect(posted('/api/trucks')).toHaveLength(0);
+  });
+
+  it('names the unsaved flag in the dirty banner', async () => {
+    const el = await render();
+    await act(async () => {
+      activeBox().click();
+    });
+    expect(el.textContent).toContain('Unsaved changes');
+    expect(el.textContent).toContain('active flag');
   });
 });

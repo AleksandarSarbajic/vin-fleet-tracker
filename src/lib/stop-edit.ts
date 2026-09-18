@@ -168,8 +168,24 @@ export const StopEdit = z
     /** Null leaves the stop with no appointment — a real state (NO_APPT). */
     appointment: AppointmentInput.nullable(),
 
-    /** Visible to the next shift. */
-    dispatcherNote: blankIsNull(2000),
+    /**
+     * Visible to the next shift — and therefore **optional on the wire**, for
+     * the same reason `loadNumber` is (§12.21): an ABSENT key is not a request
+     * to erase anything.
+     *
+     * This was the §12.23 broker wipe in a third column. The modal initialised
+     * its note box to `''` and never loaded the stored value, so every save
+     * sent `dispatcherNote: null` and nulled a note the dispatcher could not
+     * see and had not touched — along with `noteBy` and `noteAt`. The audit
+     * row said `dispatcherNote: "call receiver first" -> null`, which is again
+     * the only place it would ever have shown up.
+     *
+     *     "note text"   set it
+     *     ""            clear it — the modal's emptied box
+     *     null          clear it, said explicitly
+     *     omitted       LEAVE IT ALONE
+     */
+    dispatcherNote: blankIsNull(2000).optional(),
 
     /**
      * The driver this truck should end up with. Undefined leaves the

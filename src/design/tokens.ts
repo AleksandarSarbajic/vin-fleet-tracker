@@ -58,7 +58,16 @@ export const palette = {
     veil: 'rgba(148,188,227,0.14)',
   },
   status: {
-    late: { fg: '#ff8a7a', bg: '#3a1f1c', bd: '#6b3129' },
+    /**
+     * `dim` is the offline banner's secondary ink (§9.8) — the `auto-retry in
+     * 14s` countdown beside `Retry now`. One step down from `fg` so the
+     * countdown does not compete with the sentence that matters, while
+     * staying inside the red family rather than dropping to a neutral, which
+     * would read as unrelated chrome. Measured on `status.late.bg`
+     * (`#3a1f1c`): **6.45**, against 6.58 for `late.fg` on the same ground —
+     * so it is a step down in WEIGHT, not in legibility, which is the point.
+     */
+    late: { fg: '#ff8a7a', bg: '#3a1f1c', bd: '#6b3129', dim: '#d79b91' },
     risk: { fg: '#f2b23f', bg: '#3a2c15', bd: '#6b5224' },
     ontime: { fg: '#5ed69b', bg: '#15301f', bd: '#27573a' },
     tomorrow: {

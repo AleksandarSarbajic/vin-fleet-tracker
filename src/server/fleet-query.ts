@@ -136,6 +136,14 @@ export interface NextStop {
   /** The cached route for this lane (§12.31), or null. */
   route: CachedRoute | null;
   arrivedAt: string | null;
+  /**
+   * Visible to the next shift — and therefore it has to reach the next shift.
+   *
+   * Carried here so the edit modal can LOAD it. Without it the modal opened
+   * with an empty box and saved that emptiness over the stored note (§12.53).
+   * Nothing on the board renders it yet; the detail panel is where it belongs.
+   */
+  dispatcherNote: string | null;
 }
 
 /**
@@ -176,7 +184,7 @@ export const LATEST_POSITION_SQL = sql`
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
-    ns.stop_accuracy_miles, ns.arrived_at,
+    ns.stop_accuracy_miles, ns.arrived_at, ns.dispatcher_note,
     ns.route_miles, ns.route_duration_s, ns.route_from_lat, ns.route_from_lng,
     ns.route_straight_miles, ns.route_lane_ratio,
     ns.route_snap_from_m, ns.route_snap_to_m, ns.route_computed_at,
@@ -241,7 +249,8 @@ export const LATEST_POSITION_SQL = sql`
       to_char(sr.computed_at at time zone 'UTC',
               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as route_computed_at,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-                              as arrived_at
+                              as arrived_at,
+      s.dispatcher_note       as dispatcher_note
     from loads l
     join stops s on s.load_id = l.id
     left join stop_routes sr on sr.stop_id = s.id
@@ -359,6 +368,7 @@ export const FleetQueryRow = z.object({
   route_snap_to_m: z.number().nullable(),
   route_computed_at: z.string().nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
+  dispatcher_note: z.string().nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
   reason: z.enum(OVERRIDE_REASONS).nullable(),
@@ -449,6 +459,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
                   }
                 : null,
             arrivedAt: raw.arrived_at,
+            dispatcherNote: raw.dispatcher_note,
           }
         : null,
     openLoadCount: raw.open_load_count,
