@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
 import { SearchField } from './SearchField';
 import { FilterChips, type FilterKey } from './FilterChips';
+import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
 
 /** design-spec §9.1. 56px, raised ground, hairline bottom. */
@@ -50,7 +51,12 @@ interface Props {
   fetchedAt: string | null;
   feedNewestAt: string | null;
   dispatchTz: string;
-  userInitials: string;
+  /**
+   * The whole account, not just its initials (§12.45). The circle used to be
+   * a `<span>` with two letters and nothing behind it, so there was no way to
+   * sign out and no way to see which account you were on.
+   */
+  user: AccountUser;
 }
 
 export function ConsoleHeader({
@@ -64,7 +70,7 @@ export function ConsoleHeader({
   totalCount,
   fetchedAt,
   dispatchTz,
-  userInitials,
+  user,
 }: Props) {
   /**
    * Seeded from the FETCH instant, not from the clock.
@@ -139,9 +145,7 @@ export function ConsoleHeader({
           <Clock instant={now} zone={viewerZone} label="YOU" />
         </div>
 
-        <span className="inline-flex h-[30px] w-[30px] items-center justify-center border border-line-hair font-cond text-[11px] font-semibold text-text-secondary">
-          {userInitials}
-        </span>
+        <AccountMenu user={user} />
       </div>
     </header>
   );

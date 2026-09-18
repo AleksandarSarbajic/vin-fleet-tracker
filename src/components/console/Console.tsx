@@ -11,6 +11,7 @@ import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
 import { ConsoleHeader } from './ConsoleHeader';
+import type { AccountUser } from './AccountMenu';
 import { FleetList } from './FleetList';
 import { Split } from './Split';
 import { FleetMap } from './map/FleetMap';
@@ -26,7 +27,7 @@ const NO_ROWS: FleetRow[] = [];
 interface Props {
   initial: FleetResponse;
   dispatchTz: string;
-  userInitials: string;
+  user: AccountUser;
   /**
    * Read on the SERVER and passed down, not read here with
    * `useSearchParams`. That hook opts its whole subtree out of server
@@ -46,7 +47,7 @@ interface Props {
 export function Console({
   initial,
   dispatchTz,
-  userInitials,
+  user,
   initialQuery,
   initialTruck,
   initialChips,
@@ -217,7 +218,7 @@ export function Console({
         fetchedAt={data?.fetchedAt ?? null}
         feedNewestAt={data?.feedNewestAt ?? null}
         dispatchTz={dispatchTz}
-        userInitials={userInitials}
+        user={user}
       />
 
       {missingTruck ? (

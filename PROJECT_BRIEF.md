@@ -235,6 +235,26 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
    assigns `viewer`, and promotion requires an admin to already exist, so a
    fresh deployment has nobody who can promote anyone. `npm run bootstrap:admin
    -- <email> admin` is the deliberate act that breaks the cycle.
+   **Playwright scope — what genuinely needs a browser**, rather than what was
+   untestable by accident. Components render in Vitest now (§12.37), so modals,
+   focus traps, the chip toggles and the pickers run there in milliseconds and
+   do not belong in a browser suite. These do:
+   - **First paint carries the fleet.** The direct regression for §12.29's
+     second bug: `useSearchParams` opted the subtree out of server rendering
+     and discarded the `loadFleet()` prefetch. There is no server render in
+     Vitest to opt out of, so no unit test can see it.
+   - **No hydration error on the console.** §12.29's first bug across the RSC
+     boundary. Vitest can assert render PURITY; it cannot render `page.tsx`.
+   - **Middleware and auth redirects.** Unauthenticated to `/login`, and role
+     gating enforced server-side.
+   - **`updateDisplayName` end to end** (§12.45). The action calls
+     `requireUser()`, which needs a real Supabase session, so the component
+     tests mock it at the module boundary and assert only what the menu sends.
+     Session, parse, transaction and revalidate are unexercised.
+   - **The map.** Mapbox GL needs WebGL, which happy-dom does not have.
+   - **One write path end to end** — edit stop, save, row updates — crossing
+     the route handler and revalidation.
+
    **Carried onto this phase deliberately, not forgotten:**
    - **Overnight receiving** (§12.22). A window like `22:00–06:00` is refused
      with a field error. Grocery and retail DCs run through the night and this

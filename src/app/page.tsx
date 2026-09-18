@@ -9,13 +9,6 @@ import { db } from '@/db';
 /** Live positions — never cached. */
 export const dynamic = 'force-dynamic';
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '??';
-  if (parts.length === 1) return (parts[0] ?? '').slice(0, 2).toUpperCase();
-  return `${parts[0]?.[0] ?? ''}${parts[parts.length - 1]?.[0] ?? ''}`.toUpperCase();
-}
-
 const first = (v: string | string[] | undefined): string | null =>
   Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
 
@@ -39,7 +32,7 @@ export default async function ConsolePage({
     <Console
       initial={payload}
       dispatchTz={serverEnv.DISPATCH_TZ}
-      userInitials={initials(user.fullName)}
+      user={{ fullName: user.fullName, email: user.email, role: user.role }}
       initialQuery={first(params['q']) ?? ''}
       initialTruck={first(params['truck'])}
       initialChips={(first(params['chips']) ?? '').split(',').filter(Boolean)}

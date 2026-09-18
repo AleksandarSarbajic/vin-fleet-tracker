@@ -3542,6 +3542,75 @@ not a bug, and does not report it.
 Locked by a test that fails with `expected 'il' to be 'IL'` when the patch is
 switched back to `edit`.
 
+## 12.45 The header circle was a span
+
+`ConsoleHeader` rendered `SL` in a box with nothing behind it, for four
+phases. There was no way to sign out of the console, and no way to see which
+account you were on.
+
+It is now a menu: name, email, role, **Edit display name**, **Sign out**.
+Initials only — no picture and no upload path, because a Storage bucket and
+its RLS policies are not worth writing to tell five accounts apart. The
+initials are derived from `full_name` rather than passed in, so there is one
+implementation of what `Mary Anne Fitzgerald` shortens to (`MF`, not `MA`).
+
+The display name is the only profile field anyone can change about
+themselves. `role` is admin-only and set elsewhere; `email` is the auth
+identity, and changing it is an auth flow rather than a profile edit.
+
+### A rename is a write to history
+
+`full_name` is JOINed into override attribution — `fleet-query` selects
+`p2.full_name as set_by_name` — so renaming yourself silently rewrites how
+every past override reads.
+
+That is history changing with no record of the change, which is the same thing
+the driver merge does when it repoints assignments, and **that was only
+acceptable because the audit entry names both rows.** So a rename writes an
+audit entry with both names, in the same transaction as the update.
+
+A rename to the identical string writes nothing at all. An audit row saying a
+name changed to itself is noise in the one log that has to stay readable.
+
+`'profile'` joins the closed `AUDIT_ENTITIES` set, whose own comment explains
+why that deserved a test: a typo there writes happily and the row is simply
+never found again by the screen that eventually looks for it.
+
+### `useFocusTrap` is not a menu
+
+The dismissal logic that existed was `useFocusTrap`, and only its **return
+focus to where you were** half is right for a menu. A Tab trap is a modal's
+contract; a menu should let Tab leave and close behind it. Reusing the whole
+hook would have made the menu a dialog that cannot be tabbed out of, which is
+worse than writing nothing.
+
+So `useReturnFocus` is split out and shared, and the menu adds Escape,
+outside-click and Tab-out itself. Grepped first, per §12.37: focus-restore
+existed in exactly one place, so this is the second consumer rather than the
+second copy, which is where drift starts.
+
+### The test that proved nothing
+
+The first version of "closes on Escape and gives focus back to the circle"
+**passed with `useReturnFocus` commented out.** It opened the menu without
+ever focusing anything inside it, so the trigger still held focus and the
+assertion was trivially true.
+
+Focus has to have MOVED for the return to mean anything. The test now tabs
+into the menu first, and fails with `expected <body>` when the hook is
+removed — a stranded keyboard user, which is the actual defect.
+
+Third instance this session of §12.38's rule: **a test must fail for the
+reason you think it fails.**
+
+### Still untested
+
+The server action itself. `updateDisplayName` calls `requireUser()`, which
+needs a real Supabase session, so the component tests mock it at the module
+boundary and assert what the menu *sends*. The action's own path — session,
+parse, transaction, revalidate — is browser-shaped, and belongs on the phase 6
+Playwright list rather than being faked here.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

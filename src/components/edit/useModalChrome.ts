@@ -3,6 +3,27 @@
 import { useEffect, useRef } from 'react';
 
 /**
+ * Remembers what had focus and gives it back when `active` goes false (§12.45).
+ *
+ * Split out of `useFocusTrap`, which is the only place this behaviour existed.
+ * The account menu is the second thing to need it, and a second copy is where
+ * the drift starts — the load-number renderers and the No-ELD tag are both
+ * that story.
+ *
+ * The REST of `useFocusTrap` is wrong for a menu. A Tab trap is a modal's
+ * contract: a menu should let Tab leave and close behind it. Reusing the whole
+ * hook would have made the menu behave like a dialog that cannot be tabbed
+ * out of, which is worse than duplicating nothing.
+ */
+export function useReturnFocus(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    const previous = document.activeElement as HTMLElement | null;
+    return () => previous?.focus();
+  }, [active]);
+}
+
+/**
  * Focus trap, initial focus, and return focus on close (§8.2, §9.9).
  *
  * Initial focus goes to `[data-initial-focus]` when the modal names one, and
@@ -25,6 +46,9 @@ export function useFocusTrap(active: boolean) {
     const root = container.current;
     if (!root) return;
 
+    // Kept inline rather than composed from useReturnFocus: this effect also
+    // owns the Tab listener, and two effects racing over focus on unmount is
+    // the kind of ordering bug that only shows up on someone else's machine.
     const previous = document.activeElement as HTMLElement | null;
     const focusable = () =>
       [
