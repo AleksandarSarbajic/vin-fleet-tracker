@@ -174,9 +174,22 @@ export function Console({
       // discard confirm rather than clearing the console's selection.
       if (editingId) return;
 
-      if (event.key === 'Enter' && selectedId) {
+      /**
+       * §12.46. The ONLY Enter handler. The row no longer has one.
+       *
+       * Two cursors exist and can disagree: DOM focus, which Tab moves, and
+       * `selectedId`, which a click or the arrow keys move. Enter means the
+       * focused row when there is one, and the selection otherwise — and it
+       * selects what it opens, so the map is never showing a different truck
+       * from the modal.
+       */
+      if (event.key === 'Enter') {
+        const focused = (event.target as HTMLElement | null)?.closest?.('[data-row-id]');
+        const targetId = focused?.getAttribute('data-row-id') ?? selectedId;
+        if (!targetId) return;
         event.preventDefault();
-        setEditingId(selectedId);
+        if (targetId !== selectedId) select(targetId);
+        setEditingId(targetId);
         return;
       }
 

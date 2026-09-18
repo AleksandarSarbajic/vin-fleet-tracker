@@ -303,9 +303,26 @@ function TruckRowImpl({
       role="row"
       tabIndex={0}
       aria-selected={selected}
+      /**
+       * §12.46. How the ONE Enter handler, up in Console, knows which row has
+       * focus. Tab moves DOM focus without moving the selection, so the two
+       * cursors can disagree and the key has to resolve which one it means.
+       */
+      data-row-id={row.id}
       onClick={() => onSelect(row.id)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        /**
+         * Space only. Enter used to be handled here TOO — this selected, the
+         * event bubbled to Console's window listener, and that opened the
+         * modal on the `selectedId` in its effect closure, which was the
+         * value from before this handler ran.
+         *
+         * So Tab from a selected row A to row B and press Enter, and the
+         * modal opened on A. Two owners agreeing by luck is not agreement;
+         * Console owns Enter now, and knows about this row through
+         * `data-row-id`.
+         */
+        if (e.key === ' ') {
           e.preventDefault();
           onSelect(row.id);
         }

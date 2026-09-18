@@ -3611,6 +3611,46 @@ boundary and assert what the menu *sends*. The action's own path — session,
 parse, transaction, revalidate — is browser-shaped, and belongs on the phase 6
 Playwright list rather than being faked here.
 
+## 12.46 Enter had two owners
+
+`TruckRow` handled Enter and called `onSelect`. It called `preventDefault` but
+not `stopPropagation`, so the event carried on to Console's `window` listener,
+which opened the edit modal on `selectedId`.
+
+That `selectedId` is the one captured in the effect's closure — the value from
+**before** the row's `setSelectedId` was queued. React will not re-run the
+effect in the middle of dispatching one event.
+
+So: select row A, Tab to row B, press Enter. **The modal opens on A**, and B
+becomes selected. Reproduced as `expected '101' to be '202'`.
+
+It worked for four phases because the two paths agreed whenever focus and
+selection agreed, which is every mouse interaction. Tab is the one gesture
+that separates them.
+
+### Two cursors, and the key has to say which it means
+
+DOM focus moves with Tab. `selectedId` moves with a click or the arrow keys —
+and the arrow keys deliberately do **not** move DOM focus, because the list is
+virtualized and focusing a row that is about to be recycled is its own bug.
+
+So Enter means: **the focused row when there is one, the selection otherwise.**
+It also selects what it opens, so the map is never showing a different truck
+from the modal.
+
+Console owns the key. The row carries `data-row-id`, which is how the one
+handler resolves what has focus, and the row's own `onKeyDown` keeps Space and
+nothing else. **Two owners agreeing by luck is not agreement.**
+
+### Why nothing caught it
+
+Nothing in the suite mounted the console. Two things had to exist first:
+components rendering at all (§12.37), and a stated layout — happy-dom computes
+none, and `@tanstack/virtual` measures the scroller with `offsetHeight`, so an
+unmeasured list renders zero rows and looks exactly like a broken one.
+`src/test/layout.ts` states a size; the components still run their own logic
+against it, including the 6/8 column switch.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled
