@@ -235,6 +235,27 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
    assigns `viewer`, and promotion requires an admin to already exist, so a
    fresh deployment has nobody who can promote anyone. `npm run bootstrap:admin
    -- <email> admin` is the deliberate act that breaks the cycle.
+   **Carried onto this phase deliberately, not forgotten:**
+   - **Overnight receiving** (§12.22). A window like `22:00–06:00` is refused
+     with a field error. Grocery and retail DCs run through the night and this
+     fleet delivers to them, so a dispatcher WILL hit it and the workaround is
+     entering a wrong time. The fix is an explicit next-day control on the
+     latest hour, not a rethink of the model.
+   - **The two circle markers** (§13.4). `TOMORROW` and `UNASSIGNED` separate
+     by fill and one step of grey — weaker than the rest of the set, which
+     separates by silhouette. Never checked on real tiles.
+   - **The cluster radius** (`components/console/map/layers.ts`). Chosen
+     against a placeholder basemap, never confirmed against real dark-v11
+     tiles. Same family as the markers: a visual judgement made without the
+     thing being judged.
+   - **`route_samples` grows without bound.** By design it accumulates, but
+     ~516 calls/day is roughly 190k rows/year with no retention or archival
+     plan. `positions` has `prunePositions`; this has nothing.
+   - **No rate limiting on any route handler.** `samsara/client.ts` limits our
+     calls TO Samsara; nothing limits calls to us. Every mutating route is
+     authenticated, so the blast radius is a logged-in dispatcher — but
+     `/api/stops` geocodes and `/api/fleet` runs the full lateral-join query.
+
    Phase 4 seeded `DEMO-` loads and stops so the console and the status engine
    have something to compute against. They are kept deliberately through
    phase 5 and must not ship.
