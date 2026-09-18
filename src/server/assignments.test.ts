@@ -1,7 +1,8 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import { eq, isNull, and, desc, inArray, sql } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
-import { assignments, drivers, trucks } from '@/db/schema';
+import { expect, it } from 'vitest';
+import { and, eq, isNull } from 'drizzle-orm';
+import { assignments } from '@/db/schema';
+import { describeDb, rolledBack } from '@/test/db';
+import { assign, makeDriver, makeTruck } from '@/test/fleet';
 import { AssignmentConflictError, loadAssignmentBoard, saveAssignments } from './assignments';
 import type { Tx } from './audit';
 
@@ -12,114 +13,52 @@ import type { Tx } from './audit';
  * truck nobody assigned.
  */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
-
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-/** Runs `body` in a transaction and rolls it back, whatever happens. */
-async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
-  const { db } = connect();
-  let out: T;
-  try {
-    await db.transaction(async (tx) => {
-      out = await body(tx);
-      tx.rollback();
-    });
-  } catch (error) {
-    if (out! === undefined) throw error;
-  }
-  return out!;
-}
+const withDb = describeDb;
 
 withDb('the assignment board', () => {
   it('lists active trucks and active drivers, both sides whole', async () => {
-    const { db } = connect();
-    const board = await loadAssignmentBoard(db);
-    expect(board.trucks.length).toBeGreaterThan(0);
-    expect(board.drivers.length).toBeGreaterThan(0);
-    // The gap is the point of the screen: a driver with no truck must appear.
+    const board = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const driven = await makeDriver(tx);
+      await assign(tx, truck.id, driven.id);
+      // The gap is the point of the screen, so the fixture creates one.
+      await makeDriver(tx);
+      return loadAssignmentBoard(tx);
+    });
+    expect(board.trucks.length).toBe(1);
+    expect(board.drivers.length).toBe(2);
     expect(board.drivers.some((d) => d.truckId === null)).toBe(true);
   });
 
   it('returns `since` as an ISO string, never a Date', async () => {
-    const { db } = connect();
-    const board = await loadAssignmentBoard(db);
-    for (const t of board.trucks) {
-      if (t.since !== null) expect(typeof t.since).toBe('string');
+    const since = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await assign(tx, truck.id, (await makeDriver(tx)).id);
+      const board = await loadAssignmentBoard(tx);
+      return board.trucks.map((t) => t.since);
+    });
+    expect(since.length).toBeGreaterThan(0);
+    for (const value of since) {
+      expect(typeof value).toBe('string');
     }
   });
 });
 
 withDb('saving the board', () => {
   /**
-   * These tests run against the real database inside a transaction that
-   * always rolls back — but a rollback does not hide rows COMMITTED outside
-   * it. They used to take "the first two trucks" and "the first two drivers"
-   * and assume both were free, which was true only while the board was empty.
+   * Two trucks and two drivers, created here.
    *
-   * The moment a dispatcher actually used `/assignments`, five of them failed
-   * with "truck 136 and truck 147 both take Roman De Los Santos" — the
-   * conflict rule working exactly as designed, on a driver the fixture had no
-   * business claiming. Same shape as the geocode-cache collision in §12.29's
-   * neighbourhood: a test reading live data it does not own.
-   *
-   * So the fixture now CLEARS the open assignments for whatever it picks,
-   * inside the transaction. That rolls back with everything else, and the
-   * tests stop depending on who happens to be driving today.
+   * This used to be forty lines: take the two highest-numbered active trucks,
+   * end whatever open assignments they had, and take the opposite end of the
+   * fleet from stop-edit.test.ts so the two suites did not lock the same rows.
+   * All of it was scaffolding for sharing a database with production — the
+   * moment a dispatcher actually used /assignments, five of these failed with
+   * "truck 136 and truck 147 both take Roman De Los Santos", the conflict rule
+   * working exactly as designed on a driver the fixture had no business
+   * claiming. An empty database needs none of it (§12.32).
    */
-  /**
-   * Ordered DESC, deliberately the opposite end of the fleet from
-   * stop-edit.test.ts.
-   *
-   * Vitest runs files in parallel, and both suites now END OPEN ASSIGNMENTS
-   * for the trucks and drivers they use. Taking the same two rows meant two
-   * concurrent transactions locking them, which surfaced as an intermittent
-   * stale-preview failure that passed every time the file was run alone.
-   * Different slices, no contention.
-   *
-   * Also ordered rather than bare `limit`: an unordered limit is whatever the
-   * planner feels like returning today.
-   */
-  const twoTrucks = async (tx: Tx) => {
-    const rows = await tx
-      .select({ id: trucks.id, number: trucks.truckNumber })
-      .from(trucks)
-      .where(eq(trucks.active, true))
-      .orderBy(desc(trucks.truckNumber))
-      .limit(2);
-    await freeUp(tx, rows.map((r) => r.id), []);
-    return rows;
-  };
-  const twoDrivers = async (tx: Tx) => {
-    const rows = await tx
-      .select({ id: drivers.id, name: drivers.name })
-      .from(drivers)
-      .orderBy(desc(drivers.name))
-      .limit(2);
-    await freeUp(tx, [], rows.map((r) => r.id));
-    return rows;
-  };
-
-  /** Ends any open assignment touching these trucks or drivers. Rolls back. */
-  const freeUp = async (tx: Tx, truckIds: string[], driverIds: string[]) => {
-    if (truckIds.length === 0 && driverIds.length === 0) return;
-    await tx
-      .update(assignments)
-      .set({ endedAt: sql`now()` })
-      .where(
-        and(
-          isNull(assignments.endedAt),
-          truckIds.length > 0
-            ? inArray(assignments.truckId, truckIds)
-            : inArray(assignments.driverId, driverIds),
-        ),
-      );
-  };
+  const twoTrucks = async (tx: Tx) => [await makeTruck(tx), await makeTruck(tx)];
+  const twoDrivers = async (tx: Tx) => [await makeDriver(tx), await makeDriver(tx)];
 
   it('assigns, and the open row is readable in the same transaction', async () => {
     const result = await rolledBack(async (tx) => {
@@ -205,7 +144,10 @@ withDb('saving the board', () => {
       const now = await tx.select({ id: assignments.id }).from(assignments);
       return { before: before.length, now: now.length };
     });
-    expect(after.now).toBe(after.before);
+    // Both zero, and said so: `now === before` alone would also hold if a
+    // future fixture pre-created assignments and the save partially landed.
+    expect(after.before).toBe(0);
+    expect(after.now).toBe(0);
   });
 
   it('names every conflict in one response, not the first', async () => {

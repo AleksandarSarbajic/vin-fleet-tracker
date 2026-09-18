@@ -66,8 +66,26 @@ other. The legacy `anon` / `service_role` JWTs are deprecated and unused.
 | `npm run worker` | Ingestion worker — the only thing that calls Samsara |
 | `npm run samsara:probe` | Re-verify `docs/samsara.md` against the live org |
 | `npm run seed:demo` | Obviously-fake loads and stops for development |
+| `npm run preflight` | **Required before deploy.** The real Supabase pooler, which the tests cannot reach |
+| `npm run test:db:up` | Start the local test cluster (`npm test` does this for you) |
+| `npm run test:db:reset` | Destroy and rebuild it from the migrations |
 
 `npm run check` also runs as a Husky pre-commit hook.
+
+### Tests never touch production
+
+They run against a Postgres that belongs to this checkout — `./.testdb`, port
+55432, started on demand by `npm test`. It needs `brew install postgresql@17`
+once; nothing else.
+
+`vitest.setup.ts` overwrites `DATABASE_URL` with that cluster and **deletes**
+`DIRECT_URL`, both Supabase keys, the Samsara token and both Mapbox tokens, so
+a test process holds no credential that reaches a live service. The database
+is truncated at the start of every run, which means a fixture must create
+everything it reads: `select … limit 1` returns nothing rather than quietly
+picking somebody's real truck. See §12.32 for why.
+
+If the suite complains it cannot connect, `npm run test:db:reset`.
 
 ## Dispatch data (phase 4)
 

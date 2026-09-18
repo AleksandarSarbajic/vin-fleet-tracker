@@ -13,3 +13,6 @@ test-results/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# local test cluster (scripts/test-db.sh)
+.testdb/

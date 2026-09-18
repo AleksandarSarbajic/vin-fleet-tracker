@@ -48,7 +48,11 @@ export function truckLabel(t: { truckNumber: number | null; samsaraName: string 
  * because the gap is the point of the screen. A list of trucks alone hides
  * the driver nobody has been given a truck.
  */
-export async function loadAssignmentBoard(db: Db): Promise<AssignmentBoard> {
+/**
+ * Reads only, so it takes a transaction as happily as a connection — which is
+ * what lets a test build its own board and read it back without committing.
+ */
+export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard> {
   const [truckRows, driverRows] = await Promise.all([
     db
       .select({

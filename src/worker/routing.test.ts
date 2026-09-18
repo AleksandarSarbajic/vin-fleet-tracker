@@ -1,11 +1,11 @@
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
 import { routeSamples, routingBudget, stopRoutes } from '@/db/schema';
+import { describeDb, rolledBack } from '@/test/db';
+import { makeRoutableLane, makeRoutableLanes } from '@/test/fleet';
 import { budgetMonth } from '@/lib/routing';
 import { sweepRouting } from './routing';
 import type { EtaProvider, RouteOutcome } from '@/server/routing/provider';
-import type { Tx } from '@/server/audit';
 
 /**
  * §12.31. The sweep against the real database, always rolled back.
@@ -16,28 +16,7 @@ import type { Tx } from '@/server/audit';
  * orders of magnitude in calls.
  */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
-
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
-  const { db } = connect();
-  let out: T;
-  try {
-    await db.transaction(async (tx) => {
-      out = await body(tx);
-      tx.rollback();
-    });
-  } catch (error) {
-    if (out! === undefined) throw error;
-  }
-  return out!;
-}
+const withDb = describeDb;
 
 const silent = { info: () => {}, warn: () => {} };
 
@@ -59,18 +38,18 @@ function stubProvider(outcome?: RouteOutcome) {
 
 withDb('the routing sweep', () => {
   /**
-   * Scoped to `provider = 'stub'`, not to the whole table.
+   * The lanes are built here, so the sweep's input is known (§12.32).
    *
-   * These run against the real database while the real worker may be polling
-   * and committing routes of its own. Under READ COMMITTED each statement
-   * takes a fresh snapshot, so rows the worker commits mid-test become
-   * visible to a later SELECT — which is how a table-wide count started
-   * returning 27 when the sweep had written 8.
+   * These used to sweep whatever production held, while the real worker was
+   * polling and committing routes of its own. Under READ COMMITTED each
+   * statement takes a fresh snapshot, so rows the worker committed mid-test
+   * became visible to a later SELECT — which is how a count of the table
+   * returned 27 when the sweep had written 8. Scoping the count to
+   * `provider = 'stub'` hid that; owning the database removes it.
    */
   it('routes lanes that have never been routed, and records both rows', async () => {
     const seen = await rolledBack(async (tx) => {
-      // Start from a clean slate inside the transaction.
-      await tx.delete(stopRoutes);
+      await makeRoutableLanes(tx, 3);
       const { provider, route } = stubProvider();
       const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
       const cached = await tx
@@ -110,7 +89,9 @@ withDb('the routing sweep', () => {
    */
   it('spends NOTHING once every lane is routed and nothing has moved', async () => {
     const calls = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
+      // More lanes than MAX_PER_CYCLE, so convergence genuinely takes several
+      // polls — which is the condition the rule has to survive.
+      await makeRoutableLanes(tx, 11);
       const { provider, route } = stubProvider();
 
       let guard = 0;
@@ -133,8 +114,7 @@ withDb('the routing sweep', () => {
 
   it('counts every call against the month, including ones that fail', async () => {
     const seen = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
-      await tx.delete(routingBudget);
+      await makeRoutableLanes(tx, 3);
       const { provider } = stubProvider({
         ok: false,
         reason: 'provider-error',
@@ -158,8 +138,7 @@ withDb('the routing sweep', () => {
   /** A caching bug should cost accuracy, not money. */
   it('stops dead at the monthly ceiling instead of spending', async () => {
     const seen = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
-      await tx.delete(routingBudget);
+      await makeRoutableLanes(tx, 3);
       await tx.insert(routingBudget).values({
         month: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
         calls: 100,
@@ -176,18 +155,21 @@ withDb('the routing sweep', () => {
 
   it('caps how many routes one poll may spend', async () => {
     const routed = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
+      // Twelve lanes, all unrouted: without the cap this poll would spend 12.
+      // Against a database with fewer than nine lanes the assertion below is
+      // vacuously true, which is what it was before the fixture existed.
+      await makeRoutableLanes(tx, 12);
       const { provider } = stubProvider();
       const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
       return sweep.routed;
     });
     // MAX_PER_CYCLE — a bad threshold bounds to 8 calls per 30s, not one per truck.
-    expect(routed).toBeLessThanOrEqual(8);
+    expect(routed).toBe(8);
   });
 
   it('re-routes once the stop has been re-geocoded', async () => {
     const calls = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
+      await makeRoutableLanes(tx, 3);
       const { provider, route } = stubProvider();
       await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
       const afterFirst = route.mock.calls.length;
@@ -200,20 +182,31 @@ withDb('the routing sweep', () => {
   });
 
   it('leaves an arrived stop alone — there is nothing left to route to', async () => {
-    const considered = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
-      const { provider } = stubProvider();
-      const before = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
-      return before.routed + before.skipped;
+    /**
+     * This used to assert only that the sweep considered SOMETHING, which was
+     * true of any non-empty fleet and said nothing about arrival. With both
+     * lanes built here it can assert the thing it is named for: the arrived
+     * one is not routed, the open one is.
+     */
+    const seen = await rolledBack(async (tx) => {
+      const open = await makeRoutableLane(tx);
+      await makeRoutableLane(tx, { arrived: true });
+      const { provider, route } = stubProvider();
+      const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+      const routed = await tx.select({ stopId: stopRoutes.stopId }).from(stopRoutes);
+      return { sweep, calls: route.mock.calls.length, routed, openStopId: open.stopId };
     });
-    expect(considered).toBeGreaterThan(0);
+
+    expect(seen.calls).toBe(1);
+    expect(seen.sweep.routed).toBe(1);
+    expect(seen.routed.map((r) => r.stopId)).toEqual([seen.openStopId]);
   });
 });
 
 withDb('the cached route survives a round trip', () => {
   it('reads back as the same numbers it wrote', async () => {
     const seen = await rolledBack(async (tx) => {
-      await tx.delete(stopRoutes);
+      await makeRoutableLane(tx);
       const { provider } = stubProvider();
       await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
       const [row] = await tx
@@ -221,14 +214,14 @@ withDb('the cached route survives a round trip', () => {
         .from(stopRoutes)
         .where(eq(stopRoutes.provider, 'stub'))
         .limit(1);
-      if (!row) return null;
+      // `if (!row) return null` used to sit here, so an empty table passed.
+      if (!row) throw new Error('the sweep wrote no route for the fixture lane');
       const [again] = await tx
         .select()
         .from(stopRoutes)
         .where(eq(stopRoutes.stopId, row.stopId));
       return { row, again };
     });
-    if (!seen) return;
     expect(seen.again?.routedMiles).toBe(seen.row.routedMiles);
     expect(seen.again?.computedAt).toBeInstanceOf(Date);
   });

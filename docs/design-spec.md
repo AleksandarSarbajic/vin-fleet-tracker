@@ -2456,6 +2456,130 @@ a corridor whose ratio moved because of construction.
 in freight uses — short by 7% to 46% depending on the lane. It is road miles
 now, of whichever kind the basis names.
 
+## 12.32 Tests that read the state of the world
+
+Four faults in one session, all the same shape — a test whose result depended
+on what happened to be in the database rather than on its own setup:
+
+| | what it read |
+|---|---|
+| the geocode cache | a real `geocode_cache` row the backfill had written, served instead of the mock |
+| the retype fixture | a stale cache row from an earlier run |
+| the assignment fixtures | `select … from drivers limit 1` — whoever was free at that moment |
+| the `stop_routes` sweep | rows the live worker committed mid-test, visible under READ COMMITTED |
+
+Every one was found by accident. None was found by the suite. Four in one
+session means the fifth was already written and simply had not failed yet.
+
+### Raising the isolation level would have made it worse
+
+The tempting fix is `REPEATABLE READ`. It takes its snapshot at transaction
+start, so it hides rows another process commits *during* the test — which
+fixes the sweep race and nothing else. The other three read rows that were
+already committed before the transaction opened, and no isolation level hides
+those; that is what a snapshot is.
+
+So it would have fixed one fault in four while making the remaining three
+*less* likely to show, because the symptom is flakiness and the flakiness is
+what got them noticed. **A fix that reduces flakiness without reducing
+wrongness is worse than no fix**, and this one would have been called done.
+
+### What was built instead
+
+A Postgres cluster that belongs to the checkout — `scripts/test-db.sh`,
+`initdb` into `./.testdb` on port 55432, Postgres 17 to match Supabase's 17.6.
+Not a service, not shared, `rm -rf` to destroy. The migrations apply to it
+unmodified; `scripts/test-db-prelude.sql` supplies the Supabase platform
+objects they reference (`anon`, `authenticated`, `service_role`, `auth.users`)
+and is the only place local diverges from production.
+
+The database swap alone does not clear the bar, because a test could still
+read rows another test left. Four guards do:
+
+1. **Production credentials do not exist in the process.** `vitest.setup.ts`
+   overwrites `DATABASE_URL` with the local cluster and *deletes* `DIRECT_URL`,
+   both Supabase keys, the Samsara token and both Mapbox tokens. Deleted, not
+   blanked — an empty string is a value a `??` will keep. There is no string
+   left to reach production with. If `TEST_DATABASE_URL` is pointed at
+   production the suite refuses to start, compared by host and database name
+   rather than by string, because the two Supabase URLs differ only in port.
+2. **The database starts empty**, truncated once per run by `globalSetup`.
+   This is the guard that converts the fault into a failure:
+   `select … limit 1` returns nothing and the fixture throws where it stands.
+3. **`afterEach` names a test that commits**, empties the tables so the next
+   test is not blamed, and fails the one that leaked.
+4. **A fetch guard** rejects any call to a host that is not loopback. The
+   geocode fault was a live HTTP call reached through a cache row; guard 2
+   removes the row, this removes the call.
+
+`src/test/guards.test.ts` asserts all four are in force, so removing one fails
+the suite rather than quietly restoring the conditions for the bug.
+
+### What the inventory actually contained
+
+The guards were expected to fail six fixtures. They failed **53 tests across
+six files**, in two classes:
+
+- **39** — `truck!.id` on an empty result. The `limit 1` fixtures, failing as
+  designed.
+- **9** — `expected 0 to be greater than 0`. Tests whose *assertions* counted
+  rows production happened to have.
+
+The second class was not on the list and could not have been found by grep.
+And it under-counts: three more tests in `fleet-query.test.ts` and two in
+`worker/routing.test.ts` did not fail at all, because they iterate
+`for (const row of rows)` and an empty database makes them **vacuous**. The
+column-type test claimed to check forty column types while skipping every
+null, and against production most were null most of the time. It now builds a
+row with all forty populated and pins the null set to `['arrived_at']`, so a
+fixture that stops populating a column fails instead of quietly stopping
+checking it. `caps how many routes one poll may spend` asserted
+`routed <= 8` against a fleet that had to hold more than eight routable lanes
+for the assertion to mean anything; it builds twelve and asserts `routed === 8`.
+
+### What it cost and what it bought
+
+The fixtures had accumulated scaffolding whose only purpose was surviving a
+shared database — ordered `limit`s so the planner could not change which truck
+a test got, `freeUp()` ending open assignments the fixture had no right to,
+and two suites deliberately taking opposite ends of the fleet so they would
+not lock the same rows. All of it deleted.
+
+`fileParallelism: false` went with it. It was there because `applyReassignment`
+takes a fleet-wide `select … for update`, which serialises any two suites
+touching assignments; that lock is per database and each test's rows are now
+its own. Confirmed green across ten consecutive runs.
+
+```
+before   2m 26s   one file at a time, against eu-west-1
+after       3.4s   parallel, against localhost
+```
+
+### The gap, and the gate that covers it
+
+A local cluster cannot exercise the real Supabase pooler, and `prepare: false`
+in `createPooledDb` is the setting whose absence fails only under concurrency,
+in production. `npm run preflight` is therefore a **required step before
+deploy**, not a note: it checks that `DATABASE_URL` is `:6543`, that the real
+fleet query still returns the shape the row type claims, that the session
+pooler is reachable, and that `prepare: false` is still load-bearing.
+
+The first version of that last check was wrong, in a way worth keeping:
+
+```
+prepare:true    1 connection,  2 statements   OK
+prepare:true    5 connections, 20 statements  never returns
+prepare:false   5 connections, 20 statements  OK
+```
+
+It used one connection and two sequential statements, and reported the
+opposite of the truth. With one connection the prepared statement is reused on
+the backend that prepared it. Under concurrency the pooler hands the second
+execution to a backend that has never seen the name — and the result is not an
+error but a **stall**. No exception, no log line, just route handlers that stop
+returning. That is the incident the gate exists to prevent, and it is only
+visible under concurrency.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

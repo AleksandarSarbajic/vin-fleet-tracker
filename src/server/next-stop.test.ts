@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
-import { loads, stops, trucks } from '@/db/schema';
+import { expect, it } from 'vitest';
+import { loads, stops } from '@/db/schema';
+import { describeDb, rolledBack } from '@/test/db';
+import { makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows, type FleetRow } from './fleet-query';
 import type { Tx } from './audit';
 
@@ -11,38 +11,12 @@ import type { Tx } from './audit';
  * quietly: a departed stop, a delivered load, and a truck holding two loads.
  */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
+const withDb = describeDb;
 
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
-  const { db } = connect();
-  let out: T;
-  try {
-    await db.transaction(async (tx) => {
-      out = await body(tx);
-      tx.rollback();
-    });
-  } catch (error) {
-    if (out! === undefined) throw error;
-  }
-  return out!;
-}
-
-/** A clean truck: active, and with whatever the seed gave it removed. */
+/** A truck with no loads on it. Built here, so nothing else can have touched it. */
 async function emptyTruck(tx: Tx) {
-  const [truck] = await tx
-    .select({ id: trucks.id })
-    .from(trucks)
-    .where(eq(trucks.active, true))
-    .limit(1);
-  await tx.delete(loads).where(eq(loads.truckId, truck!.id));
-  return truck!.id;
+  const truck = await makeTruck(tx);
+  return truck.id;
 }
 
 async function rowFor(tx: Tx, truckId: string): Promise<FleetRow | undefined> {

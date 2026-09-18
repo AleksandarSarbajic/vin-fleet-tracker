@@ -1,5 +1,6 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import { createPooledDb } from '@/db/connection';
+import { describe, expect, it } from 'vitest';
+import { describeDb, rolledBack } from '@/test/db';
+import { makeFullFleetRow } from '@/test/fleet';
 import {
   FleetQueryRow,
   FleetQueryRows,
@@ -23,23 +24,29 @@ import {
  * database knows what the database returns.
  */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
+const withDb = describeDb;
 
-let handle: ReturnType<typeof createPooledDb> | null = null;
-function connect() {
-  handle ??= createPooledDb(url!);
-  return handle;
+/**
+ * The fixture builds a truck with EVERY column populated and the query runs
+ * inside that same transaction. What the database decodes is still what is
+ * asserted — that was always the point of these tests — but the rows are ours.
+ *
+ * These used to run `db.execute` against whatever production held. Three of
+ * them opened `expect(rows.length).toBeGreaterThan(0)` and so depended on the
+ * fleet being non-empty; the other three looped over the rows and asserted
+ * nothing at all when there were none.
+ */
+async function queryOwnRows() {
+  return rolledBack(async (tx) => {
+    const fixture = await makeFullFleetRow(tx);
+    const raw = await tx.execute(LATEST_POSITION_SQL);
+    return { fixture, raw };
+  });
 }
-
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
 
 withDb('the fleet query, against the real database', () => {
   it('returns rows whose shape FleetQueryRow actually describes', async () => {
-    const { db } = connect();
-    const result = await db.execute(LATEST_POSITION_SQL);
+    const { raw: result } = await queryOwnRows();
 
     // THE regression guard. If the query and its schema ever drift again,
     // this fails here with the offending field named, rather than as a
@@ -56,8 +63,8 @@ withDb('the fleet query, against the real database', () => {
   });
 
   it('returns recorded_at as an ISO-8601 UTC STRING, never a Date', async () => {
-    const { db } = connect();
-    const rows = FleetQueryRows.parse(await db.execute(LATEST_POSITION_SQL));
+    const { raw } = await queryOwnRows();
+    const rows = FleetQueryRows.parse(raw);
     const withPosition = rows.filter((r) => r.recorded_at !== null);
     expect(withPosition.length).toBeGreaterThan(0);
 
@@ -70,11 +77,7 @@ withDb('the fleet query, against the real database', () => {
   });
 
   it('gives every column the runtime type the schema claims', async () => {
-    const { db } = connect();
-    const raw = (await db.execute(LATEST_POSITION_SQL)) as unknown as Record<
-      string,
-      unknown
-    >[];
+    const raw = (await queryOwnRows()).raw as unknown as Record<string, unknown>[];
     const expected: Record<string, string> = {
       id: 'string',
       truck_number: 'number',
@@ -130,7 +133,18 @@ withDb('the fleet query, against the real database', () => {
       open_load_count: 'number',
     };
 
+    // The type check below skips nulls, so a fixture that quietly stopped
+    // populating a column would quietly stop checking it — which is how this
+    // test came to assert forty column types while production data left most
+    // of them null. Pinning the null set keeps the fixture honest.
+    // `arrived_at` is the one deliberate null: an arrived stop is not the
+    // next stop, so the query could never return one here.
     for (const row of raw) {
+      const nulls = Object.entries(row)
+        .filter(([, value]) => value === null)
+        .map(([column]) => column);
+      expect(nulls).toEqual(['arrived_at']);
+
       // Every declared column is present, so a renamed column is caught too.
       expect(Object.keys(row).sort()).toEqual(Object.keys(expected).sort());
       for (const [column, type] of Object.entries(expected)) {
@@ -142,15 +156,14 @@ withDb('the fleet query, against the real database', () => {
   });
 
   it('returns at most one row per truck — the lateral join cannot multiply', async () => {
-    const { db } = connect();
-    const rows = FleetQueryRows.parse(await db.execute(LATEST_POSITION_SQL));
+    const { raw } = await queryOwnRows();
+    const rows = FleetQueryRows.parse(raw);
     const ids = rows.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('maps cleanly to FleetRow, constructing no Date at all', async () => {
-    const { db } = connect();
-    const rows = parseFleetRows(await db.execute(LATEST_POSITION_SQL));
+    const rows = parseFleetRows((await queryOwnRows()).raw);
     expect(rows.length).toBeGreaterThan(0);
 
     for (const row of rows) {
@@ -164,8 +177,7 @@ withDb('the fleet query, against the real database', () => {
   });
 
   it('derives cityState for every row that has a location', async () => {
-    const { db } = connect();
-    const rows = parseFleetRows(await db.execute(LATEST_POSITION_SQL));
+    const rows = parseFleetRows((await queryOwnRows()).raw);
     for (const row of rows) {
       if (row.formattedLocation === null) continue;
       expect(row.cityState).toBeTruthy();

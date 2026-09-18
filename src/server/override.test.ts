@@ -1,7 +1,8 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
-import { auditLog, loads, overrides, stops, trucks } from '@/db/schema';
+import { auditLog, overrides, stops } from '@/db/schema';
+import { describeDb, rolledBack } from '@/test/db';
+import { makeTruck } from '@/test/fleet';
 import { OverrideInput } from '@/lib/override';
 import { StopEdit } from '@/lib/stop-edit';
 import { OverrideError, clearOverride, setOverride } from './override';
@@ -14,45 +15,19 @@ import type { Tx } from './audit';
  * The override write path, against the real database, always rolled back.
  */
 
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
+const withDb = describeDb;
 const DISPATCH_TZ = 'America/Chicago';
-
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
-  const { db } = connect();
-  let out: T;
-  try {
-    await db.transaction(async (tx) => {
-      out = await body(tx);
-      tx.rollback();
-    });
-  } catch (error) {
-    if (out! === undefined) throw error;
-  }
-  return out!;
-}
 
 /** A truck with one stop, created through the real edit path. */
 async function aStop(tx: Tx) {
-  const [truck] = await tx
-    .select({ id: trucks.id })
-    .from(trucks)
-    .where(eq(trucks.active, true))
-    .limit(1);
-  await tx.delete(loads).where(eq(loads.truckId, truck!.id));
+  const truck = await makeTruck(tx);
 
   const saved = await saveStopEdit(tx as never, {
     actorUserId: null,
     dispatchTz: DISPATCH_TZ,
     edit: StopEdit.parse({
       stopId: null,
-      truckId: truck!.id,
+      truckId: truck.id,
       loadNumber: 'TEST-OV-1',
       loadStatus: 'DISPATCHED',
       stopType: 'DEL',
@@ -70,7 +45,7 @@ async function aStop(tx: Tx) {
       dispatcherNote: null,
     }),
   });
-  return { truckId: truck!.id, stopId: saved.stopId };
+  return { truckId: truck.id, stopId: saved.stopId };
 }
 
 const input = (stopId: string, over: Partial<OverrideInput> = {}) =>

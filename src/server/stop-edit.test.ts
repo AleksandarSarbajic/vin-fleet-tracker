@@ -1,7 +1,8 @@
-import { afterAll, describe, expect, it, vi } from 'vitest';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { createPooledDb } from '@/db/connection';
-import { assignments, drivers, loads, overrides, stops, trucks, auditLog } from '@/db/schema';
+import { describe, expect, it, vi } from 'vitest';
+import { and, eq, isNull } from 'drizzle-orm';
+import { assignments, loads, overrides, stops, auditLog } from '@/db/schema';
+import { describeDb, rolledBack } from '@/test/db';
+import { makeDriver, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
@@ -20,71 +21,27 @@ import type { Tx } from './audit';
  */
 
 const DISPATCH_TZ = 'America/Chicago';
-const url = process.env.DATABASE_URL;
-const withDb = url ? describe : describe.skip;
-
-let handle: ReturnType<typeof createPooledDb> | null = null;
-const connect = () => (handle ??= createPooledDb(url!));
-afterAll(async () => {
-  await handle?.client.end({ timeout: 5 });
-});
-
-async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
-  const { db } = connect();
-  let out: T;
-  try {
-    await db.transaction(async (tx) => {
-      out = await body(tx);
-      tx.rollback();
-    });
-  } catch (error) {
-    if (out! === undefined) throw error;
-  }
-  return out!;
-}
+const withDb = describeDb;
 
 /**
- * The two trucks and two drivers these tests move around — with any OPEN
- * assignment on them ended first, inside the transaction that rolls back.
+ * The two trucks and two drivers these tests move around.
  *
- * Without that, the fixtures assumed the first two drivers were free, which
- * stopped being true the moment a dispatcher used `/assignments`: four
- * reassignment tests began failing with "The assignment changed while the
- * confirmation was open", which is the stale-preview guard doing its job
- * against a fixture that had no right to those drivers.
+ * This was thirty lines of defence against a shared database: take the two
+ * lowest-numbered active trucks and the two first drivers, ORDER BY so the
+ * planner could not change which ones, then end any open assignment on them
+ * inside the rolling-back transaction. All of it because the fixtures assumed
+ * the first two drivers were free, which stopped being true the moment a
+ * dispatcher used /assignments — four reassignment tests then failed with
+ * "The assignment changed while the confirmation was open", the stale-preview
+ * guard doing its job against a fixture with no right to those drivers.
+ *
+ * The database is empty now, so the trucks and drivers are simply made
+ * (§12.32). Nothing to order, nothing to free, nothing to collide with.
  */
-const fixtures = async (tx: Tx) => {
-  // ORDERED. `limit` without `order by` returns whatever the planner feels
-  // like, so which trucks a test gets can change when unrelated rows do —
-  // which is exactly how this suite started failing on a row it never chose.
-  const t = await tx
-    .select({ id: trucks.id, number: trucks.truckNumber })
-    .from(trucks)
-    .where(eq(trucks.active, true))
-    .orderBy(trucks.truckNumber)
-    .limit(2);
-  const d = await tx
-    .select({ id: drivers.id, name: drivers.name })
-    .from(drivers)
-    .orderBy(drivers.name)
-    .limit(2);
-
-  const truckIds = t.map((r) => r.id);
-  const driverIds = d.map((r) => r.id);
-  if (truckIds.length > 0) {
-    await tx
-      .update(assignments)
-      .set({ endedAt: sql`now()` })
-      .where(and(isNull(assignments.endedAt), inArray(assignments.truckId, truckIds)));
-  }
-  if (driverIds.length > 0) {
-    await tx
-      .update(assignments)
-      .set({ endedAt: sql`now()` })
-      .where(and(isNull(assignments.endedAt), inArray(assignments.driverId, driverIds)));
-  }
-  return { trucks: t, drivers: d };
-};
+const fixtures = async (tx: Tx) => ({
+  trucks: [await makeTruck(tx), await makeTruck(tx)],
+  drivers: [await makeDriver(tx), await makeDriver(tx)],
+});
 
 const openDriverFor = async (tx: Tx, truckId: string) => {
   const rows = await tx

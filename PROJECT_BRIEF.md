@@ -209,6 +209,11 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
 5. Status engine, colour coding, filter chips, footer bar, urgency groups, offline rule — with the full timezone test suite.
 6. Hardening: roles enforced server-side, rate-limit tuning, Sentry, Playwright on the critical flows, deploy.
    **Clear the demo data before deploying — `npm run seed:demo -- --clear`.**
+   **`npm run preflight` must pass before deploying — it is a gate, not a note.**
+   The suite runs against a local Postgres (§12.32), which cannot exercise the
+   real Supabase pooler. `prepare: false` in `createPooledDb` is the setting
+   whose absence fails only under concurrency, in production, as a stall rather
+   than an error. `preflight` is the only thing that checks it.
    Phase 4 seeded `DEMO-` loads and stops so the console and the status engine
    have something to compute against. They are kept deliberately through
    phase 5 and must not ship.
