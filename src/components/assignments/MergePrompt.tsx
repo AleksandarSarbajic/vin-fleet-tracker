@@ -21,15 +21,35 @@ export function MergePrompt({ role }: { role: Role }) {
   const [candidates, setCandidates] = useState<OpenMergeCandidate[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Whether the CHECK ran, separately from what it found (§12.43).
+   *
+   * These were one thing, and the one thing was `candidates.length === 0`.
+   * Both a clean roster and a failed request rendered null, so the component
+   * that exists to make sure the question gets asked answered it silently in
+   * the negative whenever it could not ask.
+   */
+  const [checked, setChecked] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   const load = useCallback(async () => {
     try {
       const response = await fetch('/api/drivers', { cache: 'no-store' });
-      if (!response.ok) return;
-      const body = (await response.json()) as { candidates: OpenMergeCandidate[] };
+      // A refusal is a failure to check, not an absence of candidates. This
+      // used to `return` into the same silence as the catch below.
+      if (!response.ok) throw new Error(`/api/drivers returned ${response.status}`);
+      const body = (await response.json()) as { candidates?: OpenMergeCandidate[] };
+      // `{}` from a route handler is not "no candidates" either.
+      if (!Array.isArray(body.candidates)) throw new Error('/api/drivers returned no candidate list');
       setCandidates(body.candidates);
-    } catch {
-      // A prompt that cannot load is not worth an error on the board.
+      setChecked('ready');
+    } catch (cause: unknown) {
+      /**
+       * Surfaced twice, deliberately: on the board for the dispatcher, who
+       * needs to know the check is not running, and in the console for
+       * whoever has to find out why. Neither one alone is a handler.
+       */
+      console.error('merge candidate check failed', cause);
+      setChecked('failed');
     }
   }, []);
 
@@ -52,13 +72,47 @@ export function MergePrompt({ role }: { role: Role }) {
         return;
       }
       await load();
-    } catch {
+    } catch (cause: unknown) {
+      // Told to the dispatcher AND to whoever has to debug it. The message
+      // alone is not a handler; it says what, never why.
+      console.error('merge action failed', cause);
       setError('That could not be completed.');
     } finally {
       setBusy(null);
     }
   };
 
+  /**
+   * The check could not run. Neutral, not alarming: nothing is wrong with the
+   * fleet and there may well be nothing to merge — we simply do not know, and
+   * "do not know" is what the neutral token means everywhere else on the
+   * console.
+   */
+  if (checked === 'failed') {
+    return (
+      <div
+        role="status"
+        className="mb-4 flex items-baseline justify-between gap-3 border border-status-neutral-bd bg-status-neutral-bg px-3 py-2"
+      >
+        <p className="text-small text-status-neutral-fg">
+          Could not check for duplicate drivers. Any that Samsara has added are
+          not being shown.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setChecked('loading');
+            void load();
+          }}
+          className="h-7 shrink-0 border border-line-hair px-2.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // Silence from here on is earned: the check ran and found nothing.
   if (candidates.length === 0) return null;
 
   // Linking rewrites which driver row past assignments point at, so it is

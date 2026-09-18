@@ -3423,6 +3423,59 @@ them is good news.
 A missing `feed_health` row counts as unrecorded for the same reason. §12.34
 deleted that row once already.
 
+## 12.43 Silence meant two different things
+
+`MergePrompt` loaded its candidates in a `try` whose `catch` was empty, with a
+comment for a body: *"a prompt that cannot load is not worth an error on the
+board."* Two lines above it, a non-2xx response `return`ed into the same
+nothing.
+
+The component then rendered `null`, which is exactly what it renders when the
+roster is clean.
+
+That is §12.35's own stated failure mode, executed by the surface built to
+prevent it. The worker records a candidate every poll and acts on none of
+them — **an unshown candidate is worse than an undetected one**, because the
+data claims the question was asked and nobody was asked anything. A dispatcher
+sees an untroubled board either way, and the duplicate accrues assignment
+history against the wrong row.
+
+### The fix is a distinction, not a message
+
+`checked: 'loading' | 'ready' | 'failed'` separates **whether the check ran**
+from **what it found**. They had been one thing, and that one thing was
+`candidates.length === 0`.
+
+- `failed` renders a neutral line and a Retry. Neutral, not alarming: nothing
+  is wrong with the fleet and there may well be nothing to merge — we do not
+  know, and not knowing is what the neutral token means everywhere else.
+- `loading` renders nothing, because a pending request is not a failed one.
+- `ready` with nothing found renders nothing, and **that silence is earned.**
+
+Three things now count as a failure to check rather than as an absence of
+candidates: a rejected request, a non-2xx response, and a body without a
+`candidates` array. The middle one had its own `return` and the third would
+have thrown into the empty catch.
+
+### Where the error goes
+
+Both: a line on the board for the dispatcher, who needs to know the check is
+not running, and `console.error` with the cause for whoever has to find out
+why. **Neither one alone is a handler** — a message says what, never why, and
+a console line nobody has open says nothing at all. The two mutation catches
+in this component and in `AddDriverInline` kept the cause for the same reason;
+they were already telling the user, and were throwing away the half that
+answers a bug report.
+
+### The rest of the greps
+
+Every other bare `catch {}` in the source was checked rather than assumed, per
+§12.37. `Split.tsx` (localStorage in private browsing), `url.ts`, `env/schema.ts`
+and `appointment.ts` (parse failures returning a documented fallback) and
+`supabase/server.ts` (a cookie write from a Server Component) are all
+deliberate, stated, and lose nothing anyone needs. A rule that fires on every
+instance of a syntax is not the rule; **swallowing a fact somebody needs** is.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

@@ -72,7 +72,8 @@ export function AddDriverInline({
         assignedTruckId: string | null;
       };
       onCreated(driverId, parsed.data.name, assignedTruckId ?? null);
-    } catch {
+    } catch (cause: unknown) {
+      console.error('driver create failed', cause);
       setError('The driver could not be saved.');
     } finally {
       setSaving(false);
