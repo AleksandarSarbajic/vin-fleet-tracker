@@ -1,19 +1,13 @@
+import { config as loadEnv } from 'dotenv';
 import postgres from 'postgres';
-import { TEST_DATABASE_URL } from './src/test/url';
+import { TEST_DATABASE_URL, refuseUnlessDisposable } from './src/test/url';
 
-/**
- * GUARD 2 (§12.32): the database starts empty, once per run.
- *
- * This is the guard that turns the recurring fault into a loud failure rather
- * than a silent wrong answer. Six fixtures open with
- * `select … from trucks limit 1` — against production that quietly picks
- * whichever truck happens to exist, so the test's subject is chosen by the
- * state of the fleet. Against an empty database the same line returns
- * undefined and the fixture throws on the spot.
- *
- * The consequence is deliberate: a fixture must create everything it reads.
- */
+// globalSetup runs in its own process and gets no setup file, so DATABASE_URL
+// has to be loaded here for the refusal below to have anything to compare to.
+loadEnv({ path: '.env.local' });
+
 export async function setup() {
+  refuseUnlessDisposable();
   const sql = postgres(TEST_DATABASE_URL, { max: 1, connect_timeout: 5 });
   try {
     const tables = await sql<{ name: string }[]>`

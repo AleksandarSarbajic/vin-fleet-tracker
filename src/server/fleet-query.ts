@@ -69,6 +69,8 @@ export interface FleetRow {
   laneRatio: number | null;
   /** Metres the provider moved the stop to reach a road. */
   snapMeters: number | null;
+  /** When this lane was last routed, for the detail block (§12.33). */
+  routeMeasuredAtUtc: string | null;
   /** Why there is no ETA, so the UI can say it rather than print a dash. */
   etaAbsence: EtaAbsence;
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
@@ -386,6 +388,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     distanceBasis: 'straight-line',
     laneRatio: null,
     snapMeters: null,
+    routeMeasuredAtUtc: raw.route_computed_at,
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
@@ -543,6 +546,7 @@ export function applyStatus(
       distanceBasis: result.distanceBasis,
       laneRatio: result.laneRatio,
       snapMeters: result.snapMeters,
+      routeMeasuredAtUtc: row.routeMeasuredAtUtc,
       etaAbsence: result.etaAbsence,
       lastComputedEtaUtc: result.lastComputedEtaUtc,
       deadlineUtc: result.deadlineUtc,

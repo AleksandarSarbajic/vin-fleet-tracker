@@ -2,8 +2,8 @@
 
 import { memo } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
-import { basisShort, precisionNote, type BasisFacts } from '@/lib/eta-basis';
-export { basisShort, precisionNote, type BasisFacts };
+import { basisShort, etaCaution, etaDetails, type BasisFacts } from '@/lib/eta-basis';
+export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
 import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
@@ -177,7 +177,7 @@ function etaTitle(row: FleetRow): string | undefined {
       if (!miles) return undefined;
       // The ETA departs from the GPS fix, not from the clock — saying so here
       // is what makes a time in the past read as information rather than a bug.
-      return `${miles} remaining, from the last GPS fix. ${precisionNote(row)}`.trim();
+      return `${miles} remaining, from the last GPS fix. ${etaCaution(row)}`.trim();
     }
     case 'address-not-located':
       return 'No ETA — this address could not be located, so nothing can be projected for it.';

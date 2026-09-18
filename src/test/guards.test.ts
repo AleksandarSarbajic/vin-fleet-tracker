@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TEST_DATABASE_URL } from './url';
+import { TEST_DATABASE_URL, refuseUnlessDisposable } from './url';
 import { describeDb, rolledBack, tablesHoldingRows } from './db';
 import { makeTruck } from './fleet';
 
@@ -71,19 +71,60 @@ describeDb('guard 3 — a test that commits is named', () => {
 
 describe('guard 4 — the network is not the state of the world either', () => {
   it('refuses a real call to a live service', async () => {
-    await expect(fetch('https://geocoding.geo.census.gov/geocoder/locations/address'))
-      .rejects.toThrow(/real network call/);
+    await expect(
+      fetch('https://geocoding.geo.census.gov/geocoder/locations/address'),
+    ).rejects.toThrow(/real network call/);
   });
 
   it('refuses Mapbox too, whatever the path', async () => {
-    await expect(fetch('https://api.mapbox.com/directions/v5/mapbox/driving/x')).rejects.toThrow(
-      /real network call/,
-    );
+    await expect(
+      fetch('https://api.mapbox.com/directions/v5/mapbox/driving/x'),
+    ).rejects.toThrow(/real network call/);
   });
 
   it('still allows a local server, so a test can stand one up', async () => {
     // Nothing is listening on this port; the point is the REASON it fails.
     // A guard rejection says "real network call"; a refused connection does not.
     await expect(fetch('http://127.0.0.1:1/')).rejects.not.toThrow(/real network call/);
+  });
+});
+
+describe('the refusal runs before the truncate, not after it', () => {
+  /**
+   * The ordering bug that cost a production database.
+   *
+   * This check lived in `vitest.setup.ts`, which runs in the test worker.
+   * `globalSetup` runs BEFORE the workers, so its truncate had already
+   * happened by the time the worker refused — and the refusal printed after
+   * the damage, reading exactly like one that had prevented it.
+   *
+   * So the function is imported from globalSetup, where it now runs, and
+   * these assert what it refuses. A guard in the wrong process is not a guard.
+   */
+  const PRODUCTION =
+    'postgresql://postgres.abc:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres';
+  const LOCAL = 'postgres://postgres@127.0.0.1:55432/fleet_test';
+
+  it('refuses a host that is not this machine', () => {
+    expect(() =>
+      refuseUnlessDisposable('postgres://u@db.example.com:5432/x', null),
+    ).toThrow(/not on this machine/);
+  });
+
+  it('refuses the database DATABASE_URL names, whatever the port', () => {
+    // The two Supabase URLs differ only in port, which is why the comparison
+    // is by host and database name rather than by string.
+    const sessionPooler = PRODUCTION.replace(':6543', ':5432');
+    expect(() => refuseUnlessDisposable(PRODUCTION, sessionPooler)).toThrow(
+      /same database/,
+    );
+  });
+
+  it('allows a local cluster', () => {
+    expect(() => refuseUnlessDisposable(LOCAL, PRODUCTION)).not.toThrow();
+  });
+
+  it('refuses something that is not a URL rather than guessing', () => {
+    expect(() => refuseUnlessDisposable('fleet_test', null)).toThrow(/not a URL/);
   });
 });

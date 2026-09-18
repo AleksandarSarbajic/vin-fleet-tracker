@@ -40,11 +40,22 @@ function identity(url: string): string {
   }
 }
 
+/**
+ * The same refusal as vitest.globalSetup.ts, kept as a second line rather
+ * than the first one.
+ *
+ * This check USED to live only here, and that cost a production database:
+ * globalSetup runs before the test workers, so the truncate had already
+ * happened by the time this threw. It reads like a guard and it is not one —
+ * by this point the tables are already empty. The guard that matters is in
+ * globalSetup. This one only catches a worker somehow started against
+ * different values.
+ */
 if (productionUrl && identity(productionUrl) === identity(TEST_DATABASE_URL)) {
   throw new Error(
     `TEST_DATABASE_URL points at the same database as DATABASE_URL ` +
-      `(${identity(TEST_DATABASE_URL)}). The test suite truncates every table ` +
-      `in public on startup, so this would delete the fleet. Refusing to run.`,
+      `(${identity(TEST_DATABASE_URL)}). Refusing to run. NOTE: globalSetup ` +
+      `runs before this file, so check whether it already truncated.`,
   );
 }
 
@@ -101,4 +112,3 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
-

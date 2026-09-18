@@ -1,9 +1,10 @@
 'use client';
 
+import { Fragment } from 'react';
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
-import { basisShort, milesText, precisionNote } from '../TruckRow';
+import { basisShort, etaCaution, etaDetails, milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
@@ -86,6 +87,34 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   </>
 );
 
+/**
+ * The basis in full, collapsed (§12.33).
+ *
+ * The caveats the tooltip no longer carries are all true and worth having;
+ * what they are not is worth making someone read past. `<details>` because it
+ * needs no state and no hook — the browser owns whether it is open, which is
+ * one fewer thing that can write during a render (§12.29).
+ */
+const BasisDetails = ({ row }: { row: FleetRow }) => {
+  const details = etaDetails(row);
+  if (details.length === 0) return null;
+  return (
+    <details className="col-span-2 mt-1">
+      <summary className="cursor-pointer text-text-muted hover:text-text">
+        How this was measured
+      </summary>
+      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+        {details.map((detail) => (
+          <Fragment key={detail.label}>
+            <dt className="text-text-muted">{detail.label}</dt>
+            <dd className="text-text">{detail.value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </details>
+  );
+};
+
 export function MapPopup({
   row,
   fetchedAt,
@@ -153,17 +182,23 @@ export function MapPopup({
           </Row>
           {row.nextStop ? (
             <Row label="Projected">
-              <span className="tabular-nums" title={precisionNote(row)}>
+              <span className="tabular-nums" title={etaCaution(row)}>
                 {projectedLine(row)}
               </span>
             </Row>
           ) : null}
-          {/* §12.30: the caveat in full, where there is room for it. */}
+          {/**
+           * §12.33: the two clauses that change a decision, in the open. The
+           * rest is one click away rather than three lines further down —
+           * this row used to repeat the whole sentence the Projected line
+           * already carried as a title.
+           */}
           {row.etaPrecision === 'zip' || row.etaPrecision === 'block' ? (
             <Row label="Accuracy">
-              <span className="text-status-risk-fg">{precisionNote(row)}</span>
+              <span className="text-status-risk-fg">{etaCaution(row)}</span>
             </Row>
           ) : null}
+          {row.nextStop ? <BasisDetails row={row} /> : null}
           {row.nextStop ? (
             <Row label={row.nextStop.apptType === 'FCFS' ? 'Receiving' : 'Appt'}>
               <span className="tabular-nums">{apptLine(row.nextStop)}</span>

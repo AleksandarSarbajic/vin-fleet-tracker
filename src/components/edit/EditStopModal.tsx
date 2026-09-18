@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { etaDetails } from '@/lib/eta-basis';
 import { LOAD_STATUSES, LOAD_STATUS_LABEL } from '@/lib/loads';
 import { can, type Role } from '@/lib/roles';
 import { StopEdit, dirtyFields } from '@/lib/stop-edit';
@@ -70,6 +71,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const lockedReason = `Your role is ${role}. Editing needs dispatcher.`;
 
   const stop = row.nextStop;
+
+  /**
+   * Derived, not state: it depends only on the row the modal was given. The
+   * saved coordinates do not change while the modal is open — a re-geocode
+   * happens on save, and the modal closes.
+   */
+  const basisDetails = stop ? etaDetails(row) : [];
 
   /**
    * One form object, and the SAME function turns it into a StopEdit whether
@@ -570,6 +578,26 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                   </select>
                 </label>
               </div>
+
+              {/**
+               * §12.33: the basis in full, under the address that produced it.
+               *
+               * Anyone in this modal is already looking deliberately, so it is
+               * open rather than collapsed — unlike the popup, where the same
+               * block sits behind a disclosure. This is where a dispatcher
+               * reconciling against a rate confirmation ends up, and the
+               * car-profile caveat is the reason it moved out of the tooltip.
+               */}
+              {basisDetails.length > 0 ? (
+                <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-line-soft py-1 pl-3 text-small">
+                  {basisDetails.map((detail) => (
+                    <Fragment key={detail.label}>
+                      <dt className="text-text-muted">{detail.label}</dt>
+                      <dd className="text-text-secondary">{detail.value}</dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              ) : null}
 
               <div className="mt-3 grid grid-cols-[1.6fr_1fr_1fr] gap-3">
                 <Field label="City" value={form.city} onChange={(v) => set('city', v)} />

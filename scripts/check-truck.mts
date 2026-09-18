@@ -11,7 +11,7 @@ import { createDirectDb } from '../src/db/connection.ts';
 import { feedHealth } from '../src/db/schema.ts';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from '../src/server/fleet-query.ts';
 import { STATUS_DEFAULTS, isFeedStale } from '../src/lib/status.ts';
-import { basisShort, precisionNote } from '../src/lib/eta-basis.ts';
+import { basisShort, etaCaution, etaDetails } from '../src/lib/eta-basis.ts';
 
 loadEnv({ path: '.env.local' });
 
@@ -92,5 +92,8 @@ const milesLabel =
 console.log(
   `  popup       ${milesLabel} · ETA ${fmt(row.etaUtc)} · ${basisShort(row)}${where}`,
 );
-console.log(`  tooltip     ${precisionNote(row)}`);
+console.log(`  tooltip     ${etaCaution(row)}`);
+for (const detail of etaDetails(row)) {
+  console.log(`  detail      ${detail.label.padEnd(9)} ${detail.value}`);
+}
 await client.end();

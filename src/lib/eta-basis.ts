@@ -1,12 +1,13 @@
+import { elapsed } from './format';
 import type { DistanceBasis } from './routing';
 
 /**
- * The words a dispatcher reads next to an ETA (§12.30, §12.31).
+ * The words a dispatcher reads next to an ETA (§12.30, §12.31, §12.33).
  *
  * Its own module, free of JSX, because these strings are the product of the
  * whole geocoding and routing chain and deserve to be readable — and testable
- * — without rendering a table row. The row and the map popup both import
- * them, and so does the command-line check that verifies a real truck.
+ * — without rendering a table row. The row, the map popup and the edit modal
+ * import them, and so does the command-line check that verifies a real truck.
  */
 
 export interface BasisFacts {
@@ -15,6 +16,8 @@ export interface BasisFacts {
   distanceBasis: DistanceBasis;
   laneRatio: number | null;
   snapMeters: number | null;
+  /** When this lane was last routed. Null when it never has been. */
+  routeMeasuredAtUtc?: string | null;
 }
 
 /** The short form, for the popup line. `routed` says nothing — it is normal. */
@@ -31,55 +34,165 @@ export function basisShort(row: BasisFacts): string {
   }
 }
 
+/** ` ±4.6 mi`, or nothing when the accuracy is unknown or exact. */
+function plusMinus(row: BasisFacts): string {
+  return row.etaAccuracyMiles !== null && row.etaAccuracyMiles > 0
+    ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi`
+    : '';
+}
+
+const ratio = (row: BasisFacts) => (row.laneRatio ? `×${row.laneRatio.toFixed(2)}` : null);
+
+/** True when the distance is not a measured route for this truck's position. */
+const degraded = (row: BasisFacts) => row.distanceBasis !== 'routed';
+
 /**
- * The full sentence, for a tooltip (§12.30, §12.31).
+ * TWO CLAUSES, never more (§12.33).
  *
- * Written to be read by a dispatcher deciding whether to phone a receiver,
- * not by whoever wrote it. It has to answer three things in plain words: how
- * far, how sure, and whether these are the miles a broker would pay.
+ * This used to emit four: basis, precision, snap, rest breaks. Four is more
+ * than anyone parses at 4am, and a label that does not get finished is worse
+ * than a shorter one that does. Ranked by what changes a decision, only two
+ * earn a place in something you must read past:
+ *
+ *   1. how far the destination might actually be — it decides whether to
+ *      trust the ETA at all;
+ *   2. that the time counts driving only — it moves the number by hours on a
+ *      long lane.
+ *
+ * The rest is true and worth having, so it moved to `etaDetails()`, which a
+ * dispatcher opens on purpose rather than reads by accident.
+ *
+ * Only ONE trust clause fires. Coarse coordinates beat a degraded distance,
+ * because being three miles from the right place outranks the miles being
+ * measured differently — and when both are true they combine into one
+ * sentence rather than queueing.
  */
-export function precisionNote(row: BasisFacts): string {
+export function etaCaution(row: BasisFacts): string {
   const parts: string[] = [];
+  const pm = plusMinus(row);
 
-  switch (row.distanceBasis) {
-    case 'routed':
-      // The caveat that matters commercially: brokers pay truck miles.
-      parts.push('Distance is a routed road distance for a car, so it can read short of a truck-mile figure on a rate confirmation.');
-      break;
-    case 'lane-estimate':
-      parts.push(
-        row.laneRatio
-          ? `Distance is estimated from this lane's last route (×${row.laneRatio.toFixed(2)}), not routed again yet.`
-          : 'Distance is estimated from this lane\u2019s last route, not routed again yet.',
-      );
-      break;
-    case 'straight-line':
-      parts.push('Distance is a straight-line estimate — no route has been measured for this lane.');
-      break;
-  }
-
-  const plusMinus =
-    row.etaAccuracyMiles !== null && row.etaAccuracyMiles > 0
-      ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi`
-      : '';
-
-  if (row.etaPrecision === 'zip') {
+  if (row.etaPrecision === 'zip' && degraded(row)) {
     parts.push(
-      `The destination is a ZIP-code centre${plusMinus}, not a street address — Census has no record of this street. At risk is suppressed here because the area is wider than the warning is worth.`,
+      `The destination is a ZIP-code centre${pm} and the distance is not a measured route — treat the time as a rough guide, and note that no at-risk warning will fire.`,
+    );
+  } else if (row.etaPrecision === 'zip') {
+    /**
+     * The four trailing words are the one demotion that would have been
+     * wrong. Every other detail moved to `etaDetails` makes the board say
+     * less about a number that is on screen; suppression makes the board
+     * WITHHOLD a warning it would otherwise show, and a dispatcher reading a
+     * row with no at-risk chip concludes the stop is fine. Inference from
+     * absence is the one case where the label carries the whole meaning.
+     */
+    parts.push(
+      `The destination is a ZIP-code centre${pm}, not a street address, so no at-risk warning will fire.`,
+    );
+  } else if (row.etaPrecision === 'block' && degraded(row)) {
+    parts.push(
+      `The destination is the nearest block on the right street${pm} and the distance is not a measured route — treat the time as a rough guide.`,
     );
   } else if (row.etaPrecision === 'block') {
     parts.push(
-      `The destination is the nearest block on the right street${plusMinus}; the house number is outside the range Census carries.`,
+      `The destination is the nearest block on the right street${pm}, not the exact house number.`,
     );
-  }
-
-  // Only worth saying once the snap is bigger than a car park.
-  if (row.snapMeters !== null && row.snapMeters > 100) {
+  } else if (row.distanceBasis === 'straight-line') {
+    parts.push('Distance is a straight line, not a road route, so the miles read short.');
+  } else if (row.distanceBasis === 'lane-estimate') {
+    const r = ratio(row);
     parts.push(
-      `The route starts from the nearest road, about ${Math.round(row.snapMeters)} m from that point.`,
+      r
+        ? `Distance is estimated from this lane's last route (${r}), not routed again yet.`
+        : 'Distance is estimated from this lane’s last route, not routed again yet.',
     );
   }
 
   parts.push('Arrival time counts driving only — no rest breaks.');
   return parts.join(' ');
+}
+
+export interface BasisDetail {
+  label: string;
+  value: string;
+}
+
+/**
+ * Everything the caution does not say, for a surface someone opens
+ * deliberately — the popup's collapsed detail block and the edit modal.
+ *
+ * The car-profile caveat lives here rather than in the tooltip because it
+ * matters when reconciling against a rate confirmation, which is not what
+ * anyone is doing while hovering a row. The snap distance lives here because
+ * it is already inside the ± above it, and it is the one line answering a
+ * question nobody asks.
+ */
+export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail[] {
+  const details: BasisDetail[] = [];
+  const pm = plusMinus(row).trim();
+
+  switch (row.etaPrecision) {
+    case 'zip':
+      details.push({
+        label: 'Accuracy',
+        value: `ZIP-code centre, ${pm || 'radius unknown'} — Census has no record of this street`,
+      });
+      break;
+    case 'block':
+      details.push({
+        label: 'Accuracy',
+        value: `Nearest block on the right street, ${pm || 'distance unknown'} — the house number is outside the range Census carries`,
+      });
+      break;
+    case 'street':
+      details.push({
+        label: 'Accuracy',
+        value: 'Street address, interpolated along the block — not a rooftop',
+      });
+      break;
+    case null:
+      break;
+  }
+
+  switch (row.distanceBasis) {
+    case 'routed':
+      details.push({
+        label: 'Distance',
+        value:
+          'Routed road miles for a car; a truck-mile figure on a rate confirmation will read longer',
+      });
+      break;
+    case 'lane-estimate':
+      details.push({
+        label: 'Distance',
+        value: `Straight line scaled by this lane's last measured route${
+          ratio(row) ? ` (${ratio(row)})` : ''
+        }`,
+      });
+      break;
+    case 'straight-line':
+      details.push({
+        label: 'Distance',
+        value: 'Straight line — no route has been measured for this lane yet',
+      });
+      break;
+  }
+
+  // Only worth saying once the snap is bigger than a car park.
+  if (row.snapMeters !== null && row.snapMeters > 100) {
+    details.push({
+      label: 'Route',
+      value: `Starts ${Math.round(row.snapMeters)} m from the destination point, at the nearest road`,
+    });
+  }
+
+  if (row.laneRatio) {
+    details.push({
+      label: 'Lane',
+      value: `${ratio(row)} measured straight-line-to-road on this lane`,
+    });
+  }
+
+  const age = elapsed(row.routeMeasuredAtUtc ?? null, now);
+  if (age) details.push({ label: 'Measured', value: `${age} ago` });
+
+  return details;
 }
