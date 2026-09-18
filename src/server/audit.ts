@@ -21,7 +21,7 @@ export type Writer = Db | Tx;
  * writes happily and the row is simply never found again by the screen that
  * eventually looks for it.
  */
-export const AUDIT_ENTITIES = ['assignment', 'stop', 'load', 'truck', 'override'] as const;
+export const AUDIT_ENTITIES = ['assignment', 'stop', 'load', 'truck', 'override', 'driver'] as const;
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 
 export const AuditEntry = z.object({

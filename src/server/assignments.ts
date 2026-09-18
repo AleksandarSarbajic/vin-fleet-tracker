@@ -7,6 +7,7 @@ import {
   type AssignmentSaveResult,
 } from '@/lib/assignments';
 import { newBatchId, writeAudit, type AuditEntry, type Db, type Tx, type Writer } from './audit';
+import type { DriverSource } from '@/lib/driver';
 
 export type { Db, Tx, Writer };
 
@@ -26,6 +27,14 @@ export interface BoardDriver {
   id: string;
   name: string;
   active: boolean;
+  /**
+   * §12.35. Where the row came from, so the board can say which drivers have
+   * an ELD behind them — it decides whether "no position" reads as expected
+   * or as broken.
+   */
+  source: DriverSource;
+  samsaraDriverId: string | null;
+  phone: string | null;
   /** The truck this driver is currently on, if any. */
   truckId: string | null;
   truckLabel: string | null;
@@ -76,6 +85,12 @@ export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard>
         id: drivers.id,
         name: drivers.name,
         active: drivers.active,
+        // §12.35: a dispatcher must be able to tell a driver with an ELD
+        // behind them from one without, because it decides whether "no
+        // position" means expected or broken.
+        source: drivers.source,
+        samsaraDriverId: drivers.samsaraDriverId,
+        phone: drivers.phone,
         truckId: trucks.id,
         truckNumber: trucks.truckNumber,
         samsaraName: trucks.samsaraName,
@@ -86,7 +101,8 @@ export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard>
         and(eq(assignments.driverId, drivers.id), isNull(assignments.endedAt)),
       )
       .leftJoin(trucks, eq(trucks.id, assignments.truckId))
-      .where(eq(drivers.active, true))
+      // A retired driver is off the board but keeps their history (§12.35).
+      .where(and(eq(drivers.active, true), isNull(drivers.retiredAt)))
       .orderBy(asc(drivers.name)),
   ]);
 
@@ -105,6 +121,9 @@ export async function loadAssignmentBoard(db: Db | Tx): Promise<AssignmentBoard>
       id: d.id,
       name: d.name,
       active: d.active,
+      source: d.source,
+      samsaraDriverId: d.samsaraDriverId,
+      phone: d.phone,
       truckId: d.truckId,
       truckLabel:
         d.truckId === null

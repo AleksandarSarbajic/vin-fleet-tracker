@@ -9,6 +9,7 @@ import { logger } from './logger';
 import { sweepArrivals } from './arrival';
 import { sweepRouting } from './routing';
 import { MapboxDirections } from '@/server/routing/provider';
+import { detectMergeCandidates } from '@/server/drivers';
 import {
   flattenFeed,
   prunePositions,
@@ -226,7 +227,20 @@ async function syncRoster(
   const driverRows = await samsara.drainAll((after) => samsara.drivers(after));
   await upsertDrivers(db, driverRows);
 
-  logger.info('roster synced', { vehicles: vehicles.length, drivers: driverRows.length });
+  /**
+   * §12.35: RECORDS a possible duplicate, never acts on one. A driver a
+   * dispatcher created by hand appears in Samsara weeks later, once
+   * onboarding finishes, and the sync above has just made a second row for
+   * the same person. A human decides whether they are the same person; this
+   * only makes sure the question gets asked.
+   */
+  const candidates = await detectMergeCandidates(db);
+
+  logger.info('roster synced', {
+    vehicles: vehicles.length,
+    drivers: driverRows.length,
+    mergeCandidates: candidates,
+  });
 }
 
 /**

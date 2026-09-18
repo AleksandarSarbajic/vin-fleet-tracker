@@ -88,6 +88,16 @@ export const appointmentType = pgEnum('appointment_type', ['APPT', 'FCFS']);
  */
 export const geocodePrecision = pgEnum('geocode_precision', ['street', 'block', 'zip']);
 
+/**
+ * Where a driver row came from (§12.35).
+ *
+ * EXPLICIT, never inferred from `samsara_driver_id IS NULL`. That inference
+ * is right until a merge fills the id in, which is precisely when the roster
+ * sync most needs to know the row was ours — and by then the only evidence
+ * the inference relied on is gone.
+ */
+export const driverSource = pgEnum('driver_source', ['samsara', 'app']);
+
 export const overrideReason = pgEnum('override_reason', [
   'RECEIVER_CONFIRMED_DETENTION',
   'APPT_RESCHEDULED_BY_BROKER',
@@ -160,7 +170,12 @@ export const drivers = pgTable(
   'drivers',
   {
     id: uuid('id').primaryKey().default(newId),
-    samsaraDriverId: text('samsara_driver_id').notNull(),
+    /**
+     * Null for a driver a dispatcher created: a new hire is on the board
+     * before anyone adds them to the ELD. Filled in by a merge (§12.35) once
+     * onboarding completes and Samsara starts returning them.
+     */
+    samsaraDriverId: text('samsara_driver_id'),
     name: text('name').notNull(),
     /**
      * Entered by dispatchers. Samsara returns no driver phone numbers for
@@ -168,11 +183,56 @@ export const drivers = pgTable(
      * rather than rendering a dead button.
      */
     phone: text('phone'),
+    /** Samsara's `driverActivationStatus`. Overwritten every poll — not ours. */
     active: boolean('active').notNull().default(true),
+    source: driverSource('source').notNull().default('samsara'),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    /**
+     * Ours, and the sync never touches it. `active` could not be reused: it
+     * belongs to Samsara and is rewritten on every poll, so after a merge the
+     * sync would resurrect a driver an admin had retired.
+     */
+    retiredAt: timestamp('retired_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(now),
     // Never store licenseNumber, licenseState, eldSettings or hosSetting.
   },
-  (t) => [uniqueIndex('drivers_samsara_driver_id_key').on(t.samsaraDriverId)],
+  (t) => [
+    // PARTIAL: unique only where there is an id to be unique about.
+    uniqueIndex('drivers_samsara_driver_id_key')
+      .on(t.samsaraDriverId)
+      .where(sql`${t.samsaraDriverId} is not null`),
+  ],
+);
+
+/**
+ * A Samsara driver whose name matches one a dispatcher created (§12.35).
+ *
+ * Detected by the sync, never acted on by it. Name is the only signal Samsara
+ * gives us — no phone, and we do not store licence data — and two drivers
+ * called J. Martinez in a 24-driver fleet is not hypothetical. A wrong
+ * automatic merge silently rewrites assignment history, so a human confirms.
+ *
+ * The dismissal is stored because the alternative is re-offering a rejected
+ * match every thirty seconds for the rest of that driver's career.
+ */
+export const driverMergeCandidates = pgTable(
+  'driver_merge_candidates',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    appDriverId: uuid('app_driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    samsaraDriverId: uuid('samsara_driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    detectedAt: timestamp('detected_at', { withTimezone: true }).notNull().default(now),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    dismissedBy: uuid('dismissed_by').references(() => profiles.id, { onDelete: 'set null' }),
+  },
+  (t) => [
+    uniqueIndex('driver_merge_candidates_pair_key').on(t.appDriverId, t.samsaraDriverId),
+    check('driver_merge_candidates_distinct', sql`${t.appDriverId} <> ${t.samsaraDriverId}`),
+  ],
 );
 
 /* -------------------------------- assignments -------------------------- */

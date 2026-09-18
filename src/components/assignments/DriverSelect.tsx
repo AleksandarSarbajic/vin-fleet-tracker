@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { BoardDriver } from '@/server/assignments';
+import { NO_ELD_LABEL, isEldBacked } from '@/lib/driver';
 
 /**
  * Searchable driver picker (design-spec §9.9's assignment group, at board
@@ -145,7 +146,21 @@ export function DriverSelect({
                     index === cursor ? 'bg-row-hover' : ''
                   } ${takenElsewhere ? 'text-text-muted' : 'text-text'}`}
                 >
-                  <span>{driver.name}</span>
+                  <span className="flex items-baseline gap-1.5">
+                    {driver.name}
+                    {/**
+                     * §12.35: provenance, not status — so it borrows no status
+                     * colour and no icon. A dispatcher needs it because only
+                     * one of these two kinds of driver has an ELD behind them,
+                     * and that decides whether a truck with no position is
+                     * expected or broken.
+                     */}
+                    {isEldBacked(driver) ? null : (
+                      <span className="border border-line-hair px-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
+                        {NO_ELD_LABEL}
+                      </span>
+                    )}
+                  </span>
                   <span className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
                     {takenElsewhere
                       ? `on truck ${claim}`

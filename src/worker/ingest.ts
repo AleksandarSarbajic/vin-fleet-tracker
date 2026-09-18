@@ -128,11 +128,30 @@ export async function upsertDrivers(db: Db, rows: DriverRow[]): Promise<number> 
         samsaraDriverId: r.id,
         name: r.name,
         active: (r.driverActivationStatus ?? 'active') === 'active',
+        source: 'samsara' as const,
       })),
     )
     .onConflictDoUpdate({
       target: drivers.samsaraDriverId,
+      /**
+       * REQUIRED, not optional (§12.35). `drivers_samsara_driver_id_key` is a
+       * PARTIAL unique index now, and Postgres will not match an ON CONFLICT
+       * target to a partial index unless the same predicate is given. Without
+       * this the statement throws "no unique or exclusion constraint matching
+       * the ON CONFLICT specification" — on the worker, on every poll.
+       */
+      targetWhere: sql`${drivers.samsaraDriverId} is not null`,
       set: { name: sql`excluded.name`, active: sql`excluded.active` },
+      /**
+       * The sync never overwrites a row it did not create.
+       *
+       * Today it cannot reach one anyway: an app-created driver has a NULL
+       * Samsara id and this conflict target skips it. That is an accident of
+       * the current shape, not a rule — and after a merge fills the id in, the
+       * row IS reachable and still is not the sync's to rewrite. Stating it
+       * here is what survives the merge.
+       */
+      setWhere: sql`${drivers.source} = 'samsara'`,
     });
   return rows.length;
 }
