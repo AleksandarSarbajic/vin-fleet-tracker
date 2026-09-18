@@ -2312,6 +2312,150 @@ reports the split by level. It is read-only — no database connection at all,
 and it writes nothing, not even cache rows — so it can be pointed at live lane
 data without touching dispatch records.
 
+## 12.31 The road factor was never measured
+
+The brief said "straight line × 1.25 ÷ 52 mph" and phase 2 would swap in a
+routing provider. The swap never happened, so **every LATE and AT_RISK
+decision the board has ever made ran on an unmeasured constant.**
+
+Measured, across our own lanes, against routed truck miles:
+
+```
+min 1.070   p25 1.180   median 1.259   p75 1.407   max 1.460
+mean 1.282   sd 0.128
+```
+
+It is not a constant and it is not distance-related. Truck **116 at 74 mi is
+1.070**; truck **140 at 63 mi is 1.454** — same length, opposite geometry. It
+clusters by *corridor*: Fargo 1.07–1.18 (straight interstate), Joliet
+1.25–1.55 (the last miles are local roads), Denver/SLC ~1.42 (mountains).
+
+**No single factor rescues it, and tuning makes it worse:**
+
+| factor | mean \|err\| | worst |
+|---|---|---|
+| 1.250 (the brief) | 41.4 mi — 48 min | 140 mi — 162 min |
+| 1.282 (the mean) | 44.2 mi — 51 min | 112 mi — 129 min |
+| 1.300 | 45.9 mi — 53 min | 96 mi — 110 min |
+
+The mean error exceeded the 45-minute AT_RISK buffer it fed.
+
+### The provider, and the tradeoff taken with eyes open
+
+**Mapbox Directions**, `driving`, `overview=false` — distance and duration,
+never geometry. Chosen over OpenRouteService on **vendor count**, not cost:
+the account already exists and 100,000/month against ~516 calls/day is not
+the constraint.
+
+**Mapbox has no heavy-goods profile, so every route here is a car route.**
+Measured against Valhalla's truck routing on our own lanes: **+3.0 mi mean,
++15.6 mi worst** (truck 122, Denver).
+
+That is fine for deciding LATE and it is **not fine for reconciling against a
+rate confirmation** — brokers pay truck miles and a car route reads short. So
+the row and popup say `routed road miles` and the tooltip says it in full:
+*"a routed road distance for a car, so it can read short of a truck-mile
+figure on a rate confirmation."* If dispatchers start reporting that the miles
+do not match their rate cons, that is the expected failure and not a bug.
+
+`EtaProvider` is the containment. An HGV provider is one new file; the policy,
+the cache, the budget and the engine all take miles and seconds.
+
+### The cache teaches, it does not just remember
+
+Each route yields `laneRatio = routedMiles / straightAtRoute` — **the measured
+road factor for that corridor**. Between recomputes the estimate is
+`straightNow × laneRatio`, so even the degraded path uses a number measured on
+that lane rather than a global guess.
+
+Recompute on: the stop's coordinates changed; the route is over 12 hours old;
+or the straight-line distance moved by more than `max(10 mi, 15%)`.
+
+```
+max( 2 mi,  5%)   74 routes/lane   ~1,843 calls/day
+max(10 mi, 15%)   21 routes/lane   ~  516 calls/day   <- chosen
+max(25 mi, 25%)   11 routes/lane   ~  268 calls/day
+```
+
+Proportional, because a 15% error 600 miles out is irrelevant and a 15% error
+20 miles out is not. For scale, 23 trucks polling every 30 s is **66,240 polls
+a day**; routing per poll would be 66,240 calls.
+
+Keyed on `stop_id`, which makes one invalidation free: when an appointment
+reorders stops and the next stop becomes a different row, the lookup simply
+lands elsewhere. In the **worker**, never in a render or a request path —
+otherwise the first dispatcher to open the console pays for 23 routes.
+
+### Snapping
+
+The provider MOVES a waypoint to the nearest road and reports how far. That
+distance is itself a quality signal, and it separates our precision levels
+almost perfectly:
+
+```
+street-precision stops   1–8 m      (median 7)
+ZIP centroids            379–402 m
+```
+
+Note at **100 m** — twelve times the worst real street stop, so it cannot
+flag a good one, and well under the ZIP cluster, so it always flags those.
+Refuse at **2 km**, just past `block` precision's measured 0.78 mi: if the
+nearest road is further away than our worst deliberate approximation, the
+route describes somewhere else.
+
+**It compounds with coordinate precision.** Elwood is a ZIP centroid ±4.4 mi
+routed from a point 379 m away, so the row reads **±4.6 mi** — a number that
+admits its own construction.
+
+### Duration, used and capped
+
+`speed = min(routedMiles / routedHours, avgSpeedMph)`.
+
+The route knows road classes, which a flat 52 mph does not — truck 147's
+6.5-mile approach implied **36.2 mph** through Joliet, and that is real
+information. But it is a *car* duration: the first live call implied **65.5
+mph**, which no loaded truck sustains. Capping keeps the useful half.
+
+**No break time is added.** HOS is on the brief's never-build list, so this is
+a **driving-time** estimate and the tooltip says so — *"counts driving only —
+no rest breaks."* A long lane will read optimistic against a driver who stops.
+Inventing a break model would be worse than saying it.
+
+### Spend
+
+`routing_budget`, one row per UTC month, incremented **before** each call —
+a call that times out still cost quota, and counting successes would let a
+failing provider burn a month while the counter read zero. In the database,
+not worker memory, so a crash loop cannot reset it. Over the ceiling (default
+25,000, a quarter of the free tier) the board degrades to lane estimates. Plus
+`MAX_PER_CYCLE = 8`, so a bad threshold costs 8 calls per 30 s rather than one
+per truck.
+
+No retry, ever. The next poll is 30 seconds away and a retry storm against a
+metered API with no hard spend cap is the failure this exists to prevent.
+
+### `route_samples`
+
+Append-only, nothing reads it. Every route logged with its destination,
+straight and routed miles, ratio, duration, implied speed and snap. After one
+evening it already says:
+
+```
+Fargo, ND           n=4  avg 1.131  (1.067–1.171)
+Atlanta, GA         n=3  avg 1.249  (1.244–1.255)
+Denver, CO          n=3  avg 1.306  (1.084–1.419)
+Joliet, IL          n=4  avg 1.420  (1.253–1.552)
+```
+
+That is the table that would let anyone sanity-check a provider swap, or spot
+a corridor whose ratio moved because of construction.
+
+### And the row now shows road miles
+
+`milesRemaining` was the great-circle distance, which is not a number anyone
+in freight uses — short by 7% to 46% depending on the lane. It is road miles
+now, of whichever kind the basis names.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

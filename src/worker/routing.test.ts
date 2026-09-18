@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { routeSamples, routingBudget, stopRoutes } from '@/db/schema';
+import { budgetMonth } from '@/lib/routing';
 import { sweepRouting } from './routing';
 import type { EtaProvider, RouteOutcome } from '@/server/routing/provider';
 import type { Tx } from '@/server/audit';
@@ -57,14 +58,29 @@ function stubProvider(outcome?: RouteOutcome) {
 }
 
 withDb('the routing sweep', () => {
+  /**
+   * Scoped to `provider = 'stub'`, not to the whole table.
+   *
+   * These run against the real database while the real worker may be polling
+   * and committing routes of its own. Under READ COMMITTED each statement
+   * takes a fresh snapshot, so rows the worker commits mid-test become
+   * visible to a later SELECT — which is how a table-wide count started
+   * returning 27 when the sweep had written 8.
+   */
   it('routes lanes that have never been routed, and records both rows', async () => {
     const seen = await rolledBack(async (tx) => {
       // Start from a clean slate inside the transaction.
       await tx.delete(stopRoutes);
       const { provider, route } = stubProvider();
       const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
-      const cached = await tx.select().from(stopRoutes);
-      const samples = await tx.select().from(routeSamples);
+      const cached = await tx
+        .select()
+        .from(stopRoutes)
+        .where(eq(stopRoutes.provider, 'stub'));
+      const samples = await tx
+        .select()
+        .from(routeSamples)
+        .where(eq(routeSamples.provider, 'stub'));
       return { sweep, calls: route.mock.calls.length, cached, samples };
     });
 
@@ -125,7 +141,10 @@ withDb('the routing sweep', () => {
         detail: 'boom',
       });
       const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
-      const [budget] = await tx.select().from(routingBudget);
+      const [budget] = await tx
+        .select()
+        .from(routingBudget)
+        .where(eq(routingBudget.month, budgetMonth(new Date())));
       return { sweep, budget };
     });
 
@@ -197,7 +216,11 @@ withDb('the cached route survives a round trip', () => {
       await tx.delete(stopRoutes);
       const { provider } = stubProvider();
       await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
-      const [row] = await tx.select().from(stopRoutes).limit(1);
+      const [row] = await tx
+        .select()
+        .from(stopRoutes)
+        .where(eq(stopRoutes.provider, 'stub'))
+        .limit(1);
       if (!row) return null;
       const [again] = await tx
         .select()

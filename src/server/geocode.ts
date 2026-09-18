@@ -79,7 +79,7 @@ export const CACHE_TTL_DAYS = { hit: 30, miss: 7 } as const;
  * following week. Stale misses are the failure mode a cache has that a bug
  * does not: it keeps working, at the old answer.
  */
-export const CHAIN_VERSION = 'census-v6+block+zcta2023';
+export const CHAIN_VERSION = 'census-v6+block+zcta2023+accuracy';
 
 /**
  * Two matches this far apart are different places and the top one is a guess.

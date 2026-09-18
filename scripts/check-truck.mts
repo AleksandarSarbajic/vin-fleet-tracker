@@ -11,6 +11,7 @@ import { createDirectDb } from '../src/db/connection.ts';
 import { feedHealth } from '../src/db/schema.ts';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from '../src/server/fleet-query.ts';
 import { STATUS_DEFAULTS, isFeedStale } from '../src/lib/status.ts';
+import { basisShort, precisionNote } from '../src/lib/eta-basis.ts';
 
 loadEnv({ path: '.env.local' });
 
@@ -74,4 +75,22 @@ console.log(`  ETA         ${secs(row.etaUtc)}   (${row.etaAbsence})`);
 console.log(`  STATUS      ${row.status}`);
 // The anchor: ETA is fix time + travel, never clock time + travel.
 console.log(`  anchor      fix ${secs(row.recordedAt)} + travel = ETA`);
+console.log(`  basis       ${row.distanceBasis}${row.laneRatio ? ` (lane ×${row.laneRatio.toFixed(3)})` : ''}${row.snapMeters ? ` · snap ${Math.round(row.snapMeters)} m` : ''}`);
+// The Projected line exactly as MapPopup renders it.
+const where =
+  row.etaPrecision === 'zip'
+    ? ` · ZIP centre${row.etaAccuracyMiles !== null ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi` : ''}`
+    : row.etaPrecision === 'block'
+      ? ' · nearest block'
+      : '';
+const milesLabel =
+  row.milesRemaining === null
+    ? ''
+    : row.milesRemaining < 10
+      ? 'arriving'
+      : `${Math.round(row.milesRemaining)} mi`;
+console.log(
+  `  popup       ${milesLabel} · ETA ${fmt(row.etaUtc)} · ${basisShort(row)}${where}`,
+);
+console.log(`  tooltip     ${precisionNote(row)}`);
 await client.end();

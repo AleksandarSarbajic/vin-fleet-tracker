@@ -100,6 +100,9 @@ for (const stop of candidates) {
             lat: outcome.lat,
             lng: outcome.lng,
             geocodePrecision: outcome.precision,
+            // The ± that goes with a coarse level. Omitting this is why a ZIP
+            // stop's tooltip said "ZIP-code centre" with no number after it.
+            geocodeAccuracyMiles: outcome.accuracyMiles ?? null,
             geocodeConfidence: outcome.confidence,
             geocodedAddress: outcome.matchedAddress,
             geocodedAt: sql`now()`,
@@ -108,6 +111,7 @@ for (const stop of candidates) {
             lat: null,
             lng: null,
             geocodePrecision: null,
+            geocodeAccuracyMiles: null,
             geocodeConfidence: null,
             geocodedAddress: null,
             geocodedAt: null,

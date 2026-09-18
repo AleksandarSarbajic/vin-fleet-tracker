@@ -80,6 +80,8 @@ for (const stop of work) {
         lat: outcome.lat,
         lng: outcome.lng,
         geocodePrecision: outcome.precision,
+        // The ± that goes with a coarse level (§12.30).
+        geocodeAccuracyMiles: outcome.accuracyMiles ?? null,
         geocodeConfidence: outcome.confidence,
         geocodedAddress: outcome.matchedAddress,
         geocodedAt: sql`now()`,
