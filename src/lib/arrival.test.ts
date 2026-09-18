@@ -267,3 +267,56 @@ describe('arrival refuses anything below street precision (§12.30)', () => {
     expect(detectDeparture(arrived, leaving)).toBeNull();
   });
 });
+
+/**
+ * §12.54. The radius was sized from one truck at one facility, and the one
+ * facility happened to be one where trucks park close.
+ *
+ * These use truck 132's REAL coordinates at Hazleton: the stop as the census
+ * geocoder placed it, and the spot the truck sat at 0 mph for 249 minutes
+ * while the board said it had not arrived.
+ */
+describe('a facility where trucks park further out (§12.54)', () => {
+  /** The census point, interpolated along ARTHUR GARDNER HWY. */
+  const HAZLETON = { lat: 40.93735438403, lng: -75.953783147648 };
+  /** Where truck 132 actually parked — 0.3124 mi away, measured. */
+  const YARD = { lat: 40.934355, lng: -75.949289 };
+
+  const hazleton = (): StopGeo => ({
+    ...HAZLETON,
+    precision: 'street',
+    arrivedAt: null,
+    departedAt: null,
+  });
+
+  /** Newest first, every 6s, exactly as the feed delivers them. */
+  const parkedInYard = (count: number): Fix[] =>
+    Array.from({ length: count }, (_, i) => ({
+      ...YARD,
+      speedMph: 0,
+      recordedAtUtc: at(-i * 6),
+    }));
+
+  it('fires on a truck parked 0.31 mi out, which 0.25 could not reach', async () => {
+    const arrival = detectArrival(hazleton(), parkedInYard(40), ARRIVAL_DEFAULTS);
+    expect(arrival).not.toBeNull();
+  });
+
+  it('would not have fired at the old 0.25 — this is the change, not a coincidence', () => {
+    // Pinned explicitly: if someone moves the radius back, this says what
+    // breaks and why, rather than a distant arrival test going quiet.
+    const old = { ...ARRIVAL_DEFAULTS, radiusMiles: 0.25 };
+    expect(detectArrival(hazleton(), parkedInYard(40), old)).toBeNull();
+  });
+
+  it('still refuses a truck that is merely nearby', () => {
+    // 0.5 mi out — beyond the measured facility spread, and beyond 0.35.
+    const away = parkedInYard(40).map((f) => ({ ...f, lat: f.lat - 0.0028 }));
+    expect(detectArrival(hazleton(), away, ARRIVAL_DEFAULTS)).toBeNull();
+  });
+
+  it('still needs the two minutes — the radius never held off the red light', () => {
+    // In range, stopped, but only ~54 seconds of evidence.
+    expect(detectArrival(hazleton(), parkedInYard(10), ARRIVAL_DEFAULTS)).toBeNull();
+  });
+});

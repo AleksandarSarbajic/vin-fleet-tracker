@@ -33,10 +33,45 @@ export interface ArrivalConfig {
  *  - Trucks park in a yard, which on a distribution centre is a few hundred
  *    metres of its own.
  *
- * So anything under 0.15 mi would never have fired on the one real arrival we
- * have. **0.25 mi (~400 m)** clears the measured case with roughly twice
- * the margin while staying about three city blocks — small enough that a
- * truck idling outside an unrelated building is not "arrived".
+ * ## The number, re-measured (§12.54)
+ *
+ * §12.27 sized this from ONE arrival — truck 143 at Grand Forks, 0.119–0.135
+ * mi — and doubled it to 0.25. That measured a truck's parked jitter at one
+ * facility, not the offset across facilities, and the offset is the thing the
+ * radius has to clear.
+ *
+ * Re-measured over 89,101 fixes: a PARKING PLACE is one truck at speed 0,
+ * fixes rounded to ~110 m, held 20 minutes or more; the distance is to the
+ * nearest street-precision stop. 13 places, 8 trucks, 4 facilities:
+ *
+ *     0.101  0.103  0.116  0.123  0.124  0.128  0.133  0.152
+ *     0.312  0.318  0.320  0.321  0.516
+ *
+ * The method reproduces §12.27 independently: two different trucks at that
+ * same Grand Forks facility land at 0.128 and 0.133.
+ *
+ * **0.25 mi reaches 8 of 13. 0.35 reaches 12.** The binding case is Hazleton
+ * at 0.3086–0.3124, held for the whole of a 249-minute dwell. 0.40 and 0.50
+ * reach no further than 0.35 in this data, so 0.35 is the smallest value that
+ * clears the measured cases with margin.
+ *
+ * §12.27's "twice the margin" heuristic is deliberately NOT reapplied: against
+ * 0.312 it gives ~0.6 mi, which is three times the distance at which the
+ * short stationary episodes already cluster.
+ *
+ * ## What the radius is actually sizing
+ *
+ * Not geocoder error. Without the dwell filter the closest single stationary
+ * fix at Burlington is **0.0105 mi** — the truck passes within 17 metres of
+ * the geocoded point and then parks 0.12 mi away. `route_samples.snap_to_m`
+ * agrees: street destinations snap to a road in 0.0–12.9 m, average 5.4.
+ *
+ * The point is on the road centreline. Trucks drive over it and park off it.
+ * So this number is **interpolation offset plus facility footprint**, and
+ * parked-truck data cannot separate them. At one drop yard (275 W Laraway,
+ * Joliet) the same facility spans 0.101 to 0.321.
+ *
+ * n=13 across 4 facilities is thin. Re-derive it on real loads.
  *
  * ## Why the radius alone is not enough
  *
@@ -45,9 +80,16 @@ export interface ArrivalConfig {
  * `confirmSeconds` is what separates a light from a dock. This feed delivers
  * a fix every 5–8 seconds, so 120 s is roughly 20 corroborating positions,
  * not two.
+ *
+ * Measurement confirms `confirmSeconds` is carrying that load and the radius
+ * never was. Of the stationary episodes over 120 s within a mile of a street
+ * stop, widening 0.25 → 0.35 admits exactly ONE more short episode (2 minutes,
+ * 4 fixes, at 0.316 mi) — because seven of the eight short episodes already
+ * sit at 0.039–0.188 mi, geometrically inside the old circle. The red-light
+ * exposure was never held off by the radius.
  */
 export const ARRIVAL_DEFAULTS: ArrivalConfig = {
-  radiusMiles: 0.25,
+  radiusMiles: 0.35,
   confirmSeconds: 120,
 };
 
@@ -57,7 +99,7 @@ export interface StopGeo {
   /**
    * §12.30. Arrival detection runs on `street` and NOTHING ELSE.
    *
-   * The radius is 0.25 mi. A `block` coordinate is measured 0.16–0.78 mi
+   * The radius is 0.35 mi (§12.54). A `block` coordinate is measured 0.16–0.78 mi
    * from truth and a `zip` centroid a median 2.14 mi, so a 0.25 mi circle
    * around either is noise: it would mark trucks ARRIVED four miles from the
    * dock, and §12.27 never unsets `arrived_at`. A wrong arrival is not a

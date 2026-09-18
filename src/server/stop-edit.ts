@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { loads, stops, trucks } from '@/db/schema';
+import { loads, stopRoutes, stops, trucks } from '@/db/schema';
 import { normalizeAddress, type AddressParts } from '@/lib/address';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, type ResolvedAppointment } from './appointment';
@@ -306,6 +306,31 @@ export async function saveStopEdit(
           ...appointmentColumns,
         })
         .where(eq(stops.id, stopId));
+
+      /**
+       * §12.54. The cached route is a cache of THIS stop. Re-geocoding moves
+       * the destination, so the row stops describing anything.
+       *
+       * It is already inert — `fleet-query` joins `stop_routes` on
+       * `sr.stop_lat = s.lat and sr.stop_lng = s.lng`, so a moved stop falls
+       * back to a straight line rather than projecting to the old place. This
+       * deletes it because inert is not the same as gone, and one stale row
+       * survived for exactly that reason:
+       *
+       * **The two defects compound.** `needsRecompute` correctly returned
+       * `stop-moved` for truck 132's re-pointed stop every poll, and the
+       * sweep's 0.5-mile floor then skipped the lane — because the truck was
+       * parked 0.313 mi from the NEW address. The overwrite that would have
+       * cleared the cache was blocked by the same rule that made the lane
+       * unroutable, so a Dallas route sat on a Pennsylvania stop indefinitely.
+       * 22 of 23 cache rows were current; the one that was not is the one the
+       * floor had hold of.
+       *
+       * Deleting at the source closes it without depending on a later sweep
+       * being ABLE to run. `route_samples` is untouched — those are
+       * measurements and they keep their own destination now.
+       */
+      if (geocode) await tx.delete(stopRoutes).where(eq(stopRoutes.stopId, stopId));
     } else {
       // "New load" state — same fields, same validation, same conversion.
       // A separate creation flow would be a second place for the appointment

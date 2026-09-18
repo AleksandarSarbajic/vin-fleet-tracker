@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
-import { assignments, loads, overrides, stops, auditLog } from '@/db/schema';
+import { assignments, loads, overrides, stopRoutes, stops, auditLog } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeDispatcher, makeDriver, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
@@ -549,6 +549,114 @@ withDb('the edit modal save', () => {
 
       // A note the board cannot read is a note nobody wrote.
       expect(note).toBe('Gate code 4417.');
+    });
+  });
+
+  describe('a re-geocode clears the cached route (§12.54)', () => {
+    /**
+     * The route cache is keyed to the stop's coordinates. A stop that moves
+     * leaves a row describing a lane to somewhere else.
+     *
+     * It was already inert — the fleet query joins on the coordinates — but
+     * one survived anyway, because the routing sweep's 0.5-mile floor blocked
+     * the overwrite that would have replaced it. Two defects holding each
+     * other up. This deletes at the source so it does not depend on a later
+     * sweep being able to run.
+     */
+    const cacheFor = async (tx: Tx, stopId: string) =>
+      tx.select().from(stopRoutes).where(eq(stopRoutes.stopId, stopId));
+
+    it('deletes a route measured to the address the stop no longer has', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id }),
+        });
+
+        // A route to where the stop was, exactly as the sweep would write it.
+        await tx.insert(stopRoutes).values({
+          stopId: created.stopId,
+          routedMiles: 1387.96,
+          routedDurationS: 77762,
+          fromLat: 40.94653,
+          fromLng: -77.708793,
+          straightAtRouteMiles: 1198.91,
+          laneRatio: 1.1577,
+          stopLat: 32.72110135719,
+          stopLng: -96.874451650074,
+          snapFromM: 0.664,
+          snapToM: 3.532,
+          provider: 'test',
+        });
+        const before = await cacheFor(tx, created.stopId);
+
+        // Re-point the stop. A real address, so the geocode actually runs.
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t[0]!.id,
+            stopId: created.stopId,
+            addressLine: '450 E Arthur Gardner',
+            city: 'Hazleton',
+            state: 'PA',
+            zip: '18201',
+          }),
+        });
+        return { before, after: await cacheFor(tx, created.stopId) };
+      });
+
+      expect(seen.before).toHaveLength(1);
+      expect(seen.after).toEqual([]);
+    });
+
+    it('leaves the cache alone when the address did not change', async () => {
+      // §12.23: an edit writes only what it owns. A note change is not a
+      // reason to throw away a route that cost a call.
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id }),
+        });
+        // Pinned rather than read back: whether the fixture address geocodes
+        // is not what this test is about, and a null would fail it for the
+        // wrong reason.
+        await tx
+          .update(stops)
+          .set({ lat: 41.525, lng: -88.0817 })
+          .where(eq(stops.id, created.stopId));
+        await tx.insert(stopRoutes).values({
+          stopId: created.stopId,
+          routedMiles: 40,
+          routedDurationS: 2400,
+          fromLat: 41.8781,
+          fromLng: -87.6298,
+          straightAtRouteMiles: 33,
+          laneRatio: 1.21,
+          stopLat: 41.525,
+          stopLng: -88.0817,
+          snapFromM: 1,
+          snapToM: 2,
+          provider: 'test',
+        });
+
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t[0]!.id,
+            stopId: created.stopId,
+            dispatcherNote: 'gate code 4417',
+          }),
+        });
+        return cacheFor(tx, created.stopId);
+      });
+
+      expect(seen).toHaveLength(1);
     });
   });
 

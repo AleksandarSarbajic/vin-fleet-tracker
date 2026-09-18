@@ -4211,11 +4211,207 @@ nobody redoes work that landed.
   event set until a preference had nothing to do. There is nothing left
   deferred.
 
+## 12.54 A radius sized from one truck, and a sweep that could not say why
+
+Truck 132 showed `LATE`, ETA 19:41 EDT, against a 10:00 appointment, parked
+0.2 mi from its receiver with the load marked `At receiver` by hand. Four
+things were wrong and one was not.
+
+### What was not wrong: the ETA
+
+```
+fix          40.934355, -75.949289  @ 23:41:31.526Z  0 mph
+stop         40.93735438403, -75.953783147648  (street, census:in-range)
+straight     0.3130 mi   × roadFactor 1.25 = 0.3913 mi   ÷ 52 mph = 27.1 s
+ETA          23:41:31.526Z + 27.1 s = 23:41:58.613Z = 19:41:58 EDT
+```
+
+19:41:58 EDT **is** 23:41:58 UTC — the current time. The fallback produced a
+27-second travel time, which is the tiny number a 0.3-mile gap should produce.
+`LATE` was then correct arithmetic: the deadline was 14:00Z (10:00 EDT) and
+the projection was 9.7 hours past it, because the stop had been re-pointed at
+23:38 to an appointment already nine hours old. §12.24's anchor rule held
+throughout. **See §13.6** — what defeated the reading was the presentation,
+not the computation, and that is recorded as an open question rather than
+patched.
+
+Load status is deliberately not an engine input, and stays that way.
+`AT_RECEIVER` is a dispatcher's claim, `arrived_at` is a measurement, and
+§12.27 exists because those are different. A dispatcher who wants to overrule
+the engine has §9.5's override, which carries a required reason, a mandatory
+expiry and the computed status rendered beside it. Letting a dropdown built
+for billing state silently suppress `LATE` would be an override with none of
+those.
+
+### The sweep could not answer the question asked of it
+
+Every poll line for eight minutes read:
+
+```
+"routed":0,"routesSkipped":20,"routesFailed":0,"routeReasons":{}
+```
+
+`routeReasons` was empty in all 289 poll lines in the log, because a reason was
+recorded only for a lane that was ROUTED or that the provider refused. Both
+skip branches did `skipped += 1; continue`. So twenty lanes correctly left
+alone and one lane dropped by the wrong rule produced identical output, and
+diagnosing it took four database queries against a log that had the answer and
+was not printing it.
+
+This is §12.36's `arrived: 0` again — the number that could not distinguish
+"nothing to report" from "the rule is broken" — and `explainNearest` was built
+to fix precisely that on the arrival side. The routing sweep never got the
+equivalent.
+
+Now every candidate leaves through one `record()` call and lands in exactly
+one outcome:
+
+| outcome | meaning |
+|---|---|
+| `routed` | a call was made; `routedBecause` says which `needsRecompute` reason paid for it |
+| `route-current` | the cached route still describes this lane — the resting state |
+| `too-close` | under `MIN_ROUTABLE_MILES` (0.5) |
+| `failed` | the provider refused; `failures` keeps its reason |
+| `cycle-cap` | this poll had already spent `MAX_PER_CYCLE` |
+| `budget-exhausted` | the monthly ceiling |
+
+`lanesConsidered` is the denominator and `routeOutcomes` sums to it, so a
+branch added later cannot be silent. `lanesBlocked` names trucks for every
+outcome that is **not** `routed` or `route-current`, capped at six — naming
+twenty healthy lanes every thirty seconds is how the one that mattered got
+buried. Two behaviours changed with it: the cycle cap records and continues
+rather than `break`ing, because a silently truncated list is how a permanently
+starved lane stays invisible; and the straight-line distance is computed
+before the recompute decision so a capped lane can still be reported with a
+number.
+
+### The arrival radius was sized from one truck at one facility
+
+§12.27 set 0.25 mi from a single arrival — truck 143 at Grand Forks,
+0.119–0.135 mi — and doubled it. It named both causes correctly (centreline
+interpolation, and trucks parking in yards) and then measured the truck's
+parked jitter rather than the offset across facilities. The offset is what the
+radius has to clear.
+
+**Re-measured** over 89,101 fixes. A *parking place* is one truck at speed 0,
+fixes rounded to ~110 m, held 20 minutes or more; the distance is to the
+nearest street-precision stop. Deduplicated that way because the naive version
+counted one truck parked in Joliet against all eight Joliet stops within a
+mile. 13 places, 8 trucks, 4 facilities:
+
+```
+0.101  0.103  0.116  0.123  0.124  0.128  0.133  0.152
+0.312  0.318  0.320  0.321  0.516
+```
+
+The method reproduces §12.27 independently: two different trucks at that same
+Grand Forks facility land at **0.128 and 0.133**.
+
+**0.25 reaches 8 of 13. 0.35 reaches 12.** The binding case is Hazleton at
+0.3086–0.3124, held for the whole of a 249-minute dwell. 0.40 and 0.50 reach
+no further in this data, so **0.35** is the smallest value clearing the
+measured cases with margin. §12.27's "twice the margin" heuristic is
+deliberately not reapplied — against 0.312 it gives ~0.6 mi, three times the
+distance at which the short stationary episodes already cluster.
+
+**The false-positive cost is almost nothing, and not where it was assumed to
+be.** Of the stationary episodes over 120 s within a mile of a street stop,
+widening 0.25 → 0.35 admits exactly **one** more (2 minutes, 4 fixes, at
+0.316 mi) and gains one more real dwell. Seven of the eight short episodes
+already sit at 0.039–0.188 mi — geometrically inside the old circle. The red
+light was never held off by the radius; `confirmSeconds` was doing that work
+all along, exactly as §12.27 said when it chose 120 s.
+
+### What the radius is sizing, which is not geocoder error
+
+Without the dwell filter, the closest single stationary fix at Burlington is
+**0.0105 mi**: the truck passes within 17 metres of the geocoded point and
+then parks 0.12 mi away. `route_samples.snap_to_m` agrees — street
+destinations snap to a road in 0.0–12.9 m, average 5.4.
+
+The point is on the road centreline. Trucks drive over it and park off it. So
+the number is **interpolation offset plus facility footprint**, and
+parked-truck data cannot separate them. At one drop yard (275 W Laraway,
+Joliet) the same facility spans 0.101 to 0.321.
+
+### `geocode_accuracy_miles` at `street` was null, and null read as exact
+
+§12.30's table gives `block` a measured 0.16–0.78 mi and `zip` a measured
+median 2.14. It gives `street` the words *"interpolation only"* — a
+description in a column of measurements. Null then reads as exact, and §12.30
+leans on that reading to grant `street` the right to conclude an arrival.
+
+`street` now carries **0.15 mi**, the p25 of the 13 places above, and it is
+labelled for what it is: **how far the dock may be from this point, never
+geocoder error.** The coordinate is exactly where Census says. p25 rather than
+the median or the max because the arrival radius is what has to clear the
+distribution; this number exists to stop `null` meaning "exact", and a ± that
+swallowed the 0.52 outlier would make every street address look unusable.
+
+It does not enter `etaCaution`, which holds at two clauses (§12.33) — a street
+address is the good case and needs a number, not a warning. It appears in
+`etaDetails`, which a dispatcher opens on purpose, saying the dock *may be up
+to* 0.2 mi from the point rather than printing a bare ± that would read as the
+geocoder being unreliable.
+
+**n=13 across 4 facilities is thin. Re-derive both numbers on real loads.**
+
+### `route_samples`: every row kept, `stop_id` demoted
+
+The stale cache pointed at Dallas and so did three samples, on a stop now in
+Pennsylvania. That is not one bad row — **35 of 114 samples (31%) already
+named a destination their stop no longer had**: Bismarck→Grand Forks,
+Atlanta→Joliet, Phoenix→Grand Island, Fargo→Minooka, and six more.
+
+Those rows are correct. Chicago to Dallas really is 1198.9 straight and
+1387.96 routed, and §12.31's use — grouping by destination to sanity-check a
+provider swap — reads `dest_city/state/zip`, which still say Dallas. The
+denormalisation saved it; the schema comment already said "a sample whose
+destination can change is not a measurement".
+
+The gap was that the city was snapshotted and **the point it referred to was
+not**, so a row could name its destination and not locate it, and `stop_id` —
+a live foreign key — was the only way to recover coordinates. `dest_lat` and
+`dest_lng` join the snapshot, and `stop_id` is documented in the schema and in
+the database as **provenance only, not a join key for destination facts**.
+
+Migration 0014 backfills from two sources and guesses at nothing: the cache
+row written in the same transaction (`computed_at = measured_at`, which
+recovers the newest sample per stop whatever the stop says now), then the live
+stop where its city and state still match the snapshot. **80 of 114 recovered,
+34 left null** — and null is the honest value, because a guess from the live
+stop would say "Hazleton" about a Dallas measurement.
+
+### The two defects were holding each other up
+
+`stop_routes` is a cache of the current stop, and it is already inert when the
+stop moves: `fleet-query` joins on `sr.stop_lat = s.lat and sr.stop_lng =
+s.lng`, so a re-pointed stop falls back to a straight line rather than
+projecting to the old place. That guard worked — the board said "straight
+line — no route has been measured for this lane yet", which was true of the
+lane it was describing.
+
+But **22 of 23 cache rows were current, and the one that was not is the one
+the 0.5-mile floor had hold of.** Every other re-pointed stop got re-routed
+and its cache overwritten. Truck 132's could not be, because `needsRecompute`
+returned `stop-moved` every poll and the floor then skipped the lane — the
+truck was parked 0.313 mi from the new address. **The rule that made the lane
+unroutable is the same rule that blocked the overwrite that would have cleared
+the cache.** Neither defect would have produced a lasting stale row on its own.
+
+So the cache row is deleted at the source, when the stop is re-geocoded,
+rather than waiting for a sweep that may be unable to run. `route_samples` is
+untouched — those are measurements, and they carry their own destination now.
+
 # 13. Still open
 
-The five contradictions found during extraction. **These have not been ruled
-on.** Four are cosmetic or deferred; one needs a decision before the list is
-built in phase 3.
+The contradictions found during extraction, plus what real use has since
+raised. **These have not been ruled on.**
+
+13.1–13.5 came out of the phase-0 extraction; of those, four are cosmetic or
+deferred and one (§13.3) has since been resolved. **§13.6 is different in
+kind** — it was raised by a real misreading of a real board, and is held open
+deliberately to see whether it happens again rather than fixed on one report.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
@@ -4270,3 +4466,48 @@ desktop detail panel. The phone detail stack predates it.
 
 Given turn 4's authority and the phone-parity requirement, the phone detail
 should carry the collapsed form of the block. **Not drawn anywhere.**
+
+
+## 13.6 Should the ETA column carry the stop's zone when nothing else does?
+
+**Raised from a real misreading, deliberately not fixed.** Kept open to see
+whether it happens again against real loads.
+
+The reading that failed: `LATE`, ETA **19:41 EDT**, appointment **10:00**. The
+conclusion drawn was that the board was broken. It was not — 19:41 EDT was the
+current instant, and the ETA was 27 seconds after the last GPS fix (§12.54).
+
+What defeated it was presentation, not arithmetic. **Three zones were in play
+and only one of them was printed:**
+
+- the ETA in the stop's zone, `EDT` — §7.1, and correct
+- the appointment in the same column's own zone, which on this row was also
+  EDT but on the row above was CDT
+- the dispatch clock (CDT) and the viewer's clock (CEST) in the header,
+  neither of them EDT
+
+So a number appeared in a zone that appeared nowhere else on that row, next to
+a number whose zone was implied, while the reader's own clock was six hours
+away. Every individual rule was followed and the composition was unreadable.
+
+§7.1 is emphatic that the Appt column carries the stop's own zone, and gives
+the reason: a single list carries MST, PST, EST and CST at once. The ETA
+follows the same rule so the two columns can be compared. **The question is
+whether "the same rule" is enough when the two columns sit 100px apart and
+only one of them is labelled**, and whether the ETA should instead print in
+the dispatch zone — the one clock in the header a dispatcher is anchored to —
+with the stop-local time in the tooltip.
+
+Arguments both ways, unresolved:
+
+- **Stop-local, as now.** The ETA is a claim about arriving at that facility,
+  and the receiver's clock is the one that decides whether it was late. Moving
+  it would put the ETA and the Appt in different zones in adjacent columns,
+  which is worse.
+- **Dispatch zone.** The row already labels nothing in the ETA cell, the
+  dispatcher's anchor is the header clock, and the comparison that actually
+  gets made at 4am is "is this before or after now", not "is this before or
+  after the appointment".
+
+Do not design a fix on this one report. **Watch whether it catches anyone
+again once real loads are running**, and if it does, that is the evidence.

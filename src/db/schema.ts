@@ -572,6 +572,15 @@ export const routeSamples = pgTable(
   'route_samples',
   {
     id: uuid('id').primaryKey().default(newId),
+    /**
+     * PROVENANCE ONLY — which stop this was measured for, at the time.
+     *
+     * **Not a join key for destination facts** (§12.54). The stop is a live
+     * row and may since have been re-pointed anywhere: 31% of the samples
+     * that existed when this comment was written already named a destination
+     * their stop no longer had. Joining `stops` to recover a destination
+     * returns Hazleton for a Dallas measurement.
+     */
     stopId: uuid('stop_id').references(() => stops.id, { onDelete: 'set null' }),
 
     /** Denormalised ON PURPOSE: the stop may be edited or deleted later, and
@@ -580,6 +589,15 @@ export const routeSamples = pgTable(
     destState: text('dest_state'),
     destZip: text('dest_zip'),
     destPrecision: geocodePrecision('dest_precision'),
+    /**
+     * The coordinates actually routed to, snapshotted with the rest (§12.54).
+     * These were the gap: the city was denormalised and the point it referred
+     * to was not, so the row could name its destination and not locate it.
+     * Null only on rows measured before migration 0014 that could not be
+     * recovered.
+     */
+    destLat: doublePrecision('dest_lat'),
+    destLng: doublePrecision('dest_lng'),
 
     straightMiles: doublePrecision('straight_miles').notNull(),
     routedMiles: doublePrecision('routed_miles').notNull(),

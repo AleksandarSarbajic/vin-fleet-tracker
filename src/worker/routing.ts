@@ -33,14 +33,85 @@ const CandidateRow = z.object({
   dest_precision: z.enum(['street', 'block', 'zip']).nullable(),
 });
 
+/**
+ * What happened to one candidate lane. **Every candidate gets exactly one**
+ * (§12.54).
+ *
+ * The sweep used to record a reason only for a lane it ROUTED or one the
+ * provider refused. Both skip branches did `skipped += 1; continue`, so a
+ * poll line read `routesSkipped: 20, routeReasons: {}` whether twenty lanes
+ * were correctly left alone or one of them was being dropped by the wrong
+ * rule. Truck 132's lane was skipped by the 0.5-mile floor for eight minutes
+ * and answering "why" took four database queries, because the log could not
+ * distinguish it from the nineteen lanes that were simply current.
+ *
+ * Same lesson as §12.36's `arrived: 0`, which `explainNearest` exists to fix:
+ * **a count with no reason cannot report its own failure.**
+ */
+export type RouteOutcome =
+  /** Routed. `routedBecause` says which `needsRecompute` reason paid for it. */
+  | 'routed'
+  /** Skipped: the cached route still describes this lane. The normal state. */
+  | 'route-current'
+  /**
+   * Skipped: under `MIN_ROUTABLE_MILES`. Nothing worth routing, and a zero
+   * denominator for the lane ratio — but ALSO the branch that hides a lane
+   * whose destination just moved to somewhere the truck is already parked.
+   */
+  | 'too-close'
+  /** The provider refused. `failures` carries its reason. */
+  | 'failed'
+  /** Never considered: this poll had already spent `MAX_PER_CYCLE`. */
+  | 'cycle-cap'
+  /** Never considered: the monthly ceiling. The board degrades, quietly. */
+  | 'budget-exhausted';
+
+/** A lane whose outcome was worth naming — see `blocked` below. */
+export interface BlockedLane {
+  truck: number | null;
+  stopId: string;
+  outcome: RouteOutcome;
+  straightMiles: number;
+}
+
 export interface RoutingSweep {
+  /** Candidates the query returned. Without it, every other count is a ratio
+   *  with no denominator. */
+  considered: number;
   routed: number;
   skipped: number;
   failed: number;
   /** True when the monthly ceiling stopped us. The board degrades, quietly. */
   budgetExhausted: boolean;
-  reasons: Record<string, number>;
+  /** Every candidate, by outcome. These sum to `considered`. */
+  outcomes: Record<RouteOutcome, number>;
+  /** Why the routed ones were routed — the money, by cause. */
+  routedBecause: Record<string, number>;
+  /** Provider refusals, by their own reason. */
+  failures: Record<string, number>;
+  /**
+   * The lanes worth naming: everything whose outcome was not `routed` or
+   * `route-current`.
+   *
+   * `route-current` is the resting state of a healthy board and naming twenty
+   * of them every thirty seconds would bury the one that matters — which is
+   * how the old log failed. Anything else is either costing money or silently
+   * not happening, and both deserve a truck number.
+   */
+  blocked: BlockedLane[];
 }
+
+/**
+ * Under half a mile there is no route worth fetching and no usable lane ratio.
+ *
+ * Named because §12.54 made it visible: this is the floor that dropped truck
+ * 132's lane every poll after its stop was re-pointed to an address the truck
+ * was already parked beside.
+ */
+export const MIN_ROUTABLE_MILES = 0.5;
+
+/** At most this many named lanes per poll, so one bad day cannot flood the log. */
+const MAX_BLOCKED_LOGGED = 6;
 
 export interface SweepLogger {
   info: (message: string, fields?: Record<string, unknown>) => void;
@@ -66,11 +137,37 @@ export async function sweepRouting(
   const config = options.config ?? ROUTING_DEFAULTS;
   const now = options.now ?? new Date();
   const sweep: RoutingSweep = {
+    considered: 0,
     routed: 0,
     skipped: 0,
     failed: 0,
     budgetExhausted: false,
-    reasons: {},
+    outcomes: {} as Record<RouteOutcome, number>,
+    routedBecause: {},
+    failures: {},
+    blocked: [],
+  };
+
+  /**
+   * The ONE place an outcome is recorded, so a branch cannot leave without
+   * one. Every `continue` in the loop below goes through here.
+   */
+  const record = (
+    outcome: RouteOutcome,
+    lane: { truck: number | null; stopId: string; straightMiles: number },
+  ): void => {
+    sweep.outcomes[outcome] = (sweep.outcomes[outcome] ?? 0) + 1;
+    if (outcome === 'routed') sweep.routed += 1;
+    else if (outcome === 'failed') sweep.failed += 1;
+    else sweep.skipped += 1;
+    if (outcome === 'routed' || outcome === 'route-current') return;
+    if (sweep.blocked.length >= MAX_BLOCKED_LOGGED) return;
+    sweep.blocked.push({
+      truck: lane.truck,
+      stopId: lane.stopId,
+      outcome,
+      straightMiles: Number(lane.straightMiles.toFixed(3)),
+    });
   };
 
   const month = budgetMonth(now);
@@ -115,11 +212,35 @@ export async function sweepRouting(
 
   const candidates = z.array(CandidateRow).parse(result);
 
+  sweep.considered = candidates.length;
+
   for (const c of candidates) {
-    if (sweep.routed >= MAX_PER_CYCLE) break;
+    /**
+     * The straight line is computed FIRST now, not after the recompute
+     * decision, so that a lane cut off by the cycle cap or the budget can
+     * still be named with a distance. A blocked lane with no number attached
+     * is most of the way back to the count that could not explain itself.
+     */
+    const straight = haversineMiles(
+      { lat: c.truck_lat, lng: c.truck_lng },
+      { lat: c.stop_lat, lng: c.stop_lng },
+    );
+    const lane = {
+      truck: c.truck_number,
+      stopId: c.stop_id,
+      straightMiles: straight,
+    };
+
+    if (sweep.routed >= MAX_PER_CYCLE) {
+      // Not `break`: the remaining candidates are still candidates, and a
+      // silent truncation is how a permanently starved lane stays invisible.
+      record('cycle-cap', lane);
+      continue;
+    }
     if (spent >= options.ceiling) {
       sweep.budgetExhausted = true;
-      break;
+      record('budget-exhausted', lane);
+      continue;
     }
 
     const [cachedRow] = await db
@@ -156,17 +277,22 @@ export async function sweepRouting(
       config,
     );
     if (reason === null) {
-      sweep.skipped += 1;
+      record('route-current', lane);
       continue;
     }
 
-    const straight = haversineMiles(
-      { lat: c.truck_lat, lng: c.truck_lng },
-      { lat: c.stop_lat, lng: c.stop_lng },
-    );
-    // Nothing to route, and a zero denominator for the lane ratio.
-    if (straight < 0.5) {
-      sweep.skipped += 1;
+    /**
+     * Nothing to route, and a zero denominator for the lane ratio.
+     *
+     * Recorded rather than dropped: this is the branch that hid truck 132.
+     * `needsRecompute` had already said `stop-moved` — the destination had
+     * been re-pointed 1,100 miles — and this floor then dropped it because the
+     * truck happened to be parked 0.313 mi from the NEW address. The lane was
+     * both urgently stale and permanently unroutable, and the log said
+     * nothing either way.
+     */
+    if (straight < MIN_ROUTABLE_MILES) {
+      record('too-close', lane);
       continue;
     }
 
@@ -179,8 +305,8 @@ export async function sweepRouting(
     });
 
     if (!outcome.ok) {
-      sweep.failed += 1;
-      sweep.reasons[outcome.reason] = (sweep.reasons[outcome.reason] ?? 0) + 1;
+      record('failed', lane);
+      sweep.failures[outcome.reason] = (sweep.failures[outcome.reason] ?? 0) + 1;
       logger.info('route failed', {
         truck: c.truck_number,
         reason: outcome.reason,
@@ -217,11 +343,16 @@ export async function sweepRouting(
         .onConflictDoUpdate({ target: stopRoutes.stopId, set: row });
 
       await tx.insert(routeSamples).values({
+        // Provenance, not a join key — see the schema comment (§12.54).
         stopId: c.stop_id,
         destCity: c.dest_city,
         destState: c.dest_state,
         destZip: c.dest_zip,
         destPrecision: c.dest_precision,
+        // The point actually routed to, so the row stays a complete
+        // observation after the stop is re-pointed somewhere else.
+        destLat: c.stop_lat,
+        destLng: c.stop_lng,
         straightMiles: straight,
         routedMiles: outcome.miles,
         laneRatio,
@@ -233,8 +364,8 @@ export async function sweepRouting(
       });
     });
 
-    sweep.routed += 1;
-    sweep.reasons[reason] = (sweep.reasons[reason] ?? 0) + 1;
+    record('routed', lane);
+    sweep.routedBecause[reason] = (sweep.routedBecause[reason] ?? 0) + 1;
     logger.info('routed', {
       truck: c.truck_number,
       reason,

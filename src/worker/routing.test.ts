@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
-import { routeSamples, routingBudget, stopRoutes } from '@/db/schema';
+import { routeSamples, routingBudget, stopRoutes, stops } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeRoutableLane, makeRoutableLanes } from '@/test/fleet';
 import { budgetMonth } from '@/lib/routing';
@@ -224,5 +224,149 @@ withDb('the cached route survives a round trip', () => {
     });
     expect(seen.again?.routedMiles).toBe(seen.row.routedMiles);
     expect(seen.again?.computedAt).toBeInstanceOf(Date);
+  });
+});
+
+/**
+ * §12.54. Every candidate lane leaves the sweep with a named outcome.
+ *
+ * The sweep recorded a reason only for lanes it ROUTED or that the provider
+ * refused. Both skip branches did `skipped += 1; continue`, so the poll line
+ * read `routesSkipped: 20, routeReasons: {}` whether twenty lanes were
+ * correctly current or one was being dropped by the wrong rule. Diagnosing
+ * truck 132 took four database queries against a log that had the answer and
+ * was not printing it.
+ */
+withDb('the sweep can explain itself (§12.54)', () => {
+  it('accounts for every candidate — the outcomes sum to considered', async () => {
+    const seen = await rolledBack(async (tx) => {
+      await makeRoutableLanes(tx, 3);
+      const { provider } = stubProvider();
+      return sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+    });
+
+    // The property that makes the numbers trustworthy: nothing falls out of
+    // the loop unrecorded, so a branch added later cannot be silent.
+    const total = Object.values(seen.outcomes).reduce((a, b) => a + b, 0);
+    expect(seen.considered).toBeGreaterThan(0);
+    expect(total).toBe(seen.considered);
+    expect(seen.routed + seen.skipped + seen.failed).toBe(seen.considered);
+  });
+
+  /**
+   * Truck 132, reconstructed: the stop is re-pointed to an address the truck
+   * is already parked beside. `needsRecompute` says `stop-moved` and the
+   * half-mile floor then drops it, so the lane is both urgently stale and
+   * permanently unroutable — the exact combination the old log could not show.
+   */
+  it('names a lane dropped by the half-mile floor, and says which floor', async () => {
+    const seen = await rolledBack(async (tx) => {
+      // 0.31 miles apart, which is where truck 132 actually sat.
+      const lane = await makeRoutableLane(tx, {
+        from: { lat: 40.934355, lng: -75.949289 },
+        to: { lat: 40.93735438403, lng: -75.953783147648 },
+      });
+      const { provider, route } = stubProvider();
+      const sweep = await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+      return { sweep, calls: route.mock.calls.length, lane };
+    });
+
+    expect(seen.sweep.outcomes['too-close']).toBe(1);
+    expect(seen.calls).toBe(0);
+
+    const named = seen.sweep.blocked.find((b) => b.stopId === seen.lane.stopId);
+    expect(named).toBeDefined();
+    expect(named?.outcome).toBe('too-close');
+    expect(named?.truck).toBe(seen.lane.truck.truckNumber);
+    // With the distance, so the next reader does not have to query for it.
+    expect(named?.straightMiles).toBeCloseTo(0.313, 2);
+  });
+
+  it('does not name the lanes that are simply current', async () => {
+    const seen = await rolledBack(async (tx) => {
+      await makeRoutableLanes(tx, 3);
+      const { provider } = stubProvider();
+      // First sweep routes them; the second finds every route current.
+      await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+      return sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+    });
+
+    expect(seen.outcomes['route-current']).toBe(seen.considered);
+    // Naming twenty healthy lanes every thirty seconds is how the one that
+    // matters gets buried — which is the failure this whole ruling is about.
+    expect(seen.blocked).toEqual([]);
+  });
+
+  it('records the cycle cap instead of truncating the list in silence', async () => {
+    const seen = await rolledBack(async (tx) => {
+      // Ten lanes against a cap of eight.
+      await makeRoutableLanes(tx, 10);
+      const { provider } = stubProvider();
+      return sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+    });
+
+    expect(seen.routed).toBe(8);
+    expect(seen.outcomes['cycle-cap']).toBe(2);
+    // Still accounted for: the cap is a deferral, not a disappearance.
+    const total = Object.values(seen.outcomes).reduce((a, b) => a + b, 0);
+    expect(total).toBe(seen.considered);
+    expect(seen.blocked.map((b) => b.outcome)).toEqual(['cycle-cap', 'cycle-cap']);
+  });
+
+  it('snapshots the destination it routed to, not a reference to it', async () => {
+    /**
+     * §12.54. `stop_id` is provenance; the destination facts are the
+     * snapshot. 31% of the samples in the database when this was written
+     * already named a city their stop no longer had, so joining `stops` to
+     * recover a destination returns Hazleton for a Dallas measurement.
+     */
+    const seen = await rolledBack(async (tx) => {
+      const lane = await makeRoutableLane(tx, { to: { lat: 32.7211, lng: -96.8744 } });
+      const { provider } = stubProvider();
+      await sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+      const [sample] = await tx
+        .select()
+        .from(routeSamples)
+        .where(eq(routeSamples.stopId, lane.stopId));
+
+      // Re-point the stop 1,100 miles away, as a dispatcher's edit would.
+      await tx.update(stops).set({ lat: 40.9373, lng: -75.9537 }).where(eq(stops.id, lane.stopId));
+      const [after] = await tx
+        .select()
+        .from(routeSamples)
+        .where(eq(routeSamples.stopId, lane.stopId));
+      return { sample, after };
+    });
+
+    expect(seen.sample?.destLat).toBeCloseTo(32.7211, 4);
+    expect(seen.sample?.destLng).toBeCloseTo(-96.8744, 4);
+    // The measurement does not move when the stop does. That is the property.
+    expect(seen.after?.destLat).toBeCloseTo(32.7211, 4);
+    expect(seen.after?.destLng).toBeCloseTo(-96.8744, 4);
+  });
+
+  it('keeps the money separate from the outcome', async () => {
+    const seen = await rolledBack(async (tx) => {
+      await makeRoutableLanes(tx, 2);
+      const { provider } = stubProvider();
+      return sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+    });
+
+    // `routedBecause` answers "what did we spend on", which is a different
+    // question from "what happened to each lane" and used to share one field.
+    expect(seen.routedBecause['no-route']).toBe(seen.routed);
+    expect(seen.failures).toEqual({});
+  });
+
+  it('records a provider refusal as its own outcome, with the reason kept', async () => {
+    const seen = await rolledBack(async (tx) => {
+      await makeRoutableLane(tx);
+      const { provider } = stubProvider({ ok: false, reason: 'no-route', detail: 'stub' });
+      return sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+    });
+
+    expect(seen.outcomes['failed']).toBe(1);
+    expect(seen.failures['no-route']).toBe(1);
+    expect(seen.blocked[0]?.outcome).toBe('failed');
   });
 });

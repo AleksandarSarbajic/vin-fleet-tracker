@@ -146,7 +146,24 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
     case 'street':
       details.push({
         label: 'Accuracy',
-        value: 'Street address, interpolated along the block — not a rooftop',
+        /**
+         * §12.54. The ± says what it MEANS here, because at `street` it is not
+         * the same quantity as at `block` or `zip`.
+         *
+         * There the number is how far the coordinate might be from the address.
+         * Here the coordinate is where Census says, to within 12.9 m of a road
+         * centreline — and the truck still parks a few hundred metres off it,
+         * because a point on a road is not a dock door and a yard has depth.
+         * Saying "±0.2 mi" without that would read as the geocoder being
+         * unreliable, which is the wrong thing to distrust.
+         *
+         * It stays out of `etaCaution`, which holds at two clauses (§12.33):
+         * a street address is the good case and does not need a warning, only
+         * a number for whoever opens the detail on purpose.
+         */
+        value: pm
+          ? `Street address, interpolated along the block — not a rooftop. The dock may be ${pm.replace('±', 'up to ')} from this point.`
+          : 'Street address, interpolated along the block — not a rooftop',
       });
       break;
     case null:

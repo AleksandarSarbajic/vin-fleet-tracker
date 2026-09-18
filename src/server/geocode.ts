@@ -135,7 +135,20 @@ export interface GeocodeHit {
   lat: number;
   lng: number;
   precision: 'street' | 'block' | 'zip';
-  /** The ± to show a dispatcher. Only meaningful below `street`. */
+  /**
+   * **How far the dock may be from this point.** NOT geocoder error, and the
+   * distinction is the whole reason this field now has a value at `street`
+   * (§12.54).
+   *
+   * It used to be documented as "only meaningful below `street`", and left
+   * null there — which reads as exact, and §12.30 leans on that reading to
+   * grant `street` the right to conclude an arrival.
+   *
+   * Measurement says the point IS exact, as a location on a road segment, and
+   * systematically away from where a truck stops. It answers a question a
+   * dispatcher actually has ("could the truck be here and my screen not know
+   * it?") rather than one nobody asked ("how wrong is the Census Bureau?").
+   */
   accuracyMiles?: number;
   /**
    * What the signal actually was, not a fabricated grade. Census returns no
@@ -308,10 +321,38 @@ export function outcomeFor(matches: CensusMatch[], typed: AddressParts): Geocode
     lng,
     // Census never returns a parcel point. See the enum comment in schema.ts.
     precision: 'street',
+    /**
+     * §12.54. 0.15 mi — the p25 of 13 measured parking places across 4
+     * facilities (0.101 · 0.103 · 0.116 · 0.123 · 0.124 · 0.128 · 0.133 ·
+     * 0.152 · 0.312 · 0.318 · 0.320 · 0.321 · 0.516).
+     *
+     * Read it as "how far the dock may be from this point", never as geocoder
+     * error. `route_samples.snap_to_m` puts these coordinates 0.0–12.9 m from
+     * a road centreline, average 5.4 — they are precisely where Census says,
+     * and a truck passing one came within 0.0105 mi of it before parking 0.12
+     * mi away. The gap is interpolation offset plus facility footprint, and
+     * parked-truck data cannot separate the two.
+     *
+     * p25 rather than the median or the max: the arrival radius (0.35) is
+     * what has to CLEAR the distribution, and this number exists to stop
+     * `null` being read as exact. A ± that swallowed the 0.52 outlier would
+     * make every street address look unusable.
+     *
+     * **n=13 across 4 facilities is thin. Re-derive it on real loads.**
+     */
+    accuracyMiles: STREET_DOCK_OFFSET_MILES,
     confidence: zipAgrees ? 'census:in-range' : 'census:zip-differs',
     matchedAddress: top.matchedAddress ?? '',
   };
 }
+
+/**
+ * What a `street` coordinate's ± means. See the GeocodeHit field and §12.54.
+ *
+ * Named rather than inlined because it is a measured value with a shelf life,
+ * and the next person to re-derive it should find one place to change.
+ */
+export const STREET_DOCK_OFFSET_MILES = 0.15;
 
 /* ------------------------------- the request ----------------------------- */
 

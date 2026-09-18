@@ -7,7 +7,7 @@ import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
 import { sweepArrivals } from './arrival';
-import { sweepRouting } from './routing';
+import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { MapboxDirections } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
 import { STALL_SECONDS } from './ingest';
@@ -277,7 +277,17 @@ async function pollOnce(
    * Caught on its own: a routing failure must not lose the positions we just
    * wrote or stall the cursor.
    */
-  let routing = { routed: 0, skipped: 0, failed: 0, budgetExhausted: false, reasons: {} };
+  let routing: RoutingSweep = {
+    considered: 0,
+    routed: 0,
+    skipped: 0,
+    failed: 0,
+    budgetExhausted: false,
+    outcomes: {} as Record<RouteOutcome, number>,
+    routedBecause: {},
+    failures: {},
+    blocked: [],
+  };
   try {
     routing = await sweepRouting(db, router, logger, {
       ceiling: env.ROUTING_MONTHLY_CEILING,
@@ -305,10 +315,20 @@ async function pollOnce(
     arrivalsDetected: sweep.arrived,
     departuresDetected: sweep.departed,
     stopsWatched: sweep.considered,
+    /**
+     * §12.54. `routesSkipped` alone could not say whether twenty lanes were
+     * correctly left alone or one was being dropped by the wrong rule.
+     * `lanesConsidered` is the denominator, `routeOutcomes` sums to it, and
+     * `lanesBlocked` names the ones that are not routing and not fine.
+     */
+    lanesConsidered: routing.considered,
     routed: routing.routed,
     routesSkipped: routing.skipped,
     routesFailed: routing.failed,
-    routeReasons: routing.reasons,
+    routeOutcomes: routing.outcomes,
+    routedBecause: routing.routedBecause,
+    routeFailures: routing.failures,
+    lanesBlocked: routing.blocked,
   });
 }
 
