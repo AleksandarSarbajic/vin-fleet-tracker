@@ -325,3 +325,227 @@ describe('double-click opens the edit modal (§12.48)', () => {
     expect(window.getSelection()?.rangeCount).toBe(0);
   });
 });
+
+/* -------------------------------------------------------------------------
+ * §12.49 — the ETA carries the status colour, and four cases refuse it
+ * ---------------------------------------------------------------------- */
+
+describe('the ETA cell carries status ink (§12.49)', () => {
+  const mountOne = async (over: Parameters<typeof fleetRow>[0], feedStale = false) => {
+    await act(async () => {
+      root!.unmount();
+    });
+    root = createRoot(container!);
+    const one = fleetRow({
+      id: ROW_A.id,
+      truckNumber: 101,
+      samsaraName: 'Truck #101',
+      milesRemaining: 412,
+      ...over,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(Console, {
+            initial: { ...INITIAL, fleet: [one], feedStale },
+            dispatchTz: 'America/Chicago',
+            user: { fullName: 'S L', email: null, role: 'admin' as const },
+            initialQuery: '',
+            initialTruck: null,
+            initialChips: [],
+            drivers: [],
+            role: 'admin' as const,
+          }),
+        ),
+      );
+    });
+    return (etaCell('101').children[0] as HTMLElement).className;
+  };
+
+  it('colours a LATE ETA with the late ink', async () => {
+    const cls = await mountOne({
+      status: 'LATE',
+      etaAbsence: 'has-eta',
+      etaUtc: '2026-09-18T22:05:00.000Z',
+    });
+    expect(cls).toContain('text-status-late-fg');
+  });
+
+  it('colours AT_RISK and ON_TIME with their own', async () => {
+    expect(
+      await mountOne({ status: 'AT_RISK', etaAbsence: 'has-eta', etaUtc: '2026-09-18T22:05:00.000Z' }),
+    ).toContain('text-status-risk-fg');
+    expect(
+      await mountOne({ status: 'ON_TIME', etaAbsence: 'has-eta', etaUtc: '2026-09-18T22:05:00.000Z' }),
+    ).toContain('text-status-ontime-fg');
+  });
+
+  /** §9.5: a forced chip keeps the status colour, so the ETA must agree. */
+  it('follows the SHOWN status, not the computed one, under an override', async () => {
+    const cls = await mountOne({
+      status: 'LATE',
+      computed: 'ON_TIME',
+      etaAbsence: 'has-eta',
+      etaUtc: '2026-09-18T22:05:00.000Z',
+    });
+    expect(cls).toContain('text-status-late-fg');
+    expect(cls).not.toContain('text-status-ontime-fg');
+  });
+
+  it('refuses ink for "no ETA" — not a time, not a judgement', async () => {
+    const cls = await mountOne({ status: 'LATE', etaAbsence: 'address-not-located', etaUtc: null });
+    expect(cls).toContain('text-text-secondary');
+    expect(cls).not.toContain('text-status-late-fg');
+  });
+
+  it('refuses ink for a dash', async () => {
+    const cls = await mountOne({ status: 'NO_APPT', etaAbsence: 'no-appointment', etaUtc: null });
+    expect(cls).toContain('text-text-secondary');
+  });
+
+  /**
+   * §5.9, hard requirement. A green ETA built on nine-minute-old GPS is worse
+   * than no ETA — so the whole board withdraws schedule colour, and this cell
+   * is the one that just gained some.
+   */
+  it('withdraws the ink entirely when the feed is stale', async () => {
+    const cls = await mountOne(
+      { status: 'LATE', etaAbsence: 'has-eta', etaUtc: '2026-09-18T22:05:00.000Z' },
+      true,
+    );
+    expect(cls).toContain('text-text-muted');
+    expect(cls).not.toContain('text-status-late-fg');
+    // And the cell says so rather than showing a time nobody should trust.
+    expect((etaCell('101').children[0] as HTMLElement).textContent).toBe('stale');
+  });
+
+  it('keeps the unassigned strike muted, never coloured (§5.8)', async () => {
+    const cls = await mountOne({
+      status: 'UNASSIGNED',
+      etaAbsence: 'suppressed-unassigned',
+      lastComputedEtaUtc: '2026-09-18T22:05:00.000Z',
+    });
+    expect(cls).toContain('text-text-muted');
+    expect(cls).toContain('line-through');
+    expect(cls).not.toContain('text-status');
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.50 — the toast actually reaches the screen
+ * ---------------------------------------------------------------------- */
+
+describe('a truck going LATE raises a toast (§12.50)', () => {
+  /** A second poll, as react-query delivers one. */
+  const poll = async (client: QueryClient, fleet: ReturnType<typeof fleetRow>[]) => {
+    await act(async () => {
+      client.setQueryData(['fleet'], {
+        ...INITIAL,
+        fleet,
+        fetchedAt: new Date().toISOString(),
+      });
+      /**
+       * react-query flushes its notify batch on a MACROTASK, so awaiting a
+       * microtask here leaves the observer un-notified and the component
+       * rendered exactly once — which looks identical to a component that
+       * ignores the cache. Cost an hour; worth the comment.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+
+  const mountWith = async (fleet: ReturnType<typeof fleetRow>[]) => {
+    await act(async () => {
+      root!.unmount();
+    });
+    root = createRoot(container!);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(Console, {
+            initial: { ...INITIAL, fleet },
+            dispatchTz: 'America/Chicago',
+            user: { fullName: 'S L', email: null, role: 'admin' as const },
+            initialQuery: '',
+            initialTruck: null,
+            initialChips: [],
+            drivers: [],
+            role: 'admin' as const,
+          }),
+        ),
+      );
+    });
+    return client;
+  };
+
+  const onTime = fleetRow({ id: ROW_A.id, truckNumber: 101, samsaraName: 'Truck #101', status: 'ON_TIME' });
+  const late = fleetRow({ id: ROW_A.id, truckNumber: 101, samsaraName: 'Truck #101', status: 'LATE' });
+  const toastEl = () => container!.querySelector('[data-toast]');
+
+  beforeEach(() => {
+    // The ledger is persisted, so one test's toast would suppress the next.
+    try {
+      window.localStorage.clear();
+    } catch {
+      /* happy-dom without storage: the ledger falls back to empty anyway. */
+    }
+  });
+
+  it('shows nothing on the first poll, however late the board is', async () => {
+    await mountWith([late]);
+    expect(toastEl()).toBeNull();
+  });
+
+  it('raises one when the truck crosses on a LATER poll', async () => {
+    const client = await mountWith([onTime]);
+    expect(toastEl()).toBeNull();
+
+    await poll(client, [late]);
+    expect(toastEl()).not.toBeNull();
+    expect(toastEl()?.textContent).toContain('101');
+    expect(toastEl()?.textContent).toContain('late');
+  });
+
+  it('never steals focus — polite, not an alert', async () => {
+    const client = await mountWith([onTime]);
+    await poll(client, [late]);
+
+    const live = container!.querySelector('[aria-live]');
+    expect(live?.getAttribute('aria-live')).toBe('polite');
+    expect(container!.querySelector('[role="alert"]')).toBeNull();
+    // "A toast is an echo, not the notification."
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('does not raise a second one for the same truck and stop', async () => {
+    const client = await mountWith([onTime]);
+    await poll(client, [late]);
+    await poll(client, [onTime]);
+    await poll(client, [late]);
+
+    expect(container!.querySelectorAll('[data-toast]')).toHaveLength(1);
+  });
+
+  it('Open selects the truck and opens its modal', async () => {
+    const client = await mountWith([onTime]);
+    await poll(client, [late]);
+
+    const open = Array.from(container!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Open',
+    );
+    expect(open).toBeDefined();
+    await act(async () => {
+      open!.click();
+    });
+
+    expect(openModalTruck()).toBe('101');
+    // And it takes itself away once acted on.
+    expect(toastEl()).toBeNull();
+  });
+});

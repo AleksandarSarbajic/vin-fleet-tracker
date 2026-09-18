@@ -12,6 +12,13 @@ import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
 import { ConsoleHeader } from './ConsoleHeader';
 import type { AccountUser } from './AccountMenu';
+import { Toasts } from './Toasts';
+import {
+  detectToasts,
+  dispatchDay,
+  type FleetSnapshot,
+  type StatusToast,
+} from '@/lib/toast';
 import { FleetList } from './FleetList';
 import { Split } from './Split';
 import { FleetMap } from './map/FleetMap';
@@ -101,6 +108,80 @@ export function Console({
    * the Inactive chip.
    */
   const rows = useMemo(() => all.filter((row) => passesFilters(row, chips)), [all, chips]);
+
+  /* --------------------------- status toasts (§12.50) -------------------- */
+
+  const [toasts, setToasts] = useState<StatusToast[]>([]);
+  /** The previous poll, as the only thing a transition can be measured against. */
+  const lastSeen = useRef<Map<string, FleetSnapshot> | null>(null);
+  const lastFeedStale = useRef<boolean>(false);
+  /**
+   * Which truck+stop pairs have already toasted today, persisted so a mid-shift
+   * refresh does not re-announce a truck the dispatcher has already dealt with.
+   * Keyed by dispatch day, which is also how the TOMORROW rule counts days.
+   */
+  const ledgerKey = `ft.toasted.${dispatchDay(new Date(), dispatchTz)}`;
+  const ledger = useRef<Set<string> | null>(null);
+  if (ledger.current === null) {
+    let stored: string[] = [];
+    try {
+      const raw = window.localStorage.getItem(ledgerKey);
+      stored = raw === null ? [] : (JSON.parse(raw) as string[]);
+      // Yesterday's ledgers are dead weight; drop them on the way past.
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const k = window.localStorage.key(i);
+        if (k !== null && k.startsWith('ft.toasted.') && k !== ledgerKey) {
+          window.localStorage.removeItem(k);
+        }
+      }
+    } catch {
+      // Private browsing, or storage disabled. A forgotten ledger costs one
+      // repeat toast; a crash costs the console.
+      stored = [];
+    }
+    ledger.current = new Set(stored);
+  }
+
+  const feedStale = data?.feedStale ?? false;
+  const snapshot = useMemo<FleetSnapshot[]>(
+    () =>
+      all.map((row) => ({
+        id: row.id,
+        truckNumber: row.truckNumber,
+        samsaraName: row.samsaraName,
+        status: row.status,
+        stopId: row.nextStop?.stopId ?? null,
+        forced: row.override !== null,
+      })),
+    [all],
+  );
+
+  useEffect(() => {
+    const found = detectToasts({
+      previous: lastSeen.current,
+      next: snapshot,
+      feedStaleBefore: lastFeedStale.current,
+      feedStaleNow: feedStale,
+      alreadyToday: ledger.current ?? new Set<string>(),
+    });
+
+    lastSeen.current = new Map(snapshot.map((row) => [row.id, row]));
+    lastFeedStale.current = feedStale;
+    if (found.length === 0) return;
+
+    for (const toast of found) ledger.current?.add(toast.id);
+    try {
+      window.localStorage.setItem(ledgerKey, JSON.stringify([...(ledger.current ?? [])]));
+    } catch {
+      // See above: the ledger is a convenience, never a correctness guarantee.
+    }
+    // Newest first, capped at the spec's three.
+    setToasts((current) => [...found, ...current].slice(0, 3));
+  }, [snapshot, feedStale, ledgerKey]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((t) => t.id !== id));
+  }, []);
 
   /** Typed immediately, applied 250ms later — the field never feels laggy. */
   const [typed, setTyped] = useState(initialQuery);
@@ -300,6 +381,16 @@ export function Console({
           }
         />
       </div>
+
+      <Toasts
+        toasts={toasts}
+        onOpen={(truckId) => {
+          select(truckId);
+          setEditingId(truckId);
+        }}
+        onExpire={dismissToast}
+        reducedMotion={reducedMotion}
+      />
 
       {editingRow ? (
         <EditStopModal

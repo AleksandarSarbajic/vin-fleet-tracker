@@ -38,6 +38,35 @@ export const GRID_8 =
  */
 export const GRID_6 = 'grid-cols-[3px_72px_148px_minmax(0,1fr)_128px_128px]';
 
+/**
+ * Status ink for the ETA cell (§12.49).
+ *
+ * The design colours the ETA and nothing else in the row. Verified cell by
+ * cell against the drawn LATE row: the stripe and the chip carry
+ * `status.late.fg`, the ETA `17:05` carries it at weight 500, and the Next
+ * stop address stays `text.secondary`. Same across every drawn state —
+ * AT_RISK `08:50` in `status.risk.fg`, ON_TIME `07:30` in `status.ontime.fg`.
+ *
+ * The Appt time is `text.DEFAULT` in every one of them, which is what §5.9
+ * means by "appointment times stay full strength": it is the one number that
+ * never carries feed-derived colour, and that is what makes it trustworthy
+ * when the feed dies.
+ *
+ * A static map because Tailwind cannot see a class name assembled at runtime.
+ */
+const ETA_INK: Record<Status, string> = {
+  LATE: 'text-status-late-fg',
+  AT_RISK: 'text-status-risk-fg',
+  ON_TIME: 'text-status-ontime-fg',
+  ARRIVED: 'text-status-arrived-fg',
+  TOMORROW: 'text-status-tomorrow-fg',
+  // The three neutral states share one ink here exactly as they do in the
+  // chip. §5.1: they are told apart by border, icon and pattern, never hue.
+  NO_APPT: 'text-status-neutral-fg',
+  STALE_GPS: 'text-status-neutral-fg',
+  UNASSIGNED: 'text-status-neutral-fg',
+};
+
 export const ROW_HEIGHT = 44;
 
 /**
@@ -154,6 +183,42 @@ export function milesText(miles: number | null): string | null {
  * above: an ETA with no driver is fiction, but blanking it loses information
  * the dispatcher had a moment ago (§5.8).
  */
+/**
+ * §12.49. Which ink the ETA cell takes, and the four cases that refuse it.
+ *
+ * Measured against every row ground before shipping (§12.49): the worst pair
+ * is LATE on a SELECTED row at exactly **7.00** — the floor, with no margin.
+ */
+function etaInk(row: FleetRow, feedStale: boolean): string {
+  /**
+   * §5.9, hard requirement. The feed is stale, so the whole board withdraws
+   * schedule colour — a green ETA built on nine-minute-old GPS is worse than
+   * no ETA. The cell already reads `stale`; it must not read it in green.
+   */
+  if (feedStale) return 'text-text-muted';
+
+  /**
+   * §5.8. The strike-through says this number is not being maintained.
+   * Status ink would argue the opposite in the same glance.
+   */
+  if (row.status === 'UNASSIGNED') return 'text-text-muted line-through';
+
+  /**
+   * `no ETA`, `—` and the like are not times, and a status colour on them
+   * would make "we cannot project this" look like a schedule judgement.
+   */
+  if (row.etaAbsence !== 'has-eta' && row.etaAbsence !== 'arrived') {
+    return 'text-text-secondary';
+  }
+
+  /**
+   * `row.status`, not `row.computed` — so a forced override colours the ETA
+   * to match the chip it is showing (§9.5: a forced chip keeps the status
+   * colour). The two must never disagree on the same row.
+   */
+  return ETA_INK[row.status];
+}
+
 function etaText(row: FleetRow, feedStale: boolean): string {
   // Every ETA reads `stale` while the feed is down: the projection is built
   // on a position we no longer trust (§5.9).
@@ -467,11 +532,7 @@ function TruckRowImpl({
         */}
       {columns === 8 ? (
         <div title={etaTitle(row)} className="relative text-right">
-          <div
-            className={`truncate text-body tabular-nums ${
-              unassigned ? 'text-text-muted line-through' : 'text-text-secondary'
-            }`}
-          >
+          <div className={`truncate text-body tabular-nums ${etaInk(row, feedStale)}`}>
             {etaText(row, feedStale)}
           </div>
           {milesLine ? (

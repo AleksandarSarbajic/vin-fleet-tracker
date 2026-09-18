@@ -3793,6 +3793,176 @@ would have covered anyway.
 Selection needs no extra work. `dblclick` is preceded by two `click`s, so the
 existing `onSelect` has already run and the map is already on the right truck.
 
+## 12.49 The ETA carries the status colour
+
+Verified cell by cell against the drawn LATE row in `Fleet_Tracker_dc.html`,
+because the brief does not say this anywhere and §4.1 gives every column's
+type with no colour at all:
+
+| Cell | Ink | Weight |
+|---|---|---|
+| stripe | `status.late.fg` | — |
+| Truck | `text.DEFAULT` | 700 |
+| Driver | `text.DEFAULT` | 400 |
+| Position | `text.DEFAULT` | 500 |
+| **Next stop** | **`text.secondary`** | 400 |
+| Appt | `text.DEFAULT` | 600 |
+| **ETA** | **`status.late.fg`** | 500 |
+| chip | `status.late.fg` on its bg | — |
+
+Consistent across every drawn state — AT_RISK amber, ON_TIME green, STALE_GPS
+`stale` in muted, UNASSIGNED struck through in muted. **The Appt time is
+`text.DEFAULT` in all of them**, which is exactly what §5.9 means by
+"appointment times stay full strength": it is the one number that never
+carries feed-derived colour, and that is what makes it trustworthy when the
+feed dies. Colouring it would have put the offline rule in direct conflict
+with itself.
+
+### Why not the address
+
+§6.2 ranks **Next stop 1st in the truncation ladder** — the most expendable
+cell, first to drop its dock detail, first to ellipsise, and below 900px of
+list width the only flexible column left, absorbing all the narrowing alone.
+A signal belongs on a cell that is always complete, and §6.2's never-truncate
+set is exactly where the design put it.
+
+### Measured against every ground
+
+§5.2 publishes base and selected. These are all four, including hover, which
+it never gave:
+
+```
+ink                        default      hover   selected  unassigned
+LATE    #ff8a7a               7.78       7.06       7.00        7.31
+AT_RISK #f2b23f               9.52       8.64       8.56        8.94
+ON_TIME #5ed69b               9.82       8.91       8.83        9.22
+ARRIVED #9cc4e8               9.74       8.84       8.76        9.15
+TOMORROW/NEUTRAL #858d94      5.29       4.80       4.76        4.97
+```
+
+**LATE on a selected row is 7.00. That is the floor, with no margin.** The
+design holds itself to 7.0; this pair is exactly on it and any change to
+`row.selected` moves it below. **Do not adjust that ground without
+re-measuring this pair.** The published 7.78 and 7.00 were reproduced
+independently here, which is the check that the method is right.
+
+`#858d94` is below the 7.0 bar on every ground, and it is also `text.muted` —
+already used as row text on TOMORROW rows, so it is a pre-existing pair rather
+than a new one.
+
+### The four refusals
+
+- **feed stale** — §5.9 withdraws schedule colour fleet-wide. The cell reads
+  `stale`; it must not read it in green.
+- **unassigned** — the strike says this number is not being maintained. Status
+  ink would argue the opposite in the same glance.
+- **`no ETA` and `—`** — not times. Colour would make "we cannot project this"
+  look like a schedule judgement.
+- **a forced override** — not a refusal but a redirection: the ink follows
+  `row.status`, not `row.computed`, so the ETA and the chip it sits beside can
+  never disagree (§9.5).
+
+## 12.50 One toast, chosen by counting
+
+§9.11 specifies three toasts and makes status-change toasts "opt-in per chip".
+There is no settings surface, and building one for a single preference is the
+wrong order: **narrow the event set until the preference has nothing to do.**
+
+### Two of the three are not built
+
+- The green `Undo` toast has **no undo behind it anywhere in the codebase**,
+  and History is deferred (§13). A toast whose action word does nothing is
+  §12.35's shape — a surface claiming a capability that is not there.
+- The red save-failure toast already has a better home: the modal the
+  dispatcher is looking at, which renders the error with `role="alert"` and
+  keeps it until they deal with it. A toast would be a worse copy that expires
+  after six seconds.
+
+### LATE only, and the counting that decided it
+
+`scripts/status-transitions.mts` replays the real engine over the positions in
+the database. Over 20 hours, 28 trucks with an open stop:
+
+```
+                crossings   distinct truck+stop   worst hour
+into LATE              10                     6            2
+into AT_RISK            4                     4            1
+```
+
+**All four AT_RISK crossings were followed by a LATE crossing on the same
+truck and stop, 17 to 49 minutes later.** So an AT_RISK toast flags no truck
+that LATE does not, and interrupts twice about one deteriorating situation —
+which is precisely the pattern that teaches people to ignore toasts.
+
+After the suppression rules, six toasts in twenty hours: about one every three
+hours. Quiet enough to be read, frequent enough to be worth having.
+
+### Six rules, and the one the data forced
+
+1. **First load.** No previous poll is a starting position, not a transition.
+   Every LATE truck on the board is not news; it is the board. This also
+   covers a mid-shift refresh.
+2. **The feed.** When `feedStale` flips, every row changes at once — 23 toasts
+   for one event, none of them about a truck. Suppressed on both edges,
+   because the return is as synchronised as the departure.
+3. **A truck that was not there a poll ago** has not crossed anything; it has
+   arrived in the query.
+4. **The fog states.** `STALE_GPS`, `NO_APPT` and `UNASSIGNED` mean "we do not
+   know", not "everything is fine". Leaving one is the fog lifting on a fact
+   that was already true.
+5. **A forced status.** The dispatcher who set it does not need telling what
+   they typed. Checked on the new row, so an override *lifting* to reveal a
+   real LATE still toasts.
+6. **Once per truck and stop per dispatch day**, persisted, so a refresh does
+   not re-announce a truck already dealt with. Keyed by stop, so the same
+   truck going late on its next load is a new fact.
+
+Rule 4 is the one measurement produced rather than reasoning. **Truck 138
+reports GPS once an hour**, so it cycled `LATE → STALE_GPS` (at the 45-minute
+threshold) `→ LATE` three times in one morning while being continuously and
+unchangingly late. Truck 124 did the same later the same day.
+
+**That is why the fix is a ledger and not a debounce.** The flapping has a
+sixty-minute period: any debounce short enough to be useful lets it through,
+and one long enough to catch it would swallow genuine crossings on other
+trucks. A time window cannot express "this fact has already been reported".
+
+### The surface
+
+Bottom-left, 6s, three at most, per §9.11 — `surface.overlay`, hairline on
+three sides, 3px status-coloured left border, action word in `accent`.
+`role="status"` with `aria-live="polite"`, never `alert`: *"a toast is an
+echo, not the notification — the row and the marker have already changed."*
+
+## 12.51 A pasted date is a test that depends on when it runs
+
+`override.test.ts` pasted `2026-09-18` as its fixture appointment. It passed
+for as long as that date was in the future, and the moment the clock reached
+the 19th `setOverride` refused the write — "that expiry is already in the
+past" — and the suite went red on a day when nothing had been touched.
+
+CLAUDE.md already says to derive dates in code and never paste one. It says it
+about DST, but the reason is more general: **a pasted date is a silent
+dependency on the calendar.** The fixture now derives tomorrow in the dispatch
+zone, so the appointment is in the future whatever the hour the suite runs at.
+
+The assertions changed shape with it. `expect(expiry).toBe('2026-09-18T20:00:00.000Z')`
+became two statements that survive a date change and say more:
+
+- the expiry **is** the stop's own `appointment_end_utc`, read back from the
+  row the edit path wrote — which is the actual contract the test is named
+  after, and was only ever implied by the literal;
+- read back into the stop's zone it says `15:00`, which is the 14:30 + 30
+  minute arithmetic the literal carried, and is now correct under either
+  offset rather than only under CDT.
+
+### The blast radius, checked rather than assumed
+
+`expiry is already in the past` is the **only** rule in the codebase that
+requires a future instant. The other 90-odd pasted dates in the suite are in
+tests where a past date is legitimate — appointment conversions, stop edits —
+and several are pasted precisely because the conversion is the subject.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

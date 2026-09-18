@@ -18,6 +18,42 @@ import type { Tx } from './audit';
 const withDb = describeDb;
 const DISPATCH_TZ = 'America/Chicago';
 
+/**
+ * TOMORROW in the dispatch zone, DERIVED (§12.51).
+ *
+ * This fixture used to paste `2026-09-18`, and it passed until the clock
+ * reached the 19th — at which point `setOverride` refused the write with
+ * "that expiry is already in the past" and the suite went red on a day when
+ * nothing had been touched.
+ *
+ * CLAUDE.md says to derive dates in code and never paste one. It says it
+ * about DST, but the reason generalises: a pasted date is a test that
+ * silently depends on when it is run.
+ *
+ * Tomorrow rather than today, so the appointment is always in the future
+ * whatever the hour the suite runs at.
+ */
+function tomorrowInDispatchZone(): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPATCH_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(Date.now() + 86_400_000));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { y: get('year'), m: get('month'), d: get('day') };
+}
+
+/** The wall time an instant reads as in the dispatch zone, as `HH:MM`. */
+function wallTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: DISPATCH_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(iso));
+}
+
 /** A truck with one stop, created through the real edit path. */
 async function aStop(tx: Tx) {
   const truck = await makeTruck(tx);
@@ -37,7 +73,7 @@ async function aStop(tx: Tx) {
       zip: '60451',
       appointment: {
         type: 'APPT',
-        date: { y: 2026, m: 9, d: 18 },
+        date: tomorrowInDispatchZone(),
         time: { h: 14, min: 30 },
         tz: DISPATCH_TZ,
         windowMinutes: 30,
@@ -45,7 +81,12 @@ async function aStop(tx: Tx) {
       dispatcherNote: null,
     }),
   });
-  return { truckId: truck.id, stopId: saved.stopId };
+  return {
+    truckId: truck.id,
+    stopId: saved.stopId,
+    apptStartUtc: saved.appointment?.startUtc ?? null,
+    apptEndUtc: saved.appointment?.endUtc ?? null,
+  };
 }
 
 const input = (stopId: string, over: Partial<OverrideInput> = {}) =>
@@ -126,17 +167,23 @@ withDb('setting an override', () => {
   });
 
   it('resolves `Until appt` to the stop’s own deadline', async () => {
-    const expiry = await rolledBack(async (tx) => {
-      const { stopId } = await aStop(tx);
+    const seen = await rolledBack(async (tx) => {
+      const stop = await aStop(tx);
       const result = await setOverride(tx as never, {
         actorUserId: null,
         dispatchTz: DISPATCH_TZ,
-        override: input(stopId, { expiry: 'UNTIL_APPT' }),
+        override: input(stop.stopId, { expiry: 'UNTIL_APPT' }),
       });
-      return result.expiresAtUtc;
+      return { expiry: result.expiresAtUtc, stop };
     });
-    // 14:30 + a 30-minute window at the stop = 20:00Z.
-    expect(expiry).toBe('2026-09-18T20:00:00.000Z');
+
+    // THE stop's deadline, read back from the row the edit path wrote —
+    // not a literal, which is what made this fail on a date change.
+    expect(seen.expiry).toBe(seen.stop.apptEndUtc);
+    // And the arithmetic the literal used to carry: 14:30 plus the stop's
+    // own 30-minute window is 15:00, in the stop's zone, whatever the offset
+    // is on the day the suite runs.
+    expect(wallTime(seen.expiry!)).toBe('15:00');
   });
 
   it('converts a CUSTOM wall time through the appointment path', async () => {
@@ -148,7 +195,7 @@ withDb('setting an override', () => {
         override: input(stopId, {
           expiry: 'CUSTOM',
           customExpiry: {
-            date: { y: 2026, m: 9, d: 18 },
+            date: tomorrowInDispatchZone(),
             time: { h: 23, min: 0 },
             tz: DISPATCH_TZ,
           },
@@ -156,8 +203,11 @@ withDb('setting an override', () => {
       });
       return result.expiresAtUtc;
     });
-    // 23:00 Chicago is 04:00Z the next day. One conversion path, not two.
-    expect(expiry).toBe('2026-09-19T04:00:00.000Z');
+    // 23:00 in the dispatch zone, whatever that is in UTC on the day. One
+    // conversion path, not two — asserted by reading it back through the
+    // zone rather than by pasting the offset.
+    expect(wallTime(expiry!)).toBe('23:00');
+    expect(expiry!.endsWith('Z')).toBe(true);
   });
 
   it('refuses an expiry already in the past', async () => {
