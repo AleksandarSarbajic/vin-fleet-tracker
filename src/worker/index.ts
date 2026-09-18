@@ -10,6 +10,7 @@ import { sweepArrivals } from './arrival';
 import { sweepRouting } from './routing';
 import { MapboxDirections } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
+import { STALL_SECONDS } from './ingest';
 import {
   flattenFeed,
   prunePositions,
@@ -87,16 +88,44 @@ async function main(): Promise<void> {
 
     let lastRoster = Date.now();
     let lastPrune = Date.now();
+    /**
+     * When the last poll SUCCEEDED, so a stall can be measured (§12.39).
+     *
+     * The worker stalled eleven times in one day, 5.8 to 51.1 minutes. Each
+     * one logged a single line — at the END, when the hung query finally
+     * threw — which read like one bad query rather than half an hour of a
+     * dead fleet. The gap is the fact worth reporting, and nothing was
+     * measuring it.
+     */
+    let lastSuccessAt = Date.now();
 
     while (!shuttingDown) {
       const startedAt = Date.now();
+      const gapSeconds = (startedAt - lastSuccessAt) / 1000;
       try {
-        await pollOnce(db, samsara, router);
+        await pollOnce(db, samsara, router, gapSeconds);
+        if (gapSeconds >= STALL_SECONDS) {
+          /**
+           * Logged as its own event, at WARN, naming the duration. This is
+           * the line that was missing: the error told us a query failed, not
+           * that the fleet had been unobserved for 34 minutes.
+           */
+          logger.warn?.('poll stall ended', {
+            stalledSeconds: Math.round(gapSeconds),
+            missedCycles: Math.floor(gapSeconds / (POLL_INTERVAL_MS / 1000)),
+          });
+        }
+        lastSuccessAt = Date.now();
       } catch (error: unknown) {
         // Never let one bad cycle kill the process — the next poll is 30s
         // away and the feed_health row is what tells the UI we are behind.
         const message = error instanceof Error ? error.message : String(error);
-        logger.error('poll cycle failed', { error: message });
+        logger.error('poll cycle failed', {
+          error: message,
+          // How long the fleet has been unobserved, which the error alone
+          // never said.
+          stalledSeconds: Math.round(gapSeconds),
+        });
         await recordFailure(db, message);
       }
 
@@ -134,12 +163,14 @@ async function pollOnce(
   db: ReturnType<typeof createDirectDb>['db'],
   samsara: SamsaraClient,
   router: MapboxDirections,
+  /** Seconds since the last SUCCESSFUL poll, recorded on the heartbeat. */
+  gapSeconds = 0,
 ): Promise<void> {
   const cursor = await readCursor(db);
   const page = await samsara.vehicleStatsFeed(cursor ?? undefined);
 
   if (page.rows.length === 0) {
-    await recordSuccess(db, page.endCursor || (cursor ?? ''), null);
+    await recordSuccess(db, page.endCursor || (cursor ?? ''), null, gapSeconds);
     logger.info('poll: no changes', { cursor: shortCursor(page.endCursor) });
     return;
   }
@@ -151,7 +182,7 @@ async function pollOnce(
   const pending = flattenFeed(page.rows);
   const result = await writePositions(db, pending, idMap);
 
-  await recordSuccess(db, page.endCursor, result.newestRecordedAt);
+  await recordSuccess(db, page.endCursor, result.newestRecordedAt, gapSeconds);
 
   /**
    * §12.27. AFTER the positions land, because it reads them back — running it

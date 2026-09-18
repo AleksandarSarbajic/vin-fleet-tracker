@@ -157,8 +157,29 @@ export function projectDistance(
   fresh: boolean,
 ): Projection {
   if (cached && fresh) {
+    /**
+     * ADVANCED by what the truck has covered since the route was measured
+     * (§12.40).
+     *
+     * This returned `cached.routedMiles` unchanged, and `project()` adds it
+     * to `position.recorded_at`. The anchor moves with every fix; the
+     * distance did not. So the ETA advanced 1:1 with the wall clock —
+     * measured on truck 116: 5.6 minutes of clock, 5.6 minutes of ETA, while
+     * the truck covered 6.5 miles and the projected distance never changed.
+     *
+     * The straight-line distance IS current — it is recomputed from the
+     * newest fix every time. So the shrinkage since the route was measured is
+     * `straightAtRoute - straightNow`, scaled by this lane's own measured
+     * ratio, which is the best available estimate of the road miles consumed.
+     *
+     * Clamped at zero: a truck that has moved AWAY has not travelled negative
+     * road miles, and the route is about to be recomputed anyway.
+     */
+    const closedStraight = cached.straightAtRouteMiles - straightNow;
+    const closedRouted = closedStraight * cached.laneRatio;
+    const miles = Math.max(0, cached.routedMiles - Math.max(0, closedRouted));
     return {
-      miles: cached.routedMiles,
+      miles,
       speedMph: cappedSpeed(cached, avgSpeedMph),
       basis: 'routed',
       laneRatio: cached.laneRatio,

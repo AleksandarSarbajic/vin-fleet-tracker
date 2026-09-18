@@ -31,6 +31,10 @@ import { writeAudit, type Db } from '@/server/audit';
  * because the worker cannot see further back than it looks. That is a bounded,
  * stated inaccuracy rather than a hidden one — and it is the reason the window
  * is 30 minutes and not 5.
+ *
+ * That bound only became TRUE in §12.41. Until then `confirmedRun` required
+ * the run to start at the newest fix, so an arrival the truck had already
+ * left was not late — it was unfindable, whatever the window said.
  */
 
 const WINDOW_MINUTES = 30;

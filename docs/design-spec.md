@@ -2145,6 +2145,21 @@ parked three hours ago is recorded as arriving at the window's edge. The
 worker cannot see further back than it looks. A bounded and stated inaccuracy,
 and the reason the window is 30 minutes rather than 5.
 
+> **This paragraph was false as written, from phase 5 until §12.41.**
+>
+> It claimed the window BOUNDED the inaccuracy. It did not. `confirmedRun`
+> broke on the first fix that failed, so a run had to begin at the newest fix
+> — the truck had to still be parked. Once it left, the dwell sat behind a
+> moving fix and could never be found, however far back the window looked. The
+> arrival was not late, it was **lost**.
+>
+> Truck 116 is the proof: 21 minutes at its receiver during a 34-minute worker
+> stall (§12.39), and nothing recorded it. The window was irrelevant; the head
+> of the list disqualified everything behind it.
+>
+> A spec line asserting a guarantee the code does not provide is its own
+> defect — it is what stops anyone looking. The bound is real now (§12.41).
+
 ### The dispatcher still wins
 
 The worker records facts; the override decides what the row shows. A live
@@ -3222,6 +3237,147 @@ The picker now holds the driver it just created until the `drivers` prop
 catches up, which removes the ordering dependency from both callers — the
 board can refetch cheaply and the modal cannot, and an input that blanks after
 a successful create looks like a failure.
+
+## 12.39 The worker stalled for 5.5 hours and nothing said so
+
+Truck 116's dwell was swallowed by a 34-minute gap in which the worker
+ingested nothing, detected no arrivals and routed nothing. It was not an
+incident. Counting the gap before every error in one day:
+
+```
+08:56  10.6 min      12:37  48.3 min      16:36  34.0 min
+09:21  36.3 min      12:39  51.1 min      17:29  26.0 min
+09:50  28.4 min      13:48   5.8 min
+10:23  26.6 min      15:26  33.4 min
+10:51  28.6 min
+```
+
+**Eleven stalls, 329 minutes — 5.5 hours of a 9.5 hour day.**
+
+### Connection-level, and the log said the opposite
+
+The 13 errors span four tables and both reads and writes — a `feed_health`
+select, a `trucks` update, a `positions` insert, a `stop_routes` select. No
+query is at fault.
+
+The poll loop is correct: it catches, logs and continues 30 s later. So
+`pollOnce` **hung**, and the error line marked the END of the outage. One line
+saying "a query failed" where the fact was "the fleet has been unobserved for
+34 minutes".
+
+Two defaults did it:
+
+- `createDirectDb` set only `connect_timeout: 10`, which covers CONNECTING.
+  **There was no query timeout anywhere**, so a statement on a socket that had
+  gone away waited for TCP to give up — 10 to 30 minutes.
+- postgres.js defaults `max_lifetime` to `60 * (30 + Math.random() * 30)`: a
+  **random 30 to 60 minutes per connection**, undocumented in our code, with
+  two connections expiring independently. Mean stall 29.9 min sits squarely in
+  that band.
+
+Now every timeout is stated: `statement_timeout` 20 s so Postgres kills the
+statement rather than us waiting on a socket, `max_lifetime` 10 minutes so
+recycling is a decision, `idle_timeout` 60 s.
+
+### The staleness rule worked. That was not the problem
+
+The board DID go stale: no positions written, `newest_position_at` frozen,
+`isFeedStale` true after five minutes, every row's ETA reading `stale`.
+
+It left **no trace**. On recovery Samsara returned the backlog,
+`newest_position_at` jumped forward, the banner cleared, and `recordSuccess`
+wiped `last_error` — which is correct, because `last_error` answers *is it
+broken now*. Nobody could ask *has it been*.
+
+So `feed_health` gained `missed_cycles`, `longest_stall_seconds` and
+`longest_stall_at`, which nothing clears, and a successful poll following a
+gap logs `poll stall ended` at WARN with the duration.
+
+**A self-healing failure that leaves no record is worse than a loud one.** In
+production nobody finds out until a dispatcher asks why a truck has not moved.
+
+A test caught a real bug in that record: the stall columns were only in the
+`ON CONFLICT` branch, so the first poll after the row was recreated (§12.34)
+inserted defaults and dropped its own stall.
+
+## 12.40 The ETA drifted with the wall clock
+
+At 09:32 the board read 11:13; five minutes later, truck still moving, 11:18.
+
+`project()` anchors to `position.recorded_at` correctly (§12.24), and both
+renderers only format the stored instant. **The anchoring was never the
+problem.** `projectDistance` returned `cached.routedMiles` unchanged while a
+route was fresh, so:
+
+> ETA = moving anchor + frozen distance = drift, 1:1 with the clock.
+
+Measured on truck 116:
+
+```
+fix recorded_at    straight  routedUsed   ETA(UTC)
+17:36:26             62.96      71.84     18:59:20
+17:38:20             65.17      71.84     19:01:14
+17:40:12             67.34      71.84     19:03:06
+17:42:02             69.47      71.84     19:04:56
+
+5.6 min of clock -> 5.6 min of ETA, while the truck covered 6.5 miles
+```
+
+**The whole 25-minute error was this.** The recompute threshold contributed
+none of it — it decided how long the freeze lasted, not that it froze.
+
+The straight-line distance is always current, so the fix is to subtract what
+has been covered since the route was measured, scaled by the lane's own
+measured ratio, clamped at zero.
+
+### And it reversed the threshold decision
+
+`max(10 mi, 15%)` was going to be replaced, because on an 85 mi run it gave
+one recompute per ~13 miles and a truck 12 miles out could never trigger one
+at all. Re-measured after this fix, with the residual error being ratio
+divergence rather than elapsed time:
+
+```
+rule                    calls/day    85mi lane          12mi lane
+current max(10,15%)         296     1.95 mi / 2.3 min   1.57 mi / 1.8 min
+B  max(1, 12%)              630     1.57 mi / 1.8 min   0.22 mi / 0.3 min
+D  0.5 + 8% remaining       815     1.13 mi / 1.3 min   0.22 mi / 0.3 min
+```
+
+**The threshold stays.** Tripling the API calls now buys one to two minutes.
+The rule was never the defect; it was amplifying one. Deferring the number
+until after the fix is the only reason this was not a wasted change.
+
+## 12.41 An arrival the truck had left could never be found
+
+`confirmedRun` walked the fixes newest-first and `break`ed on the first that
+failed, so a run had to BEGIN at the newest fix — the truck had to still be
+parked when the sweep looked.
+
+Truck 116 parked at its receiver for 21 minutes during the 34-minute stall in
+§12.39. By the next poll it had gone, the newest fix was moving, and the dwell
+sitting two fixes behind it was unreachable. Not late. **Lost.**
+
+It now takes the longest qualifying run anywhere in the window, which costs
+one pass over a few dozen fixes.
+
+### The spec asserted a guarantee the code did not provide
+
+§12.27 said the 30-minute window *bounded* post-outage inaccuracy — "a truck
+that parked three hours ago is recorded as arriving at the window's edge... a
+bounded and stated inaccuracy". That was **false from phase 5 until this
+fix**. The window decides how far back we look; `confirmedRun` decided that
+looking back was pointless.
+
+The paragraph is corrected in place rather than quietly deleted, because the
+failure mode is worth keeping: **a spec line claiming a guarantee the code
+does not provide is its own defect — it is what stops anyone looking.**
+
+### One contract changed deliberately
+
+A test asserted that one bad fix mid-dwell returns null. It now returns the
+dwell around the glitch, and the test states why rather than being deleted. A
+GPS glitch should cost the fixes around it, not the arrival.
 
 # 13. Still open
 

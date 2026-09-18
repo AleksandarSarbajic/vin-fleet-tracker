@@ -684,6 +684,15 @@ export const feedHealth = pgTable(
     lastError: text('last_error'),
     /** Persisted in the DB, not in memory, so a worker restart resumes. */
     cursor: text('cursor'),
+    /**
+     * Missed-cycle history (§12.39). `last_error` answers "is it broken now",
+     * and is cleared by the next success — so eleven stalls totalling 5.5
+     * hours left no trace at all once the worker recovered.
+     */
+    stallStartedAt: timestamp('stall_started_at', { withTimezone: true }),
+    longestStallSeconds: integer('longest_stall_seconds'),
+    longestStallAt: timestamp('longest_stall_at', { withTimezone: true }),
+    missedCycles: integer('missed_cycles').notNull().default(0),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(now),
   },
   () => [check('feed_health_singleton', sql`id = 1`)],

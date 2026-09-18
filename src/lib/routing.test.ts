@@ -175,3 +175,75 @@ describe('the thresholds are the measured ones', () => {
     expect(ROUTING_DEFAULTS.snapRefuseMeters).toBeGreaterThan(1255);
   });
 });
+
+describe('a fresh route advances with the truck (§12.40)', () => {
+  /**
+   * The bug that made every ETA drift with the wall clock.
+   *
+   * `project()` anchors the ETA to `position.recorded_at` — correctly, and
+   * §12.24 is about that. But `projectDistance` returned the cached route's
+   * total unchanged, so the anchor moved with every fix and the distance did
+   * not. ETA = moving anchor + frozen distance = 1:1 drift.
+   *
+   * Measured on truck 116: 5.6 minutes of clock, 5.6 minutes of ETA, while
+   * the truck covered 6.5 miles.
+   */
+  const lane: CachedRoute = {
+    routedMiles: 71.84,
+    routedDurationS: 4015,
+    fromLat: 46.877939,
+    fromLng: -99.367585,
+    straightAtRouteMiles: 65.9,
+    laneRatio: 1.0897,
+    stopLat: 46.794794,
+    stopLng: -100.757128,
+    snapFromM: 4,
+    snapToM: 7,
+    computedAtUtc: '2026-09-18T17:41:00.173Z',
+  };
+
+  it('shrinks the projected distance as the straight line shrinks', () => {
+    const atRoute = projectDistance(65.9, lane, 1.25, 52, true);
+    const tenCloser = projectDistance(55.9, lane, 1.25, 52, true);
+
+    expect(atRoute.miles).toBeCloseTo(71.84, 2);
+    // Ten straight-line miles closed is ~10.9 road miles on this lane.
+    expect(tenCloser.miles).toBeCloseTo(71.84 - 10 * 1.0897, 2);
+    expect(tenCloser.miles).toBeLessThan(atRoute.miles);
+  });
+
+  it('keeps the ETA still while the clock moves, which is the whole point', () => {
+    const speed = Math.min(71.84 / (4015 / 3600), 52);
+    // Two fixes 6 minutes apart, the truck covering 6 straight-line miles.
+    const first = projectDistance(65.9, lane, 1.25, 52, true);
+    const later = projectDistance(59.9, lane, 1.25, 52, true);
+
+    const etaFirst = Date.parse('2026-09-18T17:41:00Z') + (first.miles / speed) * 3_600_000;
+    const etaLater =
+      Date.parse('2026-09-18T17:47:00Z') + (later.miles / speed) * 3_600_000;
+
+    // The truck covered 6.0 straight-line miles in 6 minutes — 65.4 mph, above
+    // the 52 mph the projection assumes, so the ETA comes IN slightly. What it
+    // must not do is slide 6 minutes later, which is what it used to do.
+    const driftMinutes = (etaLater - etaFirst) / 60_000;
+    expect(Math.abs(driftMinutes)).toBeLessThan(2);
+  });
+
+  it('never goes negative when the truck moves away from the stop', () => {
+    // 116's demo stop was behind it; the straight line GREW.
+    const away = projectDistance(80, lane, 1.25, 52, true);
+    expect(away.miles).toBe(71.84);
+    expect(away.miles).toBeGreaterThan(0);
+  });
+
+  it('cannot project past the destination', () => {
+    const arrived = projectDistance(0, lane, 1.25, 52, true);
+    expect(arrived.miles).toBeGreaterThanOrEqual(0);
+  });
+
+  it('leaves the lane-estimate and straight-line paths alone', () => {
+    // Those already scale with the CURRENT straight line, so they never drifted.
+    expect(projectDistance(50, lane, 1.25, 52, false).miles).toBeCloseTo(50 * 1.0897, 3);
+    expect(projectDistance(50, null, 1.25, 52, false).miles).toBeCloseTo(62.5, 3);
+  });
+});

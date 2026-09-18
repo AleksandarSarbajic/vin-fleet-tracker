@@ -78,6 +78,13 @@
       "when": 1789777169664,
       "tag": "0010_app_created_drivers",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789863569664,
+      "tag": "0011_feed_stall_record",
+      "breakpoints": true
     }
   ]
 }

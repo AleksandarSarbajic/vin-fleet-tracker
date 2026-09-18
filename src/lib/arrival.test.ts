@@ -76,11 +76,46 @@ describe('detectArrival', () => {
     expect(detectArrival(stop(), fixes)).not.toBe(fixes[0]!.recordedAtUtc);
   });
 
-  it('one bad fix in the middle breaks the run', () => {
+  /**
+   * CONTRACT CHANGE (§12.41). This used to assert null.
+   *
+   * A single bad fix mid-dwell cut off everything older, because the run had
+   * to start at the newest fix. That is what made an arrival unrecoverable
+   * once the truck left: truck 116 parked for 21 minutes during a worker
+   * stall, and by the next poll the dwell was two fixes behind the head and
+   * could never be found again.
+   *
+   * The run is now the longest qualifying one anywhere in the window, so a
+   * GPS glitch costs the fixes around it rather than the whole arrival.
+   */
+  it('survives one bad fix in the middle, and reports the dwell around it', () => {
     const fixes = parked(40);
-    // A jump 5 miles away, 10 fixes back. Everything older is cut off.
+    // A jump 5 miles away, 10 fixes back.
     fixes[10] = { ...fixes[10]!, lat: STOP.lat + 0.08 };
-    expect(detectArrival(stop(), fixes)).toBeNull();
+    const found = detectArrival(stop(), fixes);
+    expect(found).not.toBeNull();
+    // The older, longer run — not the four-fix fragment ahead of the glitch.
+    expect(found).toBe(fixes[39]!.recordedAtUtc);
+  });
+
+  it('finds a COMPLETED dwell the truck has already left (§12.41)', () => {
+    // Exactly truck 116: parked, then gone, and the sweep only looks after.
+    const gone: Fix[] = [
+      { lat: STOP.lat + 0.2, lng: STOP.lng, speedMph: 55, recordedAtUtc: at(-30) },
+      { lat: STOP.lat + 0.1, lng: STOP.lng, speedMph: 48, recordedAtUtc: at(-90) },
+    ];
+    const parkedBlock: Fix[] = Array.from({ length: 20 }, (_, i) => ({
+      lat: STOP.lat,
+      lng: STOP.lng,
+      speedMph: 0,
+      recordedAtUtc: at(-180 - i * 60),
+    }));
+    const fixes = [...gone, ...parkedBlock];
+
+    const found = detectArrival(stop(), fixes);
+    // Under the old rule this was null forever — the head of the list
+    // disqualified everything behind it.
+    expect(found).toBe(parkedBlock[parkedBlock.length - 1]!.recordedAtUtc);
   });
 
   it('never re-detects a stop that already arrived', () => {

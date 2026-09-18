@@ -86,22 +86,52 @@ function confirmedRun(
   config: ArrivalConfig,
   holds: (fix: Fix) => boolean,
 ): Fix[] | null {
-  const run: Fix[] = [];
-  for (const fix of fixes) {
-    if (!holds(fix)) break;
-    run.push(fix);
-  }
-  // Two fixes six seconds apart are not two minutes of evidence. Both the
-  // count and the span have to clear, or a burst of readings would pass.
-  if (run.length < 2) return null;
+  /**
+   * The LONGEST qualifying run anywhere in the window, not the one at the head
+   * (§12.41).
+   *
+   * This used to `break` on the first fix that failed, so the run had to start
+   * at the newest fix — the truck had to still be there. Truck 116 parked at
+   * its receiver for 21 minutes while the worker was stalled (§12.39); by the
+   * time it polled again the truck had left, the newest fix was moving, and
+   * the dwell sitting two fixes behind it could never be found. The arrival
+   * was lost permanently.
+   *
+   * §12.27 claimed the 30-minute window bounded post-outage inaccuracy. It did
+   * not, and could not: the window decides how far back we LOOK, and this
+   * decided that looking back was pointless.
+   *
+   * Scanning the whole window costs one pass over at most a few dozen fixes
+   * and makes an arrival recoverable for as long as its evidence is retained.
+   */
+  let best: Fix[] | null = null;
+  let run: Fix[] = [];
 
+  const close = () => {
+    if (qualifies(run, config) && (best === null || run.length > best.length)) {
+      best = run;
+    }
+    run = [];
+  };
+
+  for (const fix of fixes) {
+    if (holds(fix)) run.push(fix);
+    else close();
+  }
+  close();
+
+  return best;
+}
+
+/** Both the count and the span have to clear, or a burst of readings passes. */
+function qualifies(run: Fix[], config: ArrivalConfig): boolean {
+  // Two fixes six seconds apart are not two minutes of evidence.
+  if (run.length < 2) return false;
   const newest = run[0]!;
   const oldest = run[run.length - 1]!;
   const spanSeconds =
     (new Date(newest.recordedAtUtc).getTime() - new Date(oldest.recordedAtUtc).getTime()) / 1000;
-  if (spanSeconds < config.confirmSeconds) return null;
-
-  return run;
+  return spanSeconds >= config.confirmSeconds;
 }
 
 const isStopped = (fix: Fix): boolean => (fix.speedMph ?? 0) === 0;

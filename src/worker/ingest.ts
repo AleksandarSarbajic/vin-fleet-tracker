@@ -256,6 +256,11 @@ export async function recordSuccess(
   db: Db,
   cursor: string,
   newestPositionAt: Date | null,
+  /**
+   * How long since the last successful poll. Anything beyond a cycle or two
+   * is a stall, and it is recorded so it survives its own recovery (§12.39).
+   */
+  gapSeconds?: number,
 ): Promise<void> {
   const at = new Date();
   // Same Date-in-sql`` trap as above — pass an ISO string and cast.
@@ -273,14 +278,71 @@ export async function recordSuccess(
       lastError: null,
       updatedAt: at,
       ...(newestPositionAt ? { newestPositionAt } : {}),
+      /**
+       * On the INSERT branch too. The first version put these only in
+       * `set`, which applies on conflict — so the first poll after the row
+       * was recreated (§12.34) dropped its stall entirely. Found by the
+       * test, which is the only reason it is not still there.
+       */
+      ...insertStallColumns(gapSeconds),
     })
     .onConflictDoUpdate({
       target: feedHealth.id,
       // Inside DO UPDATE, `feed_health.newest_position_at` is the EXISTING
       // row, which is what makes greatest() keep the high-water mark.
-      set: { cursor, lastSuccessAt: at, lastError: null, updatedAt: at, ...newest },
+      set: {
+        cursor,
+        lastSuccessAt: at,
+        lastError: null,
+        updatedAt: at,
+        ...newest,
+        ...stallColumns(gapSeconds),
+      },
     });
 }
+
+/**
+ * What a successful poll records about the gap that preceded it (§12.39).
+ *
+ * `last_error` is cleared on success, which is right — it answers "is it
+ * broken now". It is also why eleven stalls totalling 5.5 hours left nothing
+ * behind: each one recovered, Samsara returned the backlog, the staleness
+ * banner cleared and the error was wiped. These columns answer "has it been",
+ * and nothing clears them.
+ */
+function isStall(gapSeconds: number | undefined): gapSeconds is number {
+  return gapSeconds !== undefined && gapSeconds >= STALL_SECONDS;
+}
+
+/** The UPDATE branch: accumulates onto whatever the row already holds. */
+function stallColumns(gapSeconds: number | undefined) {
+  if (!isStall(gapSeconds)) {
+    // Healthy poll: the current stall, if any, is over.
+    return { stallStartedAt: null };
+  }
+  return {
+    stallStartedAt: null,
+    missedCycles: sql`${feedHealth.missedCycles} + ${Math.floor(gapSeconds / POLL_SECONDS)}`,
+    longestStallSeconds: sql`greatest(coalesce(${feedHealth.longestStallSeconds}, 0), ${Math.round(gapSeconds)})`,
+    longestStallAt: sql`case
+      when ${Math.round(gapSeconds)} > coalesce(${feedHealth.longestStallSeconds}, 0)
+      then now() else ${feedHealth.longestStallAt} end`,
+  };
+}
+
+/** The INSERT branch: there is nothing to accumulate onto yet. */
+function insertStallColumns(gapSeconds: number | undefined) {
+  if (!isStall(gapSeconds)) return {};
+  return {
+    missedCycles: Math.floor(gapSeconds / POLL_SECONDS),
+    longestStallSeconds: Math.round(gapSeconds),
+    longestStallAt: new Date(),
+  };
+}
+
+/** A gap longer than this is a stall, not jitter: four missed cycles. */
+export const STALL_SECONDS = 120;
+const POLL_SECONDS = 30;
 
 export async function recordFailure(db: Db, message: string): Promise<void> {
   const at = new Date();
