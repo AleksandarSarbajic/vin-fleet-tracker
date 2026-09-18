@@ -907,3 +907,111 @@ withDb('the override is part of the save (§12.28)', () => {
     expect(cleared[0]?.clearedAt).not.toBeNull();
   });
 });
+
+/* -------------------------------------------------------------------------
+ * §12.44 — the normalisation, end to end, and the layer under it
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The point of putting this in the shared schema was that the WIRE gets it,
+ * not just the modal. So it is asserted through the same path an API client
+ * takes — parse, then save — rather than by calling the normaliser directly.
+ */
+withDb('state and ZIP normalise on the way to the database (§12.44)', () => {
+  const editFor = (truckId: string, over: Record<string, unknown>) => ({
+    stopId: null,
+    truckId,
+    loadNumber: 'LD-1',
+    loadStatus: 'DISPATCHED' as const,
+    stopType: 'DEL' as const,
+    addressLine: '1 Broadway',
+    city: 'Chicago',
+    state: 'IL',
+    zip: '60601',
+    appointment: null,
+    dispatcherNote: null,
+    ...over,
+  });
+
+  const savedRow = async (over: Record<string, unknown>) =>
+    rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+      // Parsed exactly as the route parses it — this is the contract, not the
+      // modal's own trimming.
+      const parsed = StopEdit.parse(editFor(t[0]!.id, over));
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: parsed,
+      });
+      const [row] = await tx
+        .select({ state: stops.state, zip: stops.zip })
+        .from(stops)
+        .where(eq(stops.id, result.stopId));
+      return row;
+    });
+
+  /**
+   * Drizzle wraps the driver error, so the constraint name is on `cause`.
+   * Asserting the NAME rather than just "it threw" is what proves the check
+   * fired, rather than the row failing for some unrelated reason.
+   */
+  const violation = async (run: (tx: Tx) => Promise<unknown>): Promise<string> => {
+    try {
+      await rolledBack(run);
+      return 'NO ERROR';
+    } catch (error: unknown) {
+      const cause: unknown = error instanceof Error ? error.cause : null;
+      return `${String(error)} ${cause === null ? '' : String(cause)}`;
+    }
+  };
+
+  it('stores IL for an API client that posts "il"', async () => {
+    expect((await savedRow({ state: 'il' }))?.state).toBe('IL');
+  });
+
+  it('stores five digits for an API client that posts ZIP+4', async () => {
+    expect((await savedRow({ zip: '60601-1234' }))?.zip).toBe('60601');
+  });
+
+  it('stores null, not an empty string, for a cleared state', async () => {
+    const row = await savedRow({ state: '' });
+    expect(row?.state).toBeNull();
+  });
+
+  /**
+   * The constraint, not the schema. The seed script and the geocoder both
+   * write these columns without passing through `StopEdit`, so the rule has
+   * to exist at the layer a future write path cannot skip — otherwise it is
+   * enforced exactly where today's code happens to go.
+   */
+  it('refuses a bad ZIP written straight to the column', async () => {
+    const message = await violation(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+        const result = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: StopEdit.parse(editFor(t[0]!.id, {})),
+        });
+        // Bypassing the schema entirely, as a migration or a script would.
+        await tx.update(stops).set({ zip: '60601-1234' }).where(eq(stops.id, result.stopId));
+    });
+    expect(message).toContain('stops_zip_five_digits');
+  });
+
+  it('refuses a lower-case state written straight to the column', async () => {
+    const message = await violation(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+        const result = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: StopEdit.parse(editFor(t[0]!.id, {})),
+        });
+        await tx.update(stops).set({ state: 'il' }).where(eq(stops.id, result.stopId));
+    });
+    expect(message).toContain('stops_state_two_letters');
+  });
+});

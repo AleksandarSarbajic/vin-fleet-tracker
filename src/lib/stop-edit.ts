@@ -62,7 +62,8 @@ export const LoadNumber = blankIsNull(64).optional();
  * of the optimistic-cache bug in §12.21, and it breaks the same `??`
  * renderers for the same reason.
  *
- * `state` needs none of this: `.length(2)` rejects a blank outright.
+ * `state` and `zip` have their own normalisers below, which follow the same
+ * `'' -> null` rule for the same reason (§12.44).
  */
 function blankIsNull(max: number) {
   return z
@@ -72,6 +73,79 @@ function blankIsNull(max: number) {
     .transform((value) => (value === '' ? null : value))
     .nullable();
 }
+
+/* ------------------------------ normalisation ---------------------------- */
+
+/**
+ * §12.44. The normalisation lives HERE, not in the modal.
+ *
+ * The modal's own `trimmed()` nulls a blank before validating, which is why
+ * the load-number and city empty-string bugs survived three sessions: the UI
+ * could not produce the bad shape and an API client could. An API client
+ * posting `{"state": "il"}` must get `"IL"` stored or a 400 — never `"il"`.
+ *
+ * Both follow `blankIsNull`'s rule that `'' -> null`, so "clear this field"
+ * is one contract across every text field on the stop rather than two.
+ */
+
+/**
+ * Two letters, uppercased.
+ *
+ * This was `z.string().trim().length(2).toUpperCase()`, which accepted `'i1'`
+ * and `'1!'` — a rule that did not say what it claimed. It also rejected `''`
+ * outright, so clearing the state meant `null` while clearing the city meant
+ * either `null` or `''`.
+ *
+ * The state is not cosmetic: `zoneForState` derives the appointment timezone
+ * from it, and the search maps full state names onto it (§12.7).
+ */
+export const StateCode = z
+  .string()
+  .trim()
+  .nullable()
+  .transform((value, ctx) => {
+    if (value === null || value === '') return null;
+    if (!/^[A-Za-z]{2}$/.test(value)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'State must be its two-letter code, like IL.',
+      });
+      return z.NEVER;
+    }
+    return value.toUpperCase();
+  });
+
+/**
+ * Exactly five digits. ZIP+4 is accepted on input and the +4 discarded.
+ *
+ * Dispatchers paste `60601-1234` off rate confirmations, and everything we do
+ * with a ZIP is geocoding: Census matches the 5-digit code and ignores the
+ * +4. Storing it would add a field that can disagree with itself and buy
+ * nothing — and a stored `60601-1234` silently degrades the geocode that the
+ * whole ETA chain hangs off.
+ *
+ * Hyphens and internal spaces are removed before counting, so `60601-1234`,
+ * `606011234` and `60601 - 1234` are the same input.
+ */
+export const Zip = z
+  .string()
+  .trim()
+  .nullable()
+  .transform((value, ctx) => {
+    if (value === null || value === '') return null;
+    const digits = value.replace(/[\s-]/g, '');
+    const fail = (message: string) => {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+      return z.NEVER;
+    };
+    if (!/^[0-9]+$/.test(digits)) {
+      return fail('ZIP must be digits only, like 60601 or 60601-1234.');
+    }
+    // Five is a ZIP. Nine is ZIP+4, and the +4 is dropped rather than stored.
+    if (digits.length === 5 || digits.length === 9) return digits.slice(0, 5);
+    if (digits.length < 5) return fail('ZIP must be 5 digits.');
+    return fail('ZIP must be 5 digits, or 9 with the +4.');
+  });
 
 export const StopEdit = z
   .object({
@@ -86,9 +160,10 @@ export const StopEdit = z
     /** The street line, as the rate confirmation gives it. */
     addressLine: blankIsNull(200),
     city: blankIsNull(120),
-    /** Two letters. The search maps full state names to these (§12.7). */
-    state: z.string().trim().length(2).toUpperCase().nullable(),
-    zip: blankIsNull(12),
+    /** Two letters, uppercased. The search maps full state names here (§12.7). */
+    state: StateCode,
+    /** Five digits. ZIP+4 accepted on input, the +4 discarded (§12.44). */
+    zip: Zip,
 
     /** Null leaves the stop with no appointment — a real state (NO_APPT). */
     appointment: AppointmentInput.nullable(),

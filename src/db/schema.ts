@@ -404,6 +404,14 @@ export const stops = pgTable(
       .on(t.loadId, t.sequence)
       .where(sql`departed_at is null`),
 
+    /**
+     * §12.44. The shape the normaliser in `StopEdit` produces, asserted at the
+     * layer a future write path cannot skip — the seed script and the
+     * geocoder both write these columns without passing through it.
+     */
+    check('stops_state_two_letters', sql`state is null or state ~ '^[A-Z]{2}$'`),
+    check('stops_zip_five_digits', sql`zip is null or zip ~ '^[0-9]{5}$'`),
+
     /** An appointment instant is meaningless without the zone it was read in. */
     check(
       'stops_appointment_needs_tz',

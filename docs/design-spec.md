@@ -3476,6 +3476,72 @@ and `appointment.ts` (parse failures returning a documented fallback) and
 deliberate, stated, and lose nothing anyone needs. A rule that fires on every
 instance of a syntax is not the rule; **swallowing a fact somebody needs** is.
 
+## 12.44 State and ZIP normalise in the schema, not in the modal
+
+`state` was `z.string().trim().length(2).toUpperCase()` and `zip` was
+`blankIsNull(12)`. Both are now normalisers in `lib/stop-edit.ts`, beside
+`blankIsNull` and for the same reason.
+
+```
+ZIP                          State
+'60601'      -> '60601'      'il'       -> 'IL'
+'60601-1234' -> '60601'      ' il '     -> 'IL'
+'606011234'  -> '60601'      ''         -> null
+' 60601 '    -> '60601'      null       -> null
+''           -> null         'illinois' -> 400
+null         -> null         'i1'       -> 400
+'6060'       -> 400          'I'        -> 400
+'abcde'      -> 400
+'60601-12'   -> 400
+```
+
+Dispatchers paste ZIP+4 off rate confirmations. Everything we do with a ZIP is
+geocoding, Census matches the five and ignores the +4, so storing it adds a
+field that can disagree with itself and buys nothing — and a stored
+`60601-1234` silently degrades the geocode the whole ETA chain hangs off.
+
+### The layer, which is the actual subject
+
+The modal's own `trimmed()` nulls a blank before validating, so **the UI can
+never produce the bad shape and an API client always can.** That is why the
+load-number and city empty-string bugs survived three sessions: every layer
+that could see the defect was downstream of the one that hid it. An API client
+posting `{"state": "il"}` must get `IL` stored or a 400.
+
+### Two rules for one intent
+
+`.length(2)` rejected `''` — not as a decision, but as a side effect of a
+length check meeting a zero-length string. So clearing the state meant `null`
+while clearing the city meant `null` OR `''`. **Two rules for one intent is
+how layers drift apart**, so `''` now means null in every text field on the
+stop.
+
+The same `.length(2)` accepted `'i1'` and `'1!'`. A rule that does not say
+what its name claims is worse than an absent one, because the name is what
+stops anyone checking.
+
+### And one layer further down
+
+`stops_state_two_letters` and `stops_zip_five_digits` are CHECK constraints
+(0013). The schema covers every path the current code takes — and the seed
+script and the geocoder both write these columns **without going through
+`StopEdit`**. A rule enforced where today's code happens to go and absent
+where tomorrow's will is the shape of every bug in this session.
+
+A 500 on a bad write beats a quietly wrong row. No backfill: all 56 stops
+already conformed, checked before the migration was written rather than after.
+
+### The optimistic patch was already right, and now says so
+
+`EditStopModal` patches the cache from `parsed.data`, which §12.21 fixed and
+nothing asserted. The two shapes now differ in two more fields than they did
+then, so the regression was one edit away and silent: a dispatcher who types
+`il` and sees the row read `il` until the refetch corrects it sees a glitch,
+not a bug, and does not report it.
+
+Locked by a test that fails with `expected 'il' to be 'IL'` when the patch is
+switched back to `edit`.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled
