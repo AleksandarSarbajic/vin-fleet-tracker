@@ -132,18 +132,39 @@ function milesFacts(over: Partial<MilesFacts> = {}): MilesFacts {
 }
 
 describe('the miles line under the ETA (§12.47)', () => {
-  it('separates the three bases by two signals, not one', () => {
+  /**
+   * CONTRACT CHANGE. This asserted three distinct renderings, splitting
+   * `lane-estimate` from `straight-line` by colour.
+   *
+   * That split did not survive the weight this line has to sit at. The miles
+   * must be quieter than the time, which puts them at `text-text-muted` —
+   * and there is nothing below muted. A fourth level was measured in
+   * Chromium: #6f777e is indistinguishable from muted at 10.5px, and #656d74
+   * is distinguishable only by being hard to read.
+   *
+   * The split is now where it changes a decision (§12.33): routed, or not.
+   * `basisShort` keeps all three apart in the popup, where words fit.
+   */
+  it('marks whether the distance was measured for THIS position', () => {
     const routed = etaMilesLine(milesFacts({ distanceBasis: 'routed' }), false, miles);
     const lane = etaMilesLine(milesFacts({ distanceBasis: 'lane-estimate' }), false, miles);
     const straight = etaMilesLine(milesFacts({ distanceBasis: 'straight-line' }), false, miles);
 
-    expect(routed).toEqual({ text: '412 mi', quiet: false });
-    expect(lane).toEqual({ text: '~412 mi', quiet: false });
-    expect(straight).toEqual({ text: '~412 mi', quiet: true });
+    expect(routed).toBe('412 mi');
+    expect(lane).toBe('~412 mi');
+    expect(straight).toBe('~412 mi');
 
-    // The point of two signals: no two of the three render identically.
-    const rendered = [routed, lane, straight].map((m) => `${m?.text}|${m?.quiet}`);
-    expect(new Set(rendered).size).toBe(3);
+    // The distinction that survives, and the one that does not.
+    expect(routed).not.toBe(lane);
+    expect(lane).toBe(straight);
+  });
+
+  /** The popup still tells all three apart, which is where the loss lands. */
+  it('leaves basisShort carrying the full three-way distinction', () => {
+    const words = (['routed', 'lane-estimate', 'straight-line'] as const).map((b) =>
+      basisShort(facts({ distanceBasis: b })),
+    );
+    expect(new Set(words).size).toBe(3);
   });
 
   it('shows no miles while the feed is stale', () => {
@@ -178,16 +199,16 @@ describe('the miles line under the ETA (§12.47)', () => {
   it('shows no miles when milesText has no number to give', () => {
     expect(etaMilesLine(milesFacts({ milesRemaining: 4 }), false, miles)).toBeNull();
     expect(etaMilesLine(milesFacts({ milesRemaining: 9.9 }), false, miles)).toBeNull();
-    expect(etaMilesLine(milesFacts({ milesRemaining: 10 }), false, miles)?.text).toBe('10 mi');
+    expect(etaMilesLine(milesFacts({ milesRemaining: 10 }), false, miles)).toBe('10 mi');
   });
 
   it('carries a four-figure distance, which our own lanes reach', () => {
     // route_samples holds a real 2207-mile measurement.
-    expect(etaMilesLine(milesFacts({ milesRemaining: 2207 }), false, miles)?.text).toBe('2207 mi');
+    expect(etaMilesLine(milesFacts({ milesRemaining: 2207 }), false, miles)).toBe('2207 mi');
   });
 
   it('keeps the miles even with no appointment, because distance is not a deadline', () => {
     const noAppt = milesFacts({ etaAbsence: 'no-appointment' });
-    expect(etaMilesLine(noAppt, false, miles)?.text).toBe('412 mi');
+    expect(etaMilesLine(noAppt, false, miles)).toBe('412 mi');
   });
 });

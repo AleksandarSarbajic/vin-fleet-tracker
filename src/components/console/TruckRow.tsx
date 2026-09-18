@@ -475,12 +475,21 @@ function TruckRowImpl({
             {etaText(row, feedStale)}
           </div>
           {milesLine ? (
-            <div
-              className={`absolute inset-x-0 top-full truncate text-small leading-none tabular-nums ${
-                milesLine.quiet ? 'text-text-muted' : 'text-text-secondary'
-              }`}
-            >
-              {milesLine.text}
+            /**
+             * `-mt-1` pulls the pair together and off the row's edge (§12.47).
+             * At `top-full` alone the baseline sat 14.2px under the time's and
+             * 1.9px off the row boundary — it read as belonging to the row
+             * below. Measured after: 9.2px under the time, 6.9px of clearance.
+             *
+             * `text-micro` with `tracking-normal`: the micro size is drawn for
+             * uppercase condensed labels and carries .11em, which is wrong
+             * under a number.
+             *
+             * Always muted — one token below the time. The time is the
+             * decision; these are supporting detail.
+             */
+            <div className="absolute inset-x-0 -mt-1 top-full truncate text-micro tracking-normal tabular-nums text-text-muted">
+              {milesLine}
             </div>
           ) : null}
         </div>

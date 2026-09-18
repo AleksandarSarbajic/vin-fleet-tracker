@@ -224,9 +224,12 @@ describe('miles hang under the ETA (§12.47)', () => {
     const milesEl = cell.children[1] as HTMLElement;
     expect(milesEl.className).toContain('absolute');
     expect(milesEl.className).toContain('top-full');
+    // And pulled back up off the row's boundary — measured at 6.9px of
+    // clearance rather than 1.9px.
+    expect(milesEl.className).toContain('-mt-1');
   });
 
-  it('marks a straight-line distance with the quiet token', async () => {
+  it('marks any non-routed distance with a tilde (§12.47)', async () => {
     await act(async () => {
       root!.unmount();
     });
@@ -262,7 +265,10 @@ describe('miles hang under the ETA (§12.47)', () => {
 
     const milesEl = etaCell('101').children[1] as HTMLElement;
     expect(milesEl.textContent).toBe('~412 mi');
+    // Always muted, whatever the basis: one token below the time, because
+    // the time is the decision and these are supporting detail.
     expect(milesEl.className).toContain('text-text-muted');
+    expect(milesEl.className).not.toContain('text-text-secondary');
   });
 });
 

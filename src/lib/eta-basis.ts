@@ -209,32 +209,37 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
  * Barlow: `~1204 mi` at `text-small` is 44.8px, so it fits under the time
  * without moving a single column.
  *
- * Three bases, two signals, so the degraded ones stay apart at a glance:
+ * TWO states, not three (contract change — see below):
  *
  *     routed          412 mi     measured for THIS position
- *     lane-estimate  ~412 mi     measured for this lane, not this position
- *     straight-line  ~412 mi     quiet — no road has been measured at all
+ *     not routed     ~412 mi     not measured for where the truck is now
  *
- * The tilde says "not measured for where the truck is now"; the muted token
- * says "no road measured at all". `basisShort` keeps the words for the popup,
- * where there is room for them.
+ * This shipped with three, splitting `lane-estimate` from `straight-line` by
+ * colour. That split does not survive the weight this line has to sit at.
+ *
+ * The miles must be QUIETER than the time — the time is the decision, the
+ * miles are supporting detail, and at `text-text-secondary` the eye landed on
+ * the number underneath on a LATE row. Dropping them to `text-text-muted`
+ * leaves nothing below muted for the third state, and a fourth level was
+ * measured in Chromium and rejected: #6f777e against muted #858d94 is
+ * indistinguishable at 10.5px, and #656d74 is distinguishable only by being
+ * hard to read.
+ *
+ * So the split is made where it changes a decision, which is §12.33's rule.
+ * Both non-routed bases mean the same thing to a dispatcher — trust it less,
+ * open the popup — and `basisShort` keeps all three apart there, where there
+ * is room for words.
  */
 export interface MilesFacts extends BasisFacts {
   milesRemaining: number | null;
   etaAbsence: EtaAbsence;
 }
 
-export interface MilesLine {
-  text: string;
-  /** The straight-line case: quieter ink, because nothing has been measured. */
-  quiet: boolean;
-}
-
 export function etaMilesLine(
   row: MilesFacts,
   feedStale: boolean,
   milesText: (miles: number | null) => string | null,
-): MilesLine | null {
+): string | null {
   /**
    * The feed is down, so the distance is computed from a position nobody
    * trusts. The time already reads `stale`; a precise-looking mileage under
@@ -258,8 +263,5 @@ export function etaMilesLine(
    */
   if (base === null || base === 'arriving') return null;
 
-  return {
-    text: row.distanceBasis === 'routed' ? base : `~${base}`,
-    quiet: row.distanceBasis === 'straight-line',
-  };
+  return row.distanceBasis === 'routed' ? base : `~${base}`;
 }

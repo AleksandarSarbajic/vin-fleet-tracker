@@ -3696,18 +3696,57 @@ sit at 42.6px of the 44px row.
 This is the same reasoning as the Appt cell's fixed 18px prefix slot: the
 annotation gets its own space so the **number** never moves.
 
-### Three bases, two signals
+### The pair has to read as one unit
+
+The first version placed the line at `top-full` and no more. Measured on a
+full board of LATE rows, that was wrong twice over:
 
 ```
-routed           412 mi     measured for THIS position
-lane-estimate   ~412 mi     measured for this lane, not this position
-straight-line   ~412 mi     quiet ink — no road measured at all
+                    eta baseline   miles baseline   gap   to row edge
+top-full, 11.5px            26.4             40.6  14.2           1.9
+-mt-1,    10.5px            26.4             35.6   9.2           6.9
 ```
 
-Two signals rather than one, because three states cannot be told apart by a
-single glyph at 11.5px. The tilde says "not measured for where the truck is
-now"; the muted token says "no road measured at all". `basisShort` keeps the
-words for the popup, where there is room.
+A 14.2px gap with 1.9px of clearance does not read as a caption under a time.
+It reads as something sitting in the gutter between two rows, belonging to the
+row below as much as its own.
+
+`-mt-1` closes the pair to 9.2px and lifts it to 6.9px of clearance. The time
+does not move: 26.4px in both, and the alignment below still holds.
+
+`text-micro` needs `tracking-normal` with it — the micro size is drawn for
+uppercase condensed labels and carries .11em, which is wrong under a number.
+
+### Weight: the time is the decision
+
+At `text-text-secondary` the miles were the same ink as the time above them,
+and on a LATE row the eye landed on the number underneath. That is backwards.
+**Both** signals were changed: 11.5px to 10.5px, and secondary to muted — one
+token below the time.
+
+Size alone was not enough. Measured side by side, 10.5px secondary still
+competes with 12.5px secondary; the token step is what makes the miles recede.
+
+### Which cost the third basis
+
+```
+routed        412 mi     measured for THIS position
+not routed   ~412 mi     not measured for where the truck is now
+```
+
+This shipped with three, splitting `lane-estimate` from `straight-line` by
+colour. Dropping the miles to muted leaves nothing below muted, and a fourth
+level was measured and rejected: **#6f777e is indistinguishable from muted
+#858d94 at 10.5px, and #656d74 is distinguishable only by being hard to read.**
+Inventing a token that does not separate is worse than not separating.
+
+So the split is made where it changes a decision, which is §12.33's own rule.
+Both non-routed bases say the same thing to a dispatcher — trust it less, open
+the popup — and `basisShort` keeps all three apart there, where words fit.
+
+**This is a reduction from what was approved.** It is recorded rather than
+quietly applied, because the reasoning is a constraint discovered by
+measurement and not a preference.
 
 ### When there is no second line
 
