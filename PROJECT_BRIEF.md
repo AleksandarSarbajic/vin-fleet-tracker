@@ -255,6 +255,13 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
    - **One write path end to end** — edit stop, save, row updates — crossing
      the route handler and revalidation.
 
+   **The worker must not run on a laptop** (§12.52). Three "stalls" totalling
+   150 minutes were recorded after the §12.39 fix, and `pmset` matched them to
+   clamshell sleep to within 8 and 12 seconds. Until the worker is on a host
+   that stays awake, every `feed_health` figure includes the host's sleep
+   schedule and none of them measure Supabase. The first day of counters from
+   the deployed worker is what re-opens the stall question.
+
    **Carried onto this phase deliberately, not forgotten:**
    - **Overnight receiving** (§12.22). A window like `22:00–06:00` is refused
      with a field error. Grocery and retail DCs run through the night and this

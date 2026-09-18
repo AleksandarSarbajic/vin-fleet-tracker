@@ -3265,19 +3265,26 @@ The poll loop is correct: it catches, logs and continues 30 s later. So
 saying "a query failed" where the fact was "the fleet has been unobserved for
 34 minutes".
 
-Two defaults did it:
+> **This diagnosis was wrong. See §12.52.** The cause was the host sleeping,
+> not the database. The paragraphs below are kept because the changes they
+> describe are still correct defensively and because the reasoning is worth
+> being able to re-read — but they are not what was happening.
+
+Two defaults were blamed:
 
 - `createDirectDb` set only `connect_timeout: 10`, which covers CONNECTING.
   **There was no query timeout anywhere**, so a statement on a socket that had
   gone away waited for TCP to give up — 10 to 30 minutes.
 - postgres.js defaults `max_lifetime` to `60 * (30 + Math.random() * 30)`: a
   **random 30 to 60 minutes per connection**, undocumented in our code, with
-  two connections expiring independently. Mean stall 29.9 min sits squarely in
-  that band.
+  two connections expiring independently. Mean stall 29.9 min was said to sit
+  squarely in that band — which it does, and which turned out to be a
+  coincidence fitted to a hypothesis (§12.52).
 
-Now every timeout is stated: `statement_timeout` 20 s so Postgres kills the
-statement rather than us waiting on a socket, `max_lifetime` 10 minutes so
-recycling is a decision, `idle_timeout` 60 s.
+Every timeout is now stated regardless: `statement_timeout` 20 s so Postgres
+kills the statement rather than us waiting on a socket, `max_lifetime` 10
+minutes so recycling is a decision, `idle_timeout` 60 s. Worth having; not the
+fix it was claimed to be.
 
 ### The staleness rule worked. That was not the problem
 
@@ -3962,6 +3969,71 @@ became two statements that survive a date change and say more:
 requires a future instant. The other 90-odd pasted dates in the suite are in
 tests where a past date is legitimate — appointment conversions, stop edits —
 and several are pasted precisely because the conversion is the subject.
+
+## 12.52 The worker was not stalling. The laptop was sleeping
+
+§12.39 diagnosed eleven stalls a day as a database problem — no
+`statement_timeout` plus postgres.js recycling connections on a random 30-to-60
+minute `max_lifetime`. Every timeout was stated, the worker was restarted, and
+§12.42 was built to answer the question the next morning.
+
+**It answered it. The answer was no.**
+
+```
+feed_health   missed_cycles 298   longest_stall 3934s (65.6 min)
+feed_stalls   19:44:41Z -> 20:26:00Z   41.3 min
+              20:26:37Z -> 21:09:19Z   42.7 min
+              21:50:51Z -> 22:56:26Z   65.6 min
+```
+
+Three stalls, all **after** the fix. And then `pmset -g log`:
+
+```
+stall 1 started  19:44:41Z   Clamshell Sleep at 19:44:49Z    8 seconds
+stall 3 ended    22:56:26Z   Wake        at 22:56:14Z       12 seconds
+```
+
+The lid was closed. macOS then ran a maintenance-sleep cycle every five
+minutes, which is why the gaps are 40-65 minutes of mostly-asleep rather than
+one clean block: the worker got a poll in during some of the wakes.
+
+The same log shows **233 sleep events during the previous working day**,
+beginning with a clamshell sleep at 08:45:46Z — inside the window the original
+eleven stalls were measured in. The first diagnosis almost certainly described
+the same thing.
+
+### What was actually wrong with the reasoning
+
+The evidence genuinely fitted: reads and writes across four tables failing
+alike does point at the connection rather than the logic, and a 29.9 minute
+mean does sit inside a 30-to-60 minute band. But **a suspended process
+produces exactly the same evidence** — every query fails, whatever it touches,
+and the gaps are shaped by whatever the host does rather than by anything in
+the code.
+
+I had one hypothesis that fitted and stopped looking. The distinguishing test
+was cheap and never run: *was this process running during the gap at all?*
+
+### What survives
+
+- The **instrumentation is right and is what found this.** §12.39's columns
+  and §12.42's per-stall rows did their job precisely: a stall outlived its
+  recovery, and the morning-after report said the fix had not held. That is
+  the whole point of recording an outage rather than an error.
+- The timeouts are worth keeping. A query with no timeout is a bug whether or
+  not it caused this one.
+
+### What it means
+
+**A worker on a laptop is not a worker.** `worker/index.ts` already says it
+should run "as its own Node process on a small VM"; until it does, every
+`feed_health` figure includes the host's sleep schedule and none of them
+measure Supabase.
+
+So the stall diagnosis is **not re-openable from this machine.** It becomes a
+phase 6 question, answered by the first day of numbers from the deployed
+worker, and the counters are only evidence about the database once the process
+is somewhere that stays awake.
 
 # 13. Still open
 
