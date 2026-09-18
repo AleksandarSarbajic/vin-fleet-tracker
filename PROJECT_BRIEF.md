@@ -216,9 +216,12 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
    against a local Postgres (§12.32), which cannot reproduce prepared
    statements being rejected in transaction mode. That is a bug class which
    only appears under production load, and its failure mode is a **stall, not
-   an error**: measured, `prepare:true` over one connection succeeds and over
-   five connections never returns. `preflight` is the only thing that checks
-   it, along with the fleet query's row shape and the session pooler.
+   an error**. The gate asserts OUR configuration — `createPooledDb` sets
+   `prepare: false`, and that connection survives twenty concurrent statements
+   — plus the fleet query's row shape and the session pooler. What the pooler
+   does with prepared statements is reported as a note and never asserted: a
+   gate that passes only while a vendor bug persists goes red on a healthy
+   system and teaches people to delete the setting it protects (§12.32).
 
    **`npm run db:verify`** — deploying into an empty database. The §12.32
    truncate was an accidental dry run of exactly that, and it found a real

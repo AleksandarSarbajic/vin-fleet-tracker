@@ -18,9 +18,9 @@ import { FleetQueryRows, LATEST_POSITION_SQL } from '@/server/fleet-query';
  * before deploy. `npm run preflight`.
  *
  * Three questions, in order of how badly a wrong answer hurts:
- *   1. Is `prepare: false` still load-bearing? Proven by CONCURRENT prepared
- *      statements stalling, which is the one configuration where the bug
- *      shows — see concurrentBurst below.
+ *   1. Is `prepare: false` set on the connection route handlers use? This is
+ *      about OUR config, and it is the only prepared-statement check that is
+ *      a pass condition — see the note on burstSurvives.
  *   2. Does the real fleet query still return the shape the row type claims?
  *   3. Is the migration history on the deployed database current?
  */
@@ -40,72 +40,64 @@ const fail = (what: string, detail: string) => {
 };
 
 /**
- * Runs `count` statements at once over `max` connections and says whether they
- * all came back inside `ms`.
+ * Is `prepare: false` actually set on the connection route handlers use?
  *
- * Concurrency is the whole experiment. Measured against this pooler:
- *
- *     prepare:true    1 connection,  2 statements   OK
- *     prepare:true    5 connections, 20 statements  never returns
- *     prepare:false   5 connections, 20 statements  OK
- *
- * With one connection the prepared statement is reused on the backend that
- * prepared it, so it works — which is why the first version of this check
- * used two sequential statements and reported the opposite of the truth.
- * Under concurrency the pooler hands the second execution to a backend that
- * has never seen the name, and the result is not an error but a STALL. That
- * is the shape of the production incident this gate exists to prevent: no
- * exception, no log line, just route handlers that stop returning.
+ * This is the assertion that matters, and it is about OUR config rather than
+ * the vendor's behaviour. `createPooledDb` is the only way a route handler
+ * reaches the database, and the setting is the whole reason it exists.
  */
-async function concurrentBurst(
+function pooledClientHasPrepareOff(url: string): boolean {
+  const { client } = createPooledDb(url);
+  // postgres.js keeps its resolved options on the client.
+  const options = (client as unknown as { options?: { prepare?: boolean } }).options;
+  void client.end({ timeout: 1 }).catch(() => {});
+  return options?.prepare === false;
+}
+
+/**
+ * Does the pooler reject a prepared statement IF ONE IS ATTEMPTED?
+ *
+ * Informational, never a pass condition.
+ *
+ * The first version of this gate asserted that `prepare: true` STALLS, and
+ * passed only while it did. That is a gate whose green light depends on a
+ * vendor bug persisting: when Supabase fixes Supavisor it goes red on a
+ * perfectly healthy system, and the obvious way to make it green again is to
+ * delete the `prepare: false` it exists to protect. It also cost twelve
+ * seconds of every run waiting for something to fail, and could not tell
+ * "prepared statements rejected" apart from "pooler overloaded".
+ *
+ * Measured, for the record, and the behaviour is not even uniform:
+ *
+ *     prepare:true    1 connection,  2 statements   returns
+ *     prepare:true    5 connections, 20 statements  stalls (5 of 5)
+ *     prepare:true   10 connections, 20 statements  inconsistent
+ *
+ * So it is reported and never asserted. What IS asserted is that our own
+ * connection survives the burst — which is true whatever the pooler decides
+ * to do about prepared statements.
+ */
+async function burstSurvives(
   url: string,
   options: { prepare: boolean; max: number },
   count: number,
   ms: number,
-): Promise<boolean> {
+): Promise<'ok' | 'rejected' | 'timeout'> {
   const client = postgres(url, { ...options, connect_timeout: 10, idle_timeout: 5 });
   let timer: NodeJS.Timeout | undefined;
   try {
     const burst = Promise.all(
       Array.from({ length: count }, (_, i) => client`select ${i}::int as n`),
-    );
+    ).then(() => 'ok' as const);
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => resolve('timeout'), ms);
     });
-    return (await Promise.race([burst.then(() => 'done' as const), timeout])) === 'done';
+    return await Promise.race([burst, timeout]);
   } catch {
-    return false;
+    return 'rejected';
   } finally {
     if (timer) clearTimeout(timer);
-    // Deliberately not awaited: a stalled pool will not drain, and this
-    // process is about to exit anyway.
     void client.end({ timeout: 1 }).catch(() => {});
-  }
-}
-
-async function poolerIsTransactionMode(url: string) {
-  const naive = await concurrentBurst(url, { prepare: true, max: 5 }, 20, 12_000);
-  if (naive) {
-    fail(
-      '`prepare: false` is still load-bearing',
-      'twenty concurrent statements with prepare:true SUCCEEDED. Either this ' +
-        'is no longer the transaction pooler, or the pooler has gained ' +
-        'prepared-statement support. Find out which before trusting this gate ' +
-        'again — do not simply delete `prepare: false`.',
-    );
-  } else {
-    pass('`prepare: false` is still load-bearing', 'prepare:true stalls under concurrency');
-  }
-
-  const configured = await concurrentBurst(url, { prepare: false, max: 5 }, 20, 12_000);
-  if (configured) {
-    pass('the configured pooled connection survives that same burst');
-  } else {
-    fail(
-      'the configured pooled connection survives that same burst',
-      'twenty concurrent statements did not come back — route handlers will ' +
-        'stall under load',
-    );
   }
 }
 
@@ -126,7 +118,40 @@ async function main() {
     pass('DATABASE_URL is the transaction pooler');
   }
 
-  await poolerIsTransactionMode(DATABASE_URL);
+  // 1. Our own config — the assertion that does not depend on the vendor.
+  if (pooledClientHasPrepareOff(DATABASE_URL)) {
+    pass('createPooledDb sets `prepare: false`', 'required by the transaction pooler');
+  } else {
+    fail(
+      'createPooledDb sets `prepare: false`',
+      'the transaction pooler multiplexes connections; prepared statements ' +
+        'stall route handlers under load and the failure is silent',
+    );
+  }
+
+  // 2. The configured connection survives real concurrency.
+  const configured = await burstSurvives(DATABASE_URL, { prepare: false, max: 5 }, 20, 12_000);
+  if (configured === 'ok') {
+    pass('the pooled connection survives 20 concurrent statements');
+  } else {
+    fail(
+      'the pooled connection survives 20 concurrent statements',
+      configured === 'timeout'
+        ? 'they did not come back — route handlers will stall under load'
+        : 'the pooler rejected them',
+    );
+  }
+
+  // 3. What the pooler does with prepared statements. REPORTED, not asserted.
+  const naive = await burstSurvives(DATABASE_URL, { prepare: true, max: 5 }, 20, 4_000);
+  console.info(
+    naive === 'ok'
+      ? '  note  the pooler now ACCEPTS concurrent prepared statements — `prepare: false` ' +
+          'may be belt-and-braces rather than load-bearing. Do not remove it on the ' +
+          'strength of one observation; the behaviour has been inconsistent.'
+      : `  note  prepared statements ${naive === 'timeout' ? 'stall' : 'are rejected'} ` +
+          'under concurrency, as expected — `prepare: false` is load-bearing.',
+  );
 
   // 2. The pooled path our route handlers actually use.
   const pooled = createPooledDb(DATABASE_URL);

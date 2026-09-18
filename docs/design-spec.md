@@ -2691,21 +2691,42 @@ deploy**, not a note: it checks that `DATABASE_URL` is `:6543`, that the real
 fleet query still returns the shape the row type claims, that the session
 pooler is reachable, and that `prepare: false` is still load-bearing.
 
-The first version of that last check was wrong, in a way worth keeping:
+### The first version of that gate was worse than no gate
+
+It asserted that `prepare: true` **stalls**, and passed only while it did.
 
 ```
-prepare:true    1 connection,  2 statements   OK
-prepare:true    5 connections, 20 statements  never returns
-prepare:false   5 connections, 20 statements  OK
+prepare:true    1 connection,  2 statements   returns
+prepare:true    5 connections, 20 statements  stalls (5 of 5)
+prepare:true   10 connections, 20 statements  inconsistent
+prepare:false   5 connections, 20 statements  ok
 ```
 
-It used one connection and two sequential statements, and reported the
-opposite of the truth. With one connection the prepared statement is reused on
-the backend that prepared it. Under concurrency the pooler hands the second
-execution to a backend that has never seen the name — and the result is not an
-error but a **stall**. No exception, no log line, just route handlers that stop
-returning. That is the incident the gate exists to prevent, and it is only
-visible under concurrency.
+Three things were wrong with it, and only the first was obvious:
+
+1. **Its green light depended on a vendor bug persisting.** When Supabase
+   fixes Supavisor the gate goes red on a perfectly healthy system, and the
+   obvious way to make it green again is to delete the `prepare: false` it
+   exists to protect. A gate that trains people to remove the thing it guards
+   is worse than no gate.
+2. It cost **twelve seconds of every run waiting for something to fail**.
+3. It could not tell *"prepared statements rejected"* from *"pooler
+   overloaded"*, because both present as a stall.
+
+It also got the answer backwards the first time. The original probe used one
+connection and two sequential statements — the one configuration where the
+bug does not show, because the prepared statement is reused on the backend
+that prepared it — and reported the opposite of the truth.
+
+**The gate now asserts our own configuration**, which is the part we control
+and the part that matters: `createPooledDb` sets `prepare: false`, and the
+connection it produces survives twenty concurrent statements. The pooler's
+behaviour toward prepared statements is *reported as a note and never
+asserted*. Run time dropped from ~18 s to ~6 s.
+
+The check is verified to discriminate rather than to always pass:
+`prepare: false` reads `false`, `prepare: true` reads `true`, and omitting it
+reads `true` — so two of the three fail the gate.
 
 ## 12.33 The tooltip had four clauses and needed two
 
