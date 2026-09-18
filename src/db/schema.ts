@@ -435,6 +435,118 @@ export const geocodeCache = pgTable(
   ],
 );
 
+/* ------------------------------- routing ------------------------------- */
+
+/**
+ * The cached route for a stop (§12.31). One row per stop, replaced in place.
+ *
+ * A separate table rather than columns on `stops`, which is already wide, and
+ * because routing is the concern most likely to change provider: swapping one
+ * means dropping this table, not migrating the core of the schema.
+ *
+ * Keyed on `stop_id`, which makes one invalidation free. When an appointment
+ * changes and a truck's NEXT stop becomes a different stop (§12.13), the
+ * lookup simply lands on a different row — nothing has to notice or expire.
+ * A stop being re-geocoded is caught instead by comparing `stop_lat/lng`.
+ */
+export const stopRoutes = pgTable(
+  'stop_routes',
+  {
+    stopId: uuid('stop_id')
+      .primaryKey()
+      .references(() => stops.id, { onDelete: 'cascade' }),
+
+    routedMiles: doublePrecision('routed_miles').notNull(),
+    /** Seconds, as the provider gave them. A CAR duration — see §12.31. */
+    routedDurationS: doublePrecision('routed_duration_s').notNull(),
+
+    /** Where the truck was when this was routed. The recompute rule's origin. */
+    fromLat: doublePrecision('from_lat').notNull(),
+    fromLng: doublePrecision('from_lng').notNull(),
+    /** Straight-line miles at that moment, so `lane_ratio` is reproducible. */
+    straightAtRouteMiles: doublePrecision('straight_at_route_miles').notNull(),
+    /**
+     * routed_miles / straight_at_route_miles. The measured road factor for
+     * THIS lane, which is what replaced the brief's global 1.25 — measured
+     * spread across our own lanes was 1.070 to 1.460.
+     */
+    laneRatio: doublePrecision('lane_ratio').notNull(),
+
+    /** The stop's coordinates when routed. A re-geocode invalidates the row. */
+    stopLat: doublePrecision('stop_lat').notNull(),
+    stopLng: doublePrecision('stop_lng').notNull(),
+
+    /** How far the provider MOVED each end to reach a road, in metres. */
+    snapFromM: doublePrecision('snap_from_m'),
+    snapToM: doublePrecision('snap_to_m'),
+
+    provider: text('provider').notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('stop_routes_computed_idx').on(t.computedAt),
+    check('stop_routes_miles_positive', sql`routed_miles > 0 and lane_ratio > 0`),
+  ],
+);
+
+/**
+ * Every route ever measured. Append-only, and nothing reads it yet.
+ *
+ * Fargo at 1.07 and Joliet at 1.46 are stable facts about those corridors,
+ * not noise. After a few weeks this is a table of the lanes this company
+ * actually runs — which is what would let anyone sanity-check a provider
+ * swap, or notice a lane whose ratio moved because of construction.
+ *
+ * Written in the same transaction as the cache row, so the history cannot
+ * disagree with the cache.
+ */
+export const routeSamples = pgTable(
+  'route_samples',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    stopId: uuid('stop_id').references(() => stops.id, { onDelete: 'set null' }),
+
+    /** Denormalised ON PURPOSE: the stop may be edited or deleted later, and
+     *  a sample whose destination can change is not a measurement. */
+    destCity: text('dest_city'),
+    destState: text('dest_state'),
+    destZip: text('dest_zip'),
+    destPrecision: geocodePrecision('dest_precision'),
+
+    straightMiles: doublePrecision('straight_miles').notNull(),
+    routedMiles: doublePrecision('routed_miles').notNull(),
+    laneRatio: doublePrecision('lane_ratio').notNull(),
+    routedDurationS: doublePrecision('routed_duration_s').notNull(),
+    /** routed_miles / routed_hours — the provider's implied speed, uncapped. */
+    impliedMph: doublePrecision('implied_mph'),
+
+    snapFromM: doublePrecision('snap_from_m'),
+    snapToM: doublePrecision('snap_to_m'),
+
+    provider: text('provider').notNull(),
+    measuredAt: timestamp('measured_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('route_samples_measured_idx').on(t.measuredAt),
+    index('route_samples_dest_idx').on(t.destState, t.destCity),
+  ],
+);
+
+/**
+ * Routing calls per UTC month, against a configured ceiling (§12.31).
+ *
+ * In the DATABASE rather than in worker memory, so a crash loop cannot reset
+ * the counter — which is precisely the situation in which a runaway would
+ * happen. There is no hard spend cap on the Mapbox account, so this is the
+ * only thing between a caching bug and a bill.
+ */
+export const routingBudget = pgTable('routing_budget', {
+  /** `YYYY-MM`, UTC. */
+  month: text('month').primaryKey(),
+  calls: integer('calls').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(now),
+});
+
 /* -------------------------------- overrides ---------------------------- */
 
 /**

@@ -1,3 +1,10 @@
+import {
+  metresToMiles,
+  projectDistance,
+  type CachedRoute,
+  type DistanceBasis,
+  type Projection,
+} from './routing';
 /**
  * The status engine.
  *
@@ -122,6 +129,14 @@ export interface StopFacts {
   accuracyMiles: number | null;
   /** True when a dispatcher typed an address, located or not. */
   hasAddress: boolean;
+  /**
+   * The cached route for this lane (§12.31), or null. Passed in as data like
+   * everything else — the engine never routes, and a routing call in here
+   * would be a routing call per render.
+   */
+  route: CachedRoute | null;
+  /** True when that route was computed from the truck's CURRENT position. */
+  routeFresh: boolean;
 }
 
 export const OVERRIDE_REASONS = [
@@ -204,6 +219,12 @@ export interface StatusResult {
   precision: 'street' | 'block' | 'zip' | null;
   /** The ± to print beside a coarse ETA. Null for a street match. */
   accuracyMiles: number | null;
+  /** Routed, estimated from an earlier route, or straight-line (§12.31). */
+  distanceBasis: DistanceBasis;
+  /** The measured road factor used, when there was one. */
+  laneRatio: number | null;
+  /** How far the provider moved the stop to reach a road, in metres. */
+  snapMeters: number | null;
   /**
    * The ETA the engine would have produced for an UNASSIGNED truck. The row
    * renders it struck through, so the number is visible as history without
@@ -212,6 +233,15 @@ export interface StatusResult {
   lastComputedEtaUtc: string | null;
   /** `appointment_end_utc ?? appointment_start_utc` (§12.1). */
   deadlineUtc: string | null;
+}
+
+/** Coordinate error and snap error, added — see the note at the call site. */
+function combinedAccuracy(stop: StopFacts | null | undefined): number | null {
+  if (!stop) return null;
+  const snapMiles =
+    stop.route?.snapToM !== null && stop.route?.snapToM !== undefined ? metresToMiles(stop.route.snapToM) : null;
+  if (stop.accuracyMiles === null && snapMiles === null) return null;
+  return (stop.accuracyMiles ?? 0) + (snapMiles ?? 0);
 }
 
 const MINUTE = 60_000;
@@ -271,22 +301,42 @@ export function projectEta(facts: TruckFacts, config: StatusConfig): string | nu
 export function project(
   facts: TruckFacts,
   config: StatusConfig,
-): { etaUtc: string; miles: number } | null {
+): { etaUtc: string; miles: number; projection: Projection } | null {
   const stop = facts.stop;
   if (!stop || stop.lat === null || stop.lng === null) return null;
   if (facts.lat === null || facts.lng === null) return null;
   // No fix, no anchor. A truck that has never reported cannot be projected.
   if (facts.recordedAtUtc === null) return null;
 
-  const miles = haversineMiles(
+  const straight = haversineMiles(
     { lat: facts.lat, lng: facts.lng },
     { lat: stop.lat, lng: stop.lng },
   );
-  const hours = (miles * config.roadFactor) / config.avgSpeedMph;
+
+  /**
+   * §12.31. `config.roadFactor` is now only the LAST resort. It is the
+   * brief's 1.25, which measurement showed to be wrong by up to 162 minutes
+   * on a real lane — the spread across our own lanes was 1.070 to 1.460, and
+   * no single constant improves it. A route, or a ratio measured from an
+   * earlier route on the same lane, beats it every time.
+   */
+  const projection = projectDistance(
+    straight,
+    stop.route,
+    config.roadFactor,
+    config.avgSpeedMph,
+    stop.routeFresh,
+  );
+
+  const hours = projection.miles / projection.speedMph;
   const from = new Date(facts.recordedAtUtc).getTime();
   if (Number.isNaN(from)) return null;
 
-  return { etaUtc: new Date(from + hours * 3_600_000).toISOString(), miles };
+  return {
+    etaUtc: new Date(from + hours * 3_600_000).toISOString(),
+    miles: projection.miles,
+    projection,
+  };
 }
 
 /** The calendar date in a zone, as YYYY-MM-DD. */
@@ -356,7 +406,16 @@ export function evaluate(
     // would be the same fiction the suppression exists to avoid (§5.8).
     milesRemaining: shown === null ? null : (projection?.miles ?? null),
     precision: stop?.precision ?? null,
-    accuracyMiles: stop?.accuracyMiles ?? null,
+    /**
+     * A snapped waypoint compounds with a coarse coordinate: a ZIP centroid
+     * 4.4 mi wide, routed from a point the provider moved 0.25 mi to reach a
+     * road, is not the same number as a street route. Both are added, so the
+     * ± a dispatcher reads describes the whole construction.
+     */
+    accuracyMiles: combinedAccuracy(stop),
+    distanceBasis: projection?.projection.basis ?? 'straight-line',
+    laneRatio: projection?.projection.laneRatio ?? null,
+    snapMeters: stop?.route?.snapToM ?? null,
     lastComputedEtaUtc: suppressed ? etaUtc : null,
     deadlineUtc,
   };

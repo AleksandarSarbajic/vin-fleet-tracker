@@ -40,6 +40,8 @@ const stop = (over: Partial<StopFacts> = {}): StopFacts => ({
   precision: 'street',
   accuracyMiles: null,
   hasAddress: true,
+  route: null,
+  routeFresh: false,
   ...over,
 });
 
@@ -354,9 +356,21 @@ describe('the projection itself', () => {
   /* ------------------------------- miles ------------------------------- */
 
   describe('miles remaining (§12.24)', () => {
-    it('is the same distance the ETA was built from', () => {
+    /**
+     * ROAD miles, not straight-line — changed in §12.31.
+     *
+     * The row used to show the great-circle distance, which is not a number
+     * anyone in freight uses: a dispatcher reads that column against a rate
+     * confirmation, and straight-line is short by 7% to 46% depending on the
+     * lane. With no route available this is still the brief's 1.25, but it is
+     * at least the same KIND of number the routed value will be.
+     */
+    it('is road miles, not the straight line', () => {
       const result = evaluate(truck(), config, NOW);
-      expect(result.milesRemaining).toBeCloseTo(haversineMiles(NEARBY, STOP_COORDS), 6);
+      const straight = haversineMiles(NEARBY, STOP_COORDS);
+      expect(result.milesRemaining).toBeCloseTo(straight * config.roadFactor, 6);
+      expect(result.milesRemaining).toBeGreaterThan(straight);
+      expect(result.distanceBasis).toBe('straight-line');
     });
 
     it('is null exactly when the ETA is null', () => {

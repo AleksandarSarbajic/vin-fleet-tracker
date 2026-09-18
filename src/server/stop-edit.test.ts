@@ -54,12 +54,20 @@ async function rolledBack<T>(body: (tx: Tx) => Promise<T>): Promise<T> {
  * against a fixture that had no right to those drivers.
  */
 const fixtures = async (tx: Tx) => {
+  // ORDERED. `limit` without `order by` returns whatever the planner feels
+  // like, so which trucks a test gets can change when unrelated rows do —
+  // which is exactly how this suite started failing on a row it never chose.
   const t = await tx
     .select({ id: trucks.id, number: trucks.truckNumber })
     .from(trucks)
     .where(eq(trucks.active, true))
+    .orderBy(trucks.truckNumber)
     .limit(2);
-  const d = await tx.select({ id: drivers.id, name: drivers.name }).from(drivers).limit(2);
+  const d = await tx
+    .select({ id: drivers.id, name: drivers.name })
+    .from(drivers)
+    .orderBy(drivers.name)
+    .limit(2);
 
   const truckIds = t.map((r) => r.id);
   const driverIds = d.map((r) => r.id);
@@ -772,12 +780,17 @@ withDb('the override is part of the save (§12.28)', () => {
   it('rolls the STOP back when the override fails', async () => {
     const after = await rolledBack(async (tx) => {
       const { trucks: t } = await fixtures(tx);
+      // Created HERE rather than found: a test that needs a stop should make
+      // one, not hope the fleet has a suitable row today.
+      const created = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: base({ truckId: t[0]!.id, dispatcherNote: 'BEFORE' }),
+      });
       const [before] = await tx
         .select({ note: stops.dispatcherNote, id: stops.id })
         .from(stops)
-        .innerJoin(loads, eq(loads.id, stops.loadId))
-        .where(eq(loads.truckId, t[0]!.id))
-        .limit(1);
+        .where(eq(stops.id, created.stopId));
 
       let threw = false;
       try {

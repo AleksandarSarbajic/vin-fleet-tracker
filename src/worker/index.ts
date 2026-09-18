@@ -7,6 +7,8 @@ import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
 import { sweepArrivals } from './arrival';
+import { sweepRouting } from './routing';
+import { MapboxDirections } from '@/server/routing/provider';
 import {
   flattenFeed,
   prunePositions,
@@ -45,6 +47,13 @@ let shuttingDown = false;
 async function main(): Promise<void> {
   const { client, db } = createDirectDb(env.DIRECT_URL, 2);
   const samsara = new SamsaraClient({ token: env.SAMSARA_API_TOKEN, logger });
+  /**
+   * §12.31. One provider instance for the process. Absent a token it answers
+   * `not-configured` and the board degrades to the lane estimate — the same
+   * shape as the geocoder, and for the same reason: an enrichment must not be
+   * able to take the dispatch board down.
+   */
+  const router = new MapboxDirections(env.MAPBOX_DIRECTIONS_TOKEN);
 
   logger.info('worker starting', {
     orgId: env.SAMSARA_ORG_ID,
@@ -81,7 +90,7 @@ async function main(): Promise<void> {
     while (!shuttingDown) {
       const startedAt = Date.now();
       try {
-        await pollOnce(db, samsara);
+        await pollOnce(db, samsara, router);
       } catch (error: unknown) {
         // Never let one bad cycle kill the process — the next poll is 30s
         // away and the feed_health row is what tells the UI we are behind.
@@ -123,6 +132,7 @@ async function main(): Promise<void> {
 async function pollOnce(
   db: ReturnType<typeof createDirectDb>['db'],
   samsara: SamsaraClient,
+  router: MapboxDirections,
 ): Promise<void> {
   const cursor = await readCursor(db);
   const page = await samsara.vehicleStatsFeed(cursor ?? undefined);
@@ -160,6 +170,27 @@ async function pollOnce(
     });
   }
 
+  /**
+   * §12.31. After arrivals, because an arrived stop is no longer routed to.
+   * Caught on its own: a routing failure must not lose the positions we just
+   * wrote or stall the cursor.
+   */
+  let routing = { routed: 0, skipped: 0, failed: 0, budgetExhausted: false, reasons: {} };
+  try {
+    routing = await sweepRouting(db, router, logger, {
+      ceiling: env.ROUTING_MONTHLY_CEILING,
+    });
+    if (routing.budgetExhausted) {
+      logger.error('routing budget exhausted for the month — degrading to lane estimates', {
+        ceiling: env.ROUTING_MONTHLY_CEILING,
+      });
+    }
+  } catch (error: unknown) {
+    logger.error('routing sweep failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   logger.info('poll: ingested', {
     vehicles: page.rows.length,
     readings: pending.length,
@@ -172,6 +203,10 @@ async function pollOnce(
     arrivalsDetected: sweep.arrived,
     departuresDetected: sweep.departed,
     stopsWatched: sweep.considered,
+    routed: routing.routed,
+    routesSkipped: routing.skipped,
+    routesFailed: routing.failed,
+    routeReasons: routing.reasons,
   });
 }
 

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq, isNull, and, inArray, sql } from 'drizzle-orm';
+import { eq, isNull, and, desc, inArray, sql } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import { assignments, drivers, trucks } from '@/db/schema';
 import { AssignmentConflictError, loadAssignmentBoard, saveAssignments } from './assignments';
@@ -72,11 +72,25 @@ withDb('saving the board', () => {
    * inside the transaction. That rolls back with everything else, and the
    * tests stop depending on who happens to be driving today.
    */
+  /**
+   * Ordered DESC, deliberately the opposite end of the fleet from
+   * stop-edit.test.ts.
+   *
+   * Vitest runs files in parallel, and both suites now END OPEN ASSIGNMENTS
+   * for the trucks and drivers they use. Taking the same two rows meant two
+   * concurrent transactions locking them, which surfaced as an intermittent
+   * stale-preview failure that passed every time the file was run alone.
+   * Different slices, no contention.
+   *
+   * Also ordered rather than bare `limit`: an unordered limit is whatever the
+   * planner feels like returning today.
+   */
   const twoTrucks = async (tx: Tx) => {
     const rows = await tx
       .select({ id: trucks.id, number: trucks.truckNumber })
       .from(trucks)
       .where(eq(trucks.active, true))
+      .orderBy(desc(trucks.truckNumber))
       .limit(2);
     await freeUp(tx, rows.map((r) => r.id), []);
     return rows;
@@ -85,6 +99,7 @@ withDb('saving the board', () => {
     const rows = await tx
       .select({ id: drivers.id, name: drivers.name })
       .from(drivers)
+      .orderBy(desc(drivers.name))
       .limit(2);
     await freeUp(tx, [], rows.map((r) => r.id));
     return rows;

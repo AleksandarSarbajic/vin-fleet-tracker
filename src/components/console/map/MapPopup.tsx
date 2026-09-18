@@ -3,7 +3,7 @@
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
-import { milesText, precisionNote } from '../TruckRow';
+import { basisShort, milesText, precisionNote } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
@@ -54,13 +54,15 @@ function projectedLine(row: FleetRow): string {
       const time = `ETA ${timeInZone(new Date(row.etaUtc), zone)}`;
       const miles = milesText(row.milesRemaining);
       const line = miles ? `${miles} · ${time}` : time;
-      // §12.30. Four words that stop a centroid being read as an address.
-      if (row.etaPrecision === 'zip') {
-        const pm = row.etaAccuracyMiles !== null ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi` : '';
-        return `${line} · from ZIP centroid${pm}`;
-      }
-      if (row.etaPrecision === 'block') return `${line} · nearest block`;
-      return line;
+      // §12.30/§12.31: what KIND of number, then how sure. A dispatcher must
+      // be able to tell a routed figure from a straight-line guess.
+      const where =
+        row.etaPrecision === 'zip'
+          ? ` · ZIP centre${row.etaAccuracyMiles !== null ? ` ±${row.etaAccuracyMiles.toFixed(1)} mi` : ''}`
+          : row.etaPrecision === 'block'
+            ? ' · nearest block'
+            : '';
+      return `${line} · ${basisShort(row)}${where}`;
     }
     case 'address-not-located':
       return 'no ETA · address not located';

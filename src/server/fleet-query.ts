@@ -1,5 +1,10 @@
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
+import {
+  needsRecompute,
+  type CachedRoute,
+  type DistanceBasis,
+} from '@/lib/routing';
 import { cityState } from '@/samsara/schemas';
 import {
   FORCED_STATUSES,
@@ -56,8 +61,14 @@ export interface FleetRow {
   milesRemaining: number | null;
   /** How well the stop's coordinates are known. Null when there are none. */
   etaPrecision: 'street' | 'block' | 'zip' | null;
-  /** The ± to print beside a coarse ETA (§12.30). */
+  /** The ± to print beside a coarse ETA (§12.30), snap included (§12.31). */
   etaAccuracyMiles: number | null;
+  /** Routed, estimated from an earlier route, or straight-line (§12.31). */
+  distanceBasis: DistanceBasis;
+  /** The measured road factor for this lane, when one exists. */
+  laneRatio: number | null;
+  /** Metres the provider moved the stop to reach a road. */
+  snapMeters: number | null;
   /** Why there is no ETA, so the UI can say it rather than print a dash. */
   etaAbsence: EtaAbsence;
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
@@ -112,6 +123,8 @@ export interface NextStop {
   precision: 'street' | 'block' | 'zip' | null;
   /** The ± in miles on those coordinates. Null for a street match. */
   accuracyMiles: number | null;
+  /** The cached route for this lane (§12.31), or null. */
+  route: CachedRoute | null;
   arrivedAt: string | null;
 }
 
@@ -152,6 +165,9 @@ export const LATEST_POSITION_SQL = sql`
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
     ns.stop_accuracy_miles, ns.arrived_at,
+    ns.route_miles, ns.route_duration_s, ns.route_from_lat, ns.route_from_lng,
+    ns.route_straight_miles, ns.route_lane_ratio,
+    ns.route_snap_from_m, ns.route_snap_to_m, ns.route_computed_at,
     ov.forced_status, ov.reason, ov.reason_note, ov.set_by_name,
     ov.set_at, ov.expires_at,
     (select count(*) from loads ol
@@ -201,10 +217,23 @@ export const LATEST_POSITION_SQL = sql`
       s.lng                   as stop_lng,
       s.geocode_precision::text as stop_precision,
       s.geocode_accuracy_miles  as stop_accuracy_miles,
+      -- §12.31: the cached route for this lane, if there is one.
+      sr.routed_miles           as route_miles,
+      sr.routed_duration_s      as route_duration_s,
+      sr.from_lat               as route_from_lat,
+      sr.from_lng               as route_from_lng,
+      sr.straight_at_route_miles as route_straight_miles,
+      sr.lane_ratio             as route_lane_ratio,
+      sr.snap_from_m            as route_snap_from_m,
+      sr.snap_to_m              as route_snap_to_m,
+      to_char(sr.computed_at at time zone 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as route_computed_at,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at
     from loads l
     join stops s on s.load_id = l.id
+    left join stop_routes sr on sr.stop_id = s.id
+                            and sr.stop_lat = s.lat and sr.stop_lng = s.lng
     where l.truck_id = t.id
       and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
       and s.departed_at is null
@@ -306,6 +335,15 @@ export const FleetQueryRow = z.object({
   stop_lng: z.number().nullable(),
   stop_precision: z.enum(['street', 'block', 'zip']).nullable(),
   stop_accuracy_miles: z.number().nullable(),
+  route_miles: z.number().nullable(),
+  route_duration_s: z.number().nullable(),
+  route_from_lat: z.number().nullable(),
+  route_from_lng: z.number().nullable(),
+  route_straight_miles: z.number().nullable(),
+  route_lane_ratio: z.number().nullable(),
+  route_snap_from_m: z.number().nullable(),
+  route_snap_to_m: z.number().nullable(),
+  route_computed_at: z.string().nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
@@ -345,6 +383,9 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     milesRemaining: null,
     etaPrecision: null,
     etaAccuracyMiles: null,
+    distanceBasis: 'straight-line',
+    laneRatio: null,
+    snapMeters: null,
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
@@ -368,6 +409,28 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             lng: raw.stop_lng,
             precision: raw.stop_precision,
             accuracyMiles: raw.stop_accuracy_miles,
+            route:
+              raw.route_miles !== null &&
+              raw.route_duration_s !== null &&
+              raw.route_from_lat !== null &&
+              raw.route_from_lng !== null &&
+              raw.route_straight_miles !== null &&
+              raw.route_lane_ratio !== null &&
+              raw.route_computed_at !== null
+                ? {
+                    routedMiles: raw.route_miles,
+                    routedDurationS: raw.route_duration_s,
+                    fromLat: raw.route_from_lat,
+                    fromLng: raw.route_from_lng,
+                    straightAtRouteMiles: raw.route_straight_miles,
+                    laneRatio: raw.route_lane_ratio,
+                    stopLat: raw.stop_lat ?? 0,
+                    stopLng: raw.stop_lng ?? 0,
+                    snapFromM: raw.route_snap_from_m,
+                    snapToM: raw.route_snap_to_m,
+                    computedAtUtc: raw.route_computed_at,
+                  }
+                : null,
             arrivedAt: raw.arrived_at,
           }
         : null,
@@ -434,6 +497,29 @@ export function applyStatus(
               lng: row.nextStop.lng,
               precision: row.nextStop.precision,
               accuracyMiles: row.nextStop.accuracyMiles,
+              route: row.nextStop.route,
+              /**
+               * §12.31: `routed` only while the route still describes where
+               * the truck IS. Past the recompute threshold the same row is
+               * still useful — its lane ratio is a measured road factor — but
+               * the label must stop saying "routed".
+               */
+              routeFresh:
+                row.nextStop.route !== null &&
+                row.lat !== null &&
+                row.lng !== null &&
+                row.nextStop.lat !== null &&
+                row.nextStop.lng !== null &&
+                needsRecompute(
+                  row.nextStop.route,
+                  {
+                    truckLat: row.lat,
+                    truckLng: row.lng,
+                    stopLat: row.nextStop.lat,
+                    stopLng: row.nextStop.lng,
+                  },
+                  now,
+                ) === null,
               // Whether a dispatcher typed one, not whether it resolved.
               hasAddress: Boolean(
                 row.nextStop.addressLine ?? row.nextStop.city ?? row.nextStop.zip,
@@ -454,6 +540,9 @@ export function applyStatus(
       milesRemaining: result.milesRemaining,
       etaPrecision: result.precision,
       etaAccuracyMiles: result.accuracyMiles,
+      distanceBasis: result.distanceBasis,
+      laneRatio: result.laneRatio,
+      snapMeters: result.snapMeters,
       etaAbsence: result.etaAbsence,
       lastComputedEtaUtc: result.lastComputedEtaUtc,
       deadlineUtc: result.deadlineUtc,

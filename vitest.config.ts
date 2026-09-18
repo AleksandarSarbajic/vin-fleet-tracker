@@ -25,5 +25,22 @@ export default defineConfig({
      */
     testTimeout: 20_000,
     hookTimeout: 20_000,
+
+    /**
+     * ONE FILE AT A TIME. The database-backed suites share one database, and
+     * `applyReassignment` deliberately takes a FLEET-WIDE lock —
+     * `select 1 from assignments where ended_at is null for update` — so that
+     * the one-driver-per-truck invariant cannot be raced.
+     *
+     * That lock is correct and worth keeping. What it means for tests is that
+     * two suites touching assignments at the same time will block or deadlock,
+     * which showed up as a reassignment test that failed only in a full run
+     * and passed every single time it was run alone. Slicing the fixtures to
+     * different trucks did not help, because the lock is not per row.
+     *
+     * The cost is wall time. The alternative is an intermittently red suite,
+     * which is worse: it teaches people to re-run until green.
+     */
+    fileParallelism: false,
   },
 });
