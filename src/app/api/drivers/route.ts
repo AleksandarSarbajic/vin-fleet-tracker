@@ -54,7 +54,12 @@ export async function GET() {
  * both are hard to notice afterwards, and neither is urgent at 6am.
  */
 const Action = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('create'), driver: DriverCreate }),
+  z.object({
+    action: z.literal('create'),
+    driver: DriverCreate,
+    /** §12.38: assign in the same transaction. Absent means create only. */
+    truckId: z.string().uuid().optional(),
+  }),
   z.object({
     action: z.literal('link'),
     appDriverId: z.string().uuid(),
@@ -82,11 +87,14 @@ export async function POST(request: Request) {
     switch (parsed.data.action) {
       case 'create': {
         const user = await requireRole('dispatcher');
-        const { driverId } = await createDriver(db, {
+        const result = await createDriver(db, {
           actorUserId: user.id,
           driver: parsed.data.driver,
+          ...(parsed.data.truckId !== undefined
+            ? { assignToTruckId: parsed.data.truckId }
+            : {}),
         });
-        return NextResponse.json({ driverId });
+        return NextResponse.json(result);
       }
       case 'link': {
         const user = await requireRole('admin');

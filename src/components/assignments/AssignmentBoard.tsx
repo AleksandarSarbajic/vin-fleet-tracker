@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Role } from '@/lib/roles';
@@ -41,12 +41,58 @@ export function AssignmentBoard({ board, role }: Props) {
     [board.trucks],
   );
   const [draft, setDraft] = useState<Map<string, string | null>>(initial);
+
+  /**
+   * Which trucks the dispatcher has touched since the last save (§12.38).
+   *
+   * A ref, not state: it must not itself trigger the rebase below, and it is
+   * read at the moment new server data arrives rather than rendered.
+   */
+  const edited = useRef<Set<string>>(new Set());
   const [conflicts, setConflicts] = useState<AssignmentConflict[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
-  useEffect(() => setDraft(initial), [initial]);
+  /**
+   * REBASE, not reset (§12.38).
+   *
+   * This was `setDraft(initial)`, which threw away every local edit whenever
+   * new server data arrived — and `router.refresh()` resolves BEFORE the new
+   * props land, so anything edited in that gap was silently lost. It is how
+   * "Add and assign" created a driver and left the truck empty, and the same
+   * race sits behind every other refresh on this board: retiring a driver
+   * refreshes, and would have wiped a half-finished set of assignments with
+   * no warning and no error.
+   *
+   * So server data becomes the new base, and the dispatcher's own edits are
+   * replayed on top. Their pending change wins over a concurrent one; the
+   * save's conflict detection is what adjudicates that, not a silent
+   * overwrite here.
+   */
+  useEffect(() => {
+    setDraft((current) => {
+      const next = new Map(initial);
+      for (const truckId of edited.current) {
+        // A truck that has left the board cannot be rebased onto it.
+        if (next.has(truckId) && current.has(truckId)) {
+          next.set(truckId, current.get(truckId) ?? null);
+        }
+      }
+      return next;
+    });
+  }, [initial]);
+
+  /** Every local edit goes through here, so the rebase knows what to keep. */
+  const editDraft = useCallback((truckId: string, driverId: string | null) => {
+    edited.current.add(truckId);
+    setDraft((d) => new Map(d).set(truckId, driverId));
+  }, []);
+
+  /** After a save or a discard, the server IS the truth again. */
+  const clearEdits = useCallback(() => {
+    edited.current = new Set();
+  }, []);
 
   const changed = useMemo(
     () => board.trucks.filter((t) => (draft.get(t.id) ?? null) !== t.driverId),
@@ -130,13 +176,16 @@ export function AssignmentBoard({ board, role }: Props) {
         `Saved — ${result.assigned} assigned, ${result.cleared} cleared` +
           `${result.unchanged ? `, ${result.unchanged} unchanged` : ''}.`,
       );
+      // Saved, so the server is the truth again and the rebase has nothing
+      // to preserve.
+      clearEdits();
       router.refresh();
     } catch (error: unknown) {
       setFailure(error instanceof Error ? error.message : 'The save failed.');
     } finally {
       setSaving(false);
     }
-  }, [changed, draft, router]);
+  }, [changed, draft, router, clearEdits]);
 
   /** Cmd/Ctrl+Enter saves, as everywhere else that writes (§8.1). */
   useEffect(() => {
@@ -226,9 +275,7 @@ export function AssignmentBoard({ board, role }: Props) {
                   truckLabel={label(truck)}
                   disabled={!mayEdit || saving}
                   disabledReason={mayEdit ? undefined : lockedReason}
-                  onChange={(driverId) =>
-                    setDraft((d) => new Map(d).set(truck.id, driverId))
-                  }
+                  onChange={(driverId) => editDraft(truck.id, driverId)}
                   /**
                    * §12.37: the board refreshes BEFORE the select points at
                    * the new driver, so `board.drivers` already contains them.
@@ -236,9 +283,20 @@ export function AssignmentBoard({ board, role }: Props) {
                    * offered "+ Add driver" and then could not show the result
                    * would look broken.
                    */
-                  onDriverCreated={async () => {
+                  /**
+                   * §12.38: only when the truck is EMPTY. An occupied truck
+                   * makes this a reassignment, which has a two-sided confirm
+                   * and a preview token — so the driver is created, selected
+                   * here, and the existing confirm takes over on Save. The
+                   * dispatcher learns no new path.
+                   */
+                  assignToTruckId={truck.driverId === null ? truck.id : null}
+                  onDriverCreated={(_driverId, _name, assignedTruckId) => {
+                    // Assigned server-side, so pull the new truth in. The
+                    // draft rebases rather than resetting, so the selection
+                    // and every other pending edit survive.
+                    if (assignedTruckId !== null) clearEdits();
                     router.refresh();
-                    await new Promise((r) => setTimeout(r, 0));
                   }}
                 />
                 <span className="truncate text-body text-text-muted">
@@ -330,6 +388,7 @@ export function AssignmentBoard({ board, role }: Props) {
               type="button"
               disabled={!dirty || saving}
               onClick={() => {
+                clearEdits();
                 setDraft(initial);
                 setConflicts([]);
               }}

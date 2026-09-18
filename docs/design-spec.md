@@ -3129,6 +3129,100 @@ It counts tags rather than searching for the string, because
 discriminate: reverted to the original `{truck.driverName ?? 'Unassigned'}` it
 fails with `expected 1 to be 2`, and passes on the fix.
 
+## 12.38 "Add and assign" created the driver and left the truck empty
+
+Reported by the dispatcher who tried to use it. §12.37 described the
+post-click behaviour — *"the board refreshes, the dropdown closes, and the
+picker is left with Ada selected on that truck"* — without exercising it, two
+commits after §12.37 was itself about describing UI that did not exist.
+
+### Which half was missing: the assignment was never sent
+
+Diagnosed before fixing, because the three candidates need different fixes:
+
+1. **The picker does its part.** Probed directly:
+   `SEQUENCE: ["onDriverCreated","onChange(d-new)"]` — one call, with the new
+   id.
+2. **The board took it and threw it away.** `router.refresh()` resolves
+   *before* the new props arrive, so the order was: refresh → `onChange` →
+   `setDraft(truck → d-new)` → ...new board lands... → `board.trucks` is a new
+   array → `initial` recomputes → `useEffect(() => setDraft(initial))` →
+   **wiped.**
+3. **Even surviving, it was only a draft** needing a Save click, while the
+   button said "Add and assign".
+
+Nothing was rejected and nothing was written and lost server-side. It was
+never sent.
+
+### A test must fail for the reason you think it fails
+
+**The clean example, and it is mine.** The first version of the click-through
+test mocked `router.refresh()` as a no-op. The board never received new props,
+so the reset effect never fired, and the test failed — on something *adjacent*
+to the defect. It would have gone green against a fix that did not touch the
+race at all.
+
+The second version re-rendered from a fake server but reused the same board
+object, so `board.trucks` kept its identity, the `initial` memo never
+recomputed, and the test **passed against the very code it was written to
+catch**. Only cloning the board on refresh — which is what a server render
+actually delivers — made it fail correctly. And with a faithful mock it
+immediately caught a second case the earlier version had missed: the
+occupied-truck selection was being wiped too.
+
+> **A mock that cannot express the bug cannot verify the fix.** It goes green
+> against a wrong one.
+
+This belongs beside the four isolation faults (§12.32) and the preflight gate
+(§12.32) as the same discipline: a guard, a gate or a test must be shown to
+fail on the broken code before its passing means anything.
+
+### The defect was the reset, not this call site
+
+`useEffect(() => setDraft(initial), [initial])` discards **every** local edit
+whenever server data arrives. `router.refresh()` is called from three places
+on that board, and any edit made in the gap is lost silently — no error, no
+warning. Retiring a driver refreshes, and would have wiped a half-finished set
+of assignments the same way.
+
+Replaced with a **rebase**: server data becomes the new base and the
+dispatcher's own edits are replayed on top, tracked in a ref so the tracking
+does not itself trigger the effect. Their pending change wins over a
+concurrent one, and the save's conflict detection adjudicates — rather than a
+silent overwrite here. Cleared on save and on discard, when the server is the
+truth again.
+
+### Label matches capability
+
+| truck | button | what happens |
+|---|---|---|
+| empty | **Add and assign** | created and assigned in ONE transaction (§12.28) |
+| occupied | **Add driver** | created, selected in the picker; the existing reassignment confirm takes over on Save |
+
+The occupied case is **refused server-side**, not confirmed: reassignment has
+a two-sided confirm and a preview token (§9.10), and creating straight through
+would bypass a confirmation the design requires. Refused means *nothing* is
+written — no driver left behind by a failed assignment, which is the half-write
+§12.28 exists to prevent.
+
+The dispatcher learns no new path: on an occupied truck it behaves exactly
+like picking any other driver.
+
+### The edit modal was never checked
+
+It had no `onDriverCreated`, so "+ Add driver" **was never offered there at
+all** — while §12.37's walkthrough claimed "the same flow works in the edit
+modal". The same error, in the same session, about a second surface.
+
+It is create-only there even on an empty truck: the modal already assigns
+inside its own save with the preview token (§12.28), so creating *and*
+assigning server-side would write the assignment twice.
+
+The picker now holds the driver it just created until the `drivers` prop
+catches up, which removes the ordering dependency from both callers — the
+board can refetch cheaply and the modal cannot, and an input that blanks after
+a successful create looks like a failure.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

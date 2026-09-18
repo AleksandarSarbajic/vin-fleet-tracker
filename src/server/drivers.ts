@@ -22,8 +22,26 @@ export class DriverError extends Error {
 
 export async function createDriver(
   db: Db,
-  input: { actorUserId: string | null; driver: DriverCreate },
-): Promise<{ driverId: string }> {
+  input: {
+    actorUserId: string | null;
+    driver: DriverCreate;
+    /**
+     * Assign them to this truck in the SAME transaction (§12.38).
+     *
+     * "Add and assign" is one act from the dispatcher's side — a new hire
+     * walks in and goes on a truck — so it is one write from ours, both or
+     * neither, exactly as the override rides inside the stop save (§12.28).
+     * A driver created but not assigned leaves them where they started.
+     *
+     * REFUSED when the truck already has a driver: that is a reassignment,
+     * and reassignment has a two-sided confirm and a preview token (§9.10).
+     * Creating straight through would bypass a confirmation the design
+     * requires, so the caller creates the driver and lets the existing
+     * confirm path handle the move.
+     */
+    assignToTruckId?: string | undefined;
+  },
+): Promise<{ driverId: string; assignedTruckId: string | null }> {
   /**
    * Re-parsed here, not trusted from the caller (§9.9). The route parses it
    * too; a server function that assumes its caller did is a rule living in
@@ -81,15 +99,42 @@ export async function createDriver(
       })
       .returning({ id: drivers.id });
 
+    let assignedTruckId: string | null = null;
+    if (input.assignToTruckId !== undefined) {
+      const [occupied] = await tx
+        .select({ driverId: assignments.driverId })
+        .from(assignments)
+        .where(and(eq(assignments.truckId, input.assignToTruckId), isNull(assignments.endedAt)))
+        .limit(1);
+
+      if (occupied) {
+        // Nothing is written, including the driver — one transaction.
+        throw new DriverError(
+          'That truck already has a driver. Add the driver, then reassign from the board so the change is confirmed.',
+          'assignToTruckId',
+        );
+      }
+
+      await tx
+        .insert(assignments)
+        .values({ truckId: input.assignToTruckId, driverId: row!.id, createdBy: input.actorUserId });
+      assignedTruckId = input.assignToTruckId;
+    }
+
     await writeAudit(tx, {
       actorUserId: input.actorUserId,
       entity: 'driver',
       entityId: row!.id,
       before: null,
-      after: { name: driver.name, phone: driver.phone ?? null, source: 'app' },
+      after: {
+        name: driver.name,
+        phone: driver.phone ?? null,
+        source: 'app',
+        assignedTruckId,
+      },
     });
 
-    return { driverId: row!.id };
+    return { driverId: row!.id, assignedTruckId };
   });
 }
 

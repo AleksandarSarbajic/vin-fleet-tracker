@@ -36,7 +36,17 @@ interface Props {
    * "+ Add driver" — the edit modal passes it too, but a caller that cannot
    * refresh must not offer a control that appears to do nothing.
    */
-  onDriverCreated?: (driverId: string, name: string) => void | Promise<void>;
+  onDriverCreated?: (
+    driverId: string,
+    name: string,
+    assignedTruckId: string | null,
+  ) => void | Promise<void>;
+  /**
+   * §12.38: the truck this picker assigns to, when it is EMPTY. Null when it
+   * already has a driver, which makes the create a create-only and leaves the
+   * move to the existing reassignment confirm.
+   */
+  assignToTruckId?: string | null;
 }
 
 export function DriverSelect({
@@ -49,23 +59,42 @@ export function DriverSelect({
   autoFocus = false,
   onChange,
   onDriverCreated,
+  assignToTruckId = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const [cursor, setCursor] = useState(0);
   const [adding, setAdding] = useState(false);
+  /**
+   * The driver this picker just created, held until the `drivers` prop
+   * catches up (§12.38).
+   *
+   * Without it the picker depends on its parent refetching before the
+   * selection renders — the board does, the edit modal cannot as cheaply, and
+   * an input that goes blank after a successful create looks like a failure.
+   * Holding it here removes the ordering dependency from both callers.
+   */
+  const [justCreated, setJustCreated] = useState<BoardDriver | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const listId = useId();
 
-  const selected = drivers.find((d) => d.id === value) ?? null;
+  const known = useMemo(
+    () =>
+      justCreated && !drivers.some((d) => d.id === justCreated.id)
+        ? [...drivers, justCreated]
+        : drivers,
+    [drivers, justCreated],
+  );
+
+  const selected = known.find((d) => d.id === value) ?? null;
 
   const matches = useMemo(() => {
     const needle = typed.trim().toLowerCase();
     const list = needle
-      ? drivers.filter((d) => d.name.toLowerCase().includes(needle))
-      : drivers;
+      ? known.filter((d) => d.name.toLowerCase().includes(needle))
+      : known;
     return list.slice(0, 40);
-  }, [drivers, typed]);
+  }, [known, typed]);
 
   useEffect(() => {
     if (!open) return;
@@ -212,17 +241,34 @@ export function DriverSelect({
             <li>
               <AddDriverInline
                 suggestedName={typed.trim()}
+                assignToTruckId={assignToTruckId}
                 onCancel={() => setAdding(false)}
-                onCreated={(driverId, name) => {
+                onCreated={(driverId, name, assignedTruckId) => {
                   setAdding(false);
                   setTyped('');
                   setOpen(false);
-                  // The caller refreshes the board FIRST, so the driver exists
-                  // in `drivers` before the select points at them — otherwise
-                  // the input renders empty until the next fetch lands.
-                  void Promise.resolve(onDriverCreated?.(driverId, name)).then(() =>
-                    onChange(driverId),
-                  );
+                  setJustCreated({
+                    id: driverId,
+                    name,
+                    active: true,
+                    source: 'app',
+                    samsaraDriverId: null,
+                    phone: null,
+                    truckId: assignedTruckId,
+                    truckLabel: assignedTruckId === null ? null : truckLabel,
+                  });
+                  /**
+                   * `onChange` FIRST, then the refresh (§12.38).
+                   *
+                   * It used to be the other way round, awaiting a refresh that
+                   * resolves before the new props arrive — so the selection was
+                   * written into the draft and then wiped when the board data
+                   * landed. The draft now survives a refresh by rebasing, and
+                   * ordering it this way means the selection is never the thing
+                   * racing.
+                   */
+                  onChange(driverId);
+                  void onDriverCreated?.(driverId, name, assignedTruckId);
                 }}
               />
             </li>

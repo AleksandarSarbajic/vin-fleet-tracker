@@ -549,6 +549,24 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                     disabled={!mayEdit || saving}
                     disabledReason={mayEdit ? undefined : lockedReason}
                     onChange={(id) => set('driverId', id)}
+                    /**
+                     * §12.38. CREATE ONLY here — `assignToTruckId` stays null
+                     * even on an empty truck.
+                     *
+                     * The modal already assigns inside its own save (§12.28),
+                     * with the preview token a reassignment needs. Creating
+                     * AND assigning server-side would write the assignment
+                     * twice: once here and once when the modal saves. So the
+                     * driver is created, selected, and the modal's save does
+                     * the assigning — which is also why the button reads
+                     * "Add driver" on this surface.
+                     */
+                    assignToTruckId={null}
+                    onDriverCreated={() => {
+                      // The picker holds the new driver itself until this
+                      // lands, so the selection never blanks.
+                      void queryClient.invalidateQueries({ queryKey: ['fleet'] });
+                    }}
                   />
                 </label>
                 <label className="block">

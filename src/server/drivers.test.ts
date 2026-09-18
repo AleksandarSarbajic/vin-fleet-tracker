@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { assignments, driverMergeCandidates, drivers } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { assign, makeDriver, makeFullFleetRow, makeTruck } from '@/test/fleet';
@@ -406,5 +406,81 @@ describeDb('a truck with an app-created driver reports position normally', () =>
     // And the truck is not UNASSIGNED — an app driver is a real assignment.
     expect(seen?.status).not.toBe('UNASSIGNED');
     expect(seen?.etaAbsence).not.toBe('suppressed-unassigned');
+  });
+});
+
+describeDb('creating and assigning in one transaction (§12.38)', () => {
+  it('puts the new driver on the truck, in the same write', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const result = await createDriver(as(tx), {
+        actorUserId: null,
+        driver: { name: 'Ada Lovelace' },
+        assignToTruckId: truck.id,
+      });
+      const open = await tx
+        .select({ driverId: assignments.driverId })
+        .from(assignments)
+        .where(and(eq(assignments.truckId, truck.id), isNull(assignments.endedAt)));
+      return { result, open, truckId: truck.id };
+    });
+
+    expect(seen.result.assignedTruckId).toBe(seen.truckId);
+    expect(seen.open).toHaveLength(1);
+    expect(seen.open[0]?.driverId).toBe(seen.result.driverId);
+  });
+
+  it('creates nothing at all when the truck is occupied — both writes or neither', async () => {
+    const after = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const existing = await makeDriver(tx);
+      await assign(tx, truck.id, existing.id);
+
+      let refused = false;
+      try {
+        await createDriver(as(tx), {
+          actorUserId: null,
+          driver: { name: 'Ada Lovelace' },
+          assignToTruckId: truck.id,
+        });
+      } catch (error) {
+        refused = error instanceof DriverError;
+      }
+      const ada = await tx.select().from(drivers).where(eq(drivers.name, 'Ada Lovelace'));
+      return { refused, adaExists: ada.length > 0 };
+    });
+
+    expect(after.refused).toBe(true);
+    // §12.28: one endpoint, one transaction. A driver left behind by a
+    // refused assignment is the half-write this rules out.
+    expect(after.adaExists).toBe(false);
+  });
+
+  it('creates without assigning when no truck is named', async () => {
+    const open = await rolledBack(async (tx) => {
+      const result = await createDriver(as(tx), {
+        actorUserId: null,
+        driver: { name: 'Unassigned Ada' },
+      });
+      expect(result.assignedTruckId).toBeNull();
+      return tx.select().from(assignments).where(eq(assignments.driverId, result.driverId));
+    });
+    expect(open).toEqual([]);
+  });
+
+  it('records the assignment in the audit entry', async () => {
+    const entry = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await createDriver(as(tx), {
+        actorUserId: null,
+        driver: { name: 'Audited Ada' },
+        assignToTruckId: truck.id,
+      });
+      const rows = (await tx.execute(
+        sql`select after from audit_log where entity = 'driver'`,
+      )) as unknown as { after: Record<string, unknown> }[];
+      return { after: rows[0]?.after, truckId: truck.id };
+    });
+    expect(entry.after?.assignedTruckId).toBe(entry.truckId);
   });
 });

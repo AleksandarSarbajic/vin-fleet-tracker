@@ -19,12 +19,20 @@ import { DriverCreate } from '@/lib/driver';
  */
 export function AddDriverInline({
   suggestedName,
+  assignToTruckId,
   onCreated,
   onCancel,
 }: {
   /** Whatever they typed into the search, which is almost always the name. */
   suggestedName: string;
-  onCreated: (driverId: string, name: string) => void;
+  /**
+   * §12.38. Present when the truck is EMPTY, so the driver can be created and
+   * assigned in one transaction. Absent when it already has a driver: that is
+   * a reassignment and belongs to the confirm path, so the button says what it
+   * can actually do instead.
+   */
+  assignToTruckId: string | null;
+  onCreated: (driverId: string, name: string, assignedTruckId: string | null) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(suggestedName);
@@ -44,7 +52,11 @@ export function AddDriverInline({
       const response = await fetch('/api/drivers', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'create', driver: parsed.data }),
+        body: JSON.stringify({
+          action: 'create',
+          driver: parsed.data,
+          ...(assignToTruckId !== null ? { truckId: assignToTruckId } : {}),
+        }),
       });
       const body: unknown = await response.json();
       if (!response.ok) {
@@ -55,8 +67,11 @@ export function AddDriverInline({
         setError(message);
         return;
       }
-      const driverId = (body as { driverId: string }).driverId;
-      onCreated(driverId, parsed.data.name);
+      const { driverId, assignedTruckId } = body as {
+        driverId: string;
+        assignedTruckId: string | null;
+      };
+      onCreated(driverId, parsed.data.name, assignedTruckId ?? null);
     } catch {
       setError('The driver could not be saved.');
     } finally {
@@ -96,6 +111,9 @@ export function AddDriverInline({
       <p className="mb-2 text-small text-text-muted">
         No ELD — this driver is not in Samsara, so the truck&rsquo;s position
         still comes from the vehicle.
+        {assignToTruckId === null
+          ? ' This truck already has a driver, so the change is confirmed when you save.'
+          : ''}
       </p>
       {error ? (
         <p className="mb-2 text-small text-status-late-fg" role="alert">
@@ -109,7 +127,12 @@ export function AddDriverInline({
           disabled={saving || name.trim() === ''}
           className="h-9 flex-1 border border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.09em] text-text disabled:text-text-muted"
         >
-          {saving ? 'Adding…' : 'Add and assign'}
+          {/**
+           * The label matches what the button can do. On an occupied truck it
+           * can only create — the assignment is a reassignment and goes
+           * through the existing confirm on Save — so it must not promise one.
+           */}
+          {saving ? 'Adding…' : assignToTruckId !== null ? 'Add and assign' : 'Add driver'}
         </button>
         <button
           type="button"
