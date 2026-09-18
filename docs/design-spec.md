@@ -2837,6 +2837,177 @@ first successful poll, cursor and all.
 `npm run db:verify` already checked this (`feed_health rows : 0 (singleton)` →
 `FAILED`) and was the only thing that noticed.
 
+## 12.35 Drivers a dispatcher creates
+
+New hires are on the board before anyone adds them to the ELD, and until now
+they could not be assigned to a truck at all — so the board could not
+represent the real fleet.
+
+### The hazard, established before anything was designed
+
+The roster sync rewrites `drivers` from Samsara every poll. If a hand-entered
+driver were wiped on the next one the feature would be worthless, so that was
+settled first, by running it rather than by reading it:
+
+```
+seeded:   samsara-1     Samsara Driver    (synced)
+          app-local-1   Hand Entered      phone=555
+
+Samsara returns ONLY samsara-1, renamed. After the sync:
+
+          app-local-1   Hand Entered              active=true  phone=555   survived
+          samsara-1     Samsara Driver RENAMED    active=true  phone=-
+```
+
+`upsertDrivers` is `INSERT … ON CONFLICT DO UPDATE` with **no DELETE**, and
+nothing else in the codebase writes to `drivers` at all.
+
+**But that survival was an accident of the sync's shape, not a rule.** Nothing
+stated it, no test asserted it, and the obvious next feature — "deactivate
+drivers Samsara stopped returning" — would have wiped every hand-entered
+driver in one poll.
+
+### Source is explicit, never inferred
+
+`samsara_driver_id IS NULL` is the tempting inference and it is wrong at the
+one moment it matters: a **merge fills that id in**, and the row the sync must
+still keep its hands off then looks Samsara-born. So `source` is a column, and
+the sync carries `setWhere source = 'samsara'`.
+
+### The constraint that would have taken the worker down
+
+`samsara_driver_id` becomes nullable and its unique index **partial**.
+Postgres will not match `ON CONFLICT (samsara_driver_id)` to a partial index
+unless the same predicate is supplied, so without `targetWhere` the roster
+sync throws *"no unique or exclusion constraint matching the ON CONFLICT
+specification"* — on the worker, on every poll, thirty seconds apart.
+
+### The merge: detect and offer, never automatic
+
+Onboarding completes, Samsara returns the driver, and the sync makes a
+**second** row for a person who already has assignment history against the
+first.
+
+Name is the only signal available — Samsara gives id, name and activation
+status, no phone, and licence data is never stored — and two drivers called
+J. Martinez in a 24-driver fleet is not hypothetical. An automatic merge that
+is wrong silently rewrites assignment history, and **nobody would find it,
+because the point of merging is that the rows stop being distinguishable.**
+
+So the sync records a candidate and a human decides. Dismissals are stored, or
+a rejected match re-offers itself every thirty seconds forever.
+
+Linking runs in one transaction, in this order:
+
+1. repoint `assignments.driver_id` — `ON DELETE RESTRICT` requires it, and it
+   is what keeps the history intact rather than orphaned;
+2. carry the phone across if Samsara has none, which it never does;
+3. carry a local retirement across;
+4. delete the app row, now unreferenced;
+5. audit **both ids**, on both sides.
+
+Rewriting which row past assignments point at is deliberate: the meaning of
+the merge is that these were always one person, and a history that keeps them
+apart lies in the other direction. **The audit entry naming both ids is the
+condition** — afterwards the rows are indistinguishable by design, so that
+entry is the only way back from a wrong link.
+
+### Name matching had two implementations, and they disagreed
+
+Found by a test. `detectMergeCandidates` normalised in SQL
+(`lower(regexp_replace(…))` — whitespace and case) while `normalizeDriverName`
+normalised in TypeScript (also punctuation and accents). "J Martinez" and
+"J. Martinez" matched in one and not the other.
+
+The same shape as §12.21, §12.23 and §12.32: **one rule, two implementations,
+and the layers drift.** Collapsed to one — the matching happens in TypeScript
+and the database does not get a vote. At 24 drivers the read is free.
+
+### The rest
+
+| decision | why |
+|---|---|
+| **name only**, phone optional | A required field a dispatcher cannot fill at 6am is a required field they will fake, and faked data looks real to the next shift. Phone is the only way to reach a driver with no ELD. |
+| **nothing else** | Licence data is never stored by policy; an employee number has no consumer, and a field with no consumer goes stale while looking authoritative. |
+| **`No ELD` tag** in the picker | Provenance, not status — so it borrows no status colour. It decides whether "no position" reads as expected or as broken. |
+| **dispatcher creates; admin links and retires** | Creating is routine and happens at 6am. Linking rewrites history; retiring removes someone from the board. Neither is urgent, both are hard to notice afterwards. |
+| **`retired_at`, not `active`** | `active` is Samsara's and is rewritten every poll, so after a merge the sync would resurrect a driver an admin had retired. |
+| never deleted | `assignments.driver_id` is `ON DELETE RESTRICT`, and the history is the record of who drove what. |
+
+### Position is keyed on the vehicle
+
+Stated rather than assumed, and pinned by a test: the fleet query joins
+`positions` with a lateral on `truck_id`, and the driver join supplies only
+`driver_id` and `driver_name`. A truck with an app-created driver has
+position, ETA, miles, routing and arrival detection exactly as any other. What
+a driver with no ELD costs is their own HOS — which this product does not use
+at all.
+
+## 12.36 Arrival detection had never fired
+
+It shipped in phase 5 with 24 tests against synthetic fixtures. A week of a
+worker running against a live fleet later: **zero arrivals, zero departures.**
+
+That is not evidence it works. It is not evidence it is broken either, and
+that ambiguity is the actual defect — `arrived: 0` was the same log line
+whether the fleet was 600 miles out or one poll short of confirming.
+
+### Why it never fired
+
+Measured against the live fleet:
+
+```
+watched stops (street precision, undeparted)  19
+open stops: street 47 · not-street 1 · no coordinates 0
+closest truck to its next stop                4.435 mi
+within the 0.25 mi radius                     0
+```
+
+Nothing was wrong. The watched set was healthy, the coordinates were there,
+the radius was fine — **the trucks had genuinely not arrived**, because the
+watched stops are seeded demo destinations that bear no relation to where this
+fleet actually drives. The detector had never been given a chance.
+
+### Verified against real position data
+
+The fixes in `test/real-tracks.ts` are unedited production data — real
+coordinates, real 11–30 s cadence, real GPS wander, real speeds. Only the
+stop's coordinates are chosen, which is the one thing a dispatcher types
+anyway.
+
+**Truck 142, near Wisconsin Dells — genuinely parked.** Seventeen consecutive
+fixes at 0 mph across five minutes, wandering 3.5e-5° of latitude (about 12
+feet) and 1.2e-4° of longitude (about 30 feet). That jitter is why the radius
+is 0.25 mi and not something tighter: a stationary truck's coordinates move.
+Detected, through the whole sweep, anchored to a recorded fix rather than
+`now()`.
+
+**Truck 133, near Alexandria, MN — a traffic light.** 69 mph, down to 21, then
+**0 mph for thirty-six seconds**, then away again at 11, 15, 35, 53, 67, 69.
+With the stop placed on the exact halt point the detector correctly refuses:
+the two-poll confirmation is the only thing standing between that track and a
+moving truck parked on the board. This is the case the feature lives or dies
+on, and it now has real data behind it.
+
+### Silence made legible
+
+Every sweep now logs the closest candidate and what stopped it counting —
+`too-far`, `moving`, `not-confirmed`, `coarse-precision`, `already-arrived`.
+
+The closest fix in the window, not the newest: "how close did it get" is the
+question, and the newest fix cannot answer it, because a truck that pulled
+into the yard and left again reads identically to one that was never there.
+
+The first instrumented sweep changed the picture immediately:
+
+```
+12:53:11  considered 19  arrived 0  nearest truck 133  0.194 mi  52.814 mph  moving
+```
+
+**0.194 mi — inside the 0.25 mi radius.** The fleet does pass within range of
+these stops; it passes *through* them at 52 mph, and the speed gate rejects it
+correctly. A week of `arrived: 0` had hidden that entirely.
+
 # 13. Still open
 
 The five contradictions found during extraction. **These have not been ruled

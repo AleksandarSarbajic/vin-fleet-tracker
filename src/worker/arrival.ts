@@ -5,8 +5,10 @@ import {
   ARRIVAL_DEFAULTS,
   detectArrival,
   detectDeparture,
+  explainNearest,
   type ArrivalConfig,
   type Fix,
+  type NearestCandidate,
 } from '@/lib/arrival';
 import { writeAudit, type Db } from '@/server/audit';
 
@@ -49,6 +51,14 @@ export interface ArrivalSweep {
   arrived: number;
   departed: number;
   considered: number;
+  /**
+   * The closest any watched truck got, and what stopped it counting (§12.36).
+   *
+   * Without this, `arrived: 0` is the same line whether the fleet is 600
+   * miles out or one poll short of confirming. That ambiguity is why nobody
+   * noticed this had never fired.
+   */
+  nearest: NearestCandidate | null;
 }
 
 export interface SweepLogger {
@@ -92,7 +102,9 @@ export async function sweepArrivals(
     where t.active`);
 
   const candidates = z.array(CandidateRow).parse(candidateResult);
-  if (candidates.length === 0) return { arrived: 0, departed: 0, considered: 0 };
+  if (candidates.length === 0) {
+    return { arrived: 0, departed: 0, considered: 0, nearest: null };
+  }
 
   const truckIds = candidates.map((c) => c.truck_id);
   const since = new Date(Date.now() - WINDOW_MINUTES * 60_000);
@@ -128,6 +140,7 @@ export async function sweepArrivals(
 
   let arrived = 0;
   let departed = 0;
+  let nearest: NearestCandidate | null = null;
 
   for (const candidate of candidates) {
     const fixes = byTruck.get(candidate.truck_id) ?? [];
@@ -140,6 +153,17 @@ export async function sweepArrivals(
       arrivedAt: candidate.arrived_at,
       departedAt: candidate.departed_at,
     };
+
+    const explained = explainNearest(stopGeo, fixes, config);
+    if (explained && (nearest === null || explained.miles < nearest.miles)) {
+      nearest = {
+        stopId: candidate.stop_id,
+        truckNumber: candidate.truck_number,
+        miles: explained.miles,
+        speedMph: explained.speedMph,
+        blockedBy: explained.blockedBy,
+      };
+    }
 
     const arrivedAt = detectArrival(stopGeo, fixes, config);
     if (arrivedAt !== null) {
@@ -165,7 +189,24 @@ export async function sweepArrivals(
     }
   }
 
-  return { arrived, departed, considered: candidates.length };
+  /**
+   * Logged every sweep, not only when something happens. A near miss has to
+   * be visible for the same reason an arrival does.
+   */
+  if (nearest) {
+    logger.info('arrival sweep', {
+      considered: candidates.length,
+      arrived,
+      departed,
+      nearestTruck: nearest.truckNumber,
+      nearestMiles: Number(nearest.miles.toFixed(3)),
+      nearestSpeedMph: nearest.speedMph,
+      nearestBlockedBy: nearest.blockedBy,
+      radiusMiles: config.radiusMiles,
+    });
+  }
+
+  return { arrived, departed, considered: candidates.length, nearest };
 }
 
 /**

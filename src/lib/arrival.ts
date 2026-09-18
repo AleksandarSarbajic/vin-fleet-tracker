@@ -173,3 +173,73 @@ export function detectDeparture(
   const left = run[run.length - 1]!.recordedAtUtc;
   return new Date(left) > new Date(stop.arrivedAt) ? left : null;
 }
+
+/**
+ * Why the nearest candidate did NOT arrive (§12.36).
+ *
+ * `arrived: 0` means two completely different things — every truck is
+ * hundreds of miles away, or one is sitting in the receiver's yard and the
+ * rule is one poll short — and the log could not tell them apart. Arrival
+ * detection ran for a week reporting zero, and nothing in that number said
+ * whether it was working.
+ */
+export type ArrivalBlock =
+  | 'too-far'
+  | 'moving'
+  | 'not-confirmed'
+  | 'coarse-precision'
+  | 'already-arrived';
+
+export interface NearestCandidate {
+  stopId: string;
+  truckNumber: number | null;
+  miles: number;
+  speedMph: number | null;
+  blockedBy: ArrivalBlock;
+}
+
+/**
+ * How close this truck GOT within the window, and what stopped it counting.
+ *
+ * The closest fix, not the newest one. "How close did it get" is the question
+ * a silent sweep has to answer, and the newest fix cannot answer it: a truck
+ * that pulled into the yard and left again reads as far away, which is the
+ * same reading as never having been there.
+ */
+export function explainNearest(
+  stop: StopGeo,
+  fixes: Fix[],
+  config: ArrivalConfig = ARRIVAL_DEFAULTS,
+): { miles: number; speedMph: number | null; blockedBy: ArrivalBlock } | null {
+  if (fixes.length === 0) return null;
+
+  let closest = fixes[0]!;
+  let miles = haversineMiles(
+    { lat: closest.lat, lng: closest.lng },
+    { lat: stop.lat, lng: stop.lng },
+  );
+  for (const fix of fixes) {
+    const d = haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: stop.lat, lng: stop.lng });
+    if (d < miles) {
+      miles = d;
+      closest = fix;
+    }
+  }
+  const newest = closest;
+  const speedMph = closest.speedMph;
+
+  const blockedBy: ArrivalBlock =
+    stop.arrivedAt !== null
+      ? 'already-arrived'
+      : stop.precision !== 'street'
+        ? 'coarse-precision'
+        : miles > config.radiusMiles
+          ? 'too-far'
+          : !isStopped(newest)
+            ? 'moving'
+            : // In range and stopped, but the run is not long enough yet —
+              // the two-poll confirmation is the only thing left.
+              'not-confirmed';
+
+  return { miles, speedMph, blockedBy };
+}
