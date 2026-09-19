@@ -75,7 +75,11 @@ function projectedLine(row: FleetRow): string {
         ? `last computed ${timeInZone(new Date(row.lastComputedEtaUtc), zone)} · no driver`
         : 'no ETA · no driver assigned';
     case 'arrived':
-      return 'arrived';
+      // §12.57. The popup has room for the whole phrase the row has to say
+      // in one word.
+      return row.nextStop?.arrivedSource === 'dispatcher'
+        ? 'marked arrived by a dispatcher'
+        : 'arrived';
     case 'no-appointment':
       return 'no appointment';
   }

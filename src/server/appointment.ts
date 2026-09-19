@@ -5,6 +5,7 @@ import {
   wallText,
   type AppointmentInput,
   type AppointmentResolution,
+  type WallTimeInput,
 } from '@/lib/appointment';
 
 /**
@@ -21,7 +22,7 @@ import {
  */
 
 /** The instant. The only place wall time becomes an instant in this app. */
-export function appointmentStartSql(input: AppointmentInput): SQL {
+export function appointmentStartSql(input: Pick<AppointmentInput, 'date' | 'time' | 'tz'>): SQL {
   const { y, m, d } = input.date;
   const { h, min } = input.time;
   return sql`timezone(${input.tz},
@@ -170,4 +171,55 @@ export async function resolveAppointment(
     tz: input.tz,
     resolution: row.ambiguous ? 'ambiguous' : 'exact',
   };
+}
+
+/* -------------------------------------------------------------------------
+ * §12.57 — a bare wall time, for the hand-entered arrival
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The same conversion as an appointment's start, for a value that is only a
+ * time — no window, no type, no second hour.
+ *
+ * It calls `appointmentStartSql`, so there is still exactly ONE place where a
+ * wall time becomes an instant. What it repeats is the round-trip CHECK, not
+ * the conversion: `resolveAppointment` verifies start and end in one query
+ * because it has two to verify, and folding this into it would mean giving it
+ * a third shape of input to branch on. A duplicated guard is cheap; a second
+ * conversion is the two-hour bug.
+ *
+ * Both DST pathologies apply here for the same reasons they do to an
+ * appointment, and one of them harder: a NONEXISTENT wall time silently
+ * stored an hour late would be a record of when a truck was somewhere, which
+ * is the thing detention is argued from.
+ */
+export async function resolveWallTime(
+  executor: Executor,
+  input: WallTimeInput,
+  field: 'arrivedAt.time' = 'arrivedAt.time',
+): Promise<{ utc: string; resolution: AppointmentResolution }> {
+  const at = appointmentStartSql(input);
+
+  const result = await executor.execute(sql`
+    select
+      to_char((${at}) at time zone 'UTC', ${sql.raw(ISO)})              as start_utc,
+      null::text                                                       as end_utc,
+      to_char((${at}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')   as reads_back_as,
+      null::text                                                       as end_reads_back_as,
+      to_char(((${at}) - interval '1 hour') at time zone ${input.tz},
+              'YYYY-MM-DD HH24:MI')
+        = to_char((${at}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')
+                                                                       as ambiguous
+  `);
+
+  const rows = z.array(ResolveRow).parse(result);
+  const row = rows[0];
+  if (!row) throw new Error('The wall-time conversion returned no row.');
+
+  const wall = wallText(input, input.time);
+  if (row.reads_back_as !== wall) {
+    throw new AppointmentTimeError(wall, input.tz, row.reads_back_as, field);
+  }
+
+  return { utc: row.start_utc, resolution: row.ambiguous ? 'ambiguous' : 'exact' };
 }

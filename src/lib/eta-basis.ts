@@ -1,6 +1,6 @@
 import { elapsed } from './format';
 import type { DistanceBasis } from './routing';
-import type { EtaAbsence } from './status';
+import type { ArrivalSource, EtaAbsence } from './status';
 
 /**
  * The words a dispatcher reads next to an ETA (§12.30, §12.31, §12.33).
@@ -19,6 +19,12 @@ export interface BasisFacts {
   snapMeters: number | null;
   /** When this lane was last routed. Null when it never has been. */
   routeMeasuredAtUtc?: string | null;
+  /**
+   * §12.57. Which kind of claim the arrival is, when there is one. Optional
+   * because most callers of `etaDetails` are describing a truck still moving,
+   * and an absent key must not read as "detected".
+   */
+  arrivedSource?: ArrivalSource | null;
 }
 
 /** The short form, for the popup line. `routed` says nothing — it is normal. */
@@ -152,6 +158,24 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
   const details: BasisDetail[] = [];
   const pm = plusMinus(row).trim();
 
+  /**
+   * §12.57. First, because it is the only line here that is about what
+   * HAPPENED rather than how well the board can guess — and because a
+   * dispatcher who opens this on an arrived stop is usually asking exactly
+   * this question: does the board know, or did somebody tell it.
+   */
+  if (row.arrivedSource === 'detected') {
+    details.push({
+      label: 'Arrived',
+      value: 'Detected — a GPS fix inside the arrival radius, stopped, held across two polls',
+    });
+  } else if (row.arrivedSource === 'dispatcher') {
+    details.push({
+      label: 'Arrived',
+      value: 'Marked by hand — a dispatcher entered this time. No GPS fix confirmed it.',
+    });
+  }
+
   switch (row.etaPrecision) {
     case 'zip':
       details.push({
@@ -161,11 +185,17 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
       // §12.56. Said in the place a dispatcher opens on purpose, as well as
       // in the caution, because this one explains a SILENCE rather than a
       // number on screen.
-      details.push({
-        label: 'Arrival',
-        value:
-          'Cannot be detected for this stop — the coordinate is an area, not an address. Mark it by hand, or correct the address so it geocodes to a street.',
-      });
+      //
+      // §12.57: not once it HAS been marked. "Mark it by hand" under a stop
+      // somebody already marked by hand is an instruction to do what has been
+      // done, and the `Arrived` row below says the rest.
+      if (!row.arrivedSource) {
+        details.push({
+          label: 'Arrival',
+          value:
+            'Cannot be detected for this stop — the coordinate is an area, not an address. Mark it by hand, or correct the address so it geocodes to a street.',
+        });
+      }
       break;
     case 'block':
       details.push({

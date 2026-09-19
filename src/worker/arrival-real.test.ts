@@ -81,7 +81,11 @@ describeDb('real position data: a truck that is genuinely parked', () => {
 
       const sweep = await sweepArrivals(tx as unknown as Db, silent);
       const [row] = await tx
-        .select({ arrivedAt: stops.arrivedAt, departedAt: stops.departedAt })
+        .select({
+          arrivedAt: stops.arrivedAt,
+          arrivedSource: stops.arrivedSource,
+          departedAt: stops.departedAt,
+        })
         .from(stops)
         .where(eq(stops.id, stopId));
       return { sweep, row };
@@ -90,6 +94,13 @@ describeDb('real position data: a truck that is genuinely parked', () => {
     expect(seen.sweep.arrived).toBe(1);
     expect(seen.row?.arrivedAt).toBeInstanceOf(Date);
     expect(seen.row?.departedAt).toBeNull();
+    /**
+     * §12.57. The sweep says what KIND of claim it just made. The modal can
+     * write this column too now, and a detection that did not label itself
+     * would be indistinguishable from somebody's guess — with the row
+     * printing `arrived` over a time nothing measured.
+     */
+    expect(seen.row?.arrivedSource).toBe('detected');
   });
 
   it('anchors the arrival to a recorded fix, never to now()', async () => {

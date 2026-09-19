@@ -14,9 +14,29 @@ import { timeInZone } from '@/lib/format';
  * design-spec §9.5, held back from phase 4 because it renders the COMPUTED
  * status beside the forced one and the engine that computes it did not exist.
  *
- * A forced status changes the chip and nothing else: the stripe and the sort
- * are untouched, so the list still reads by urgency while a reviewer can see
- * which reds are decisions rather than measurements.
+ * ## What a forced status actually changes
+ *
+ * This said "the chip and nothing else: the stripe and the sort are
+ * untouched". That was wrong about the code it sits next to, and had been
+ * since the row was built: `TruckRow` takes its rail from `RAIL[row.status]`
+ * and `fleet-order` sorts on `urgencyRank(a.status)` — both the SHOWN status,
+ * which is the forced one while an override is live. The ETA ink and the
+ * filter chips follow it too.
+ *
+ * The real rule is simpler, and it is the right one: **a forced status moves
+ * the row wherever a genuine one would.** Forcing ARRIVED takes the row out
+ * of the late band and out of the Late chip, which is the point of forcing
+ * it. What an override cannot touch is `computed` — rendered beside it here,
+ * so a reviewer can always see which reds are decisions and which are
+ * measurements.
+ *
+ * ## What it is NOT
+ *
+ * An override forcing ARRIVED writes no `arrived_at`. It is a chip, not an
+ * arrival: the ETA keeps running underneath it, no arrival time is recorded,
+ * departure can never fire, and it EXPIRES — `expires_at` is mandatory, so
+ * the row returns to LATE with nobody watching. Marking a truck arrived is
+ * the Arrival block above (§12.57), not this one.
  */
 
 export interface OverrideDraft {

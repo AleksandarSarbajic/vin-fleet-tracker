@@ -1,8 +1,8 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { loads, stopRoutes, stops, trucks } from '@/db/schema';
 import { normalizeAddress, type AddressParts } from '@/lib/address';
 import type { StopEdit } from '@/lib/stop-edit';
-import { resolveAppointment, type ResolvedAppointment } from './appointment';
+import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
 import { writeAudit, type AuditEntry, type Db } from './audit';
 import { geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
 import { clearOverride, setOverride } from './override';
@@ -36,6 +36,13 @@ export interface StopEditResult {
    */
   warnings: SaveWarning[];
 }
+
+/**
+ * §12.57. How far ahead of our clock a hand-entered arrival may be before it
+ * is refused. Five minutes, sized by what it is protecting against: an
+ * unsynchronised browser clock, not a dispatcher predicting an arrival.
+ */
+const FUTURE_ARRIVAL_TOLERANCE_MS = 5 * 60_000;
 
 export class StopEditError extends Error {
   constructor(
@@ -184,6 +191,9 @@ export async function saveStopEdit(
               appointmentStartUtc: stops.appointmentStartUtc,
               appointmentTz: stops.appointmentTz,
               dispatcherNote: stops.dispatcherNote,
+              arrivedAt: stops.arrivedAt,
+              arrivedSource: stops.arrivedSource,
+              departedAt: stops.departedAt,
             })
             .from(stops)
             .innerJoin(loads, eq(loads.id, stops.loadId))
@@ -274,6 +284,82 @@ export async function saveStopEdit(
         }
       : {};
 
+    /* --------------------------- the arrival --------------------------- */
+
+    /**
+     * §12.57. `arrived_at`, written by a person instead of by the sweep.
+     *
+     * Three rules, and the third is the one with a bug behind it:
+     *
+     * 1. **Omitted means leave it alone; null means clear it.** Clearing is
+     *    not a convenience. §12.27 never unsets `arrived_at` automatically,
+     *    which is correct for something anchored to a GPS fix and unbearable
+     *    for something typed at 4am on the wrong row.
+     *
+     * 2. **A wall time, converted here.** Never an instant from the client,
+     *    and refused outright on the spring-forward hour — an arrival stored
+     *    silently an hour late is a false record of where a truck was.
+     *
+     * 3. **The source moves only when the TIME moves, tested at the
+     *    control's resolution, not the column's.** The modal loads the stored
+     *    arrival, so every unrelated save re-sends it. A detected arrival
+     *    reads back as 06:44:37 and the control can only render and return
+     *    06:44 — so a naive comparison sees a change on every save and
+     *    relabels a measurement as a dispatcher's claim. That is §12.53's
+     *    note-authorship bug exactly, in the one column where the difference
+     *    between measured and asserted is the whole point. Compared to the
+     *    minute because a minute is all the control can express.
+     */
+    let arrivalColumns:
+      | Record<string, never>
+      | { arrivedAt: null; arrivedSource: null }
+      | { arrivedAt: SQL; arrivedSource: 'dispatcher' } = {};
+    /** What to log: undefined = untouched, null = cleared, string = written. */
+    let arrivalWritten: string | null | undefined;
+
+    if (edit.arrivedAt === null) {
+      // Clearing nothing is not a change, and must not write an audit row
+      // saying an arrival was removed.
+      if (existing?.arrivedAt) {
+        arrivalColumns = { arrivedAt: null, arrivedSource: null };
+        arrivalWritten = null;
+      }
+    } else if (edit.arrivedAt !== undefined) {
+      const arrival = await resolveWallTime(tx, edit.arrivedAt);
+      const at = new Date(arrival.utc).getTime();
+
+      /**
+       * A truck cannot have arrived in the future. The tolerance exists
+       * because the control DEFAULTS to the dispatcher's own clock, and a
+       * browser a minute fast would otherwise have its default refused — a
+       * validation error on a value nobody typed is worse than useless.
+       */
+      if (at > Date.now() + FUTURE_ARRIVAL_TOLERANCE_MS) {
+        throw new StopEditError(
+          'That arrival time is in the future. A truck cannot have arrived yet.',
+          'arrivedAt.time',
+        );
+      }
+      // The database would refuse this too (`stops_departed_after_arrived`),
+      // as a 500 with no field on it. Said here so it lands on the input.
+      if (existing?.departedAt && at > existing.departedAt.getTime()) {
+        throw new StopEditError(
+          'That is after the truck left this stop. Check the date.',
+          'arrivedAt.time',
+        );
+      }
+
+      const minute = (value: Date | null) =>
+        value === null ? null : Math.floor(value.getTime() / 60_000);
+      if (minute(existing?.arrivedAt ?? null) !== minute(new Date(arrival.utc))) {
+        arrivalColumns = {
+          arrivedAt: sql`${arrival.utc}::timestamptz`,
+          arrivedSource: 'dispatcher',
+        };
+        arrivalWritten = arrival.utc;
+      }
+    }
+
     let loadId: string;
     let stopId: string;
 
@@ -302,6 +388,7 @@ export async function saveStopEdit(
           state: edit.state,
           zip: edit.zip,
           ...noteColumns,
+          ...arrivalColumns,
           ...geocodeColumns,
           ...appointmentColumns,
         })
@@ -362,6 +449,9 @@ export async function saveStopEdit(
           dispatcherNote: edit.dispatcherNote ?? null,
           noteBy: edit.dispatcherNote ? input.actorUserId : null,
           noteAt: edit.dispatcherNote ? sql`now()` : null,
+          // A brand new stop has no arrival to leave alone either, so the
+          // block above resolves to `{}` for both omitted and null.
+          ...arrivalColumns,
           ...geocodeColumns,
           ...appointmentColumns,
         })
@@ -415,6 +505,8 @@ export async function saveStopEdit(
             appointmentStartUtc: existing.appointmentStartUtc?.toISOString() ?? null,
             appointmentTz: existing.appointmentTz,
             dispatcherNote: existing.dispatcherNote,
+            arrivedAt: existing.arrivedAt?.toISOString() ?? null,
+            arrivedSource: existing.arrivedSource,
           }
         : null,
       after: {
@@ -453,6 +545,17 @@ export async function saveStopEdit(
         // What was WRITTEN, not what was sent (§12.21). A save that left the
         // note alone must not appear in history as having set it.
         ...(noteChanged ? { dispatcherNote: edit.dispatcherNote ?? null } : {}),
+        /**
+         * §12.57. Same rule, same reason: present only when this save
+         * actually moved it. A history that showed an arrival being re-set on
+         * every unrelated edit would bury the one entry that matters.
+         */
+        ...(arrivalWritten !== undefined
+          ? {
+              arrivedAt: arrivalWritten,
+              arrivedSource: arrivalWritten === null ? null : 'dispatcher',
+            }
+          : {}),
         source: 'edit-modal',
       },
     };

@@ -109,6 +109,15 @@ export interface StopFacts {
   apptType: 'APPT' | 'FCFS';
   arrivedAt: string | null;
   /**
+   * §12.57. Which KIND of claim `arrivedAt` is — measured, or asserted by a
+   * person. Null exactly when `arrivedAt` is, enforced by a check constraint.
+   * Nothing in the engine branches on it: a hand-marked arrival is as
+   * arrived as a detected one, and pretending otherwise would give the board
+   * two kinds of ARRIVED. It rides through so the row and the detail can say
+   * which one a dispatcher is looking at.
+   */
+  arrivedSource: ArrivalSource | null;
+  /**
    * Written only by the forward geocoder (§12.24). Null when the address
    * could not be located, or when there is no address at all — `hasAddress`
    * tells those two apart, and the row says which.
@@ -139,10 +148,24 @@ export interface StopFacts {
   routeFresh: boolean;
 }
 
+/**
+ * §12.57. Which writer put the timestamp in `stops.arrived_at`.
+ *
+ * `detected` is a measurement — a GPS fix inside the radius, below the speed
+ * threshold, held across two polls. `dispatcher` is a belief, typed by
+ * someone who may have it from a phone call. Both are legitimate; telling
+ * them apart is not optional, because only one of them can be wrong in a way
+ * nothing else on the board would contradict.
+ */
+export const ARRIVAL_SOURCES = ['detected', 'dispatcher'] as const;
+export type ArrivalSource = (typeof ARRIVAL_SOURCES)[number];
+
 export const OVERRIDE_REASONS = [
   'RECEIVER_CONFIRMED_DETENTION',
   'APPT_RESCHEDULED_BY_BROKER',
   'ELD_POSITION_WRONG',
+  /** §12.58. The stop's coordinate cannot register an arrival — not the ELD. */
+  'ARRIVAL_NOT_DETECTED',
   'DRIVER_REPORTED_DELAY',
   'OTHER',
 ] as const;
@@ -219,6 +242,12 @@ export interface StatusResult {
   precision: 'street' | 'block' | 'zip' | null;
   /** The ± to print beside a coarse ETA. Null for a street match. */
   accuracyMiles: number | null;
+  /**
+   * §12.57. Which kind of arrival this is, for the row and the detail. Null
+   * when the truck has not arrived — and null for an override forcing
+   * ARRIVED, which sets no timestamp and is not an arrival.
+   */
+  arrivedSource: ArrivalSource | null;
   /** Routed, estimated from an earlier route, or straight-line (§12.31). */
   distanceBasis: DistanceBasis;
   /** The measured road factor used, when there was one. */
@@ -413,6 +442,8 @@ export function evaluate(
      * ± a dispatcher reads describes the whole construction.
      */
     accuracyMiles: combinedAccuracy(stop),
+    /** §12.57. Carried, never branched on — see the note on StopFacts. */
+    arrivedSource: stop?.arrivedSource ?? null,
     distanceBasis: projection?.projection.basis ?? 'straight-line',
     laneRatio: projection?.projection.laneRatio ?? null,
     snapMeters: stop?.route?.snapToM ?? null,

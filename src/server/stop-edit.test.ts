@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { assignments, loads, overrides, stopRoutes, stops, auditLog } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeDispatcher, makeDriver, makeTruck } from '@/test/fleet';
@@ -1314,5 +1314,318 @@ withDb('state and ZIP normalise on the way to the database (§12.44)', () => {
         await tx.update(stops).set({ state: 'il' }).where(eq(stops.id, result.stopId));
     });
     expect(message).toContain('stops_state_two_letters');
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.57 — the arrival, marked by hand
+ * ---------------------------------------------------------------------- */
+
+withDb('the hand-marked arrival (§12.57)', () => {
+  /**
+   * `arrived_at` had one writer until now: the sweep, which anchors it to a
+   * GPS fix. Two real stops can never produce that fix — a ZIP centroid,
+   * where §12.30 gates arrival off, and a street match the §12.55 guard
+   * refuses — so without this control they could never read as arrived
+   * however long the truck sat there.
+   *
+   * What these tests are mostly about is the SECOND column. A dispatcher's
+   * entry and a detected arrival are different claims, and the interesting
+   * failures are all the ways the second one gets quietly relabelled as the
+   * first.
+   */
+  const editFor = (truckId: string, over: Record<string, unknown>) =>
+    StopEdit.parse({
+      stopId: null,
+      truckId,
+      loadNumber: 'ARR-1',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: '1400 Laraway Road',
+      city: 'New Lenox',
+      state: 'IL',
+      zip: '60451',
+      appointment: {
+        type: 'APPT',
+        date: { y: 2026, m: 9, d: 18 },
+        time: { h: 14, min: 30 },
+        tz: 'America/Chicago',
+        windowMinutes: 30,
+      },
+      dispatcherNote: null,
+      ...over,
+    });
+
+  const readArrival = async (tx: Tx, stopId: string) =>
+    (
+      await tx
+        .select({ at: stops.arrivedAt, source: stops.arrivedSource })
+        .from(stops)
+        .where(eq(stops.id, stopId))
+    )[0] ?? null;
+
+  /** A stop that exists, with no arrival on it yet. */
+  const makeStop = async (tx: Tx) => {
+    const { trucks: t } = await fixtures(tx);
+    await tx.delete(loads).where(eq(loads.truckId, t[0]!.id));
+    const created = await saveStopEdit(tx as never, {
+      actorUserId: null,
+      dispatchTz: DISPATCH_TZ,
+      edit: editFor(t[0]!.id, {}),
+    });
+    return { truckId: t[0]!.id, stopId: created.stopId };
+  };
+
+  /** A wall time far enough in the past to be unambiguously legal. */
+  const yesterday = () => {
+    const d = new Date(Date.now() - 24 * 3_600_000);
+    return {
+      date: { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() },
+      time: { h: 6, min: 44 },
+      tz: 'America/Chicago',
+    };
+  };
+
+  it('stores the wall time the dispatcher typed, in the stop’s zone', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      const wall = yesterday();
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: wall }),
+      });
+      const row = await readArrival(tx, stopId);
+      // Read back through Postgres in the SAME zone: 06:44 typed at the stop
+      // must be 06:44 at the stop, whatever zone this process runs in.
+      const [back] = (await tx.execute(
+        sql`select to_char(arrived_at at time zone 'America/Chicago', 'HH24:MI') as wall
+            from stops where id = ${stopId}::uuid`,
+      )) as unknown as [{ wall: string }];
+      return { row, wall: back!.wall };
+    });
+
+    expect(seen.wall).toBe('06:44');
+    expect(seen.row?.source).toBe('dispatcher');
+  });
+
+  it('records it as a dispatcher’s claim, never as a detection', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+      });
+      return readArrival(tx, stopId);
+    });
+    expect(seen?.source).toBe('dispatcher');
+  });
+
+  it('survives a save that never mentions it', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+      });
+      const { arrivedAt: _omitted, ...withoutKey } = editFor(truckId, {
+        stopId,
+        loadStatus: 'DELIVERED',
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: StopEdit.parse(withoutKey),
+      });
+      return readArrival(tx, stopId);
+    });
+    expect(seen?.at).not.toBeNull();
+    expect(seen?.source).toBe('dispatcher');
+  });
+
+  it('is cleared by an explicit null, and the source goes with it', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: null }),
+      });
+      return readArrival(tx, stopId);
+    });
+    /**
+     * Clearing has to work. §12.27 never unsets `arrived_at` automatically,
+     * which is right for a measurement and intolerable for a field a human
+     * types: an arrival entered on the wrong row at 4am would otherwise be a
+     * permanent wrong answer.
+     */
+    expect(seen?.at).toBeNull();
+    expect(seen?.source).toBeNull();
+  });
+
+  /**
+   * THE REGRESSION THIS COLUMN EXISTS FOR.
+   *
+   * The modal loads the stored arrival, so every unrelated save re-sends it.
+   * A detected arrival reads back as 06:44:37 and the control can only render
+   * and return 06:44 — so comparing instants sees a change on every save and
+   * relabels a MEASUREMENT as somebody's assertion. That is §12.53's
+   * note-authorship bug in the one column where the difference between
+   * measured and asserted is the entire point.
+   */
+  it('does not relabel a detected arrival when the modal sends the same minute back', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+
+      // The sweep's own write: an instant with SECONDS on it, which no
+      // control can express.
+      const detected = new Date(Date.now() - 3 * 3_600_000);
+      detected.setUTCSeconds(37, 0);
+      await tx
+        .update(stops)
+        .set({ arrivedAt: detected, arrivedSource: 'detected' })
+        .where(eq(stops.id, stopId));
+
+      // What the modal renders it as, and therefore sends back untouched.
+      const [wall] = (await tx.execute(
+        sql`select extract(year  from arrived_at at time zone 'America/Chicago')::int as y,
+                   extract(month from arrived_at at time zone 'America/Chicago')::int as m,
+                   extract(day   from arrived_at at time zone 'America/Chicago')::int as d,
+                   extract(hour  from arrived_at at time zone 'America/Chicago')::int as h,
+                   extract(minute from arrived_at at time zone 'America/Chicago')::int as min
+            from stops where id = ${stopId}::uuid`,
+      )) as unknown as [{ y: number; m: number; d: number; h: number; min: number }];
+
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, {
+          stopId,
+          loadStatus: 'DELIVERED',
+          arrivedAt: {
+            date: { y: wall!.y, m: wall!.m, d: wall!.d },
+            time: { h: wall!.h, min: wall!.min },
+            tz: 'America/Chicago',
+          },
+        }),
+      });
+      return { row: await readArrival(tx, stopId), detected };
+    });
+
+    expect(seen.row?.source).toBe('detected');
+    // And the seconds are still there: nothing was rewritten at all.
+    expect(seen.row?.at?.toISOString()).toBe(seen.detected.toISOString());
+  });
+
+  it('does relabel it when the dispatcher actually moves the time', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      const detected = new Date(Date.now() - 3 * 3_600_000);
+      await tx
+        .update(stops)
+        .set({ arrivedAt: detected, arrivedSource: 'detected' })
+        .where(eq(stops.id, stopId));
+
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+      });
+      return readArrival(tx, stopId);
+    });
+    // The other half of the rule: a correction IS a dispatcher's claim, and
+    // §12.54's radius has already produced one arrival 60 seconds early.
+    expect(seen?.source).toBe('dispatcher');
+  });
+
+  it('refuses a time in the future, because a truck cannot have arrived yet', async () => {
+    const message = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      // Tomorrow at the stop, whichever way the zones fall.
+      const later = new Date(Date.now() + 36 * 3_600_000);
+      try {
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: editFor(truckId, {
+            stopId,
+            arrivedAt: {
+              date: {
+                y: later.getUTCFullYear(),
+                m: later.getUTCMonth() + 1,
+                d: later.getUTCDate(),
+              },
+              time: { h: 12, min: 0 },
+              tz: 'America/Chicago',
+            },
+          }),
+        });
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    expect(message).toContain('future');
+  });
+
+  it('refuses an arrival after the truck had already left', async () => {
+    const message = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      const arrived = new Date(Date.now() - 48 * 3_600_000);
+      const departed = new Date(Date.now() - 47 * 3_600_000);
+      await tx
+        .update(stops)
+        .set({ arrivedAt: arrived, arrivedSource: 'detected', departedAt: departed })
+        .where(eq(stops.id, stopId));
+      try {
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+        });
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    // The database would refuse this too, as a 500 with no field on it.
+    expect(message).toContain('after the truck left');
+  });
+
+  it('writes the arrival into the audit entry only when it moved', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await makeStop(tx);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, { stopId, arrivedAt: yesterday() }),
+      });
+      // A second, unrelated save that re-sends the same minute.
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: editFor(truckId, {
+          stopId,
+          loadStatus: 'DELIVERED',
+          arrivedAt: yesterday(),
+        }),
+      });
+      const rows = await tx
+        .select({ after: auditLog.after })
+        .from(auditLog)
+        .where(eq(auditLog.entityId, stopId));
+      return rows.map((r) => (r.after as Record<string, unknown>)['arrivedAt']);
+    });
+
+    // One save moved it; the other said nothing about it. A history that
+    // showed it being re-set every time would bury the entry that matters.
+    expect(seen.filter((v) => v !== undefined)).toHaveLength(1);
   });
 });

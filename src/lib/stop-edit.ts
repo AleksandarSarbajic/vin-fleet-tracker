@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AppointmentInput } from './appointment';
+import { AppointmentInput, WallTimeInput } from './appointment';
 import { LOAD_STATUSES } from './loads';
 import { StopOverrideEdit } from './override';
 
@@ -188,6 +188,32 @@ export const StopEdit = z
     dispatcherNote: blankIsNull(2000).optional(),
 
     /**
+     * §12.57. The arrival, marked by hand.
+     *
+     * A WALL TIME at the stop, never an instant — the same rule the
+     * appointment has kept since phase 2, and for a stronger reason: this is
+     * the column detention is argued from. A dispatcher confirming at 07:10
+     * for a truck that docked at 06:44 must be able to type 06:44, so the
+     * control cannot be a button that stamps `now()`.
+     *
+     *     {date,time,tz}   set it — recorded as `dispatcher`, not `detected`
+     *     null             clear it, and the source with it
+     *     omitted          LEAVE IT ALONE
+     *
+     * Clearing has to be possible. §12.27 never unsets `arrived_at`
+     * automatically, which is right for a measurement and intolerable for a
+     * field a human types: an arrival entered on the wrong stop at 4am with
+     * no way back is a permanent wrong answer on the board.
+     *
+     * The server decides whether this actually MOVED, at the control's own
+     * one-minute resolution, and only then restamps the source — see
+     * server/stop-edit.ts. The modal loads the stored value, so an unrelated
+     * save re-sends it, and a rule that depended on the caller omitting
+     * correctly would be §12.53's note-authorship bug in a new column.
+     */
+    arrivedAt: WallTimeInput.nullable().optional(),
+
+    /**
      * The driver this truck should end up with. Undefined leaves the
      * assignment alone; null clears it; a uuid assigns or reassigns, which
      * goes through the two-sided transaction and the confirm dialog.
@@ -239,6 +265,11 @@ export function dirtyFields(before: Partial<StopEdit>, after: StopEdit): string[
 
   if (JSON.stringify(before.appointment ?? null) !== JSON.stringify(after.appointment ?? null)) {
     changed.push('appointment time');
+  }
+  // §12.57. Structural, like the appointment: both sides are objects, and the
+  // `!==` above would call every open modal dirty on identity alone.
+  if (JSON.stringify(before.arrivedAt ?? null) !== JSON.stringify(after.arrivedAt ?? null)) {
+    changed.push('arrival');
   }
   return changed;
 }

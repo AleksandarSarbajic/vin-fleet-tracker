@@ -263,7 +263,11 @@ export async function makeRoutableLane(tx: Tx, options: LaneOptions = {}) {
       appointmentEndUtc: new Date(Date.now() + 7 * 3_600_000),
       appointmentTz: 'America/Chicago',
       appointmentType: 'APPT',
-      ...(options.arrived ? { arrivedAt: new Date() } : {}),
+      // §12.57. Paired in the database, so paired here: a fixture that set
+      // only the timestamp is refused, which is the constraint doing its job.
+      ...(options.arrived
+        ? { arrivedAt: new Date(), arrivedSource: 'detected' as const }
+        : {}),
     })
     .returning({ id: stops.id });
 

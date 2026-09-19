@@ -126,6 +126,7 @@ withDb('the fleet query, against the real database', () => {
       route_snap_to_m: 'number',
       route_computed_at: 'string',
       arrived_at: 'string',
+      arrived_source: 'string',
       dispatcher_note: 'string',
       forced_status: 'string',
       reason: 'string',
@@ -140,13 +141,16 @@ withDb('the fleet query, against the real database', () => {
     // populating a column would quietly stop checking it — which is how this
     // test came to assert forty column types while production data left most
     // of them null. Pinning the null set keeps the fixture honest.
-    // `arrived_at` is the one deliberate null: an arrived stop is not the
-    // next stop, so the query could never return one here.
+    // `arrived_at` and `arrived_source` are the deliberate nulls, and they
+    // are one fact: an arrived stop is not the NEXT stop, so the query could
+    // never return one here. They are null together or not at all — the
+    // database enforces it (§12.57), and this asserts the pair rather than
+    // letting a half-written arrival slip through as a shape nobody checked.
     for (const row of raw) {
       const nulls = Object.entries(row)
         .filter(([, value]) => value === null)
         .map(([column]) => column);
-      expect(nulls).toEqual(['arrived_at']);
+      expect(nulls).toEqual(['arrived_at', 'arrived_source']);
 
       // Every declared column is present, so a renamed column is caught too.
       expect(Object.keys(row).sort()).toEqual(Object.keys(expected).sort());
@@ -234,6 +238,7 @@ describe('the schema guard itself', () => {
     route_snap_to_m: null,
     route_computed_at: null,
     arrived_at: null,
+    arrived_source: null,
     dispatcher_note: null,
     forced_status: null,
     reason: null,

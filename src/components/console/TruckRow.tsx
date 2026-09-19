@@ -236,7 +236,19 @@ function etaText(row: FleetRow, feedStale: boolean): string {
     case 'no-address':
       return 'no ETA';
     case 'arrived':
-      return 'arrived';
+      /**
+       * §12.57. Two words, because they are two different claims.
+       *
+       * `arrived` is a measurement: a fix inside the radius, stopped, held
+       * across two polls. `marked` is somebody's word for it — typed because
+       * the stop's coordinate cannot register an arrival, or because the one
+       * that did was wrong. Same slot, same weight, different word, in the
+       * same way `NO ELD` says which kind of driver row you are reading.
+       *
+       * Not a suffix, a badge or a colour: this cell is 44px of a scanned
+       * list and the distinction has to survive being read sideways.
+       */
+      return row.nextStop?.arrivedSource === 'dispatcher' ? 'marked' : 'arrived';
     case 'no-appointment':
       return '—';
   }
@@ -258,7 +270,9 @@ function etaTitle(row: FleetRow): string | undefined {
     case 'suppressed-unassigned':
       return 'Last computed ETA. No driver is assigned, so it is not a projection any more.';
     case 'arrived':
-      return 'The truck is at the stop.';
+      return row.nextStop?.arrivedSource === 'dispatcher'
+        ? 'Marked arrived by a dispatcher. No GPS fix confirmed it — open the stop to see or correct the time.'
+        : 'The truck is at the stop. Detected from its GPS position.';
     default:
       return undefined;
   }

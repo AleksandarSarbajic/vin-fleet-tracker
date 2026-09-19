@@ -5,7 +5,7 @@ import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditStopModal } from './EditStopModal';
-import { fleetRow } from '@/test/fleet-row';
+import { fleetRow, nextStop } from '@/test/fleet-row';
 import type { FleetResponse } from '@/hooks/useFleet';
 
 /**
@@ -243,5 +243,105 @@ describe('the Active checkbox actually flips the flag (§12.14, §12.53)', () =>
     });
     expect(el.textContent).toContain('Unsaved changes');
     expect(el.textContent).toContain('active flag');
+  });
+});
+
+describe('the arrival is loaded before it is saved (§12.57)', () => {
+  /**
+   * The same shape as §12.53's note: a control that opens blank over a stored
+   * value writes that blank back, and the person who destroys the record is
+   * the one person who could not see it was there. `arrived_at` is worse than
+   * the note — it is the column detention would be argued from.
+   */
+  const ARRIVED = fleetRow({
+    nextStop: nextStop({
+      // 06:44 at the stop on 18 September, in America/Chicago (UTC-5 in
+      // September). Derived, not pasted: §7 forbids a hardcoded offset, and
+      // this is the zone the modal has to read it back in.
+      arrivedAt: new Date('2026-09-18T11:44:00.000Z').toISOString(),
+      arrivedSource: 'detected',
+      apptTz: 'America/Chicago',
+    }),
+    etaAbsence: 'arrived',
+    status: 'ARRIVED',
+    computed: 'ARRIVED',
+  });
+
+  const arrivalBox = (): HTMLInputElement => {
+    const found = Array.from(
+      container!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ).find((b) => b.getAttribute('aria-label')?.startsWith('This truck has arrived'));
+    if (!found) throw new Error('No arrival checkbox');
+    return found;
+  };
+
+  const posted = (url: string) =>
+    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.filter(
+      ([called]) => called === url,
+    );
+
+  it('opens with the stored arrival, not with an empty box', async () => {
+    await render(ARRIVED);
+    expect(arrivalBox().checked).toBe(true);
+    expect(fieldLabelled('Arrival date').value).toBe('2026-09-18');
+    expect(fieldLabelled('Arrival time').value).toBe('06:44');
+  });
+
+  it('sends a wall time and a zone, never an instant', async () => {
+    await render(ARRIVED);
+    await act(async () => {
+      setValue(fieldLabelled('Arrival time'), '06:20');
+    });
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+
+    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as {
+      arrivedAt: { date: unknown; time: unknown; tz: string };
+    };
+    // Integers and a zone. Nothing here is a Date, an ISO string or an
+    // offset — the server converts, as it has since phase 2 (§7).
+    expect(body.arrivedAt).toEqual({
+      date: { y: 2026, m: 9, d: 18 },
+      time: { h: 6, min: 20 },
+      tz: 'America/Chicago',
+    });
+  });
+
+  it('sends an explicit null when the box is unchecked', async () => {
+    await render(ARRIVED);
+    await act(async () => {
+      arrivalBox().click();
+    });
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+
+    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as {
+      arrivedAt: unknown;
+    };
+    // Null, not an absent key: §12.23's difference between "clear it" and
+    // "leave it alone", and the only way back from an arrival typed on the
+    // wrong row (§12.27 never unsets one on its own).
+    expect(body.arrivedAt).toBeNull();
+  });
+
+  it('says nothing about the arrival on a stop that has none', async () => {
+    await render();
+    await act(async () => {
+      setValue(fieldLabelled('City'), 'Joliet');
+    });
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+
+    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as Record<
+      string,
+      unknown
+    >;
+    // The control defaults to "now" so the box is usable the moment it is
+    // ticked — but an untouched, unarrived stop must not send that default,
+    // or every unrelated save would mark the truck arrived.
+    expect('arrivedAt' in body).toBe(false);
   });
 });

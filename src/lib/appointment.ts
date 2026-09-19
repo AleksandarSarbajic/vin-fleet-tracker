@@ -72,6 +72,22 @@ export const AppointmentTime = z
   })
   .strict();
 
+/**
+ * A stop-local wall time in full: the three date integers, the two time
+ * integers, and the zone they are read in.
+ *
+ * Extracted because three things now carry one — the appointment, the
+ * override's custom expiry, and the hand-entered arrival (§12.57) — and the
+ * rule that matters is the same for all three: **the client never sends an
+ * instant.** One schema, so a fourth caller cannot invent a fourth spelling
+ * of it and a fourth conversion to go with it.
+ */
+export const WallTimeInput = z
+  .object({ date: AppointmentDate, time: AppointmentTime, tz: IanaZone })
+  .strict();
+
+export type WallTimeInput = z.infer<typeof WallTimeInput>;
+
 /** The default receiving hours on a new FCFS stop (§12.22). Editable per stop. */
 export const DEFAULT_FCFS_HOURS = { earliest: { h: 7, min: 0 }, latest: { h: 15, min: 0 } };
 
@@ -158,8 +174,16 @@ export class AppointmentTimeError extends Error {
     readonly wall: string,
     readonly tz: string,
     readonly became: string,
-    /** Which field to hang the error on: the earliest hour, or the latest. */
-    readonly field: 'appointment.time' | 'appointment.endTime' = 'appointment.time',
+    /**
+     * Which field to hang the error on. `arrivedAt.time` is here because the
+     * arrival is typed by a person too, and 02:30 on a spring-forward date is
+     * as refusable there as in an appointment — more so, since it would go
+     * into the one column that records when a truck was somewhere.
+     */
+    readonly field:
+      | 'appointment.time'
+      | 'appointment.endTime'
+      | 'arrivedAt.time' = 'appointment.time',
   ) {
     super(
       `${wall} does not exist in ${tz} — the clocks jump that hour, and it ` +

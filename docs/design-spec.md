@@ -4618,6 +4618,148 @@ real arrival track we have.
 `> 0` — otherwise a truck creeping at 2 mph is neither, and one still in the
 yard could satisfy the departure test.
 
+## 12.57 The arrival a dispatcher can mark, and the column that says who did
+
+`stops.arrived_at` had exactly one writer from phase 2 until now: the arrival
+sweep, which anchors it to a GPS fix inside a radius, below a speed threshold,
+held across two polls. **Two real stops can never produce that fix**, and both
+appeared on the first day of real use:
+
+- **Truck 133**, Minooka IL. Census has no record of `201 S MCLINDEN RD`, so
+  the stop is a ZIP centroid at ±4.9 mi and §12.30 gates arrival off
+  entirely. The truck sat there overnight and the board never moved.
+- **Truck 135**, West Fargo ND. Census answered `1907 4TH AVE E` for a typed
+  `1907 4TH AVE NW` — a different street three miles away — and §12.55 now
+  refuses the match, which leaves the stop with **no coordinate at all**.
+  Correct, and it cannot register an arrival either.
+
+Both are intermodal-adjacent, which is where most of this fleet's deliveries
+go. A board that can never say ARRIVED for a truck that plainly has is not
+missing a nicety; it is wrong on the screen's headline fact.
+
+### The override was not this, and never could be
+
+`FORCED_STATUSES` already contains `ARRIVED`, and the obvious move was to use
+it. It is a **chip, not an arrival**, and the difference is not cosmetic:
+
+| | forcing ARRIVED | this |
+|---|---|---|
+| chip, rail, sort, filters | yes | yes |
+| the ETA | **keeps running** — `etaAbsence` keys off `computed`, so the row shows ARRIVED beside a live projected time and live miles | suppressed, like any arrival |
+| an arrival time | none recorded | recorded |
+| departure detection | can never fire — `detectDeparture` needs `arrived_at` | fires normally |
+| the next stop | never advances; §12.13 is "lowest sequence with no `departed_at`" | advances |
+| lifetime | **expires.** `expires_at` is mandatory (§9.5), so the row silently returns to LATE | permanent, until cleared by hand |
+
+Both of today's trucks are on stop 1 of 2. An override would have stranded
+them there.
+
+### A wall time, not a button
+
+A button stamping `now()` records when the DISPATCHER got round to it. A
+dispatcher confirming at 07:10 for a truck that docked at 06:44 would put 26
+minutes of invented detention into the only column anyone could argue it
+from. So it is a date and a time, defaulted to now at the stop and editable.
+
+It is a **stop-local wall time plus a zone**, converted server-side, as §7 has
+required of appointments since phase 2 — and for a stronger reason here. The
+zone is the one the appointment block is already showing, live rather than
+copied: a dispatcher reading "06:44" off a phone call is reading the
+receiver's clock, and asking which zone that was twice in one modal is how the
+wrong answer gets typed.
+
+Three wall-time carriers now exist — the appointment, the override's custom
+expiry, and this — so the shape is one schema, `WallTimeInput`, and the
+conversion is still the single `appointmentStartSql`. What `resolveWallTime`
+repeats is the round-trip CHECK, not the conversion: the spring-forward hour
+is refused here too, because an arrival stored silently an hour late is a
+false record of where a truck was.
+
+**Clearing must be possible, and is.** §12.27 never unsets `arrived_at`
+automatically, which is right for a measurement and intolerable for a field a
+human types: an arrival entered on the wrong row at 4am would otherwise be a
+permanent wrong answer. Omitted leaves it alone, null clears it — §12.23,
+unchanged.
+
+### `arrived_source`, and why it is a column
+
+The sweep's claim and a dispatcher's claim are different kinds of thing. One
+is measured; one is believed. Storing them in one column with no discriminator
+makes them indistinguishable everywhere except `audit_log`, which nothing on
+the board reads.
+
+Two derivations were considered and both refused as the confident-wrong-answer
+shape:
+
+- *"`arrived_at` matches some position's `recorded_at`"* — a join per row, and
+  a coincidence misclassifies silently.
+- *"the seconds are zero, so a human typed it"* — true of most hand entries
+  and of any GPS fix landing on the minute. Usually right is the problem.
+
+Not `arrived_by uuid REFERENCES profiles` either, mirroring `note_by`: that
+answers WHO, and null would have to mean "the sweep", so deleting a profile
+(`ON DELETE SET NULL`) would silently reclassify a dispatcher's entry as a
+detection. **The kind of claim must not depend on whether the person who made
+it still has an account.** Who made it is in `audit_log`, where "who" belongs.
+
+Paired with `arrived_at` by a check constraint, both ways — which caught three
+test fixtures writing a timestamp with no source the moment it landed.
+
+### What the board says
+
+Same slot, different word, the way `NO ELD` says which kind of driver row you
+are reading:
+
+```
+arrived    detected — a fix inside the radius, stopped, held across two polls
+marked     a dispatcher typed it
+```
+
+Not a suffix, a badge or a colour: that cell is 44px of a scanned list and the
+distinction has to survive being read sideways. The ETA detail block
+(§12.33) carries the full sentence, including the half nobody can infer —
+*"No GPS fix confirmed it"* — and §12.56's "mark it by hand" instruction stops
+appearing on a ZIP stop once somebody has.
+
+### The rule that keeps it honest
+
+**The source moves only when the time moves, tested at the control's
+resolution, not the column's.**
+
+The modal loads the stored arrival, so every unrelated save re-sends it. A
+detected arrival reads back as `06:44:37`; the control can only render and
+return `06:44`. Comparing instants would see a change on every save and
+relabel a measurement as somebody's assertion — §12.53's note-authorship bug,
+in the one column where measured-versus-asserted is the entire point. So the
+comparison is to the minute, because a minute is all the control can express,
+and the server decides it against the stored value rather than trusting the
+caller to omit correctly.
+
+Two guards, both landing on the field rather than as a 500: an arrival in the
+future is refused (with five minutes of tolerance, sized for an unsynchronised
+browser clock, not for predicting arrivals), and so is one after the truck had
+already left.
+
+## 12.58 A reason list with no entry for the commonest reason
+
+`OVERRIDE_REASONS` offered five, and the closest fit for both of today's
+trucks was `ELD_POSITION_WRONG` — which is false. The ELD is working and the
+position is right; it is **our coordinate for the stop** that cannot register
+an arrival. Saying otherwise would put a lie in the audit log and send
+whoever read it to the wrong vendor.
+
+So it filed as `OTHER`, which §9.5 reserves for the rare case that earns a
+written note, and which is the one value that cannot be counted in review. A
+list whose catch-all absorbs the commonest entry is not a list.
+
+Added as `ARRIVAL_NOT_DETECTED`, *"Arrival cannot be detected for this stop"*
+— worded about the stop, not the truck. Inserted `BEFORE
+'DRIVER_REPORTED_DELAY'` rather than appended, so the database's enum order
+matches the order a dispatcher reads down in the modal; nothing sorts by it
+today, and a silent disagreement is a trap for whoever first writes
+`order by reason`.
+
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fleetRow } from '@/test/fleet-row';
+import { fleetRow, nextStop } from '@/test/fleet-row';
 import { stubLayout } from '@/test/layout';
 import type { FleetResponse } from '@/hooks/useFleet';
 
@@ -420,6 +420,33 @@ describe('the ETA cell carries status ink (§12.49)', () => {
     expect(cls).not.toContain('text-status-late-fg');
     // And the cell says so rather than showing a time nobody should trust.
     expect((etaCell('101').children[0] as HTMLElement).textContent).toBe('stale');
+  });
+
+  /**
+   * §12.57. Two claims, two words, one slot.
+   *
+   * `arrived` is a measurement — a fix inside the radius, stopped, held
+   * across two polls. `marked` is somebody's word for it, typed because the
+   * stop's coordinate cannot register an arrival at all. Printing both as
+   * `arrived` would let a dispatcher's guess wear a measurement's clothes on
+   * the one screen anybody reads at 4am.
+   */
+  it('says `arrived` for a detected arrival and `marked` for a typed one', async () => {
+    const text = async (source: 'detected' | 'dispatcher') => {
+      await mountOne({
+        status: 'ARRIVED',
+        computed: 'ARRIVED',
+        etaAbsence: 'arrived',
+        nextStop: nextStop({
+          arrivedAt: '2026-09-18T11:44:00.000Z',
+          arrivedSource: source,
+        }),
+      });
+      return (etaCell('101').children[0] as HTMLElement).textContent;
+    };
+
+    expect(await text('detected')).toBe('arrived');
+    expect(await text('dispatcher')).toBe('marked');
   });
 
   it('keeps the unassigned strike muted, never coloured (§5.8)', async () => {

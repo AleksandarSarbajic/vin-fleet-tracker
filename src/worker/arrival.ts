@@ -304,7 +304,16 @@ async function write(
       .update(stops)
       .set(
         isArrival
-          ? { arrivedAt: sql`${change.arrivedAt}::timestamptz` }
+          ? {
+              arrivedAt: sql`${change.arrivedAt}::timestamptz`,
+              /**
+               * §12.57. The sweep says what kind of claim this is, rather
+               * than leaving the board to guess from the timestamp. Paired
+               * with `arrived_at` by a check constraint, so this cannot be
+               * forgotten here without the write failing.
+               */
+              arrivedSource: 'detected' as const,
+            }
           : { departedAt: sql`${change.departedAt}::timestamptz` },
       )
       .where(eq(stops.id, candidate.stop_id));
@@ -314,10 +323,11 @@ async function write(
       entity: 'stop',
       entityId: candidate.stop_id,
       before: isArrival
-        ? { arrivedAt: null }
+        ? { arrivedAt: null, arrivedSource: null }
         : { arrivedAt: candidate.arrived_at, departedAt: null },
       after: {
         ...change,
+        ...(isArrival ? { arrivedSource: 'detected' } : {}),
         source: 'worker',
         /** What convinced it, so the threshold is arguable after the fact. */
         detection: {

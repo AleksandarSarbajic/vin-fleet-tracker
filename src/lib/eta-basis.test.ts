@@ -258,3 +258,40 @@ describe('the ± prints the number that was measured', () => {
     expect(detail?.value).toBe('Street address, interpolated along the block — not a rooftop');
   });
 });
+
+/**
+ * §12.57. Two kinds of arrival, and the detail block is where the difference
+ * gets explained rather than abbreviated.
+ */
+describe('the arrival says which kind of claim it is', () => {
+  const arrivedRow = (over: Partial<BasisFacts> = {}) =>
+    etaDetails(facts({ etaPrecision: 'street', ...over })).find((d) => d.label === 'Arrived');
+
+  it('says a detected arrival was measured, and how', () => {
+    expect(arrivedRow({ arrivedSource: 'detected' })?.value).toMatch(/GPS fix/);
+  });
+
+  it('says a hand-marked arrival had no fix behind it', () => {
+    const value = arrivedRow({ arrivedSource: 'dispatcher' })?.value ?? '';
+    expect(value).toMatch(/by hand/);
+    // The half a dispatcher cannot infer from anything else on screen.
+    expect(value).toMatch(/No GPS fix confirmed it/);
+  });
+
+  it('says nothing at all for a truck still on the road', () => {
+    expect(arrivedRow()).toBeUndefined();
+    expect(arrivedRow({ arrivedSource: null })).toBeUndefined();
+  });
+
+  it('stops telling a ZIP stop to mark it by hand once somebody has', () => {
+    const before = etaDetails(facts({ etaPrecision: 'zip', etaAccuracyMiles: 4.6 }));
+    const after = etaDetails(
+      facts({ etaPrecision: 'zip', etaAccuracyMiles: 4.6, arrivedSource: 'dispatcher' }),
+    );
+    // §12.56's line is an instruction. Repeating it under a stop that has
+    // been marked is telling someone to do what they have just done.
+    expect(before.some((d) => d.label === 'Arrival')).toBe(true);
+    expect(after.some((d) => d.label === 'Arrival')).toBe(false);
+    expect(after.some((d) => d.label === 'Arrived')).toBe(true);
+  });
+});

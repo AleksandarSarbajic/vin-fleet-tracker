@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FORCED_STATUSES, OVERRIDE_REASONS } from './status';
-import { AppointmentDate, AppointmentTime, IanaZone } from './appointment';
+import { WallTimeInput } from './appointment';
 
 /**
  * The status override contract (§9.5), shared by the client and the server.
@@ -42,6 +42,12 @@ export const OVERRIDE_REASON_LABEL: Record<(typeof OVERRIDE_REASONS)[number], st
   RECEIVER_CONFIRMED_DETENTION: 'Receiver confirmed detention',
   APPT_RESCHEDULED_BY_BROKER: 'Appointment rescheduled by broker',
   ELD_POSITION_WRONG: 'ELD position wrong or missing',
+  /**
+   * §12.58. Deliberately worded about the STOP, not the truck: the ELD is
+   * fine and the position is right — our coordinate for the destination
+   * cannot register an arrival, so the board will never flip it on its own.
+   */
+  ARRIVAL_NOT_DETECTED: 'Arrival cannot be detected for this stop',
   DRIVER_REPORTED_DELAY: 'Driver reported delay by phone',
   OTHER: 'Other — note required',
 };
@@ -50,10 +56,12 @@ export const OVERRIDE_REASON_LABEL: Record<(typeof OVERRIDE_REASONS)[number], st
  * A custom expiry is a WALL TIME plus a zone, exactly like an appointment,
  * and it goes through the same integer-parts conversion. Two conversion paths
  * for the same kind of value is where the two-hour appointment bug lived.
+ *
+ * It IS `WallTimeInput` now rather than a third copy of the same three
+ * fields — the alias is kept because `customExpiry` is what the wire calls it
+ * and renaming it would be a contract change for no gain.
  */
-export const CustomExpiry = z
-  .object({ date: AppointmentDate, time: AppointmentTime, tz: IanaZone })
-  .strict();
+export const CustomExpiry = WallTimeInput;
 
 /**
  * Everything about an override EXCEPT which stop it is on.

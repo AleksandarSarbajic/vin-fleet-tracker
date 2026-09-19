@@ -36,6 +36,7 @@ const stop = (over: Partial<StopFacts> = {}): StopFacts => ({
   apptEndUtc: null,
   apptType: 'APPT',
   arrivedAt: null,
+  arrivedSource: null,
   ...STOP_COORDS,
   precision: 'street',
   accuracyMiles: null,

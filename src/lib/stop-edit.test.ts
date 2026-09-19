@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StopEdit } from './stop-edit';
+import { StopEdit, dirtyFields } from './stop-edit';
 
 /**
  * §12.21. The wire contract for the fields the edit modal patches optimistically.
@@ -193,5 +193,84 @@ describe('loadNumber is permanently optional (§12.21)', () => {
   it('caps length, which is the only rule it has', () => {
     expect(valueOf('loadNumber', 'x'.repeat(64))).toBe('x'.repeat(64));
     expect(valueOf('loadNumber', 'x'.repeat(65))).toBe('REJECTED');
+  });
+});
+
+describe('the hand-marked arrival is a wall time with three states (§12.57)', () => {
+  const WALL = {
+    date: { y: 2026, m: 9, d: 18 },
+    time: { h: 6, min: 44 },
+    tz: 'America/Chicago',
+  };
+
+  it('takes the date, the time and the zone', () => {
+    expect(valueOf('arrivedAt', WALL)).toEqual(WALL);
+  });
+
+  it('distinguishes omitted from null, because they are different requests', () => {
+    const { arrivedAt: _omitted, ...withoutKey } = { ...base, arrivedAt: WALL };
+    const absent = StopEdit.safeParse(withoutKey);
+    expect(absent.success && absent.data.arrivedAt).toBeUndefined();
+    expect(valueOf('arrivedAt', null)).toBeNull();
+  });
+
+  /**
+   * The rule that keeps this column honest, asserted at the boundary that
+   * cannot be skipped. An instant carries an offset the sender chose; a wall
+   * time plus a zone is converted by Postgres against real tzdata (§7).
+   */
+  it('refuses an instant, whatever shape it arrives in', () => {
+    for (const instant of [
+      '2026-09-18T11:44:00.000Z',
+      1789738000000,
+      { utc: '2026-09-18T11:44:00.000Z' },
+      { ...WALL, startUtc: '2026-09-18T11:44:00.000Z' },
+    ]) {
+      expect(valueOf('arrivedAt', instant)).toBe('REJECTED');
+    }
+  });
+
+  it('refuses a fixed offset as the zone — it cannot survive a DST boundary', () => {
+    expect(valueOf('arrivedAt', { ...WALL, tz: 'UTC-5' })).toBe('REJECTED');
+    expect(valueOf('arrivedAt', { ...WALL, tz: '-05:00' })).toBe('REJECTED');
+  });
+
+  it('refuses an impossible clock face rather than rounding it', () => {
+    expect(valueOf('arrivedAt', { ...WALL, time: { h: 24, min: 0 } })).toBe('REJECTED');
+    expect(valueOf('arrivedAt', { ...WALL, time: { h: 6, min: 60 } })).toBe('REJECTED');
+    expect(valueOf('arrivedAt', { ...WALL, date: { y: 2026, m: 13, d: 1 } })).toBe('REJECTED');
+  });
+});
+
+describe('the dirty banner names the arrival (§12.57)', () => {
+  const WALL = {
+    date: { y: 2026, m: 9, d: 18 },
+    time: { h: 6, min: 44 },
+    tz: 'America/Chicago',
+  };
+  const edit = (over: Record<string, unknown> = {}) => StopEdit.parse({ ...base, ...over });
+
+  it('names it when it is set, cleared or moved', () => {
+    expect(dirtyFields(edit(), edit({ arrivedAt: WALL }))).toContain('arrival');
+    expect(dirtyFields(edit({ arrivedAt: WALL }), edit({ arrivedAt: null }))).toContain(
+      'arrival',
+    );
+    const moved = { ...WALL, time: { h: 6, min: 20 } };
+    expect(dirtyFields(edit({ arrivedAt: WALL }), edit({ arrivedAt: moved }))).toContain(
+      'arrival',
+    );
+  });
+
+  /**
+   * Structurally compared, like the appointment. `!==` on two objects with
+   * the same contents is always true, and a banner that is always on is worse
+   * than none — it trains people to ignore it.
+   */
+  it('does not name it when nothing moved', () => {
+    const same = { ...WALL, date: { ...WALL.date }, time: { ...WALL.time } };
+    expect(dirtyFields(edit({ arrivedAt: WALL }), edit({ arrivedAt: same }))).not.toContain(
+      'arrival',
+    );
+    expect(dirtyFields(edit(), edit())).not.toContain('arrival');
   });
 });

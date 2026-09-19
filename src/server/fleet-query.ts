@@ -8,9 +8,11 @@ import {
 } from '@/lib/routing';
 import { cityState } from '@/samsara/schemas';
 import {
+  ARRIVAL_SOURCES,
   FORCED_STATUSES,
   OVERRIDE_REASONS,
   evaluate,
+  type ArrivalSource,
   type EtaAbsence,
   type OverrideFacts,
   type Status,
@@ -137,6 +139,13 @@ export interface NextStop {
   route: CachedRoute | null;
   arrivedAt: string | null;
   /**
+   * §12.57. Which kind of claim the arrival is — `detected` by the sweep from
+   * a GPS fix, or `dispatcher` because a person typed it. The row prints a
+   * different word for each, so "arrived" never covers for "somebody said
+   * so". Null exactly when `arrivedAt` is.
+   */
+  arrivedSource: ArrivalSource | null;
+  /**
    * Visible to the next shift — and therefore it has to reach the next shift.
    *
    * Carried here so the edit modal can LOAD it. Without it the modal opened
@@ -184,7 +193,7 @@ export const LATEST_POSITION_SQL = sql`
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
-    ns.stop_accuracy_miles, ns.arrived_at, ns.dispatcher_note,
+    ns.stop_accuracy_miles, ns.arrived_at, ns.arrived_source, ns.dispatcher_note,
     ns.route_miles, ns.route_duration_s, ns.route_from_lat, ns.route_from_lng,
     ns.route_straight_miles, ns.route_lane_ratio,
     ns.route_snap_from_m, ns.route_snap_to_m, ns.route_computed_at,
@@ -250,6 +259,7 @@ export const LATEST_POSITION_SQL = sql`
               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as route_computed_at,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at,
+      s.arrived_source::text  as arrived_source,
       s.dispatcher_note       as dispatcher_note
     from loads l
     join stops s on s.load_id = l.id
@@ -368,6 +378,8 @@ export const FleetQueryRow = z.object({
   route_snap_to_m: z.number().nullable(),
   route_computed_at: z.string().nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
+  /** §12.57. Paired with `arrived_at` in the database, both ways. */
+  arrived_source: z.enum(ARRIVAL_SOURCES).nullable(),
   dispatcher_note: z.string().nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
@@ -459,6 +471,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
                   }
                 : null,
             arrivedAt: raw.arrived_at,
+            arrivedSource: raw.arrived_source,
             dispatcherNote: raw.dispatcher_note,
           }
         : null,
@@ -521,6 +534,7 @@ export function applyStatus(
               apptEndUtc: row.nextStop.apptEndUtc,
               apptType: row.nextStop.apptType,
               arrivedAt: row.nextStop.arrivedAt,
+              arrivedSource: row.nextStop.arrivedSource,
               lat: row.nextStop.lat,
               lng: row.nextStop.lng,
               precision: row.nextStop.precision,

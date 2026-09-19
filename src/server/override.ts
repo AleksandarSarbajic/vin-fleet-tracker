@@ -64,16 +64,11 @@ async function resolveExpiry(
           select coalesce(s.appointment_end_utc, s.appointment_start_utc)
           from stops s where s.id = ${input.stopId}::uuid
         )`;
-      case 'CUSTOM': {
-        const custom = input.customExpiry!;
-        return appointmentStartSql({
-          type: 'APPT',
-          date: custom.date,
-          time: custom.time,
-          tz: custom.tz,
-          windowMinutes: null,
-        });
-      }
+      case 'CUSTOM':
+        // A `WallTimeInput` now (§12.57), so it goes straight in — the
+        // synthetic `type: 'APPT', windowMinutes: null` that used to be
+        // needed here was only ever there to satisfy a wider parameter type.
+        return appointmentStartSql(input.customExpiry!);
     }
   })();
 

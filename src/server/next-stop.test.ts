@@ -48,6 +48,8 @@ async function addLoad(
       appointmentTz: 'America/Chicago',
       appointmentType: 'APPT',
       arrivedAt: leg.departed ? at(-3) : null,
+      // §12.57. A departed leg was arrived at first, and the pair is enforced.
+      arrivedSource: leg.departed ? ('detected' as const) : null,
       departedAt: leg.departed ? at(-2) : null,
     });
   }

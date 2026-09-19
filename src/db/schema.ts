@@ -102,9 +102,27 @@ export const overrideReason = pgEnum('override_reason', [
   'RECEIVER_CONFIRMED_DETENTION',
   'APPT_RESCHEDULED_BY_BROKER',
   'ELD_POSITION_WRONG',
+  /**
+   * §12.58. Not the same claim as ELD_POSITION_WRONG: the ELD is working and
+   * the position is right — it is our own coordinate for the STOP that cannot
+   * register an arrival, because §12.30 gates a ZIP centroid off or the
+   * §12.55 guard refused the street match. Added because this case was
+   * filing as OTHER, which §9.5 reserves for what earns a written note.
+   */
+  'ARRIVAL_NOT_DETECTED',
   'DRIVER_REPORTED_DELAY',
   'OTHER',
 ]);
+
+/**
+ * §12.57. Which kind of claim `stops.arrived_at` is.
+ *
+ *   detected    the arrival sweep matched a GPS fix inside the radius, below
+ *               the speed threshold, confirmed over two polls.
+ *   dispatcher  a person typed it, because no fix could confirm it — or
+ *               because the one that did was wrong.
+ */
+export const arrivalSource = pgEnum('arrival_source', ['detected', 'dispatcher']);
 
 /**
  * The dispatcher's vocabulary for where a load is.
@@ -392,6 +410,12 @@ export const stops = pgTable(
     appointmentType: appointmentType('appointment_type').notNull().default('APPT'),
 
     arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+    /**
+     * §12.57. Paired with `arrivedAt` by a check constraint, both ways. Never
+     * inferred from the timestamp — see the migration for the two derivations
+     * that were considered and refused.
+     */
+    arrivedSource: arrivalSource('arrived_source'),
     departedAt: timestamp('departed_at', { withTimezone: true }),
 
     dispatcherNote: text('dispatcher_note'),
@@ -446,6 +470,11 @@ export const stops = pgTable(
     check(
       'stops_departed_after_arrived',
       sql`departed_at is null or arrived_at is null or departed_at >= arrived_at`,
+    ),
+    /** §12.57. An arrival with no source is the ambiguity the column ends. */
+    check(
+      'stops_arrived_source_paired',
+      sql`(arrived_at is null) = (arrived_source is null)`,
     ),
   ],
 );

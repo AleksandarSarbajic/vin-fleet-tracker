@@ -20,6 +20,7 @@ import {
   zoneForState,
   type AppointmentDraft,
 } from './AppointmentFields';
+import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
 import { ReassignConfirm } from './ReassignConfirm';
 import { useFocusTrap } from './useModalChrome';
 
@@ -89,6 +90,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
    * nobody had touched. A dirty banner that is always on is worse than none —
    * it trains people to ignore it.
    */
+  /**
+   * The instant this modal opened, frozen. Used only to default the arrival
+   * time; a live `new Date()` inside the memo would recompute on any
+   * re-render and silently change what "unchanged" means.
+   */
+  const [openedAt] = useState(() => new Date().toISOString());
+
+  /** The stop's zone, for the arrival. Same facility, same clock (§7.1). */
+  const arrivalZone = stop?.apptTz ?? zoneForState(stop?.state ?? null);
+
   const initialForm = useMemo(
     () => ({
       loadNumber: stop?.loadNumber ?? '',
@@ -121,8 +132,25 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         tz: stop?.apptTz ?? zoneForState(stop?.state ?? null),
         windowMinutes: 30,
       } as AppointmentDraft,
+      /**
+       * §12.57. Loaded from the stored value, like the note — a control that
+       * opened blank over a recorded arrival would write that blank back and
+       * destroy it, which is §12.53 again.
+       *
+       * Unmarked, it still carries a DEFAULT of now at the stop, so checking
+       * the box gives a sensible time to correct rather than an empty field
+       * to fill. The default is computed once, at open: a `now` that ticked
+       * while the modal sat there would make the form dirty on its own.
+       */
+      arrival: {
+        marked: Boolean(stop?.arrivedAt),
+        date:
+          isoDate(stop?.arrivedAt ?? null, arrivalZone) || isoDate(openedAt, arrivalZone),
+        time:
+          isoTime(stop?.arrivedAt ?? null, arrivalZone) || isoTime(openedAt, arrivalZone),
+      } as ArrivalDraft,
     }),
-    [drivers, row.id, stop],
+    [arrivalZone, drivers, openedAt, row.id, stop],
   );
 
   const [form, setForm] = useState(initialForm);
@@ -208,10 +236,39 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             }
           : null,
         dispatcherNote: trimmed(f.note),
+        /**
+         * §12.57, and the three states are not interchangeable:
+         *
+         *   marked          the wall time, for the server to convert
+         *   cleared         null — explicitly, and only when there IS one to
+         *                   clear, so an untouched unarrived stop stays quiet
+         *   nothing to say  omitted, which means leave it alone
+         *
+         * The zone is the appointment block's, live rather than captured:
+         * correcting the facility's zone corrects the arrival with it, and a
+         * stale copy here would convert the arrival against a zone the
+         * dispatcher has just said is wrong.
+         */
+        arrivedAt: f.arrival.marked
+          ? {
+              date: {
+                y: Number(f.arrival.date.slice(0, 4)),
+                m: Number(f.arrival.date.slice(5, 7)),
+                d: Number(f.arrival.date.slice(8, 10)),
+              },
+              time: {
+                h: Number(f.arrival.time.slice(0, 2)),
+                min: Number(f.arrival.time.slice(3, 5)),
+              },
+              tz: f.appointment.tz,
+            }
+          : stop?.arrivedAt
+            ? null
+            : undefined,
         driverId: f.driverId,
       };
     },
-    [row.id, stop?.stopId],
+    [row.id, stop?.arrivedAt, stop?.stopId],
   );
 
   const initialDriverId = initialForm.driverId;
@@ -674,6 +731,23 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               initialFocus={initialDriverId !== null}
               error={errorFor('appointment.time')}
               endError={errorFor('appointment.endTime')}
+            />
+
+            {/* ---------------------------- arrival ------------------------ */}
+            <ArrivalFields
+              draft={form.arrival}
+              onChange={(next) => set('arrival', next)}
+              zone={form.appointment.tz}
+              storedSource={stop?.arrivedSource ?? null}
+              disabled={!mayEdit || !stop}
+              error={
+                errorFor('arrivedAt.time') ??
+                errorFor('arrivedAt.date.y') ??
+                errorFor('arrivedAt.date.m') ??
+                errorFor('arrivedAt.date.d') ??
+                errorFor('arrivedAt.time.h') ??
+                errorFor('arrivedAt.time.min')
+              }
             />
 
             {/* --------------------------- stop & load --------------------- */}
