@@ -4624,9 +4624,12 @@ The contradictions found during extraction, plus what real use has since
 raised. **These have not been ruled on.**
 
 13.1–13.5 came out of the phase-0 extraction; of those, four are cosmetic or
-deferred and one (§13.3) has since been resolved. **§13.6 is different in
-kind** — it was raised by a real misreading of a real board, and is held open
-deliberately to see whether it happens again rather than fixed on one report.
+deferred and one (§13.3) has since been resolved. **§13.6 and §13.7 are
+different in kind** — both were raised by real trucks rather than by reading
+the drawings, and both are held open deliberately: §13.6 to see whether the
+misreading happens again, §13.7 because the idea is sound and the shape is
+not settled. Neither is a gap. §13.7 carries a tension that is stated and
+**not** resolved; a proposal that does not address it is not a proposal.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
@@ -4726,3 +4729,162 @@ Arguments both ways, unresolved:
 
 Do not design a fix on this one report. **Watch whether it catches anyone
 again once real loads are running**, and if it does, that is the evidence.
+
+## 13.7 Should a facility's coordinates be learned from observed arrivals?
+
+**Raised from a real question about real trucks, ruled "agreed, not yet, and
+not as one feature". Recorded here rather than built.** The argument for it is
+sound and the evidence below is ours; what is not settled is the shape, and
+one tension in it has no answer yet.
+
+### The argument, which our own measurements make
+
+A geocoder answers *"where is this address on the road network"*. A dispatcher
+asks *"where do trucks stop at this facility"*. These are different questions
+and we have been using the first answer for the second.
+
+Census street-precision points sit on the road centreline, and we can show it:
+across **140 routed street-precision lanes** the provider had to move the
+destination an average of **5.3 m** to reach a road, maximum 12.9 m. The point
+is already on the tarmac. (The same figure for zip precision is 402.5 m — a
+centroid is nowhere near a road, which is a separate fact.)
+
+Trucks do not park on the centreline. Every place one of our trucks has sat
+for five minutes or more at three miles an hour or less, within a mile of its
+own stop, deduplicated to about 55 m — **14 parking places across 4
+facilities** — sits **0.057 to 0.341 mi** from the geocoded point. That spread
+is what §12.54 sized the 0.35 mi arrival radius against.
+
+A truck parked at a receiver for twenty minutes is therefore a **direct
+measurement of the thing we actually want**, and a better one than the
+geocoder can give. That much is not in doubt.
+
+The bootstrap objection — that arrival detection needs coordinates before it
+can observe an arrival — is real but not fatal, and the answer is one we need
+anyway: **a dispatcher confirming "this truck is at the receiver" by hand**.
+That is the same control the zip-precision stops need (§12.30 gates arrival
+off entirely there, so they can never fire on their own), and the same one
+truck 135's stop needs now that §12.55 has taken its coordinates away. One
+control, three problems.
+
+### But it is three problems wearing one costume
+
+The failures that prompted this are not the same failure, and they do not want
+the same remedy:
+
+| failure | our example | what it actually needs |
+|---|---|---|
+| the geocode is **wrong** | 135 — Census returned a street 3.02 mi away | a corrected **centre** |
+| the yard is **big** | 275 W Laraway Rd, Joliet | a wider **radius**, or several centres |
+| there is **no geocode** | 133 — ZIP centroid, ±4.9 mi | a **centre**, bootstrapped by hand |
+
+These separate cleanly, and a design that treats them as one thing will be
+wrong about at least two of them:
+
+- A **learned radius** — keep the geocoded centre, widen the circle to the
+  observed maximum plus a margin — handles the middle row with no override
+  question at all, and fails safe to 0.35 mi when there is nothing learned.
+  It does nothing for row 1, where the radius would have to be three miles.
+- A **learned centre** handles rows 1 and 3, and carries every hazard below.
+- Row 1 also has a cheaper remedy that already exists: the guard refuses the
+  match, the stop goes dark, and a dispatcher fixes the address. **Learning
+  must not become the way we paper over an address nobody corrected.**
+
+### The large yard, measured
+
+275 W Laraway Rd, Joliet has three parking places at five minutes or more:
+
+```
+   0.102 mi from the geocode    21 fixes,  6 min
+   0.169 mi                     14 fixes, 17 min
+   0.333 mi                      7 fixes, 22 min
+```
+
+Two groups, **0.232 mi apart** — a dock and a drop yard, or two entrances.
+Their centroid lands 0.201 mi from the geocode and **0.098 / 0.041 / 0.134 mi
+from the three places themselves**: it describes a spot where no truck has
+ever parked, and it is furthest from the longest dwell of the three.
+
+This is precisely the error §12.31 threw out when it discarded the 1.25 road
+factor — a single constant fitted to a distribution that has no single value
+in it. So if a centre is learned, the **observations must be kept, not
+collapsed**, and the arrival test becomes "within R of any observed cluster"
+rather than "within R of the mean". That is materially more code and more test
+surface than the idea sounds like.
+
+### Should a learned coordinate override a geocoded one?
+
+**The recommendation is no — and to scope it narrower than "override or
+not".** Ask instead who consumes the coordinate:
+
+- **Routing** snaps to a road anyway (5.3 m, above), so a yard centre buys the
+  ETA almost nothing.
+- **The map marker** would be improved by it, but nothing is broken today.
+- **Arrival detection** is the consumer whose question the learned point
+  actually answers, and the only one visibly failing.
+
+So: **arrival detection uses the learned point where one exists with enough
+observations; everything else keeps the geocode.** That keeps the blast radius
+at one rule, stays exactly reversible (delete the observations and behaviour
+reverts), needs no amendment to §12.30's precision ladder, and leaves the ETA,
+the ±, and the row's warnings alone. The marker and the routing can follow
+later on evidence rather than in advance.
+
+### The tension, unresolved
+
+**One bad observation is sticky, and the cases that most need learning have
+the least evidence.**
+
+§12.27 never unsets `arrived_at`; a wrong arrival is corrected by a human or
+not at all. A dispatcher who confirms while the truck is in the gate queue
+0.4 mi from the dock teaches the gate. Over twenty observations that averages
+out. Over the first one it does not — and **the bootstrap case has exactly one
+observation by construction**, because a stop that cannot detect its own
+arrivals only ever gets the one a dispatcher gives it.
+
+So the confidence threshold that would make learning safe (enough
+observations to outvote a bad one) is the threshold the stops that need it
+most can never reach. Every obvious escape has a cost: requiring N
+observations leaves 133 and 135 exactly where they are; accepting N=1 means a
+single mistaken confirmation silently relocates a facility; weighting by dwell
+length helps and does not solve it, because the gate queue is sometimes the
+longest dwell of the visit.
+
+**This is not resolved. Do not let a design proposal quietly assume it away.**
+
+### What it would cost, and what else breaks
+
+Roughly **2–3 days, more than half of it interface.** The table and migration
+are small and the dwell clustering is a modest addition to a sweep that
+already finds the closest fix. The dispatcher control is the expensive part,
+and it wants the detail panel (§9.4), which does not exist — the same blocker
+as the manual override for zip stops, which is either a reason to do both
+together or a reason this waits.
+
+Where it must live: keyed on the **normalised address**, beside `geocode_cache`
+and emphatically **not in it**. The cache has a TTL and is swept
+(`sweepGeocodeCache`); observations are measurements and must never expire.
+That is the `stop_routes`-versus-`route_samples` distinction from §12.54, and
+putting learned points in a table with a TTL would discard them silently. A
+new `facilities` entity is the wrong shape — §12.20 deleted `facility_name`
+precisely because nothing ever wrote it.
+
+What else breaks:
+
+1. **Cached routes invalidate.** `stop_routes` joins on the stop's
+   coordinates, so adopting a learned point costs a re-route on that lane.
+   Correct behaviour, real cost.
+2. **The ± stops meaning what it says.** §12.54's 0.15 mi is "how far the dock
+   may be from this point". If the point *is* the dock, that number should
+   collapse, so the constant can no longer be applied per-precision and the
+   detail line needs different words.
+3. **§12.30's precision is single-valued.** A stop with both a geocoded and a
+   learned point has two accuracies, and that ruling would need amending.
+4. **Demo data would teach it garbage.** Any learning must be gated off
+   `DEMO-` loads, or run only after the pre-deploy truncate.
+5. **No automatic recovery** from a wrong learned coordinate, for the same
+   reason §12.27 gives for `arrived_at`.
+
+**Not ruled on.** The street guard (§12.55) plus a manual arrival control get
+us 133 and 135 without any of this, and learning wants a real week of arrivals
+before it has anything worth learning from.
