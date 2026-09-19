@@ -14,6 +14,7 @@
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "format": "prettier --check .",
     "test": "npm run test:db:up --silent && vitest run",
+    "geocode:reaudit": "tsx scripts/regeocode-audit.mts",
     "test:db:up": "scripts/test-db.sh up",
     "test:db:down": "scripts/test-db.sh down",
     "test:db:migrate": "tsx scripts/test-db-migrate.mts",
