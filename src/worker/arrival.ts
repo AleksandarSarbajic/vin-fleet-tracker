@@ -63,6 +63,20 @@ export interface ArrivalSweep {
    * noticed this had never fired.
    */
   nearest: NearestCandidate | null;
+  /**
+   * Stops that can never conclude an arrival, whatever the truck does
+   * (§12.56). Today that means a coordinate coarser than `street`.
+   */
+  cannotArrive: CannotArrive[];
+}
+
+/** A stop the arrival rule is structurally unable to decide (§12.56). */
+export interface CannotArrive {
+  truck: number | null;
+  stopId: string;
+  precision: string | null;
+  /** How far the truck is from it, so the entry is actionable on sight. */
+  miles: number;
 }
 
 export interface SweepLogger {
@@ -96,10 +110,23 @@ export async function sweepArrivals(
         and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
         and s.departed_at is null
         and s.lat is not null and s.lng is not null
-        -- §12.30: only a street-level coordinate can be arrived at. Filtered
-        -- HERE as well as in the pure rule, so the sweep does not fetch
-        -- positions for stops it could never conclude anything about.
-        and s.geocode_precision = 'street'
+        /*
+         * §12.56. The "and s.geocode_precision = street" filter USED to sit
+         * here, and it is why the gate was invisible.
+         *
+         * §12.30 is still right that only a street coordinate can conclude an
+         * arrival — a 0.35 mi circle around a ZIP centroid ±4.6 mi is noise.
+         * But filtering here meant the stop never became a candidate, so
+         * explainNearest's coarse-precision branch was unreachable from the
+         * worker and the sweep reported "considered: 19" while meaning
+         * 19-of-21. Truck 133 sat 3.2 miles from a ZCTA centroid for twelve
+         * hours, 1,497 stationary fixes, and no line said why nothing fired.
+         *
+         * That is §12.36's shape inside the code written to end it. The stop
+         * is a candidate now and the PURE RULE refuses it, which is where the
+         * refusal was always supposed to live — and it gets counted and named
+         * on the way past.
+         */
       order by s.appointment_start_utc asc nulls last, s.sequence asc
       limit 1
     ) ns on true
@@ -107,7 +134,7 @@ export async function sweepArrivals(
 
   const candidates = z.array(CandidateRow).parse(candidateResult);
   if (candidates.length === 0) {
-    return { arrived: 0, departed: 0, considered: 0, nearest: null };
+    return { arrived: 0, departed: 0, considered: 0, nearest: null, cannotArrive: [] };
   }
 
   const truckIds = candidates.map((c) => c.truck_id);
@@ -145,6 +172,8 @@ export async function sweepArrivals(
   let arrived = 0;
   let departed = 0;
   let nearest: NearestCandidate | null = null;
+  /** Stops that cannot conclude an arrival at all — §12.56. */
+  const cannotArrive: CannotArrive[] = [];
 
   for (const candidate of candidates) {
     const fixes = byTruck.get(candidate.truck_id) ?? [];
@@ -159,14 +188,41 @@ export async function sweepArrivals(
     };
 
     const explained = explainNearest(stopGeo, fixes, config);
-    if (explained && (nearest === null || explained.miles < nearest.miles)) {
-      nearest = {
-        stopId: candidate.stop_id,
-        truckNumber: candidate.truck_number,
-        miles: explained.miles,
-        speedMph: explained.speedMph,
-        blockedBy: explained.blockedBy,
-      };
+    if (explained) {
+      if (explained.blockedBy === 'coarse-precision') {
+        /**
+         * §12.56. Counted and named rather than silently skipped. This stop
+         * CANNOT register an arrival however long the truck sits there, and
+         * that is a fact about the stop worth saying out loud once per sweep.
+         */
+        cannotArrive.push({
+          truck: candidate.truck_number,
+          stopId: candidate.stop_id,
+          precision: candidate.precision,
+          miles: Number(explained.miles.toFixed(3)),
+        });
+      }
+      /**
+       * §12.56. `already-arrived` is excluded from this slot — not from the
+       * sweep, which still needs it for departure detection.
+       *
+       * 73% of sweeps were reporting truck 132's completed stop at 0.309 mi
+       * as `nearest`, because it beat a genuinely blocked truck 1.6 mi out on
+       * distance alone. The field exists to explain why nothing fired; a stop
+       * that already fired is the one thing it cannot be about.
+       */
+      const eligible =
+        explained.blockedBy !== 'already-arrived' &&
+        (nearest === null || explained.miles < nearest.miles);
+      if (eligible) {
+        nearest = {
+          stopId: candidate.stop_id,
+          truckNumber: candidate.truck_number,
+          miles: explained.miles,
+          speedMph: explained.speedMph,
+          blockedBy: explained.blockedBy,
+        };
+      }
     }
 
     const arrivedAt = detectArrival(stopGeo, fixes, config);
@@ -197,20 +253,35 @@ export async function sweepArrivals(
    * Logged every sweep, not only when something happens. A near miss has to
    * be visible for the same reason an arrival does.
    */
-  if (nearest) {
-    logger.info('arrival sweep', {
-      considered: candidates.length,
-      arrived,
-      departed,
-      nearestTruck: nearest.truckNumber,
-      nearestMiles: Number(nearest.miles.toFixed(3)),
-      nearestSpeedMph: nearest.speedMph,
-      nearestBlockedBy: nearest.blockedBy,
-      radiusMiles: config.radiusMiles,
-    });
-  }
+  logger.info('arrival sweep', {
+    considered: candidates.length,
+    arrived,
+    departed,
+    /**
+     * §12.56. `considered` minus these is what the sweep can actually decide
+     * anything about. Named, not just counted: "2 stops cannot arrive" sends
+     * someone looking; "considered: 19" sends nobody anywhere.
+     */
+    cannotArrive: cannotArrive.length,
+    cannotArriveStops: cannotArrive,
+    ...(nearest
+      ? {
+          nearestTruck: nearest.truckNumber,
+          nearestMiles: Number(nearest.miles.toFixed(3)),
+          nearestSpeedMph: nearest.speedMph,
+          nearestBlockedBy: nearest.blockedBy,
+        }
+      : {}),
+    radiusMiles: config.radiusMiles,
+  });
 
-  return { arrived, departed, considered: candidates.length, nearest };
+  return {
+    arrived,
+    departed,
+    considered: candidates.length,
+    nearest,
+    cannotArrive,
+  };
 }
 
 /**

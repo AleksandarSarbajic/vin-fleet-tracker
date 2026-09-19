@@ -76,7 +76,16 @@ function match(over: {
   matchedAddress?: string;
 }): CensusMatch {
   return {
-    matchedAddress: over.matchedAddress ?? '1804 N WASHINGTON ST, GRAND FORKS, ND, 58203',
+    /**
+     * The SAME street the fixture types, in Census's own spelling.
+     *
+     * This defaulted to `1804 N WASHINGTON ST` against a typed
+     * `1804 Vitest Fixture Street` — a pairing no real response could
+     * produce, which nothing noticed because nothing compared the two. Once
+     * §12.55's guard existed, nine tests failed on a fixture that had been
+     * describing a wrong-street match all along.
+     */
+    matchedAddress: over.matchedAddress ?? '1804 VITEST FIXTURE ST, GRAND FORKS, ND, 58203',
     // x is LONGITUDE, y is latitude. Backwards puts the fleet in the ocean.
     coordinates: { x: over.lng ?? -97.057369, y: over.lat ?? 47.936987 },
     tigerLine: { side: 'R' },
@@ -176,7 +185,17 @@ describe('the cutoff', () => {
    */
   it('accepts a corrected ZIP when the city still agrees', () => {
     const out = outcomeFor(
-      [match({ city: 'DENVER', state: 'CO', zip: '80022' })],
+      [
+        match({
+          city: 'DENVER',
+          state: 'CO',
+          zip: '80022',
+          // The same street, in Census's spelling — this test is about the
+          // ZIP, and a fixture that also changed the street would now be
+          // refused for the other reason (§12.55).
+          matchedAddress: '5500 E 56TH AVE, DENVER, CO, 80022',
+        }),
+      ],
       { addressLine: '5500 East 56th Avenue', city: 'Denver', state: 'CO', zip: '80216' },
     );
     expect(out.ok).toBe(true);
@@ -186,7 +205,14 @@ describe('the cutoff', () => {
 
   it('accepts a differently-spelled city when the ZIP agrees', () => {
     const out = outcomeFor(
-      [match({ city: 'SAINT PAUL', state: 'MN', zip: '55101' })],
+      [
+        match({
+          city: 'SAINT PAUL',
+          state: 'MN',
+          zip: '55101',
+          matchedAddress: '100 MAIN ST, SAINT PAUL, MN, 55101',
+        }),
+      ],
       { addressLine: '100 Main Street', city: 'St. Paul', state: 'MN', zip: '55101' },
     );
     expect(out.ok).toBe(true);
@@ -205,11 +231,11 @@ describe('the runner-up veto', () => {
   it('refuses two matches in different places', () => {
     const out = outcomeFor(
       [
-        match({ matchedAddress: 'WASHINGTON ST, GRAND FORKS, ND' }),
+        match({ matchedAddress: 'VITEST FIXTURE ST, GRAND FORKS, ND' }),
         match({
           lat: 44.9778,
           lng: -93.265,
-          matchedAddress: 'WASHINGTON ST, MINNEAPOLIS, MN',
+          matchedAddress: 'VITEST FIXTURE ST, MINNEAPOLIS, MN',
         }),
       ],
       address,

@@ -55,8 +55,42 @@ describe('detectArrival', () => {
   });
 
   it('does not fire while the truck is still moving', () => {
-    const rolling = parked(40).map((f) => ({ ...f, speedMph: 3 }));
+    // Well above the tolerance — this is driving, not manoeuvring.
+    const rolling = parked(40).map((f) => ({ ...f, speedMph: 12 }));
     expect(detectArrival(stop(), rolling)).toBeNull();
+  });
+
+  describe('the stopped tolerance (§12.56)', () => {
+    /**
+     * `isStopped` was `=== 0`. 7.8% of fixes from a demonstrably parked truck
+     * report a non-zero speed, and each one restarted the two-minute clock.
+     */
+    it('treats a truck manoeuvring in a yard as stopped', () => {
+      const creeping = parked(40).map((f, i) => ({
+        ...f,
+        // The speeds truck 135 actually reported while parking.
+        speedMph: [0, 0.603, 1.856, 2.482][i % 4]!,
+      }));
+      expect(detectArrival(stop(), creeping)).not.toBeNull();
+    });
+
+    it('still refuses just above the tolerance', () => {
+      // 3.086 mph is a real fix from truck 143's track, and it is the one
+      // that correctly bounds the run — the truck was still rolling in.
+      const rolling = parked(40).map((f) => ({ ...f, speedMph: 3.086 }));
+      expect(detectArrival(stop(), rolling)).toBeNull();
+    });
+
+    it('does not let a creeping truck satisfy the DEPARTURE test', () => {
+      // The complement has to move with it, or 2 mph is neither stopped nor
+      // moving and a truck still in the yard reads as departed.
+      const away = parked(40).map((f) => ({
+        ...f,
+        lat: STOP.lat + 0.02,
+        speedMph: 2,
+      }));
+      expect(detectDeparture({ ...stop(), arrivedAt: at(-1000) }, away)).toBeNull();
+    });
   });
 
   it('does not fire outside the radius', () => {
@@ -189,7 +223,28 @@ describe('truck 143 into Grand Forks, from the real track', () => {
   };
 
   it('detects the arrival', () => {
-    expect(detectArrival(realStop, fixes)).toBe('2026-09-17T20:15:49.033Z');
+    /**
+     * §12.56 moved this **one minute earlier**, and the real track is why.
+     *
+     * Truck 143 manoeuvred into the yard reporting 1.23, 2.482, 0, 1.23, 0,
+     * 2.482, 1.856 mph on consecutive fixes. Under `isStopped === 0` every
+     * non-zero one broke the run, so the confirmed run could not start before
+     * 20:15:49 — the first zero with only zeros after it. With the tolerance
+     * the run reaches back to 20:14:49, where the truck actually stopped.
+     *
+     * §12.27's rule is that the instant recorded is when it ARRIVED, not when
+     * we became sure. This is that rule getting 60 seconds more accurate on
+     * the only real arrival track we have.
+     */
+    expect(detectArrival(realStop, fixes)).toBe('2026-09-17T20:14:49.025Z');
+  });
+
+  it('is bounded by the fix where the truck was still rolling', () => {
+    // 3.086 mph at 20:14:43, immediately before. The tolerance absorbs the
+    // manoeuvring and stops exactly there, which is what makes it a cut
+    // rather than a licence.
+    const arrivedAt = detectArrival(realStop, fixes)!;
+    expect(Date.parse(arrivedAt)).toBeGreaterThan(Date.parse('2026-09-17T20:14:43.052Z'));
   });
 
   /**

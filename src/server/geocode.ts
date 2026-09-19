@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from './audit';
 import { geocodeCache } from '@/db/schema';
-import { hasStreetLine, isAddressEmpty, normalizeAddress, type AddressParts } from '@/lib/address';
+import { hasStreetLine, isAddressEmpty, normalizeAddress, type AddressParts, streetDisagreement } from '@/lib/address';
 import { ZIP_CENTROID_VINTAGE, zipCentroid } from '@/lib/geo/zip-centroid';
 
 /**
@@ -78,8 +78,15 @@ export const CACHE_TTL_DAYS = { hit: 30, miss: 7 } as const;
  * its TTL, so the new fallback would not have run for any of them until the
  * following week. Stale misses are the failure mode a cache has that a bug
  * does not: it keeps working, at the old answer.
+ *
+ * Bumped to v7 for §12.55's street guard, and this time it is stale HITS that
+ * matter rather than stale misses. `1907 4TH AVE NW` is cached as a confident
+ * street match on `1907 4TH AVE E`, three miles away. The guard refuses that
+ * pairing now, and without a bump the cache would keep serving the answer the
+ * guard exists to reject — for thirty days, on exactly the addresses most
+ * likely to be wrong.
  */
-export const CHAIN_VERSION = 'census-v6+block+zcta2023+accuracy';
+export const CHAIN_VERSION = 'census-v7+street-guard';
 
 /**
  * Two matches this far apart are different places and the top one is a guess.
@@ -289,6 +296,29 @@ export function outcomeFor(matches: CensusMatch[], typed: AddressParts): Geocode
     if (typed.city) unmatched.push('the city');
     if (typed.zip) unmatched.push('the ZIP');
   }
+
+  /**
+   * §12.55. **The street, which this guard never checked.**
+   *
+   * State, city and ZIP all agreeing says the match is in the right town. It
+   * says nothing about which street in that town, and Census will happily
+   * return a neighbouring one: `1907 4TH AVE NW, West Fargo ND 58078` came
+   * back as `1907 4TH AVE E`, same town, same ZIP, **three miles away**, and
+   * was accepted at the top precision level with a ±0.15 mi on it.
+   *
+   * This is the exact failure the guard exists to prevent, arriving through
+   * the one component it did not look at. The preamble's own rule — a refusal
+   * costs an ETA, an acceptance costs a WRONG ETA — applies here more sharply
+   * than to the city, because a wrong street inside the right town is the one
+   * error a dispatcher reading the row cannot see.
+   *
+   * Compared on the street's PARTS, so the legitimate variations survive:
+   * `5500 East 56th Avenue` against `5500 E 56TH AVE`, `4801 S California`
+   * against `4801 S CALIFORNIA AVE`. Absence is never evidence; disagreement
+   * is. See `streetDisagreement`.
+   */
+  const streetDiffers = streetDisagreement(typed.addressLine, top.matchedAddress ?? null);
+  if (streetDiffers !== null) unmatched.push(streetDiffers);
 
   if (unmatched.length > 0) {
     return fail(

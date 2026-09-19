@@ -755,7 +755,14 @@ withDb('the forward geocode (§12.24)', () => {
             result: {
               addressMatches: [
                 {
-                  matchedAddress: '1804 N WASHINGTON ST, GRAND FORKS, ND, 58203',
+                  /**
+                   * The SAME street the fixture types. It read
+                   * `1804 N WASHINGTON ST` against a typed
+                   * `1804 Vitest Fixture Street` — a pairing no real response
+                   * could produce, which only became visible once §12.55
+                   * started comparing the two.
+                   */
+                  matchedAddress: '1804 VITEST FIXTURE ST, GRAND FORKS, ND, 58203',
                   // x is LONGITUDE. Backwards puts the fleet in the Indian Ocean.
                   coordinates: { x: GRAND_FORKS.lng, y: GRAND_FORKS.lat },
                   tigerLine: { side: 'R', tigerLineId: '637799318' },

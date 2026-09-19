@@ -86,7 +86,7 @@ export function etaCaution(row: BasisFacts): string {
 
   if (row.etaPrecision === 'zip' && degraded(row)) {
     parts.push(
-      `The destination is a ZIP-code centre${pm} and the distance is not a measured route — treat the time as a rough guide, and note that no at-risk warning will fire.`,
+      `The destination is a ZIP-code centre${pm} and the distance is not a measured route — treat the time as a rough guide, and note that neither an at-risk warning nor an arrival can register here.`,
     );
   } else if (row.etaPrecision === 'zip') {
     /**
@@ -97,8 +97,18 @@ export function etaCaution(row: BasisFacts): string {
      * row with no at-risk chip concludes the stop is fine. Inference from
      * absence is the one case where the label carries the whole meaning.
      */
+    /**
+     * §12.56. The arrival clause joins the at-risk one, and for the identical
+     * reason §12.33 kept that one: **inference from absence**.
+     *
+     * A dispatcher watching a truck sit at a receiver and never flip to
+     * ARRIVED concludes the truck is not there, or that the board is broken.
+     * Neither is true — the stop is a ZIP centroid and the rule structurally
+     * cannot decide, which is the one thing no amount of watching reveals.
+     * Truck 133 sat 3.2 mi from its centroid for twelve hours saying nothing.
+     */
     parts.push(
-      `The destination is a ZIP-code centre${pm}, not a street address, so no at-risk warning will fire.`,
+      `The destination is a ZIP-code centre${pm}, not a street address, so neither an at-risk warning nor an arrival can register here.`,
     );
   } else if (row.etaPrecision === 'block' && degraded(row)) {
     parts.push(
@@ -147,6 +157,14 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
       details.push({
         label: 'Accuracy',
         value: `ZIP-code centre, ${pm || 'radius unknown'} — Census has no record of this street`,
+      });
+      // §12.56. Said in the place a dispatcher opens on purpose, as well as
+      // in the caution, because this one explains a SILENCE rather than a
+      // number on screen.
+      details.push({
+        label: 'Arrival',
+        value:
+          'Cannot be detected for this stop — the coordinate is an area, not an address. Mark it by hand, or correct the address so it geocodes to a street.',
       });
       break;
     case 'block':

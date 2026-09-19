@@ -56,12 +56,18 @@ describe('the caution is at most two clauses, whatever the board produces', () =
 });
 
 describe('what the caution must never demote', () => {
-  it('says at-risk is suppressed on a zip stop, routed or not', () => {
+  it('says at-risk AND arrival are suppressed on a zip stop, routed or not', () => {
     for (const distanceBasis of BASES) {
       const text = etaCaution(facts({ etaPrecision: 'zip', distanceBasis, etaAccuracyMiles: 4.6 }));
-      // Inference from absence: a row with no at-risk chip otherwise reads as
-      // fine. This is the one clause carrying the whole meaning.
-      expect(text).toMatch(/at-risk warning will fire|no at-risk warning/);
+      /**
+       * Inference from absence — the one thing §12.33 refused to demote, and
+       * §12.56 adds the second half of it. A row with no at-risk chip reads
+       * as fine; a row that never flips to ARRIVED reads as a truck that has
+       * not got there, or a broken board. Truck 133 sat 3.2 mi from its ZIP
+       * centroid for twelve hours saying neither.
+       */
+      expect(text).toContain('at-risk');
+      expect(text).toContain('arrival');
       expect(text).toContain('±4.6 mi');
     }
   });

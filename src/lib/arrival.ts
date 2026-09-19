@@ -16,6 +16,10 @@ import { haversineMiles } from './status';
 export interface ArrivalConfig {
   /** How close counts as "at the stop". */
   radiusMiles: number;
+  /**
+   * At or below this, the truck counts as stopped. See `STOPPED_BELOW_MPH`.
+   */
+  stoppedBelowMph: number;
   /** How long the condition must hold before it is believed. */
   confirmSeconds: number;
 }
@@ -88,9 +92,58 @@ export interface ArrivalConfig {
  * sit at 0.039–0.188 mi, geometrically inside the old circle. The red-light
  * exposure was never held off by the radius.
  */
+/**
+ * §12.56. "Stopped" is at or below a walking pace, not exactly zero.
+ *
+ * `=== 0` was too strict for the thing it was measuring. Truck 135's approach
+ * reported 0.603, 1.856 and 2.482 mph on four fixes while it was manoeuvring
+ * in the yard, and each one broke a confirmation run — so a truck that had
+ * genuinely arrived kept restarting its own two-minute clock.
+ *
+ * ## The number
+ *
+ * Measured over the fixes of trucks that were demonstrably parked (a dwell of
+ * 20 minutes or more, bounded by anything above 3 mph). **7.8% of fixes from a
+ * stationary truck report a non-zero speed:**
+ *
+ *     exactly 0   92.17%          1 < v <= 1.5   0.72%
+ *     0 < v <= .5  3.53%        1.5 < v <= 2     0.77%
+ *     .5 < v <= 1  1.97%          2 < v <= 2.5   0.51%
+ *                                2.5 < v <= 3    0.31%
+ *
+ * A tolerance of 3 captures 99.98% of them; 2 captures 99.16% and would still
+ * have been broken by truck 135's 2.482.
+ *
+ * ## What it costs, measured rather than reasoned
+ *
+ * Runs of at least 120 s within 0.35 mi of a street stop — the ones that
+ * would actually confirm — counted at every tolerance:
+ *
+ *     tolerance   0     1     2     3     5
+ *     runs       22    22    22    22    19
+ *
+ * **Flat.** The tolerance admits no new confirmable runs; it merges fragments
+ * of the same events into longer ones, which is the entire intent. (The drop
+ * at 5 is more merging, not fewer events.)
+ *
+ * And the geometric bound: at 3 mph a truck covers **161 m** during the
+ * 120-second window, against a 563 m radius. It cannot drift in from outside
+ * and confirm — `confirmedRun` only counts fixes that are inside the radius
+ * AND slow, so the clock starts at the boundary and the truck is 161 m deeper
+ * by the end. A confirmed arrival means 120 unbroken seconds within 0.35 mi
+ * at no more than a brisk walk, which is what being at a receiver looks like.
+ *
+ * 5 mph was rejected on that bound alone: 268 m is half the radius.
+ */
+export const STOPPED_BELOW_MPH = 3;
+
+const isStopped = (fix: Fix, config: ArrivalConfig): boolean =>
+  (fix.speedMph ?? 0) <= config.stoppedBelowMph;
+
 export const ARRIVAL_DEFAULTS: ArrivalConfig = {
   radiusMiles: 0.35,
   confirmSeconds: 120,
+  stoppedBelowMph: STOPPED_BELOW_MPH,
 };
 
 export interface StopGeo {
@@ -176,7 +229,6 @@ function qualifies(run: Fix[], config: ArrivalConfig): boolean {
   return spanSeconds >= config.confirmSeconds;
 }
 
-const isStopped = (fix: Fix): boolean => (fix.speedMph ?? 0) === 0;
 
 /**
  * When the truck arrived, or null.
@@ -201,7 +253,7 @@ export function detectArrival(
     fixes,
     config,
     (fix) =>
-      isStopped(fix) &&
+      isStopped(fix, config) &&
       haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: stop.lat, lng: stop.lng }) <=
         config.radiusMiles,
   );
@@ -230,7 +282,15 @@ export function detectDeparture(
   // an arrival it could not have produced is a dispatcher's to undo.
   if (stop.precision !== 'street') return null;
   if (fixes.length === 0) return null;
-  if ((fixes[0]!.speedMph ?? 0) <= 0) return null;
+  /**
+   * §12.56. The complement of `isStopped`, not `> 0`.
+   *
+   * Once "stopped" means "at or below a walking pace", "moving" has to mean
+   * the same threshold from the other side. Leaving this at `> 0` would make
+   * a truck creeping at 2 mph neither stopped nor moving — able to satisfy
+   * the departure test while still in the yard.
+   */
+  if (isStopped(fixes[0]!, config)) return null;
 
   const run = confirmedRun(
     fixes,
@@ -307,7 +367,7 @@ export function explainNearest(
         ? 'coarse-precision'
         : miles > config.radiusMiles
           ? 'too-far'
-          : !isStopped(newest)
+          : !isStopped(newest, config)
             ? 'moving'
             : // In range and stopped, but the run is not long enough yet —
               // the two-poll confirmation is the only thing left.

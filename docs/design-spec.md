@@ -4420,6 +4420,204 @@ So the cache row is deleted at the source, when the stop is re-geocoded,
 rather than waiting for a sweep that may be unable to run. `route_samples` is
 untouched — those are measurements, and they carry their own destination now.
 
+## 12.55 The guard checked the town and never the street
+
+`outcomeFor` is the confidence cutoff: it decides whether Census's answer is
+the place that was typed. It compared the **state, the city and the ZIP**.
+
+```
+typed     1907 4TH AVE NW UNIT 200, West Fargo, ND 58078
+matched   1907 4TH AVE E,           WEST FARGO, ND, 58078
+```
+
+Same state, same city, same ZIP — so it passed, at `street` precision,
+`census:in-range`, carrying the ±0.15 mi added that morning (§12.54). **The
+two points are 3.023 miles apart, on different streets.** Truck 135 sat at its
+receiver reading AT RISK while the board measured it against a street it had
+never been on; Samsara's own reverse geocode said `4th Avenue Northwest` on
+every fix.
+
+The preamble already stated the principle — *"a refusal costs an ETA, an
+acceptance costs a WRONG ETA, and only one of those sends a dispatcher
+somewhere"* — and the guard was enforcing it on three of the four components.
+A wrong street inside the right town is the one error a dispatcher reading the
+row cannot see: the city is right, the ZIP is right, the precision says exact
+and the ± says 0.15.
+
+**A match that changes the street is not a match.**
+
+### The audit, before the fix
+
+Every geocoded stop and every cache row, typed street against matched street,
+70 comparisons. **Two addresses disagree**, and they disagree differently,
+which is what set the rule:
+
+```
+1907 4TH AVE NW       ->  1907 4TH AVE E          3.02 mi.  WRONG.
+450 E Arthur Gardner  ->  450 ARTHUR GARDNER HWY            RIGHT — truck 132
+                                                  arrived 0.31 mi from it,
+                                                  inside the normal facility
+                                                  spread (§12.54).
+```
+
+So a directional **present on one side and absent on the other** is a
+difference in how a street is written, and refusing on it would have thrown
+away a match that was demonstrably correct. A directional **present on both
+sides and different** is a different street.
+
+**Absence is never evidence. Disagreement is.**
+
+### How the legitimate variations survive
+
+`streetDisagreement` compares the street's parts, not its spelling: house
+number, name, canonical suffix, and the SET of directionals. All of these
+pass, and all are real rows from our own data:
+
+```
+5500 East 56th Avenue          ->  5500 E 56TH AVE
+2611 South Westmoreland Road   ->  2611 S WESTMORELAND RD
+4801 S California              ->  4801 S CALIFORNIA AVE     suffix omitted
+1750 South 4800 West           ->  1750 S 4800 W             numeric name
+4400 Fulton Industrial Blvd SW ->  4400 FULTON INDUSTRIAL BLVD SW
+275 w laraway rd               ->  275 W LARAWAY RD
+1907 4TH AVE NW UNIT 200       ->  1907 4TH AVE NW           unit dropped
+```
+
+A **set** rather than a pre/post pair, because `E 56TH AVE` and `56TH AVE E`
+are one street written two ways and a positional comparison would call them
+different — while `NW` against `E` stays different wherever it sits.
+
+`address.ts` deliberately refuses a suffix dictionary for the cache key, on
+the grounds that ST is Street and also Saint. That objection is answered by
+making the dictionary **positional**: ST is only read as a suffix when it is
+the last token, so `1200 St Charles Rd` keeps its saint and its RD.
+
+### Three test fixtures had been describing this bug all along
+
+Nine tests failed the moment the guard existed, and every one was a fixture
+pairing a typed street with an unrelated matched street:
+
+```
+typed  1804 Vitest Fixture Street   matched  1804 N WASHINGTON ST
+```
+
+No real Census response could produce that, and nothing noticed because
+nothing compared the two. The fixtures are coherent now. **A fixture that
+cannot happen is a test that proves something else** — the same lesson as
+§12.38, arriving through the data rather than through the assertion.
+
+One of the nine was my own wiring rather than a fixture: `streetDisagreement`
+was called with the whole matched address, and `squash` turns commas into
+spaces, so the city, state and ZIP folded into the street name and every
+comparison agreed with itself. `parseStreetLine` takes the segment before the
+first comma now, and says why.
+
+### The cache had to be invalidated, and this time it is stale HITS
+
+`CHAIN_VERSION` goes to `census-v7+street-guard`. §12.30 introduced it for
+stale misses; this is the mirror. `1907 4TH AVE NW` is sitting in the cache as
+a confident street match on `1907 4TH AVE E` with thirty days of TTL, and
+without a bump the cache would keep serving precisely the answer the guard
+exists to reject — on exactly the addresses most likely to be wrong.
+
+## 12.56 Two silences and a speed that was too strict
+
+Three defects found with truck 133 and truck 135, none of them the radius
+(§12.54), which had fired correctly once and was not what stood between the
+board and these two arrivals.
+
+### The ZIP gate was closed in a place that made it invisible
+
+§12.30 is right that only a `street` coordinate can conclude an arrival: a
+0.35 mi circle around a ZCTA centroid ±4.6 mi is noise, and `arrived_at` is
+never unset automatically. That ruling stands and the gate stays shut.
+
+What was wrong is **where** it was shut. The worker's candidate query carried
+`and s.geocode_precision = 'street'`, so a coarse stop never became a
+candidate — which made `explainNearest`'s `coarse-precision` branch
+unreachable from the worker, and made the sweep report `considered: 19` in all
+245 lines while meaning 19-of-21.
+
+Truck 133 sat on Grainger Way in Minooka, **1,497 stationary fixes over twelve
+hours**, 3.26 mi from the ZIP centroid its stop resolves to, and no line
+anywhere said why nothing fired. That is §12.36's shape inside the code
+written to end it.
+
+The filter is gone from the query; the pure rule refuses, which is where the
+refusal was always meant to live. The sweep now logs `cannotArrive` with the
+truck, the stop and the distance — **named, not just counted**: "2 stops
+cannot arrive" sends someone looking, `considered: 19` sends nobody anywhere.
+
+And it is said on the board, which is the half that matters at 4am. §12.33
+kept the at-risk suppression clause for one reason — **inference from
+absence** — and this is the same argument: a dispatcher watching a truck sit
+at a receiver and never flip to ARRIVED concludes the truck is not there, or
+that the board is broken. Neither is true. The zip caution now reads *"neither
+an at-risk warning nor an arrival can register here"*, still one sentence so
+§12.33's two-clause ceiling holds, and `etaDetails` gains an `Arrival` row
+naming the remedy.
+
+The count, asked for and given before any fix: **2 of 46 open stops**, both
+Illinois intermodal — Minooka and Elwood. 4.3% is not a rate to plan against
+on a demo-seeded address set. That both failures are ramps is the pattern that
+matters, and a real answer needs `geocode:probe` against real destinations.
+
+### `nearest` was occupied by a stop that had already fired
+
+**181 of 245 sweeps (73%)** reported an `already-arrived` stop as `nearest`.
+Truck 132's completed stop at 0.309 mi beat a genuinely blocked truck 1.6 mi
+out, on distance alone — so the field built to explain why nothing fired spent
+three quarters of its lines on the one thing it cannot be about, and answering
+a question about truck 135's approach needed the database again.
+
+Arrived stops stay candidates, because departure detection needs them. They
+are excluded from **that selection only**.
+
+### "Stopped" meant exactly zero, and trucks do not park like that
+
+`isStopped` was `(speedMph ?? 0) === 0`. Measured across fixes from trucks
+that were demonstrably parked — a dwell of 20 minutes or more — **7.8% report
+a non-zero speed**:
+
+```
+exactly 0   92.17%        1   < v <= 1.5   0.72%
+0   < v <= 0.5  3.53%     1.5 < v <= 2     0.77%
+0.5 < v <= 1    1.97%     2   < v <= 2.5   0.51%
+                          2.5 < v <= 3     0.31%
+```
+
+Every one of those restarted the two-minute clock. **The tolerance is 3 mph**,
+capturing 99.98%; 2 captures 99.16% and would still have been broken by truck
+135's 2.482.
+
+What it costs was measured rather than reasoned. Runs of at least 120 s within
+0.35 mi of a street stop — the ones that would actually confirm:
+
+```
+tolerance   0     1     2     3     5
+runs       22    22    22    22    19
+```
+
+**Flat.** The tolerance admits no new confirmable runs; it merges fragments of
+the same events into longer ones, which is the entire intent. And the
+geometric bound: at 3 mph a truck covers 161 m during the window against a
+563 m radius, and `confirmedRun` only counts fixes that are inside the radius
+AND slow — so the clock starts at the boundary and the truck is deeper by the
+end. 5 mph was rejected on that bound alone: 268 m is half the radius.
+
+**The real track proves it.** Truck 143 manoeuvred into its yard reporting
+1.23, 2.482, 0, 1.23, 0, 2.482, 1.856 mph on consecutive fixes. Under `=== 0`
+the run could not start before 20:15:49 — the first zero with only zeros after
+it. With the tolerance it reaches back to **20:14:49**, and the fix before
+that reads **3.086 mph**, which the cut correctly excludes because the truck
+was still rolling in. §12.27's rule that the instant recorded is when it
+ARRIVED, not when we became sure, is sixty seconds more accurate on the only
+real arrival track we have.
+
+`detectDeparture` moves with it. "Moving" is the complement of "stopped", not
+`> 0` — otherwise a truck creeping at 2 mph is neither, and one still in the
+yard could satisfy the departure test.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
