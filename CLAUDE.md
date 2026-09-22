@@ -21,6 +21,13 @@ whole. From phase 1 onward build from `docs/design-spec.md`, not the HTML.
   route handlers, direct (5432) for migrations and the worker.
 - RLS enabled on every table with deny-by-default policies.
 - No `any`. No unhandled rejections. No silent catches.
+- **A rate divided by time-since-start needs a FLOOR on the denominator, not
+  a zero-check** (§12.60). `total / elapsed` is nonsense in the first moments
+  of any window: 12 calls at 00:05 on the 1st is 0.003 days, which projects to
+  millions and fires every alarm every month. `> 0` does not save it — 0.003
+  is greater than zero. Floor the elapsed time (one hour is usually right), or
+  do what feed health does and refuse to report a partial window at all rather
+  than extrapolating from it.
 - No hex values in components. Semantic status out of the engine, token in the
   config, class in the component.
 - `npm run check` (typecheck + lint + test) passes before any phase is done.
