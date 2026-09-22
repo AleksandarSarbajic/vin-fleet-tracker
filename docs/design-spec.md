@@ -1469,9 +1469,20 @@ Truck 124 is the case. One load, `12120569`:
 The delivery is dated two days before the pickup, so Fargo won. The board
 named Fargo as the next stop, the ETA was computed to Fargo, the map line drew
 to Fargo, and the arrival sweep — which takes **one** candidate per truck —
-watched Fargo while the truck sat undelivered at Joliet. That last part is why
-124's Joliet arrival took 25.9 minutes to register when every other sequence-1
-arrival that day took 3.3–3.7.
+watched Fargo, 700 miles away, while the truck worked Joliet. A Joliet arrival
+was therefore **undetectable**, not merely late.
+
+The worker demonstrated it on the restart. Six seconds after starting on the
+fixed ordering:
+
+```
+17:08:38  worker starting
+17:08:44  arrival detected  truck 124  arrivedAt 2026-09-22T17:02:20.206Z
+```
+
+The truck had reached Joliet at 17:02:20. The previous worker ran for four
+hours over that period and never once named 124 as its nearest candidate,
+because its candidate was Fargo.
 
 The dates are bad data; a delivery appointment before its pickup is a typo.
 But nothing prevents the typo, and the right answer under it is unchanged:
