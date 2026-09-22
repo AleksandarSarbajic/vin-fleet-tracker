@@ -56,9 +56,43 @@ interface Variant {
   /** Thresholds for every other lane. Null keeps the current ones. */
   otherFloor?: number;
   otherFraction?: number;
+  /**
+   * A per-lane floor on how often ONE lane may be routed, in minutes.
+   *
+   * Suppresses `truck-moved` ONLY. `no-route`, `stop-moved`,
+   * `provider-changed` and `route-stale` are answers to "the cached row is
+   * not about this lane any more", and a cooldown that swallowed those would
+   * serve a wrong number on purpose. `truck-moved` is the only reason that
+   * means "the cached row is still about this lane, just older" — the one
+   * that is safe to defer.
+   */
+  cooldownMin?: number;
+  /**
+   * Below this many straight-line miles the cooldown does not apply.
+   *
+   * route_samples says the lane ratio is nearly still far out and violent
+   * close in: Bismarck went 1.133 -> 2.752 while the truck covered 16.4 ->
+   * 6.3 miles, worth 10.2 miles of displayed distance in ten minutes. Every
+   * drift above 5 miles in the record is an endgame. A flat cooldown is cheap
+   * where nothing moves and expensive exactly where the number is being read.
+   */
+  cooldownBelowMilesExempt?: number;
 }
 const VARIANTS: Variant[] = [
   { name: 'current    10mi/15% all', floorMiles: 10, fraction: 0.15 },
+
+  /**
+   * The cooldown alone, changing no threshold. Truck 116 is the case that
+   * motivates it: an interstate lane whose ratio moved 1.045 -> 1.076 over
+   * forty minutes and FIVE routing calls, because 10 miles of I-94 goes by in
+   * nine minutes at 65 mph. The floor was chosen as a distance and behaves as
+   * a clock.
+   */
+  { name: 'cooldown 10 min', floorMiles: 10, fraction: 0.15, cooldownMin: 10 },
+  { name: 'cooldown 15 min', floorMiles: 10, fraction: 0.15, cooldownMin: 15 },
+  { name: 'cooldown 20 min', floorMiles: 10, fraction: 0.15, cooldownMin: 20 },
+  { name: 'cooldown 30 min', floorMiles: 10, fraction: 0.15, cooldownMin: 30 },
+
   { name: 'today  5mi/8%,  rest as-is', floorMiles: 5, fraction: 0.08 },
   { name: 'today  2mi/5%,  rest as-is', floorMiles: 2, fraction: 0.05 },
   { name: 'today  1mi/3%,  rest as-is', floorMiles: 1, fraction: 0.03 },
@@ -70,6 +104,41 @@ const VARIANTS: Variant[] = [
   { name: 'today  2mi/5%,  rest 25/25%', floorMiles: 2, fraction: 0.05, otherFloor: 25, otherFraction: 0.25 },
   { name: 'today  1mi/3%,  rest 25/25%', floorMiles: 1, fraction: 0.03, otherFloor: 25, otherFraction: 0.25 },
   { name: 'today  1mi/3%,  rest 40/35%', floorMiles: 1, fraction: 0.03, otherFloor: 40, otherFraction: 0.35 },
+
+  /**
+   * The combination the cooldown is meant to fund: tighten where the
+   * deadline is close, and pay for it by not re-routing the same lane twice
+   * inside a quarter of an hour.
+   */
+  { name: 'today  5mi/8%  + cool 15', floorMiles: 5, fraction: 0.08, cooldownMin: 15 },
+  { name: 'today  2mi/5%  + cool 10', floorMiles: 2, fraction: 0.05, cooldownMin: 10 },
+  { name: 'today  2mi/5%  + cool 15', floorMiles: 2, fraction: 0.05, cooldownMin: 15 },
+  { name: 'today  1mi/3%  + cool 15', floorMiles: 1, fraction: 0.03, cooldownMin: 15 },
+  { name: 'today  1mi/3%  + cool 20', floorMiles: 1, fraction: 0.03, cooldownMin: 20 },
+
+  /**
+   * The cooldown that yields to the approach: hold a lane back only while it
+   * is still far enough out that its ratio is not moving.
+   */
+  { name: 'cool 20, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 20, cooldownBelowMilesExempt: 25 },
+  { name: 'cool 30, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 30, cooldownBelowMilesExempt: 25 },
+  { name: 'cool 30, free under 50mi', floorMiles: 10, fraction: 0.15, cooldownMin: 30, cooldownBelowMilesExempt: 50 },
+  { name: 'today 2/5 + cool30 u25', floorMiles: 2, fraction: 0.05, cooldownMin: 30, cooldownBelowMilesExempt: 25 },
+  { name: 'today 1/3 + cool30 u25', floorMiles: 1, fraction: 0.03, cooldownMin: 30, cooldownBelowMilesExempt: 25 },
+  { name: 'today 1/3 + cool30 u50', floorMiles: 1, fraction: 0.03, cooldownMin: 30, cooldownBelowMilesExempt: 50 },
+
+  /**
+   * What it takes to get UNDER the ceiling at all. 3,000/month is 96.8
+   * calls/day; the current rule runs 187. Nothing above halves that, so these
+   * ask how far the rule has to move before the ceiling is a fact rather than
+   * an aspiration.
+   */
+  { name: 'cool 45, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 45, cooldownBelowMilesExempt: 25 },
+  { name: 'cool 60, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 60, cooldownBelowMilesExempt: 25 },
+  { name: '25mi/25% all lanes', floorMiles: 25, fraction: 0.25 },
+  { name: '25/25 + cool 30 u25', floorMiles: 25, fraction: 0.25, cooldownMin: 30, cooldownBelowMilesExempt: 25 },
+  { name: '25/25 + cool 60 u25', floorMiles: 25, fraction: 0.25, cooldownMin: 60, cooldownBelowMilesExempt: 25 },
+  { name: 'today 5/8 + rest 25/25 + cool45 u25', floorMiles: 5, fraction: 0.08, otherFloor: 25, otherFraction: 0.25, cooldownMin: 45, cooldownBelowMilesExempt: 25 },
 ];
 
 /** Is the appointment inside the next 24 hours? That is "today" for dispatch. */
@@ -91,6 +160,10 @@ console.log(`${rows.length} fixes across ${byTruck.size} truck-lanes, last ${HOU
 const results = VARIANTS.map((v) => {
   let calls = 0;
   let lanesToday = 0;
+  /** Sweeps where the rule said route and the cooldown said not yet. */
+  let deferred = 0;
+  /** Summed over those: how far past its threshold the lane had drifted. */
+  let deferredMiles = 0;
   for (const track of byTruck.values()) {
     const first = track[0]!;
     const today = isToday(first.appt, new Date(first.recorded_at));
@@ -103,6 +176,7 @@ const results = VARIANTS.map((v) => {
     };
     let cached: CachedRoute | null = null;
     let lastSweep = 0;
+    let lastCall = 0;
     for (const fix of track) {
       const at = new Date(fix.recorded_at);
       // The sweep runs every 30 s, not per fix.
@@ -120,7 +194,23 @@ const results = VARIANTS.map((v) => {
         cfg,
       );
       if (reason === null) continue;
+      /**
+       * The cooldown, applied where the sweep would apply it: after the rule
+       * has said yes, and only to the one reason that means "older", not
+       * "about somewhere else".
+       */
+      if (
+        v.cooldownMin !== undefined &&
+        reason === 'truck-moved' &&
+        straight > (v.cooldownBelowMilesExempt ?? 0) &&
+        at.getTime() - lastCall < v.cooldownMin * 60_000
+      ) {
+        deferred += 1;
+        deferredMiles += Math.abs(straight - cached!.straightAtRouteMiles);
+        continue;
+      }
       calls += 1;
+      lastCall = at.getTime();
       cached = {
         provider: ROUTE_PROVIDER,
         routedMiles: straight * 1.25,
@@ -134,19 +224,28 @@ const results = VARIANTS.map((v) => {
       };
     }
   }
-  return { v, calls, lanesToday };
+  return { v, calls, lanesToday, deferred, deferredMiles };
 });
 
 const base = results[0]!.calls;
 const perDay = (c: number) => (c / HOURS) * 24;
-console.log('rule                          calls   calls/day   /month(31d)   vs current   % of 3,000');
+console.log(
+  'rule                          calls   calls/day   /month(31d)   vs current   % of 3,000   deferred  avg drift',
+);
 for (const r of results) {
   const d = perDay(r.calls);
   const m = d * 31;
+  const drift = r.deferred === 0 ? '—' : `${(r.deferredMiles / r.deferred).toFixed(1)} mi`;
   console.log(
-    `${r.v.name.padEnd(28)} ${String(r.calls).padStart(6)} ${d.toFixed(1).padStart(11)} ${Math.round(m).toString().padStart(13)} ${(r.calls === base ? '—' : `${r.calls > base ? '+' : ''}${(((r.calls - base) / base) * 100).toFixed(0)}%`).padStart(12)} ${((m / 3000) * 100).toFixed(0).padStart(11)}%`,
+    `${r.v.name.padEnd(28)} ${String(r.calls).padStart(6)} ${d.toFixed(1).padStart(11)} ${Math.round(m).toString().padStart(13)} ${(r.calls === base ? '—' : `${r.calls > base ? '+' : ''}${(((r.calls - base) / base) * 100).toFixed(0)}%`).padStart(12)} ${((m / 3000) * 100).toFixed(0).padStart(11)}% ${String(r.deferred).padStart(10)} ${drift.padStart(10)}`,
   );
 }
 console.log(`\nlanes with an appointment inside 24h: ${results[0]!.lanesToday} of ${byTruck.size}`);
 console.log('Ceiling is 3,000/month (§12.59). Worker restarts add ~24 calls each.');
+console.log(
+  'deferred = sweeps the cooldown held back; avg drift = how far past its\n' +
+  'threshold the lane had moved when it was held. Drift is the EXPOSURE, not\n' +
+  'the error: what it costs in miles shown depends on how much the lane ratio\n' +
+  'moves in that window, which route_samples measures directly.',
+);
 await client.end();
