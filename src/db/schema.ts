@@ -568,6 +568,14 @@ export const stopRoutes = pgTable(
      * spread across our own lanes was 1.070 to 1.460.
      */
     laneRatio: doublePrecision('lane_ratio').notNull(),
+    /**
+     * §12.61. The ratio this row is REPLACING, carried forward so the lane's
+     * previous-but-one measurement is exact rather than reconstructed by
+     * ordering `route_samples` on a `now()` that is transaction-start time.
+     *
+     * Read by nothing in the routing path. Shadow observation only.
+     */
+    prevLaneRatio: doublePrecision('prev_lane_ratio'),
 
     /** The stop's coordinates when routed. A re-geocode invalidates the row. */
     stopLat: doublePrecision('stop_lat').notNull(),
@@ -644,6 +652,58 @@ export const routeSamples = pgTable(
   (t) => [
     index('route_samples_measured_idx').on(t.measuredAt),
     index('route_samples_dest_idx').on(t.destState, t.destCity),
+  ],
+);
+
+/**
+ * §12.61. One observation per real routing call, for the ratio-stability
+ * gate that is NOT built.
+ *
+ * The gate would skip a recompute when a lane's ratio has been holding still.
+ * Whether that is safe depends on what the skipped call would have revealed —
+ * which is unknowable at the moment of the decision and known a moment later,
+ * because the call really happens. That asymmetry is the whole reason this
+ * table exists rather than a simulation: step 0 could only ask the question
+ * of `route_samples`, whose rows sit 12–17 minutes apart because that is how
+ * often the rule routes a lane, and a replay needs the answer in between.
+ *
+ * Nothing reads it. No recompute is skipped. It is dropped when the question
+ * is answered.
+ *
+ * The threshold is deliberately NOT stored — the raw ratios are, so any eps
+ * can be swept later without re-running the fleet.
+ */
+export const routeShadow = pgTable(
+  'route_shadow',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    /** Provenance only, like route_samples (§12.54). */
+    stopId: uuid('stop_id').references(() => stops.id, { onDelete: 'set null' }),
+    destLat: doublePrecision('dest_lat').notNull(),
+    destLng: doublePrecision('dest_lng').notNull(),
+    destCity: text('dest_city'),
+    destState: text('dest_state'),
+    /**
+     * The real recompute reason. `route_samples` has no such column, so
+     * step 0 had to approximate "plausibly truck-moved" from geometry —
+     * only `truck-moved` is gateable at all.
+     */
+    reason: text('reason').notNull(),
+    straightMiles: doublePrecision('straight_miles').notNull(),
+    /** r(i-2). Null on a lane with one prior sample: a real state, counted. */
+    ratioPrev: doublePrecision('ratio_prev'),
+    /** r(i-1) — what the board was showing until this call returned. */
+    ratioCached: doublePrecision('ratio_cached').notNull(),
+    /** r(i) — the truth this call established. */
+    ratioNow: doublePrecision('ratio_now').notNull(),
+    /** straight x |ratio_now - ratio_cached|: the cost of having skipped. */
+    errorMiles: doublePrecision('error_miles').notNull(),
+    provider: text('provider').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('route_shadow_observed_idx').on(t.observedAt),
+    index('route_shadow_lane_idx').on(t.stopId, t.destLat, t.destLng, t.observedAt),
   ],
 );
 

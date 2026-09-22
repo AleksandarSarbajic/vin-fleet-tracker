@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
-import { routeSamples, routingBudget, stopRoutes, stops } from '@/db/schema';
+import { routeSamples, routeShadow, routingBudget, stopRoutes, stops } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
-import { makeRoutableLane, makeRoutableLanes } from '@/test/fleet';
+import { makePosition, makeRoutableLane, makeRoutableLanes } from '@/test/fleet';
 import { budgetMonth } from '@/lib/routing';
 import { sweepRouting } from './routing';
 import type { EtaProvider, RouteOutcome } from '@/server/routing/provider';
@@ -368,5 +368,94 @@ withDb('the sweep can explain itself (§12.54)', () => {
     expect(seen.outcomes['failed']).toBe(1);
     expect(seen.failures['no-route']).toBe(1);
     expect(seen.blocked[0]?.outcome).toBe('failed');
+  });
+
+  /**
+   * §12.61. The shadow observation, which exists because the counterfactual
+   * it records is knowable at exactly one moment: after the call that a gate
+   * would have skipped has already answered.
+   *
+   * Three sweeps on one lane, because the row only makes sense in a sequence
+   * — the first has nothing to have skipped, the second has no stability to
+   * judge yet, and only the third is what the gate would actually face.
+   */
+  it('records what a skipped recompute would have cost, once there is one to skip', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await makeRoutableLane(tx);
+      // A different answer each call, so the ratios genuinely move.
+      const miles = [40, 18, 3];
+      let call = 0;
+      const provider: EtaProvider = {
+        name: 'stub',
+        route: async () => ({
+          ok: true,
+          miles: miles[call++] ?? 1,
+          durationSeconds: 3600,
+          snapFromMeters: 4,
+          snapToMeters: 9,
+        }),
+      };
+      const sweep = () =>
+        sweepRouting(tx as never, provider, silent, { ceiling: 25_000 });
+      const rows = () =>
+        tx.select().from(routeShadow).orderBy(routeShadow.observedAt);
+
+      // 1. Cold. `no-route`: there is no cached ratio, so nothing a gate
+      //    could have kept showing, so no observation.
+      const first = await sweep();
+      const afterFirst = await rows();
+
+      // 2. Nineteen miles closer -- past `max(10 mi, 15%)`.
+      await makePosition(tx, lane.truck.id, {
+        lat: 41.65, lng: -87.85, speedMph: 55, recordedAt: new Date(),
+      });
+      const second = await sweep();
+      const afterSecond = await rows();
+
+      // 3. Closer again, and now there IS a previous ratio to judge.
+      await makePosition(tx, lane.truck.id, {
+        lat: 41.55, lng: -88.05, speedMph: 55, recordedAt: new Date(),
+      });
+      const third = await sweep();
+      const afterThird = await rows();
+
+      return { first, second, third, afterFirst, afterSecond, afterThird };
+    });
+
+    // Nothing to skip on a cold lane.
+    expect(seen.first.routed).toBe(1);
+    expect(seen.first.shadowRows).toBe(0);
+    expect(seen.afterFirst.length).toBe(0);
+
+    // The second call is the first one a gate could have held back.
+    expect(seen.second.shadowRows).toBe(1);
+    const one = seen.afterSecond[0]!;
+    expect(one.reason).toBe('truck-moved');
+    // Only one prior route, so there is no stability to have judged. Null,
+    // never zero: zero would read as "perfectly stable" and let a gate skip
+    // on no evidence at all.
+    expect(one.ratioPrev).toBeNull();
+    // The board would have gone on showing straight x ratioCached.
+    expect(one.errorMiles).toBeCloseTo(
+      one.straightMiles * Math.abs(one.ratioNow - one.ratioCached),
+      6,
+    );
+
+    // The third is the real case: a ratio to compare against.
+    expect(seen.third.shadowRows).toBe(1);
+    expect(seen.afterThird.length).toBe(2);
+    const two = seen.afterThird[1]!;
+    expect(two.ratioPrev).not.toBeNull();
+    /**
+     * r(i-2) is the ratio the FIRST call established, not the second's.
+     *
+     * This assertion is the reason `prev_lane_ratio` lives on the cache row.
+     * Reconstructing it by ordering `route_samples` on `measured_at` fails
+     * here and would pass in production: all three sweeps share one rolled-
+     * back transaction, so `now()` gives every sample the same instant and
+     * the ordering that picks r(i-2) is arbitrary.
+     */
+    expect(two.ratioPrev).toBeCloseTo(one.ratioCached, 6);
+    expect(two.ratioCached).toBeCloseTo(one.ratioNow, 6);
   });
 });

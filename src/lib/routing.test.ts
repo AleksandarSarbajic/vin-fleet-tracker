@@ -7,6 +7,7 @@ import {
   budgetStatus,
   needsRecompute,
   projectDistance,
+  shadowObservation,
   type CachedRoute,
 } from './routing';
 
@@ -361,5 +362,58 @@ describe('budgetStatus', () => {
     expect(status.burnPerDay).toBe(0);
     expect(status.exhaustedOnDay).toBeNull();
     expect(status.band).toBe('ok');
+  });
+});
+
+describe('the shadow observation (§12.61)', () => {
+  const at = (o: Partial<Parameters<typeof shadowObservation>[0]> = {}) =>
+    shadowObservation({
+      straightMiles: 100,
+      ratioPrev: 1.2,
+      ratioCached: 1.21,
+      ratioNow: 1.25,
+      ...o,
+    });
+
+  it('measures stability against the two routes BEFORE this one', () => {
+    // What the gate could know when it decided: |1.21 - 1.2|. NOT the move
+    // this call just revealed, which is the thing it was blind to.
+    expect(at().stabilityDelta).toBeCloseTo(0.01, 10);
+  });
+
+  it('prices a skip at the miles the board would have gone on showing', () => {
+    // 100 x |1.25 - 1.21|: the row would have said 121 where the truth is 125.
+    expect(at().errorMiles).toBeCloseTo(4, 10);
+  });
+
+  it('has no stability to report on a lane with one prior route', () => {
+    // A real state, not a zero: the bootstrap case, and counting it as
+    // "perfectly stable" would let the gate skip on no evidence at all.
+    expect(at({ ratioPrev: null }).stabilityDelta).toBeNull();
+    expect(at({ ratioPrev: null }).errorMiles).toBeCloseTo(4, 10);
+  });
+
+  it('is unsigned in both directions — a ratio that fell still costs', () => {
+    expect(at({ ratioNow: 1.17 }).errorMiles).toBeCloseTo(4, 10);
+    expect(at({ ratioPrev: 1.22 }).stabilityDelta).toBeCloseTo(0.01, 10);
+  });
+
+  it('scales the cost with what is left of the lane, not with the ratio', () => {
+    // The same 0.04 of ratio drift is 4 miles at 100 out and 0.4 at 10 — the
+    // reason §12.61 reports error in minutes against remaining distance
+    // rather than in ratio points.
+    expect(at({ straightMiles: 10 }).errorMiles).toBeCloseTo(0.4, 10);
+  });
+
+  it('stores no threshold, so any eps can be tried later', () => {
+    // The row carries inputs, never a verdict (§12.31's mistake).
+    expect(Object.keys(at()).sort()).toEqual([
+      'errorMiles',
+      'ratioCached',
+      'ratioNow',
+      'ratioPrev',
+      'stabilityDelta',
+      'straightMiles',
+    ]);
   });
 });

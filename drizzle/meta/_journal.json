@@ -127,6 +127,13 @@
       "when": 1790381969664,
       "tag": "0017_here_truck_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790468369664,
+      "tag": "0018_route_shadow",
+      "breakpoints": true
     }
   ]
 }
