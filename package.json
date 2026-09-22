@@ -18,6 +18,7 @@
     "route:compare": "tsx scripts/route-compare.mts",
     "route:simulate": "tsx scripts/recompute-sim.mts",
     "route:drift": "tsx scripts/ratio-drift.mts",
+    "route:gate": "tsx scripts/gate-falsify.mts",
     "test:db:up": "scripts/test-db.sh up",
     "test:db:down": "scripts/test-db.sh down",
     "test:db:migrate": "tsx scripts/test-db-migrate.mts",
