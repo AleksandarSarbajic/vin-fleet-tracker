@@ -11,6 +11,16 @@ import { sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 loadEnv({ path: '.env.local' });
 const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
+/**
+ * Which provider's measurements to read. Never mixed (§12.59) — a car ratio
+ * and a truck ratio are different numbers for the same lane. The older
+ * Mapbox rows are still a valid cohort for asking whether ratio drift tracks
+ * TIME or PROXIMITY, which is a question about the shape of a road network
+ * rather than about a vehicle profile.
+ */
+const PROVIDER =
+  process.argv.find((a) => a.startsWith('--provider='))?.split('=')[1] ??
+  'here-routing-v8-truck';
 
 interface S { stop_id: string; dest_lat: number; dest_lng: number;
   straight_miles: number; lane_ratio: number; measured_at: string; }
@@ -19,7 +29,7 @@ const rows = (await db.execute(sql`
   select stop_id::text as stop_id, dest_lat, dest_lng, straight_miles, lane_ratio,
          measured_at
   from route_samples
-  where provider = 'here-routing-v8-truck' and dest_lat is not null
+  where provider = ${PROVIDER} and dest_lat is not null
   order by stop_id, dest_lat, dest_lng, measured_at`)) as unknown as S[];
 
 const lanes = new Map<string, S[]>();
@@ -41,7 +51,7 @@ for (const lane of lanes.values()) {
   }
 }
 
-console.log(`${rows.length} HERE samples on ${lanes.size} lanes -> ${obs.length} consecutive pairs\n`);
+console.log(`${rows.length} ${PROVIDER} samples on ${lanes.size} lanes -> ${obs.length} consecutive pairs\n`);
 const p = (xs: number[], q: number) => {
   if (xs.length === 0) return 0;
   const s = [...xs].sort((x, y) => x - y);
