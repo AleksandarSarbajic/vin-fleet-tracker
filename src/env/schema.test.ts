@@ -194,12 +194,17 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
     expect(r.success && r.data.HERE_API_KEY).toBeUndefined();
   });
 
-  it('caps the month well under HERE\'s free allowance by default', () => {
+  it("caps the month at HERE's free allowance, never above it", () => {
     const r = ServerEnv.safeParse(validServer);
-    // 3,000 of 5,000. The Mapbox-era default was 25,000 against a tier of
-    // 100,000; the tier shrank 20x and a ceiling above it guards nothing.
-    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBe(3_000);
-    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBeLessThan(5_000);
+    /**
+     * 5,000 (§12.61). The measured rule costs ~5,800/month, so no ceiling it
+     * fits inside exists — and a ceiling ABOVE the free tier cannot guard
+     * anything, because HERE's limit arrives first and the overage is a bill
+     * rather than a degradation. The upper bound is the assertion that
+     * matters; the exact value is allowed to fall.
+     */
+    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBe(5_000);
+    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBeLessThanOrEqual(5_000);
   });
 });
 

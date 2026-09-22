@@ -5064,6 +5064,90 @@ One detail with a bug behind it: elapsed time is floored at one hour. Without
 it, twelve calls at 00:05 on the first of the month divide by 0.003 days and
 project to millions, so every new month would open with a critical alert.
 
+## 12.61 The ceiling was set from an average of the wrong thing
+
+§12.59 sized the routing ceiling at 3,000 from 2.62 calls per worker-hour
+measured over 99 hours — about 2,700 a month including restarts, comfortably
+inside HERE's 5,000 free Base allowance.
+
+Those 99 hours included long stretches with the fleet parked and the worker
+idle. Averaging over them answers "what does an hour cost on average", which
+is not the question a monthly ceiling asks.
+
+Counted over a real dispatch day instead:
+
+| | calls/day | /month (31d) |
+|---|---|---|
+| measured, 24 h of live operation | 168 | 5,208 |
+| simulated over 110,777 real fixes, 18 truck-lanes | 187 | 5,797 |
+
+The simulation overshoots the count by 11% — close enough to trust, and
+pessimistic in the safe direction. **The rule that is running costs about
+5,800 calls a month against a free tier of 5,000.**
+
+### 5,000, because a ceiling above the vendor's limit guards nothing
+
+No honest ceiling exists that the current rule fits inside, so the only
+question is which limit the guard should be, and it is HERE's. Above 5,000
+the vendor's limit arrives first and the overage is a bill rather than a
+degradation to lane estimates; below 5,000 free capacity is given away and
+the ceiling is breached anyway. At exactly 5,000 the guard fires where the
+free tier ends.
+
+The consequence is meant to stay visible rather than be smoothed away: at the
+measured rate the ceiling is reached **around day 27**, and the board spends
+the last days of the month on lane-ratio estimates. That is the guard working
+and the standing argument for a cheaper recompute rule.
+
+Raising it further is a decision to pay HERE for overage and wants a price in
+hand, not a quieter log.
+
+### What was measured and rejected: the per-lane cooldown
+
+A per-lane cooldown — a floor on how often ONE lane may be routed,
+suppressing `truck-moved` only, since it is the single recompute reason that
+means "older" rather than "about somewhere else" — was replayed over the same
+110,777 fixes:
+
+| rule | calls/day | /month | % of 5,000 |
+|---|---|---|---|
+| current `max(10 mi, 15%)` | 187 | 5,797 | 116% |
+| + cooldown 15 min | 175 | 5,425 | 109% |
+| + cooldown 30 min | 147 | 4,557 | 92% |
+| + cooldown 45 min, exempt under 25 mi | 134 | 4,154 | 83% |
+| far lanes 25 mi/25% + cooldown 30 min | 132 | 4,092 | 82% |
+| far lanes 25 mi/25% + cooldown 60 min | 109 | 3,379 | 68% |
+
+**Rejected as the wrong instrument**, on the evidence rather than the cost.
+`route:drift` measures `lane_ratio` between consecutive real HERE samples,
+which is what the displayed distance depends on between recomputes:
+
+```
+gap between        pairs   median dRatio   p90 dRatio   median mi   p90 mi   worst mi
+0-10 min                6          0.0126       0.0338        0.47     0.61       0.61
+10-15 min              13          0.0330       0.2224        0.72     5.36      10.25
+15-20 min               8          0.0249       0.1610        2.57     5.23       5.23
+20-30 min              13          0.0104       0.0309        1.30     4.12       4.28
+```
+
+Drift does not grow with the gap. It grows with **proximity** — every
+observation above 5 miles is an approach, the worst being Bismarck at
+1.133 -> 2.752 while the truck covered 16.4 -> 6.3 miles. A clock therefore
+buys its savings in the wrong currency: truck 116's interstate lane recomputed
+five times in forty minutes to learn 0.031 of ratio (about 1.5 miles, 1.7
+minutes of ETA), while truck 143's lane moved 2.7-5.4 miles over comparable
+gaps. The same cooldown is nearly free on one and expensive on the other, and
+time cannot tell them apart.
+
+**What the data points at instead is a ratio-stability gate**: skip the
+recompute when the lane's ratio has not moved, not when time has not passed.
+It cannot be costed from the existing simulation, which holds ratio at a
+synthetic 1.25 and can therefore count calls but not model accuracy. It needs
+a shadow-mode run — logging what the gate would have skipped while skipping
+nothing — over several real days before any number is proposed.
+
+Sample size, stated: 41 consecutive pairs on 30 lanes. Thin.
+
 
 # 13. Still open
 

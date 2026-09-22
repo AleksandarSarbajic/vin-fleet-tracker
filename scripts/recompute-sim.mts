@@ -19,6 +19,8 @@ import { NEXT_STOP_ORDER } from '../src/server/next-stop.ts';
 loadEnv({ path: '.env.local' });
 const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
 const HOURS = Number(process.argv.find((a) => a.startsWith('--hours='))?.split('=')[1] ?? 24);
+/** The ceiling actually in force, so the table cannot drift from the guard. */
+const CEILING = Number(process.env['ROUTING_MONTHLY_CEILING'] ?? 5_000);
 
 interface Row {
   truck: number | null;
@@ -128,10 +130,9 @@ const VARIANTS: Variant[] = [
   { name: 'today 1/3 + cool30 u50', floorMiles: 1, fraction: 0.03, cooldownMin: 30, cooldownBelowMilesExempt: 50 },
 
   /**
-   * What it takes to get UNDER the ceiling at all. 3,000/month is 96.8
-   * calls/day; the current rule runs 187. Nothing above halves that, so these
-   * ask how far the rule has to move before the ceiling is a fact rather than
-   * an aspiration.
+   * What it takes to get UNDER the ceiling at all. 5,000/month is 161
+   * calls/day; the current rule runs 187. These ask how far the rule has to
+   * move before the ceiling is a fact rather than an aspiration.
    */
   { name: 'cool 45, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 45, cooldownBelowMilesExempt: 25 },
   { name: 'cool 60, free under 25mi', floorMiles: 10, fraction: 0.15, cooldownMin: 60, cooldownBelowMilesExempt: 25 },
@@ -230,18 +231,20 @@ const results = VARIANTS.map((v) => {
 const base = results[0]!.calls;
 const perDay = (c: number) => (c / HOURS) * 24;
 console.log(
-  'rule                          calls   calls/day   /month(31d)   vs current   % of 3,000   deferred  avg drift',
+  `rule                          calls   calls/day   /month(31d)   vs current   % of ${CEILING.toLocaleString()}   deferred  avg drift`,
 );
 for (const r of results) {
   const d = perDay(r.calls);
   const m = d * 31;
   const drift = r.deferred === 0 ? '—' : `${(r.deferredMiles / r.deferred).toFixed(1)} mi`;
   console.log(
-    `${r.v.name.padEnd(28)} ${String(r.calls).padStart(6)} ${d.toFixed(1).padStart(11)} ${Math.round(m).toString().padStart(13)} ${(r.calls === base ? '—' : `${r.calls > base ? '+' : ''}${(((r.calls - base) / base) * 100).toFixed(0)}%`).padStart(12)} ${((m / 3000) * 100).toFixed(0).padStart(11)}% ${String(r.deferred).padStart(10)} ${drift.padStart(10)}`,
+    `${r.v.name.padEnd(28)} ${String(r.calls).padStart(6)} ${d.toFixed(1).padStart(11)} ${Math.round(m).toString().padStart(13)} ${(r.calls === base ? '—' : `${r.calls > base ? '+' : ''}${(((r.calls - base) / base) * 100).toFixed(0)}%`).padStart(12)} ${((m / CEILING) * 100).toFixed(0).padStart(11)}% ${String(r.deferred).padStart(10)} ${drift.padStart(10)}`,
   );
 }
 console.log(`\nlanes with an appointment inside 24h: ${results[0]!.lanesToday} of ${byTruck.size}`);
-console.log('Ceiling is 3,000/month (§12.59). Worker restarts add ~24 calls each.');
+console.log(
+  `Ceiling is ${CEILING.toLocaleString()}/month (§12.61). Worker restarts add ~24 calls each.`,
+);
 console.log(
   'deferred = sweeps the cooldown held back; avg drift = how far past its\n' +
   'threshold the lane had moved when it was held. Drift is the EXPOSURE, not\n' +

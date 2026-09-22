@@ -89,30 +89,44 @@ export const ServerEnv = z
     HERE_API_KEY: z.string().min(1).optional(),
 
     /**
-     * Monthly ceiling on routing calls (§12.59).
+     * Monthly ceiling on routing calls (§12.59, §12.61).
      *
-     * **3,000 against HERE's 5,000/month free Base allowance** — 60% of it.
-     * Mapbox's free tier was 100,000 and this default was 25,000; the tier
-     * shrank by 20x and the ceiling has to shrink with it or it guards
-     * nothing.
+     * **5,000 — HERE's free Base allowance exactly.**
      *
-     * Sized from MEASURED traffic, not from the §12.31 simulation:
+     * It was 3,000, sized from a measurement that turned out to be an
+     * average of the wrong thing: 2.62 calls per worker-hour over 99 hours,
+     * which included long stretches with the fleet parked and the worker
+     * idle. Projected ~2,700/month, so 3,000 looked like a conservative
+     * ceiling with 40% of the free tier in reserve.
      *
-     *     measured     2.62 calls per worker-hour over 99 hours of real
-     *                  operation (259 calls) -> ~1,950/month at 24/7
-     *     restarts     every lane is `no-route` on a cold start; the worst
-     *                  observed hour was 72 calls across three restarts
-     *     projected    ~2,700/month including restarts
-     *     §12.31 said  ~516 calls/day = ~15,480/month
+     * A full working day, counted rather than averaged:
      *
-     * **The documented projection does not fit and the real traffic does.**
-     * §12.31 simulated 23 trucks all running long lanes at once; the fleet
-     * actually moves about seven at a time. If utilisation rises to what
-     * §12.31 assumed, this ceiling is reached around day 6 and the board
-     * spends the rest of the month on lane estimates — which is the budget
-     * guard working, not failing, and is the right failure to choose.
+     *     measured      168 calls in 24 h of a real dispatch day
+     *     simulated     187/day, replaying `needsRecompute` over 110,777
+     *                   real position fixes across 18 truck-lanes
+     *     projected     5,797/month at the simulated rate
+     *
+     * The simulation overshoots the count by 11%, which is close enough to
+     * trust and pessimistic in the safe direction. **The rule that is running
+     * costs about 5,800 calls a month and the free tier is 5,000.**
+     *
+     * So there is no honest ceiling that the current rule fits inside, and
+     * the question is only which limit the guard should be. It is the
+     * vendor's. A ceiling above 5,000 cannot guard anything — HERE's limit
+     * arrives first and the overage is a bill, not a degradation — and a
+     * ceiling below 5,000 gives up free capacity while still being breached.
+     * At 5,000 the guard fires exactly where the free tier ends.
+     *
+     * The consequence is meant to be visible, not smoothed away: at the
+     * measured rate the ceiling is reached **around day 27**, and the board
+     * spends the last few days of the month on lane-ratio estimates. That is
+     * the guard working. It is also the standing argument for a recompute
+     * rule that costs less — see §12.61 for what was measured and rejected.
+     *
+     * Raising this above 5,000 is a decision to pay HERE for overage, and
+     * should be made with a price in hand rather than to quiet a warning.
      */
-    ROUTING_MONTHLY_CEILING: z.coerce.number().int().positive().default(3_000),
+    ROUTING_MONTHLY_CEILING: z.coerce.number().int().positive().default(5_000),
 
     SAMSARA_API_TOKEN: z.string().min(1),
     SAMSARA_ORG_ID: z.string().regex(/^\d+$/, 'SAMSARA_ORG_ID must be numeric'),
