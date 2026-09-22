@@ -270,7 +270,12 @@ function reportBudget(budget: BudgetStatus): void {
     /** Day of this month the ceiling lands on at this rate; null if never. */
     exhaustedOnDay: budget.exhaustedOnDay,
     daysInMonth: budget.daysInMonth,
-    ruling: '\u00a712.59, \u00a712.60',
+    /**
+     * §12.61 is the ceiling's own ruling and belongs here: a reader who wants
+     * to know why 5,000 rather than 3,000, and why the current rule does not
+     * fit inside it, should not have to find that out by asking.
+     */
+    ruling: '\u00a712.59, \u00a712.60, \u00a712.61',
   };
 
   if (budget.band === 'exhausted') {
