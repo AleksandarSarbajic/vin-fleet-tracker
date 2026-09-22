@@ -1,0 +1,36 @@
+-- ---------------------------------------------------------------------------
+-- Routing moves to HERE Routing v8, truck profile (§12.59).
+--
+-- WHAT THIS DELETES, AND WHY THAT IS NOT THE SAME AS LOSING IT.
+--
+-- `stop_routes` is a CACHE — §12.54 settled that distinction: one row per
+-- stop, replaced in place, deletable, and already deleted outright whenever a
+-- stop is re-geocoded. `route_samples` is the MEASUREMENT record and keeps
+-- every row forever. So every Mapbox route this company has ever measured
+-- stays exactly where it was, 279 rows of it, each stamped
+-- `provider = 'mapbox-directions-driving'`; what goes is only the 24 cached
+-- answers the board would otherwise keep serving.
+--
+-- It has to go, because a `lane_ratio` is not provider-neutral. Measured on
+-- truck 135's live Chicago->Phoenix lane, same endpoints, same minute:
+--
+--     Mapbox  car    1744.0 mi
+--     HERE    car    1743.6 mi     <- the two car providers agree to 0.4 mi
+--     HERE    truck  1787.6 mi     <- +44 mi, +2.5%
+--
+-- A car ratio applied to a truck lane is a 44-mile understatement dressed up
+-- as a measurement, and `projectDistance` would have gone on using it until
+-- each lane happened to move far enough to trigger a recompute — up to 12
+-- hours under `maxAgeHours`, and longer for a parked truck.
+--
+-- The 24 deleted rows cost 24 routing calls on the worker's next sweep, which
+-- it will report as `no-route`. That is under 1% of the monthly ceiling.
+--
+-- NOT A ONE-OFF: `needsRecompute` now returns `provider-changed` whenever a
+-- cached row names a provider other than the one in force, so a row that
+-- survives a future swap can never be believed. This statement is the
+-- cleanup; that rule is the guarantee.
+-- ---------------------------------------------------------------------------
+
+DELETE FROM public.stop_routes
+ WHERE provider <> 'here-routing-v8-truck';

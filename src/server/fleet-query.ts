@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DriverSource } from '@/lib/driver';
 import {
+  ROUTE_PROVIDER,
   needsRecompute,
   type CachedRoute,
   type DistanceBasis,
@@ -197,6 +198,7 @@ export const LATEST_POSITION_SQL = sql`
     ns.route_miles, ns.route_duration_s, ns.route_from_lat, ns.route_from_lng,
     ns.route_straight_miles, ns.route_lane_ratio,
     ns.route_snap_from_m, ns.route_snap_to_m, ns.route_computed_at,
+    ns.route_provider,
     ov.forced_status, ov.reason, ov.reason_note, ov.set_by_name,
     ov.set_at, ov.expires_at,
     (select count(*) from loads ol
@@ -257,6 +259,7 @@ export const LATEST_POSITION_SQL = sql`
       sr.snap_to_m              as route_snap_to_m,
       to_char(sr.computed_at at time zone 'UTC',
               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as route_computed_at,
+      sr.provider               as route_provider,
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at,
       s.arrived_source::text  as arrived_source,
@@ -377,6 +380,8 @@ export const FleetQueryRow = z.object({
   route_snap_from_m: z.number().nullable(),
   route_snap_to_m: z.number().nullable(),
   route_computed_at: z.string().nullable(),
+  /** §12.59: which provider and profile measured the cached route. */
+  route_provider: z.string().nullable(),
   arrived_at: z.string().regex(ISO_UTC_MS).nullable(),
   /** §12.57. Paired with `arrived_at` in the database, both ways. */
   arrived_source: z.enum(ARRIVAL_SOURCES).nullable(),
@@ -457,6 +462,11 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
               raw.route_lane_ratio !== null &&
               raw.route_computed_at !== null
                 ? {
+                    // Null is impossible beside a route row (NOT NULL), but
+                    // the guard above does not prove it to the compiler. An
+                    // empty string can never equal ROUTE_PROVIDER, so the
+                    // fallback recomputes rather than trusting a mystery row.
+                    provider: raw.route_provider ?? '',
                     routedMiles: raw.route_miles,
                     routedDurationS: raw.route_duration_s,
                     fromLat: raw.route_from_lat,
@@ -559,6 +569,14 @@ export function applyStatus(
                     truckLng: row.lng,
                     stopLat: row.nextStop.lat,
                     stopLng: row.nextStop.lng,
+                    /**
+                     * §12.59. The board must not label a car-measured route
+                     * `routed` once the truck profile is in force. It falls
+                     * back to `lane-estimate`, which is the honest word for a
+                     * figure the current provider has not measured — and the
+                     * worker replaces the row on its next sweep anyway.
+                     */
+                    provider: ROUTE_PROVIDER,
                   },
                   now,
                 ) === null,

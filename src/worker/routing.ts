@@ -251,6 +251,7 @@ export async function sweepRouting(
 
     const cached: CachedRoute | null = cachedRow
       ? {
+          provider: cachedRow.provider,
           routedMiles: cachedRow.routedMiles,
           routedDurationS: cachedRow.routedDurationS,
           fromLat: cachedRow.fromLat,
@@ -272,6 +273,9 @@ export async function sweepRouting(
         truckLng: c.truck_lng,
         stopLat: c.stop_lat,
         stopLng: c.stop_lng,
+        // §12.59. The sweep's own identity, so a row from the previous
+        // provider is recomputed rather than believed.
+        provider: provider.name,
       },
       now,
       config,

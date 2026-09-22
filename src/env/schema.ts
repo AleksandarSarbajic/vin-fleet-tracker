@@ -74,21 +74,45 @@ export const ServerEnv = z
     WORKER_SUPABASE_SECRET_KEY: secretKey('WORKER_SUPABASE_SECRET_KEY'),
 
     /**
-     * Routing for the ETA (§12.31). SERVER ONLY, and never the browser token.
+     * HERE Routing v8, truck profile (§12.59). SERVER ONLY.
+     *
+     * Replaced `MAPBOX_DIRECTIONS_TOKEN`, which is gone rather than left
+     * lying about: a token for a provider nothing calls is a credential with
+     * no owner, and the next person to find it in `.env` has to work out
+     * whether it matters.
      *
      * Optional: absent, the board degrades to the straight-line estimate
-     * exactly as it does when Mapbox is down. Refusing to boot would take the
+     * exactly as it did when Mapbox was down. Refusing to boot would take the
      * whole dispatch console off the air over an enrichment it already knows
      * how to live without.
      */
-    MAPBOX_DIRECTIONS_TOKEN: z.string().min(1).optional(),
+    HERE_API_KEY: z.string().min(1).optional(),
 
     /**
-     * Monthly ceiling on routing calls. A quarter of the free tier by
-     * default, because there is no hard spend cap on the account and a
-     * caching bug should cost accuracy, not money.
+     * Monthly ceiling on routing calls (§12.59).
+     *
+     * **3,000 against HERE's 5,000/month free Base allowance** — 60% of it.
+     * Mapbox's free tier was 100,000 and this default was 25,000; the tier
+     * shrank by 20x and the ceiling has to shrink with it or it guards
+     * nothing.
+     *
+     * Sized from MEASURED traffic, not from the §12.31 simulation:
+     *
+     *     measured     2.62 calls per worker-hour over 99 hours of real
+     *                  operation (259 calls) -> ~1,950/month at 24/7
+     *     restarts     every lane is `no-route` on a cold start; the worst
+     *                  observed hour was 72 calls across three restarts
+     *     projected    ~2,700/month including restarts
+     *     §12.31 said  ~516 calls/day = ~15,480/month
+     *
+     * **The documented projection does not fit and the real traffic does.**
+     * §12.31 simulated 23 trucks all running long lanes at once; the fleet
+     * actually moves about seven at a time. If utilisation rises to what
+     * §12.31 assumed, this ceiling is reached around day 6 and the board
+     * spends the rest of the month on lane estimates — which is the budget
+     * guard working, not failing, and is the right failure to choose.
      */
-    ROUTING_MONTHLY_CEILING: z.coerce.number().int().positive().default(25_000),
+    ROUTING_MONTHLY_CEILING: z.coerce.number().int().positive().default(3_000),
 
     SAMSARA_API_TOKEN: z.string().min(1),
     SAMSARA_ORG_ID: z.string().regex(/^\d+$/, 'SAMSARA_ORG_ID must be numeric'),
@@ -106,19 +130,37 @@ export const ServerEnv = z
       'SUPABASE_SECRET_KEY and WORKER_SUPABASE_SECRET_KEY are identical. ' +
       'Issue a separate key per service so either can be rotated alone.',
   })
+  /**
+   * §12.59. The HERE key must not be any value that reaches a browser.
+   *
+   * Broader than the guard it replaces, which compared one token against one
+   * named counterpart. `NEXT_PUBLIC_*` is the whole client surface — Next
+   * inlines every one of them into the bundle by literal substitution — so
+   * this compares against all of them, and therefore also catches the
+   * mistake the narrow version could not: someone adding
+   * `NEXT_PUBLIC_HERE_API_KEY` to make it reachable from a map component.
+   *
+   * A routing key in a network tab is a metered API anyone can spend, and
+   * HERE's free allowance is 5,000 transactions a month — one afternoon of
+   * somebody else's script.
+   */
   .refine(
-    (e) =>
-      e.MAPBOX_DIRECTIONS_TOKEN === undefined ||
-      e.MAPBOX_DIRECTIONS_TOKEN !== process.env['NEXT_PUBLIC_MAPBOX_TOKEN'],
+    (e) => e.HERE_API_KEY === undefined || publicValues().every((v) => v !== e.HERE_API_KEY),
     {
-      path: ['MAPBOX_DIRECTIONS_TOKEN'],
+      path: ['HERE_API_KEY'],
       message:
-        'MAPBOX_DIRECTIONS_TOKEN is the same token as NEXT_PUBLIC_MAPBOX_TOKEN, ' +
-        'which ships to every browser. Issue a separate SECRET (sk.) token, so ' +
-        'a metered API is not callable from a network tab and either token can ' +
-        'be rotated alone.',
+        'HERE_API_KEY is also exposed as a NEXT_PUBLIC_* variable, which ' +
+        'ships to every browser. Routing is metered: keep the key server-side ' +
+        'and issue a separate one if a client ever genuinely needs HERE.',
     },
   );
+
+/** Every value Next will inline into the client bundle. */
+function publicValues(): string[] {
+  return Object.entries(process.env)
+    .filter(([key, value]) => key.startsWith('NEXT_PUBLIC_') && typeof value === 'string')
+    .map(([, value]) => value as string);
+}
 
 export function report(scope: string, error: z.ZodError): string {
   const lines = error.issues.map(

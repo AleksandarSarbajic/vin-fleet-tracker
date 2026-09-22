@@ -4760,6 +4760,157 @@ today, and a silent disagreement is a trap for whoever first writes
 `order by reason`.
 
 
+## 12.59 Routing moves to HERE, truck profile — and geocoding does not
+
+§12.31 opened the provider seam with a defect written on it: **Mapbox
+Directions has no heavy-goods profile**, so every route the board had ever
+measured was a car route. Fine for deciding LATE, not fine for anyone
+reconciling against a rate confirmation, because brokers pay truck miles and a
+car route reads short. This spends that seam.
+
+**Routing only.** HERE's Base plan states that Permanent Geocoding is not
+included, with no listed pricing — and storing lat/lng long-term is exactly
+what we do (§12.24). Routing Truck carries no such restriction and is free on
+Base at 5,000 monthly transactions. Geocoding stays on the US Census geocoder
+until HERE support answers directly, and `src/server/geocode.ts` was not
+touched. Splitting the migration here is not caution about the code; it is
+about a licence we do not have in writing.
+
+### `transportMode=truck`, confirmed twice
+
+The parameter name was read out of HERE's transport-modes reference — it is
+one of three mandatory parameters, and `truck` is its heavy-goods value — and
+then confirmed against the live API before a line was written. The response
+echoes `"transport":{"mode":"truck"}`, so the provider states which profile
+answered, and the parser refuses anything that comes back as `car`. A silent
+downgrade to car miles is the exact defect this swap exists to end, and it
+would be invisible: car miles are not obviously wrong, only short.
+
+**Truck dimensions are deliberately not sent.** HERE accepts `grossWeight`,
+`height` and the rest, and they change the answer. We do not send them because
+we do not know them: there is no per-truck equipment record, the trailer field
+was cut (§12.53), and a default weight would produce a specific-looking number
+describing a truck nobody owns. The profile alone applies the general HGV
+network restrictions, which is the gap §12.31 named.
+
+### The gap got BIGGER, which is the opposite of the hoped-for answer
+
+Re-run on ten of our own lanes, same endpoints, both profiles, same minute
+(`npm run route:compare`):
+
+```
+lane                       straight   mapbox car   HERE car  HERE truck  truck-car
+138 -> Phoenix, AZ           1426.5       1723.2     1721.2      1765.3      +44.1
+145 -> Salt Lake City, UT     875.3            —     1140.0      1145.8       +5.8
+141 -> Denver, CO             900.8        986.4      986.3       986.3        0.0
+146 -> Dallas, TX             756.8        981.3      954.8       998.2      +43.4
+128 -> Atlanta, GA            585.9        740.8      737.5       737.5        0.0
+130 -> GRAND ISLAND, NE       544.6        602.8      606.2       605.8       -0.4
+137 -> Elwood, IL             407.3        500.7      500.5       500.5        0.0
+132 -> Joliet, IL             318.9        413.1      414.3       414.4       +0.1
+136 -> Fargo, ND              287.2        298.4      298.4       298.4        0.0
+133 -> Minooka, IL             46.6         55.8       53.5        54.6       +1.2
+```
+
+**HERE truck vs HERE car: mean +9.4 mi (0.97%), worst +44.1 mi.** §12.31
+measured +3.0 mi mean and +15.6 mi worst against Valhalla. The gap is roughly
+**three times larger** than the number that motivated the swap, so the swap
+was better justified than its own business case, not worse.
+
+**But the mean is the wrong summary, and the distribution says why.** Six of
+ten lanes are *identical* to the car route to within half a mile — interstate
+corridors with no HGV restriction to apply. The other four differ by 23.6 mi
+mean and 44.1 mi worst. Truck routing either agrees exactly or departs by tens
+of miles; averaging those describes no lane we run. Same shape as §13.7's
+bimodal yard, and the same lesson: report the two modes, not their midpoint.
+
+A control worth having: **the two car profiles agree to 4.35 mi mean across
+the nine comparable lanes.** So the difference is the profile, not the vendor —
+which is what makes the +44 attributable to truck routing rather than to
+changing supplier.
+
+One methodological correction, because the first run of the comparison was
+wrong. `route_samples` stores the destination it measured but not the origin,
+so the origin had to come from `stop_routes` — the *current* cached origin,
+which on a re-routed lane is a different point. That produced a 199-mile
+"provider disagreement" on Salt Lake City that was two different journeys
+being subtracted. Car-vs-truck was never affected (both calls leave the same
+point in the same minute); the Mapbox column now prints `—` when the origins
+cannot be shown to match, rather than being quietly averaged in.
+
+### `provider-changed`, and why the migration alone was not enough
+
+A `lane_ratio` is not provider-neutral: a car ratio applied to a truck lane is
+a 44-mile understatement wearing a measurement's clothes. Two things address
+it, and they are not the same thing.
+
+Migration 0017 **deletes the cached rows** — `stop_routes` is a cache by
+§12.54's own distinction, deletable and already deleted on every re-geocode,
+while `route_samples` is the measurement record and keeps every row. All 337
+Mapbox measurements are still there, each stamped with its provider; only the
+24 cached answers went.
+
+`needsRecompute` gains **`provider-changed`**, returned whenever a cached row
+names a provider other than the one in force, and checked *before* the
+geometry — a row from the old provider is wrong wherever the truck has got to,
+and letting `truck-moved` report it would hide a swap inside ordinary traffic.
+
+That rule earned itself within eleven minutes. A worker process from before
+the swap was still running, unnoticed, and went on writing Mapbox rows
+*after* the migration had emptied the table. The new worker's first sweeps
+reported `routedBecause: {"provider-changed": 8}` and replaced every one; one
+sweep later all 19 cached routes were HERE truck. The migration was the
+cleanup and it was already out of date; the rule is the guarantee.
+
+### The budget does not fit the documented projection, and does fit reality
+
+HERE Base allows **5,000 routing transactions a month**. Mapbox's free tier
+was 100,000 and `ROUTING_MONTHLY_CEILING` defaulted to 25,000 — five times the
+entire new allowance, so it guarded nothing and had to move.
+
+§12.31's calibration projects **~516 calls/day ≈ 15,480/month**. That is
+**3.1x over the free tier** and it does not fit. Measured traffic tells a
+different story:
+
+```
+2.62 routing calls per worker-hour, over 99 hours of real operation (259 calls)
+  -> ~1,950/month at 24/7
+  +  restarts, where every lane is `no-route`: worst observed hour was 72
+  => ~2,700/month
+```
+
+The simulation assumed 23 trucks all running long lanes at once; the fleet
+actually moves about seven at a time, which is why it is off by 4.5x.
+
+**Ceiling set to 3,000** — 60% of the allowance, ~1.1x measured worst case.
+The honest statement of the risk: if utilisation rises to what §12.31
+simulated, this is reached around day six and the board spends the rest of the
+month on lane estimates. That is the budget guard working, not failing. The
+guard degrades and never throws — a failed or over-budget call falls back to
+the lane ratio and then to the straight line, exactly as it did when Mapbox
+was down — and `routing_budget` lives in the database so a crash loop cannot
+reset the counter.
+
+**Watch the monthly number.** It is the one figure here that is a projection
+rather than a measurement.
+
+### The key
+
+`HERE_API_KEY`, server-side only, and `MAPBOX_DIRECTIONS_TOKEN` is **removed**
+rather than left lying about: a credential for a provider nothing calls has no
+owner, and the next person to find it has to work out whether it matters. The
+browser token `NEXT_PUBLIC_MAPBOX_TOKEN` stays — it draws the map.
+
+The startup guard is broader than the one it replaces. The old rule compared
+one token against one named counterpart; this compares the HERE key against
+**every `NEXT_PUBLIC_*` value**, because that prefix is the whole client
+surface — Next inlines each of them into the bundle by literal substitution.
+It therefore also catches the mistake the narrow version could not: somebody
+adding `NEXT_PUBLIC_HERE_API_KEY` to reach HERE from a map component. A
+routing key in a network tab is a metered API anyone can spend, and 5,000
+transactions is one afternoon of somebody else's script.
+
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

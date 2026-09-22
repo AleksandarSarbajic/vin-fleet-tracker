@@ -11,6 +11,23 @@ import { haversineMiles } from './status';
 
 /* ------------------------------- thresholds ------------------------------ */
 
+/**
+ * Who measures the routes, as one string (§12.59).
+ *
+ * Written into `stop_routes.provider` and every `route_samples` row, and
+ * compared against the cache by `needsRecompute`. It lives HERE, in the
+ * policy module, rather than only on the provider class, because two places
+ * need to agree about it — the worker that writes rows and the query that
+ * decides whether an existing row still describes the world — and a name
+ * duplicated in two files is a name that will differ in one of them.
+ *
+ * The value carries the PROFILE, not just the vendor. `here-routing-v8-car`
+ * and `here-routing-v8-truck` are different measurements of the same lane
+ * (+44 mi on Chicago->Phoenix, measured), so a row that recorded only "here"
+ * could not be told apart after a profile change.
+ */
+export const ROUTE_PROVIDER = 'here-routing-v8-truck';
+
 export const ROUTING_DEFAULTS = {
   /**
    * Recompute when the straight-line distance has changed by more than
@@ -63,6 +80,8 @@ export const metresToMiles = (m: number): number => m / METRES_PER_MILE;
 /* ------------------------------ the decision ----------------------------- */
 
 export interface CachedRoute {
+  /** Which provider and profile measured it (§12.59). */
+  provider: string;
   routedMiles: number;
   routedDurationS: number;
   fromLat: number;
@@ -81,6 +100,8 @@ export type RecomputeReason =
   | 'stop-moved'
   | 'truck-moved'
   | 'route-stale'
+  /** §12.59: measured by a provider or profile we no longer use. */
+  | 'provider-changed'
   | null;
 
 /**
@@ -92,11 +113,39 @@ export type RecomputeReason =
  */
 export function needsRecompute(
   cached: CachedRoute | null,
-  now: { truckLat: number; truckLng: number; stopLat: number; stopLng: number },
+  now: {
+    truckLat: number;
+    truckLng: number;
+    stopLat: number;
+    stopLng: number;
+    /**
+     * The provider in force RIGHT NOW. Part of the facts rather than an
+     * optional argument on purpose: both callers are then made to supply it
+     * by the compiler, and a rule that depends on the caller remembering is
+     * not a rule.
+     */
+    provider: string;
+  },
   at: Date,
   config: RoutingConfig = ROUTING_DEFAULTS,
 ): RecomputeReason {
   if (!cached) return 'no-route';
+
+  /**
+   * §12.59. A car route and a truck route are different numbers for the same
+   * lane — +44 mi on Chicago->Phoenix when this was measured — and a
+   * `lane_ratio` derived from one is not a road factor for the other.
+   *
+   * Checked FIRST, before the geometry: a row from the previous provider is
+   * wrong no matter where the truck has got to, and letting `truck-moved`
+   * report it would hide a provider swap inside ordinary traffic.
+   *
+   * This is the standing guarantee. Migration 0017 deleted the 24 Mapbox
+   * rows that existed at the swap, so nothing relies on this today — it is
+   * here so the NEXT swap, or a row that somehow survives one, cannot feed a
+   * car ratio to a truck.
+   */
+  if (cached.provider !== now.provider) return 'provider-changed';
 
   // A re-geocode moves the destination. The old route measured elsewhere.
   if (cached.stopLat !== now.stopLat || cached.stopLng !== now.stopLng) return 'stop-moved';

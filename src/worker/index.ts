@@ -8,7 +8,7 @@ import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
-import { MapboxDirections } from '@/server/routing/provider';
+import { HereRouting } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
 import { STALL_SECONDS } from './ingest';
 import {
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
    * shape as the geocoder, and for the same reason: an enrichment must not be
    * able to take the dispatch board down.
    */
-  const router = new MapboxDirections(env.MAPBOX_DIRECTIONS_TOKEN);
+  const router = new HereRouting(env.HERE_API_KEY);
 
   logger.info('worker starting', {
     orgId: env.SAMSARA_ORG_ID,
@@ -232,7 +232,7 @@ async function reportDay(
 async function pollOnce(
   db: ReturnType<typeof createDirectDb>['db'],
   samsara: SamsaraClient,
-  router: MapboxDirections,
+  router: HereRouting,
   /** Seconds since the last SUCCESSFUL poll, recorded on the heartbeat. */
   gapSeconds = 0,
 ): Promise<void> {

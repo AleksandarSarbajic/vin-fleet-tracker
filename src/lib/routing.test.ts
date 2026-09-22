@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { haversineMiles } from './status';
 import {
+  ROUTE_PROVIDER,
   ROUTING_DEFAULTS,
   budgetMonth,
   needsRecompute,
@@ -23,6 +24,7 @@ const FAR = { lat: 46.8672, lng: -96.9422 };
 const FAR_STRAIGHT = haversineMiles(FAR, STOP);
 
 const cached = (over: Partial<CachedRoute> = {}): CachedRoute => ({
+  provider: ROUTE_PROVIDER,
   routedMiles: 481.3,
   routedDurationS: 7.35 * 3600,
   fromLat: FAR.lat,
@@ -37,16 +39,46 @@ const cached = (over: Partial<CachedRoute> = {}): CachedRoute => ({
   ...over,
 });
 
-const here = (from: { lat: number; lng: number }) => ({
+const here = (from: { lat: number; lng: number }, provider = ROUTE_PROVIDER) => ({
   truckLat: from.lat,
   truckLng: from.lng,
   stopLat: STOP.lat,
   stopLng: STOP.lng,
+  provider,
 });
 
 describe('needsRecompute', () => {
   it('routes a lane that has never been routed', () => {
     expect(needsRecompute(null, here(FAR), AT)).toBe('no-route');
+  });
+
+  /**
+   * §12.59. A car route and a truck route are different numbers for the same
+   * lane — measured at +44 mi on truck 135's Chicago->Phoenix — so a
+   * `lane_ratio` from one is not a road factor for the other.
+   */
+  it('routes again when the cached row came from another provider', () => {
+    const fromMapbox = cached({ provider: 'mapbox-directions-driving' });
+    expect(needsRecompute(fromMapbox, here(FAR), AT)).toBe('provider-changed');
+  });
+
+  it('routes again when only the PROFILE changed', () => {
+    // The name carries the profile for exactly this case: a car measurement
+    // from the same vendor is still the wrong number.
+    const carFromHere = cached({ provider: 'here-routing-v8-car' });
+    expect(needsRecompute(carFromHere, here(FAR), AT)).toBe('provider-changed');
+  });
+
+  it('says provider-changed even when the row is otherwise perfect', () => {
+    /**
+     * Checked BEFORE the geometry, deliberately. This row is current by every
+     * other measure — same stop, fresh, truck has not moved — so if the
+     * provider check came later this would return null and a car ratio would
+     * survive the swap untouched for up to `maxAgeHours`.
+     */
+    const stale = cached({ provider: 'mapbox-directions-driving' });
+    expect(needsRecompute(cached(), here(FAR), AT)).toBeNull();
+    expect(needsRecompute(stale, here(FAR), AT)).toBe('provider-changed');
   });
 
   it('leaves a fresh route alone', () => {
@@ -189,6 +221,7 @@ describe('a fresh route advances with the truck (§12.40)', () => {
    * the truck covered 6.5 miles.
    */
   const lane: CachedRoute = {
+    provider: ROUTE_PROVIDER,
     routedMiles: 71.84,
     routedDurationS: 4015,
     fromLat: 46.877939,

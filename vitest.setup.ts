@@ -69,7 +69,10 @@ for (const key of [
   'WORKER_SUPABASE_SECRET_KEY',
   'SAMSARA_API_TOKEN',
   'SAMSARA_ORG_ID',
+  // Kept after the HERE swap (§12.59): a token for a provider nothing calls
+  // is still a live credential if it is sitting in someone's .env.local.
   'MAPBOX_DIRECTIONS_TOKEN',
+  'HERE_API_KEY',
   'NEXT_PUBLIC_MAPBOX_TOKEN',
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
 ]) {

@@ -140,6 +140,69 @@ describe('ClientEnv', () => {
   });
 });
 
+describe('the HERE routing key stays server-side (§12.59)', () => {
+  /**
+   * Routing is metered, and HERE's free Base allowance is 5,000 transactions
+   * a month — one afternoon of somebody else's script if the key reaches a
+   * browser. Next inlines every `NEXT_PUBLIC_*` value into the bundle by
+   * literal substitution, so that prefix IS the client surface.
+   */
+  const withPublic = <T>(vars: Record<string, string>, run: () => T): T => {
+    const before = { ...process.env };
+    Object.assign(process.env, vars);
+    try {
+      return run();
+    } finally {
+      for (const key of Object.keys(vars)) delete process.env[key];
+      Object.assign(process.env, before);
+    }
+  };
+
+  it('accepts a key that is nowhere in the client bundle', () => {
+    const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.abc' }, () =>
+      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'here-secret' }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it('refuses a key that is ALSO published under any NEXT_PUBLIC_ name', () => {
+    /**
+     * The mistake the narrow guard it replaced could not catch: the old rule
+     * compared one token against one named counterpart, so inventing a new
+     * public variable walked straight past it.
+     */
+    const r = withPublic({ NEXT_PUBLIC_HERE_API_KEY: 'here-secret' }, () =>
+      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'here-secret' }),
+    );
+    expect(r.success).toBe(false);
+    expect(errorOn(r, 'HERE_API_KEY')).toContain('ships to every browser');
+  });
+
+  it('refuses it whichever public variable happens to hold it', () => {
+    const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'shared-value' }, () =>
+      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'shared-value' }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it('boots without one, because the board degrades rather than falling over', () => {
+    // Absent, every lane falls back to the lane estimate or the straight
+    // line. Refusing to start would take the whole console off the air over
+    // an enrichment it already knows how to live without.
+    const r = ServerEnv.safeParse(validServer);
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.HERE_API_KEY).toBeUndefined();
+  });
+
+  it('caps the month well under HERE\'s free allowance by default', () => {
+    const r = ServerEnv.safeParse(validServer);
+    // 3,000 of 5,000. The Mapbox-era default was 25,000 against a tier of
+    // 100,000; the tier shrank 20x and a ceiling above it guards nothing.
+    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBe(3_000);
+    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBeLessThan(5_000);
+  });
+});
+
 describe('isIanaZone', () => {
   it.each(['America/Chicago', 'America/Phoenix', 'Europe/Belgrade', 'UTC'])(
     'accepts %s',

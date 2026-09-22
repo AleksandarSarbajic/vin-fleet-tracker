@@ -26,7 +26,12 @@ describe('guard 1 — production credentials do not exist in this process', () =
       'SUPABASE_SECRET_KEY',
       'WORKER_SUPABASE_SECRET_KEY',
       'SAMSARA_API_TOKEN',
+      // §12.59. `MAPBOX_DIRECTIONS_TOKEN` is kept on this list although the
+      // variable is gone: the point of the guard is that a test can never
+      // reach a live service, and a stale token still sitting in somebody's
+      // `.env.local` is exactly the credential it exists to strip.
       'MAPBOX_DIRECTIONS_TOKEN',
+      'HERE_API_KEY',
     ]) {
       expect(process.env[key]).toBeUndefined();
     }
@@ -76,9 +81,9 @@ describe('guard 4 — the network is not the state of the world either', () => {
     ).rejects.toThrow(/real network call/);
   });
 
-  it('refuses Mapbox too, whatever the path', async () => {
+  it('refuses the routing provider too, whatever the path', async () => {
     await expect(
-      fetch('https://api.mapbox.com/directions/v5/mapbox/driving/x'),
+      fetch('https://router.hereapi.com/v8/routes?transportMode=truck'),
     ).rejects.toThrow(/real network call/);
   });
 
