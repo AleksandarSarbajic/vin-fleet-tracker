@@ -278,3 +278,102 @@ function cappedSpeed(cached: CachedRoute, avgSpeedMph: number): number {
 export function budgetMonth(at: Date): string {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
+/**
+ * How the month is going, and when it runs out at this rate (§12.60).
+ *
+ * ## Why this exists at all
+ *
+ * The budget had exactly one runtime signal: an error line when the ceiling
+ * was already hit. By then the board has silently degraded to lane estimates
+ * and the only remedies are to raise the ceiling or wait for the month to
+ * roll over — so the first thing ops heard about it was also the last thing
+ * they could act on.
+ *
+ * §12.59 wrote down a specific risk: HERE's free tier is 5,000 a month,
+ * §12.31's calibration projects ~15,480, and if utilisation ever rises to
+ * what that simulation assumed the ceiling is reached **around day six**.
+ * That sentence was in the spec and in a commit message, which is not where
+ * anyone looks at 3am. It belongs in the log line, next to the numbers that
+ * would make it true.
+ *
+ * Pure, and therefore testable without a clock or a database — the same rule
+ * the rest of this module follows.
+ */
+export const BUDGET_WATCH_FRACTION = 0.7;
+export const BUDGET_CRITICAL_FRACTION = 0.9;
+
+export type BudgetBand = 'ok' | 'watch' | 'critical' | 'exhausted';
+
+export interface BudgetStatus {
+  spent: number;
+  ceiling: number;
+  /** 0–1+, and it can exceed 1: a cycle in flight when the ceiling fell. */
+  fraction: number;
+  band: BudgetBand;
+  /** Days of this UTC month elapsed so far, including the part-day. */
+  daysElapsed: number;
+  daysInMonth: number;
+  /** Calls per day so far this month. */
+  burnPerDay: number;
+  /** Calls by month end if the rate holds. */
+  projectedMonthEnd: number;
+  /**
+   * The day of the month the ceiling is reached at this rate, or null when
+   * the rate does not reach it. This is the §12.59 number, computed rather
+   * than remembered — a forecast is only useful if it updates.
+   */
+  exhaustedOnDay: number | null;
+}
+
+/** Days in the UTC month containing `at`. */
+function daysInUtcMonth(at: Date): number {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 0)).getUTCDate();
+}
+
+export function budgetStatus(spent: number, ceiling: number, at: Date): BudgetStatus {
+  const daysInMonth = daysInUtcMonth(at);
+  /**
+   * Elapsed INCLUDING the part-day, so the first hours of the month do not
+   * divide by something near zero and report a burn rate of thousands. The
+   * floor of one hour is what stops that.
+   */
+  const msIntoMonth =
+    at.getTime() - Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1);
+  const daysElapsed = Math.max(msIntoMonth / 86_400_000, 1 / 24);
+  const burnPerDay = spent / daysElapsed;
+  const projectedMonthEnd = burnPerDay * daysInMonth;
+
+  /**
+   * Day-of-month the ceiling lands on. Rounded UP: "reached on day 6" should
+   * mean the ceiling is hit at some point during day 6, not that day 5.2 is a
+   * date anybody can act on.
+   */
+  const daysToCeiling = burnPerDay > 0 ? ceiling / burnPerDay : Infinity;
+  const exhaustedOnDay =
+    Number.isFinite(daysToCeiling) && daysToCeiling <= daysInMonth
+      ? Math.max(1, Math.ceil(daysToCeiling))
+      : null;
+
+  const fraction = ceiling > 0 ? spent / ceiling : 1;
+  const band: BudgetBand =
+    fraction >= 1
+      ? 'exhausted'
+      : fraction >= BUDGET_CRITICAL_FRACTION
+        ? 'critical'
+        : fraction >= BUDGET_WATCH_FRACTION
+          ? 'watch'
+          : 'ok';
+
+  return {
+    spent,
+    ceiling,
+    fraction,
+    band,
+    daysElapsed,
+    daysInMonth,
+    burnPerDay,
+    projectedMonthEnd,
+    exhaustedOnDay,
+  };
+}

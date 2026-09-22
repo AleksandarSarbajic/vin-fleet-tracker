@@ -2545,6 +2545,42 @@ a corridor whose ratio moved because of construction.
 in freight uses — short by 7% to 46% depending on the lane. It is road miles
 now, of whichever kind the basis names.
 
+### ADDENDUM (§12.59): the car-vs-truck gap is concentrated, not general
+
+The `+3.0 mi mean, +15.6 mi worst` above is the number that justified the
+provider seam, and it was re-measured on our own lanes once the seam was
+actually spent. The mean grew — HERE truck against HERE car is **+9.4 mi mean,
++44.1 mi worst** — but the more useful finding is the shape:
+
+```
+6 of 10 lanes   identical to the car route, within 0.5 mi
+4 of 10 lanes   +23.6 mi mean, +44.1 mi worst
+```
+
+**Truck routing either agrees with car routing exactly or departs from it by
+tens of miles.** It is not a small general improvement spread across every
+lane; it is no improvement at all on most of them and a large one on a few.
+Averaging the two modes produces a figure that describes no lane this company
+runs — the same error the 1.25 road factor made, and the same shape as
+§13.7's bimodal yard.
+
+Two consequences worth holding on to:
+
+- **The value is a property of the LANE, not of the fleet.** A swap justified
+  by a mean would look disappointing on any single interstate run and
+  suspiciously good on a handful of others. Either reading is wrong.
+- **Nobody has established WHY those four diverge.** The likely cause is a
+  weight, height, length or hazmat restriction forcing a real detour — which
+  would mean the divergent lanes share a structural feature and are therefore
+  predictable, not random. That is worth knowing: if the gap tracks a
+  restriction we could name, it would also tell us which lanes deserve the
+  truck dimensions §12.59 deliberately does not send.
+
+**Not investigated, and not urgent.** Recorded here rather than in §13
+because it is a note on a measurement already taken, not an open design
+question. The four lanes were Phoenix (+44.1), Dallas (+43.4), Salt Lake City
+(+5.8) and Minooka (+1.2); `npm run route:compare` reproduces the table.
+
 ## 12.32 Tests that read the state of the world
 
 Four faults in one session, all the same shape — a test whose result depended
@@ -4909,6 +4945,76 @@ It therefore also catches the mistake the narrow version could not: somebody
 adding `NEXT_PUBLIC_HERE_API_KEY` to reach HERE from a map component. A
 routing key in a network tab is a metered API anyone can spend, and 5,000
 transactions is one afternoon of somebody else's script.
+
+
+## 12.60 The budget's first warning was also its last chance to act
+
+§12.59 set the routing ceiling at 3,000 against HERE's 5,000 and wrote down a
+specific foreseen failure: if utilisation rises to what §12.31's calibration
+simulated, the ceiling arrives **around day six** and the board spends the
+rest of the month on lane estimates.
+
+That sentence lived in the spec and in a commit message. Neither is open at
+3am. The runtime had exactly one budget signal:
+
+```
+logger.error('routing budget exhausted for the month — degrading to lane
+              estimates', { ceiling })
+```
+
+Three things wrong with it, and the first is the one that matters:
+
+1. **It fires only once the ceiling is already hit.** By then the degradation
+   has happened and the only remedies left are raising the ceiling or waiting
+   for the month to turn over. The first thing ops heard about it was also the
+   last thing they could do anything about.
+2. **It carried the ceiling and not the spend**, so it said what the limit was
+   and not how the month had got there.
+3. **Nothing reported the budget on a normal cycle**, so there was no baseline.
+   "Is this sudden?" had no answer.
+
+### What it does now
+
+`budgetStatus` in `lib/routing.ts` — pure, so the forecast is testable without
+a clock or a database, like every other rule in that module. It returns the
+spend, the fraction, the burn per day, the projected month end, and the day of
+the month the ceiling lands on at the current rate.
+
+**The §12.59 day-six number is computed, not remembered.** A forecast is only
+worth anything if it updates, and this one is asserted directly:
+
+```
+budgetStatus(516 * 5, 3_000, Sept 6)  ->  burnPerDay 516, exhaustedOnDay 6
+```
+
+Bands at 70% (`watch`, warn), 90% (`critical`, error) and 100% (`exhausted`,
+error). The watch line names the §12.59 scenario in words, so the person
+reading it at 3am gets the context without having to find the spec.
+
+**Edge-triggered**, because the poll is every 30 seconds and an unconditional
+warning is 2,880 identical lines a day — which is the same as no warning, but
+harder to read past. Only `exhausted` repeats, because that one is a live
+degradation and a board running on lane estimates should keep saying so. A
+restart re-announces deliberately: a worker coming up at 85% of the month is
+worth one line. Dropping back a band logs too, so a recovery is as findable as
+the warning was.
+
+And `poll: ingested` now carries `routeCallsThisMonth` and `routeCallCeiling`
+on **every** cycle. A number that only appears in trouble is a number nobody
+has a baseline for.
+
+Verified against the real counter rather than a fixture — 374 calls, ceiling
+forced to 500:
+
+```
+warn  routing budget past 70%. If this is the §12.59 scenario …
+      spent 374  ceiling 500  percent 74.8  burnPerDay 17.4
+      projectedMonthEnd 521  exhaustedOnDay 29  ruling "§12.59, §12.60"
+```
+
+One detail with a bug behind it: elapsed time is floored at one hour. Without
+it, twelve calls at 00:05 on the first of the month divide by 0.003 days and
+project to millions, so every new month would open with a critical alert.
 
 
 # 13. Still open

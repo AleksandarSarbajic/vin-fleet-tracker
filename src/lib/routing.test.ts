@@ -4,6 +4,7 @@ import {
   ROUTE_PROVIDER,
   ROUTING_DEFAULTS,
   budgetMonth,
+  budgetStatus,
   needsRecompute,
   projectDistance,
   type CachedRoute,
@@ -278,5 +279,87 @@ describe('a fresh route advances with the truck (§12.40)', () => {
     // Those already scale with the CURRENT straight line, so they never drifted.
     expect(projectDistance(50, lane, 1.25, 52, false).miles).toBeCloseTo(50 * 1.0897, 3);
     expect(projectDistance(50, null, 1.25, 52, false).miles).toBeCloseTo(62.5, 3);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.60 — the budget says where the month is going, before it gets there
+ * ---------------------------------------------------------------------- */
+
+describe('budgetStatus', () => {
+  /** Noon on the Nth of a 30-day month (September), UTC. */
+  const day = (n: number, hour = 12) =>
+    new Date(Date.UTC(2026, 8, n, hour, 0, 0));
+
+  it('bands the month by how much of the ceiling is gone', () => {
+    expect(budgetStatus(0, 3_000, day(15)).band).toBe('ok');
+    expect(budgetStatus(2_099, 3_000, day(15)).band).toBe('ok');
+    expect(budgetStatus(2_100, 3_000, day(15)).band).toBe('watch');
+    expect(budgetStatus(2_700, 3_000, day(15)).band).toBe('critical');
+    expect(budgetStatus(3_000, 3_000, day(15)).band).toBe('exhausted');
+  });
+
+  it('bands a cycle that overshot as exhausted, not as something above it', () => {
+    // A sweep already in flight when the counter crossed can land past the
+    // ceiling. There is no band above `exhausted` and there should not be.
+    expect(budgetStatus(3_400, 3_000, day(15)).band).toBe('exhausted');
+  });
+
+  /**
+   * THE §12.59 SCENARIO, which is the reason this function exists.
+   *
+   * §12.31's calibration projects ~516 calls/day. Against the 3,000 ceiling
+   * that is reached partway through day six — the number §12.59 states in
+   * prose and nothing computed until now.
+   */
+  it('reaches a 3,000 ceiling on day six at §12.31’s projected rate', () => {
+    // Five days elapsed, spent at 516/day.
+    const status = budgetStatus(516 * 5, 3_000, day(6, 0));
+    expect(Math.round(status.burnPerDay)).toBe(516);
+    expect(status.exhaustedOnDay).toBe(6);
+  });
+
+  it('reaches nothing at the rate actually measured', () => {
+    // §12.59 measured ~2,700/month including restarts — 90/day on a 30-day
+    // month, which never meets 3,000. `null` is the whole point: a forecast
+    // that always names a day would cry wolf every month.
+    const status = budgetStatus(90 * 15, 3_000, day(16, 0));
+    expect(status.exhaustedOnDay).toBeNull();
+    expect(Math.round(status.projectedMonthEnd)).toBe(2_700);
+  });
+
+  it('rounds the forecast day UP, because day 5.2 is not a date anyone acts on', () => {
+    const status = budgetStatus(516 * 5, 3_000, day(6, 0));
+    // 3000/516 = 5.81 days -> the ceiling arrives during day 6.
+    expect(status.exhaustedOnDay).toBe(6);
+  });
+
+  /**
+   * The first hours of a month divide by something near zero. Without a
+   * floor, twelve calls at 00:05 on the 1st project to millions and the
+   * warning fires on every new month.
+   */
+  it('does not report a wild burn rate in the first minutes of a month', () => {
+    const justAfterMidnight = new Date(Date.UTC(2026, 8, 1, 0, 5, 0));
+    const status = budgetStatus(12, 3_000, justAfterMidnight);
+    // Floored at one hour of elapsed time: 12 calls/hour, not 12 per 5 min.
+    expect(status.burnPerDay).toBeCloseTo(12 * 24, 0);
+    expect(status.band).toBe('ok');
+  });
+
+  it('knows how long the month it is actually in is', () => {
+    // September has 30 days, October 31, February 2026 has 28. Derived from
+    // the date rather than assumed to be 30 — a projection that is 3% wrong
+    // every other month is a projection nobody trusts.
+    expect(budgetStatus(100, 3_000, new Date(Date.UTC(2026, 8, 10))).daysInMonth).toBe(30);
+    expect(budgetStatus(100, 3_000, new Date(Date.UTC(2026, 9, 10))).daysInMonth).toBe(31);
+    expect(budgetStatus(100, 3_000, new Date(Date.UTC(2026, 1, 10))).daysInMonth).toBe(28);
+  });
+
+  it('survives a month with nothing spent in it', () => {
+    const status = budgetStatus(0, 3_000, day(15));
+    expect(status.burnPerDay).toBe(0);
+    expect(status.exhaustedOnDay).toBeNull();
+    expect(status.band).toBe('ok');
   });
 });

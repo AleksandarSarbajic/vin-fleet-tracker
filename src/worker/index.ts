@@ -8,6 +8,7 @@ import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
+import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
 import { HereRouting } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
 import { STALL_SECONDS } from './ingest';
@@ -229,6 +230,99 @@ async function reportDay(
 }
 
 /** One poll: feed → positions → heartbeat. The cursor advances only on success. */
+/* -------------------------------------------------------------------------
+ * §12.60 — the routing budget, said out loud before the wall
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The band this process last announced.
+ *
+ * Edge-triggered, because the poll is every 30 seconds and an unconditional
+ * warning would be 2,880 identical lines a day — which is the same as no
+ * warning, except harder to read past. A restart re-announces deliberately:
+ * a worker coming up at 85% of the month's allowance is worth one line.
+ */
+let lastBudgetBand: BudgetBand | null = null;
+
+/**
+ * Says where the month stands, in the place ops actually reads.
+ *
+ * The budget used to have ONE runtime signal — an error once the ceiling was
+ * already hit. By then the board has silently dropped to lane estimates and
+ * the only remedies left are raising the ceiling or waiting for the month to
+ * turn over, so the first thing anyone heard was also the last thing they
+ * could act on.
+ *
+ * §12.59 recorded a specific foreseen scenario: HERE's free tier is 5,000 a
+ * month, §12.31's calibration projects ~15,480, and if utilisation rises to
+ * what that simulation assumed the ceiling lands **around day six**. That
+ * sentence lived in the spec and in a commit message. Neither is open at 3am,
+ * so the forecast is computed here and printed beside the numbers that would
+ * make it true.
+ */
+function reportBudget(budget: BudgetStatus): void {
+  const fields = {
+    spent: budget.spent,
+    ceiling: budget.ceiling,
+    percent: Number((budget.fraction * 100).toFixed(1)),
+    burnPerDay: Number(budget.burnPerDay.toFixed(1)),
+    projectedMonthEnd: Math.round(budget.projectedMonthEnd),
+    /** Day of this month the ceiling lands on at this rate; null if never. */
+    exhaustedOnDay: budget.exhaustedOnDay,
+    daysInMonth: budget.daysInMonth,
+    ruling: '\u00a712.59, \u00a712.60',
+  };
+
+  if (budget.band === 'exhausted') {
+    /**
+     * Every cycle, not edge-triggered: this one is a live degradation, and a
+     * board running on lane estimates should keep saying so until it is not.
+     * It recovers by itself at the month boundary.
+     */
+    logger.error(
+      'routing budget exhausted \u2014 every lane now falls back to its lane ratio, ' +
+        'then to the straight line. Raise ROUTING_MONTHLY_CEILING or wait for ' +
+        'the month to roll over.',
+      fields,
+    );
+    lastBudgetBand = 'exhausted';
+    return;
+  }
+
+  if (budget.band === lastBudgetBand) return;
+  const first = lastBudgetBand === null;
+  lastBudgetBand = budget.band;
+
+  if (budget.band === 'critical') {
+    logger.error(
+      'routing budget past 90% \u2014 the board is days from falling back to lane estimates.',
+      fields,
+    );
+  } else if (budget.band === 'watch') {
+    logger.warn(
+      'routing budget past 70%. If this is the \u00a712.59 scenario \u2014 utilisation ' +
+        'rising to what \u00a712.31 simulated \u2014 the ceiling arrives around day six ' +
+        'and the board degrades quietly.',
+      fields,
+    );
+  } else if (first) {
+    /**
+     * A worker's opening statement about the month, not a recovery.
+     *
+     * "back within normal range" was the first wording, and a freshly started
+     * worker at 12% announced it — which reads as though something had gone
+     * wrong and been fixed. The distinction is worth a branch: a restart
+     * SHOULD say where the month stands, and it should not claim a recovery
+     * that never happened.
+     */
+    logger.info('routing budget at startup', fields);
+  } else {
+    // A genuine drop: a new month, or a raised ceiling. Worth one line, so
+    // the recovery is as findable as the warning was.
+    logger.info('routing budget back within normal range', fields);
+  }
+}
+
 async function pollOnce(
   db: ReturnType<typeof createDirectDb>['db'],
   samsara: SamsaraClient,
@@ -283,6 +377,7 @@ async function pollOnce(
     skipped: 0,
     failed: 0,
     budgetExhausted: false,
+    budget: budgetStatus(0, env.ROUTING_MONTHLY_CEILING, new Date()),
     outcomes: {} as Record<RouteOutcome, number>,
     routedBecause: {},
     failures: {},
@@ -292,11 +387,7 @@ async function pollOnce(
     routing = await sweepRouting(db, router, logger, {
       ceiling: env.ROUTING_MONTHLY_CEILING,
     });
-    if (routing.budgetExhausted) {
-      logger.error('routing budget exhausted for the month — degrading to lane estimates', {
-        ceiling: env.ROUTING_MONTHLY_CEILING,
-      });
-    }
+    reportBudget(routing.budget);
   } catch (error: unknown) {
     logger.error('routing sweep failed', {
       error: error instanceof Error ? error.message : String(error),
@@ -305,6 +396,13 @@ async function pollOnce(
 
   logger.info('poll: ingested', {
     vehicles: page.rows.length,
+    /**
+     * §12.60. On EVERY cycle, not only in trouble: a number that appears
+     * once the wall is hit is a number nobody has a baseline for, and the
+     * question ops actually asks is "was it climbing before this?".
+     */
+    routeCallsThisMonth: routing.budget.spent,
+    routeCallCeiling: routing.budget.ceiling,
     readings: pending.length,
     inserted: result.inserted,
     duplicates: pending.length - result.inserted - result.skippedUnknownTruck,

@@ -5,7 +5,9 @@ import { haversineMiles } from '@/lib/status';
 import {
   ROUTING_DEFAULTS,
   budgetMonth,
+  budgetStatus,
   needsRecompute,
+  type BudgetStatus,
   type CachedRoute,
   type RoutingConfig,
 } from '@/lib/routing';
@@ -83,6 +85,12 @@ export interface RoutingSweep {
   failed: number;
   /** True when the monthly ceiling stopped us. The board degrades, quietly. */
   budgetExhausted: boolean;
+  /**
+   * §12.60. Where the month stands AFTER this sweep's spending, so the caller
+   * can warn on the way up instead of only at the wall. Always present: a
+   * field that appears only in trouble is a field nobody has a baseline for.
+   */
+  budget: BudgetStatus;
   /** Every candidate, by outcome. These sum to `considered`. */
   outcomes: Record<RouteOutcome, number>;
   /** Why the routed ones were routed — the money, by cause. */
@@ -142,6 +150,9 @@ export async function sweepRouting(
     skipped: 0,
     failed: 0,
     budgetExhausted: false,
+    // Replaced once the counter has been read; a zero ceiling would band as
+    // `exhausted`, which is the right way round for a field not yet known.
+    budget: budgetStatus(0, options.ceiling, now),
     outcomes: {} as Record<RouteOutcome, number>,
     routedBecause: {},
     failures: {},
@@ -177,6 +188,7 @@ export async function sweepRouting(
     .where(eq(routingBudget.month, month))
     .limit(1);
   let spent = budget?.calls ?? 0;
+  sweep.budget = budgetStatus(spent, options.ceiling, now);
   if (spent >= options.ceiling) {
     sweep.budgetExhausted = true;
     return sweep;
@@ -381,6 +393,9 @@ export async function sweepRouting(
     });
   }
 
+  // §12.60. After the spending, not before: the caller warns on what the
+  // month now stands at, including what this sweep just added.
+  sweep.budget = budgetStatus(spent, options.ceiling, now);
   return sweep;
 }
 
