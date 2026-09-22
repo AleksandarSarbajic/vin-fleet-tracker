@@ -1452,6 +1452,43 @@ there is no map to sit beneath.
 A truck holding two loads takes the **earliest deadline across both**, and the
 row shows the load number so it is clear which one is driving the status.
 
+### The two halves are not one rule (2026-09-22)
+
+For six months the query was `order by appointment_start_utc asc nulls last,
+sequence asc` — one flat sort over every open stop the truck holds. That
+implements the second sentence and quietly breaks the first, because a sort by
+appointment can reorder a single load's own legs.
+
+Truck 124 is the case. One load, `12120569`:
+
+| seq | stop | appointment |
+|---|---|---|
+| 1 | Joliet, IL | 2026-09-22 05:01 |
+| 2 | Fargo, ND | 2026-09-20 23:30 |
+
+The delivery is dated two days before the pickup, so Fargo won. The board
+named Fargo as the next stop, the ETA was computed to Fargo, the map line drew
+to Fargo, and the arrival sweep — which takes **one** candidate per truck —
+watched Fargo while the truck sat undelivered at Joliet. That last part is why
+124's Joliet arrival took 25.9 minutes to register when every other sequence-1
+arrival that day took 3.3–3.7.
+
+The dates are bad data; a delivery appointment before its pickup is a typo.
+But nothing prevents the typo, and the right answer under it is unchanged:
+**stop 1 first.** An ordering that only works when the appointments are right
+is not an ordering.
+
+`NEXT_STOP_ORDER` in `src/server/next-stop.ts` is now the single definition,
+used by all four queries that ask the question — the console row, the reassign
+preview, the routing sweep and the arrival sweep. It ranks each **load** by
+the earliest deadline it still has (a window `min` over the rows surviving the
+`WHERE`, so a departed leg stops speaking for its load), then keeps that
+load's legs in `sequence`. A tie is broken on `l.created_at, l.id`: without a
+total order two loads' stops can interleave, which is the same failure again.
+
+On the live fleet the change moves exactly one truck of nineteen — 124, from
+Fargo back to Joliet.
+
 ## 12.14 Built in v1
 
 Three things the design never drew that ship anyway.

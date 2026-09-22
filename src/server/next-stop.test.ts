@@ -120,6 +120,46 @@ withDb('the next stop (§12.13)', () => {
     expect(row?.nextStop?.loadNumber).toBe('TEST-TIMED');
   });
 
+  /**
+   * Truck 124, live on 2026-09-22: ONE load, seq 1 Joliet appointment
+   * 2026-09-22 05:01, seq 2 Fargo appointment 2026-09-20 23:30 — two days
+   * EARLIER. Ordering the whole fleet's stops by appointment made Fargo the
+   * next stop while Joliet was undelivered, so the board, the ETA and the
+   * arrival sweep's one candidate all pointed at the second stop of a load
+   * whose first stop had not happened.
+   */
+  it('keeps a load in sequence even when a later leg has an earlier time', async () => {
+    const row = await rolledBack(async (tx) => {
+      const truckId = await emptyTruck(tx);
+      await addLoad(tx, truckId, 'TEST-BACKWARDS', 'DISPATCHED', [
+        { seq: 1, appt: at(30) },
+        { seq: 2, appt: at(-18) },
+      ]);
+      return rowFor(tx, truckId);
+    });
+    // Sequence 1 is the PU, sequence 2 the DEL: you cannot deliver before
+    // you load, whatever the two appointment times say.
+    expect(row?.nextStop?.type).toBe('PU');
+  });
+
+  /**
+   * The across-loads half of §12.13 is ranked on the earliest deadline a load
+   * still HAS, not the one it started with — otherwise a load whose first leg
+   * is done keeps winning on a deadline nobody is driving to any more.
+   */
+  it('ranks a part-finished load by the leg it has left', async () => {
+    const row = await rolledBack(async (tx) => {
+      const truckId = await emptyTruck(tx);
+      await addLoad(tx, truckId, 'TEST-STARTED', 'DISPATCHED', [
+        { seq: 1, appt: at(-6), departed: true },
+        { seq: 2, appt: at(20) },
+      ]);
+      await addLoad(tx, truckId, 'TEST-URGENT', 'DISPATCHED', [{ seq: 1, appt: at(8) }]);
+      return rowFor(tx, truckId);
+    });
+    expect(row?.nextStop?.loadNumber).toBe('TEST-URGENT');
+  });
+
   it('returns the appointment as an ISO string, never a Date', async () => {
     const value = await rolledBack(async (tx) => {
       const truckId = await emptyTruck(tx);

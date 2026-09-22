@@ -20,6 +20,7 @@ import {
   type StatusConfig,
 } from '@/lib/status';
 import { LOAD_STATUSES, type LoadStatus } from '@/lib/loads';
+import { NEXT_STOP_ORDER } from './next-stop';
 
 /**
  * The console's fleet query, its row schema, and the mapping between them.
@@ -218,9 +219,10 @@ export const LATEST_POSITION_SQL = sql`
     limit 1
   ) p on true
   /**
-   * The next stop (§12.13): lowest undeparted sequence, and for a truck
-   * holding two loads, the EARLIEST DEADLINE across both — which is why the
-   * appointment leads the ordering and the sequence only breaks ties.
+   * The next stop (§12.13): lowest undeparted sequence WITHIN a load, and
+   * for a truck holding two loads, the earliest deadline ACROSS them. Both
+   * halves live in NEXT_STOP_ORDER, which explains why an appointment can
+   * never reorder a load's own legs.
    *
    * The terminal statuses are the three in lib/loads.ts. A delivered load's
    * stops are history, not work.
@@ -271,7 +273,7 @@ export const LATEST_POSITION_SQL = sql`
     where l.truck_id = t.id
       and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
       and s.departed_at is null
-    order by s.appointment_start_utc asc nulls last, s.sequence asc
+    ${NEXT_STOP_ORDER}
     limit 1
   ) ns on true
   -- The live override on that stop, if any (§9.5).

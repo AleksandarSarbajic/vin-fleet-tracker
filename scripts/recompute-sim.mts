@@ -14,6 +14,7 @@ import { sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 import { needsRecompute, ROUTE_PROVIDER, ROUTING_DEFAULTS, type CachedRoute } from '../src/lib/routing.ts';
 import { haversineMiles } from '../src/lib/status.ts';
+import { NEXT_STOP_ORDER } from '../src/server/next-stop.ts';
 
 loadEnv({ path: '.env.local' });
 const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
@@ -40,7 +41,7 @@ const rows = (await db.execute(sql`
     from loads l join stops s on s.load_id = l.id
     where l.truck_id = t.id and l.status not in ('DELIVERED','TONU','CANCELLED')
       and s.departed_at is null and s.lat is not null
-    order by s.appointment_start_utc asc nulls last, s.sequence asc limit 1
+    ${NEXT_STOP_ORDER} limit 1
   ) ns on true
   join positions p on p.truck_id = t.id
   where t.active and p.recorded_at > now() - make_interval(hours => ${HOURS})

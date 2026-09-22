@@ -13,6 +13,7 @@ import {
 } from '@/lib/routing';
 import type { Db } from '@/server/audit';
 import type { EtaProvider } from '@/server/routing/provider';
+import { NEXT_STOP_ORDER } from '@/server/next-stop';
 
 /**
  * The routing sweep, run once per poll beside the arrival sweep (§12.31).
@@ -217,7 +218,7 @@ export async function sweepRouting(
         and s.departed_at is null
         and s.arrived_at is null
         and s.lat is not null and s.lng is not null
-      order by s.appointment_start_utc asc nulls last, s.sequence asc
+      ${NEXT_STOP_ORDER}
       limit 1
     ) ns on true
     where t.active`);

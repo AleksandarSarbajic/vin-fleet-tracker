@@ -11,6 +11,7 @@ import {
   type NearestCandidate,
 } from '@/lib/arrival';
 import { writeAudit, type Db } from '@/server/audit';
+import { NEXT_STOP_ORDER } from '@/server/next-stop';
 
 /**
  * Arrival and departure detection, run once per poll (§12.27).
@@ -127,7 +128,7 @@ export async function sweepArrivals(
          * refusal was always supposed to live — and it gets counted and named
          * on the way past.
          */
-      order by s.appointment_start_utc asc nulls last, s.sequence asc
+      ${NEXT_STOP_ORDER}
       limit 1
     ) ns on true
     where t.active`);

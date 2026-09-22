@@ -5,6 +5,7 @@ import type { DriverSource } from '@/lib/driver';
 import { assignments, drivers } from '@/db/schema';
 import { truckLabel } from './assignments';
 import type { Db, Tx } from './audit';
+import { NEXT_STOP_ORDER } from './next-stop';
 
 /**
  * Reassignment: two trucks, one transaction (§9.10).
@@ -80,7 +81,7 @@ async function sideOf(executor: Db | Tx, truckId: string): Promise<PreviewSide |
         where l.truck_id = t.id
           and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
           and s.departed_at is null
-        order by s.appointment_start_utc asc nulls last, s.sequence asc
+        ${NEXT_STOP_ORDER}
         limit 1
       ) ns on true
       where t.id = ${truckId}::uuid
