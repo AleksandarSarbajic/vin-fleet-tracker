@@ -27,7 +27,7 @@ import { ROW_HEIGHT, type Density } from '@/lib/density';
  *                                   total =  693
  */
 export const GRID_8 =
-  'grid-cols-[3px_72px_148px_minmax(0,1fr)_minmax(0,1.25fr)_128px_100px_128px]';
+  'grid-cols-[28px_3px_72px_148px_minmax(0,1fr)_minmax(0,1.25fr)_128px_100px_128px]';
 
 /**
  * §12.17. Below 900px of LIST width — not viewport width — Position and ETA
@@ -37,7 +37,7 @@ export const GRID_8 =
  *
  *   fixed  3 + 72 + 148 + 128 + 128 = 479   gaps 5 x 14 = 70   pad-r 16 = 565
  */
-export const GRID_6 = 'grid-cols-[3px_72px_148px_minmax(0,1fr)_128px_128px]';
+export const GRID_6 = 'grid-cols-[28px_3px_72px_148px_minmax(0,1fr)_128px_128px]';
 
 /**
  * Status ink for the ETA cell (§12.49).
@@ -359,6 +359,9 @@ interface Props {
   /** §14 feature 5. Drives the row height and the chip size. */
   density: Density;
   selected: boolean;
+  /** §14 feature 2. Independent of `selected` — see useBulkSelection. */
+  checked: boolean;
+  onCheck: (id: string, extend: boolean) => void;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -375,6 +378,8 @@ function TruckRowImpl({
   columns,
   density,
   selected,
+  checked,
+  onCheck,
   query,
   onSelect,
   onEdit,
@@ -392,7 +397,13 @@ function TruckRowImpl({
     ? `Last seen ${row.cityState ?? '—'}`
     : (row.cityState ?? '—');
 
-  const ground = selected
+  /*
+   * §14.5. Checked and selected are the same ground by design ("= selected"
+   * in §14.4's table), so a row that is both is not a third colour. The tick
+   * is what tells them apart, which is also what lets the flash borrow this
+   * ground for 1.6s without the checked state being lost.
+   */
+  const ground = selected || checked
     ? 'bg-row-selected'
     : unassigned
       ? // Marginally sunken, so it reads as inert rather than urgent — it is a
@@ -459,6 +470,25 @@ function TruckRowImpl({
         selected ? 'border-l-[3px] border-l-accent' : 'border-l-[3px] border-l-transparent',
       ].join(' ')}
     >
+      {/*
+        §14.5. Its own column, sharing no hit area with the row: a click here
+        must check without selecting, because selecting also moves the map.
+      */}
+      <div className="flex h-full items-center justify-center">
+        <input
+          type="checkbox"
+          checked={checked}
+          aria-label={`Select truck ${row.truckNumber ?? row.samsaraName}`}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            const native = e.nativeEvent as MouseEvent;
+            onCheck(row.id, native.shiftKey === true);
+          }}
+          className="h-[13px] w-[13px] cursor-pointer accent-accent"
+        />
+      </div>
+
       {/* Every stripe switches to the dotted stale gradient (§5.9). */}
       <div
         className={`h-full ${feedStale ? RAIL.STALE_GPS : RAIL[row.status]}`}
@@ -606,6 +636,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.columns === b.columns &&
     a.density === b.density &&
     a.selected === b.selected &&
+    a.checked === b.checked &&
     a.query === b.query
   );
 });

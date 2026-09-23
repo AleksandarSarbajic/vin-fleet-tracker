@@ -92,11 +92,11 @@ describe('the cheat sheet (§14 feature 1)', () => {
     }
   });
 
-  it('marks the keys that do not work yet rather than listing them plainly', () => {
+  it('marks the keys that do not work yet, without promising when they will', () => {
     mount(<ShortcutSheet />);
     press('?');
     const planned = KEYMAP.filter((b) => b.planned).length;
-    expect(text().match(/soon/g) ?? []).toHaveLength(planned);
+    expect(text().match(/not yet/g) ?? []).toHaveLength(planned);
   });
 });
 

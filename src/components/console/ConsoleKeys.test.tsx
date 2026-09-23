@@ -195,10 +195,31 @@ describe('Enter has one owner (§12.46)', () => {
  * §12.47 — the miles line, and §12.48 — double-click to edit
  * ---------------------------------------------------------------------- */
 
+/**
+ * Grid children, in order: checkbox, rail, truck, driver, position, next
+ * stop, appt, ETA, status.
+ *
+ * §14 feature 2 added the checkbox as a leading column, which moved every
+ * index here by one. Named rather than counted from now on — a positional
+ * index into a grid is a comment that cannot be checked, and the next column
+ * to be added should break something louder than an off-by-one assertion
+ * about miles.
+ */
+const CELL = {
+  checkbox: 0,
+  rail: 1,
+  truck: 2,
+  driver: 3,
+  position: 4,
+  nextStop: 5,
+  appt: 6,
+  eta: 7,
+  status: 8,
+} as const;
+
 const etaCell = (truck: string) => {
   const row = rowFor(truck)!;
-  // Seventh grid child: rail, truck, driver, position, next stop, appt, ETA.
-  return row.children[6] as HTMLElement;
+  return row.children[CELL.eta] as HTMLElement;
 };
 
 describe('miles hang under the ETA (§12.47)', () => {
@@ -304,10 +325,10 @@ describe('double-click opens the edit modal (§12.48)', () => {
     await render();
     const row = rowFor('202')!;
 
-    await dblclick(row.children[7] as HTMLElement);
+    await dblclick(row.children[CELL.status] as HTMLElement);
     expect(container!.querySelector('[role="dialog"]')).toBeNull();
 
-    await dblclick(row.children[6] as HTMLElement);
+    await dblclick(row.children[CELL.eta] as HTMLElement);
     expect(openModalTruck()).toBe('202');
   });
 

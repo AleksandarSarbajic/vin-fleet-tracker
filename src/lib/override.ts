@@ -128,6 +128,44 @@ export const StopOverrideEdit = z.union([
 
 export type StopOverrideEdit = z.infer<typeof StopOverrideEdit>;
 
+/**
+ * §14 feature 2. The same override, applied to several stops at once.
+ *
+ * Reuses `overrideFields` and `withOverrideRules` rather than restating them:
+ * a bulk override that could carry an "Other" with no note, or a CUSTOM
+ * expiry with no time, would be a second set of rules for the same act, and
+ * §9.5's review is counting them together.
+ *
+ * `stopIds` is bounded. Not because the transaction could not take more, but
+ * because a bulk status write is a claim a person is making about every truck
+ * in it, and past a couple of dozen nobody is making that claim — they are
+ * clicking. The bar's own selection is capped by what fits on screen.
+ */
+export const BulkOverrideInput = withOverrideRules(
+  z
+    .object({
+      stopIds: z.array(z.string().uuid()).min(1).max(40),
+      ...overrideFields,
+    })
+    .strict(),
+);
+export type BulkOverrideInput = z.infer<typeof BulkOverrideInput>;
+
+/**
+ * §14 feature 2. A dispatcher note on several stops.
+ *
+ * Trimmed, and a blank one is a refusal rather than a clear: bulk-clearing
+ * notes across trucks would destroy text nobody can recover, and §12.23's
+ * "omitted means leave alone" has no gesture here to express it.
+ */
+export const BulkNoteInput = z
+  .object({
+    stopIds: z.array(z.string().uuid()).min(1).max(40),
+    note: z.string().trim().min(1).max(500),
+  })
+  .strict();
+export type BulkNoteInput = z.infer<typeof BulkNoteInput>;
+
 /** Clearing is its own action — `Clear now` in the detail block (§9.5). */
 export const ClearOverrideInput = z.object({ stopId: z.string().uuid() }).strict();
 export type ClearOverrideInput = z.infer<typeof ClearOverrideInput>;

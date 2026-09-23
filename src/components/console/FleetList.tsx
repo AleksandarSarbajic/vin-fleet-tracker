@@ -6,6 +6,7 @@ import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
+import { BulkBar } from './BulkBar';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -39,6 +40,15 @@ interface Props {
   selectedId: string | null;
   /** §14 feature 5. */
   density: Density;
+  /** §14 feature 2. Checked rows — not the same cursor as selectedId. */
+  checked: ReadonlySet<string>;
+  onCheck: (id: string, extend: boolean) => void;
+  bulk: {
+    barOpen: boolean;
+    onForceStatus: () => void;
+    onAddNote: () => void;
+    onClear: () => void;
+  };
   query: string;
   drift: number;
   onResort: () => void;
@@ -53,6 +63,9 @@ export function FleetList({
   feedStale,
   selectedId,
   density,
+  checked,
+  onCheck,
+  bulk,
   query,
   drift,
   onResort,
@@ -114,6 +127,12 @@ export function FleetList({
           role="row"
           className={`sticky top-0 z-[2] grid h-7 items-center gap-x-[14px] border-b border-line-hair bg-surface-raised pl-[3px] pr-4 ${columns === 8 ? GRID_8 : GRID_6}`}
         >
+          {/*
+            Two spacers: the checkbox column and the 3px rail. No select-all
+            here -- §14 did not specify one, and a control that checks thirty
+            trucks in one click wants a design rather than an assumption.
+          */}
+          <div />
           <div />
           {headers.map((h) => (
             <div
@@ -164,6 +183,8 @@ export function FleetList({
                   columns={columns}
                   density={density}
                   selected={row.id === selectedId}
+                  checked={checked.has(row.id)}
+                  onCheck={onCheck}
                   query={query}
                   onSelect={onSelect}
                   onEdit={onEdit}
@@ -174,7 +195,23 @@ export function FleetList({
         </div>
       </div>
 
-      <ListFooter rows={rows} firstVisible={firstVisible} lastVisible={lastVisible} />
+      {/*
+        §14.5. One slot, one occupant. The bar REPLACES the footer at two
+        checked rows rather than stacking above it, so the list never shifts
+        under a cursor that is mid-click.
+      */}
+      {bulk.barOpen ? (
+        <BulkBar
+          rows={rows}
+          checked={checked}
+          lastVisible={lastVisible}
+          onForceStatus={bulk.onForceStatus}
+          onAddNote={bulk.onAddNote}
+          onClear={bulk.onClear}
+        />
+      ) : (
+        <ListFooter rows={rows} firstVisible={firstVisible} lastVisible={lastVisible} />
+      )}
     </div>
   );
 }

@@ -30,6 +30,8 @@ import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
 import { useDensity } from '@/hooks/useDensity';
 import { ListToolbar } from './ListToolbar';
+import { useBulkSelection } from '@/hooks/useBulkSelection';
+import { BulkActionModal } from './BulkActionModal';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -307,6 +309,47 @@ export function Console({
   /** §14 feature 5. Persisted, and bound to D. */
   const { density, setDensity } = useDensity();
 
+  /**
+   * §14 feature 2. A second cursor over the same list: `selectedId` drives
+   * the map, this drives the bulk bar, and a row can be in either without the
+   * other (§14.3).
+   */
+  const orderedIds = useMemo(() => ordered.map((r) => r.id), [ordered]);
+  const bulk = useBulkSelection(orderedIds);
+  const [bulkAction, setBulkAction] = useState<'status' | 'note' | null>(null);
+
+  /**
+   * §14's `X` binding, and Esc's new first job.
+   *
+   * `X` checks the SELECTED row — the keyboard's way into a gesture the
+   * design gave only to the mouse. Without it every binding that moves the
+   * selection dead-ends at a checkbox needing a click.
+   *
+   * Esc clears the checks BEFORE the search and the selection, because the
+   * checks are the most recently made state and the bar names the key. It
+   * runs in the capture phase and stops there, so Console's own Esc handler
+   * does not also clear the search in the same press.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (editingId) return;
+      if ((event.key === 'x' || event.key === 'X') && selectedId) {
+        event.preventDefault();
+        bulk.toggle(selectedId, event.shiftKey);
+        return;
+      }
+      if (event.key === 'Escape' && bulk.count > 0) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        bulk.clear();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [bulk, selectedId, editingId]);
+
   /** Bumped on split drag-end; the map reflows then and only then. */
   const [resizeSignal, setResizeSignal] = useState(0);
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
@@ -396,6 +439,14 @@ export function Console({
                 <ListToolbar density={density} onDensity={setDensity} />
                 <FleetList
                   density={density}
+                  checked={bulk.checked}
+                  onCheck={bulk.toggle}
+                  bulk={{
+                    barOpen: bulk.barOpen,
+                    onForceStatus: () => setBulkAction('status'),
+                    onAddNote: () => setBulkAction('note'),
+                    onClear: bulk.clear,
+                  }}
                   rows={ordered}
                   fetchedAt={data?.fetchedAt ?? null}
                   feedStale={data?.feedStale ?? false}
@@ -443,7 +494,22 @@ export function Console({
           />
         ) : null}
 
-        <ShortcutSheet />
+        {bulkAction ? (
+        <BulkActionModal
+          action={bulkAction}
+          rows={ordered}
+          checked={bulk.checked}
+          onDone={() => {
+            setBulkAction(null);
+            // The checks go with the act. Leaving them would invite the same
+            // override to be applied twice to the same trucks.
+            bulk.clear();
+          }}
+          onClose={() => setBulkAction(null)}
+        />
+      ) : null}
+
+      <ShortcutSheet />
       </div>
     </OverlayProvider>
   );

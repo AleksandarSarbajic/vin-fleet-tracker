@@ -72,6 +72,6 @@ describe('the registry describes what the console actually binds', () => {
     // with the density toggle; the rest arrive with their features, and
     // until then the sheet says so rather than listing a dead key.
     const planned = KEYMAP.filter((b) => b.planned).map((b) => b.keys.join(''));
-    expect(planned.sort()).toEqual(['P', 'X', '⌘K']);
+    expect(planned.sort()).toEqual(['P', '⌘K']);
   });
 });

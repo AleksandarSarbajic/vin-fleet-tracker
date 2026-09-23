@@ -88,7 +88,7 @@ export const KEYMAP: readonly Binding[] = [
   { keys: ['?'], label: 'Show this sheet', group: 'overlays', owner: 'ShortcutSheet' },
   { keys: ['⌘', 'K'], label: 'Jump to a truck, driver or view', group: 'overlays', owner: 'CommandPalette', planned: true },
   { keys: ['P'], label: 'Pin the selected truck', group: 'list', owner: 'FleetList', planned: true },
-  { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'FleetList', planned: true },
+  { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'Console' },
   { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },
 ];
 

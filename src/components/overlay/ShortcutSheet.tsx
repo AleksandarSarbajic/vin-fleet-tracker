@@ -55,12 +55,16 @@ function Row({ binding }: { binding: Binding }) {
         {binding.label}
         {/*
           A sheet that lists a key which does nothing is worse than one that
-          admits the key is coming — the reader tries it, nothing happens, and
+          admits the key is absent — the reader tries it, nothing happens, and
           now the whole sheet is suspect.
+
+          "not yet" rather than "soon": the sheet knows the key does nothing
+          today and knows nothing at all about when it will, and a schedule
+          nobody promised is the kind of thing a reader remembers.
         */}
         {binding.planned ? (
           <span className="ml-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
-            soon
+            not yet
           </span>
         ) : null}
       </span>
