@@ -28,6 +28,8 @@ import { useChipFilters } from './useChipFilters';
 import { isTypingTarget } from '@/lib/keymap';
 import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
+import { useDensity } from '@/hooks/useDensity';
+import { ListToolbar } from './ListToolbar';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -302,6 +304,9 @@ export function Console({
     return () => window.removeEventListener('keydown', onKey);
   }, [ordered, selectedId, select, query, editingId]);
 
+  /** §14 feature 5. Persisted, and bound to D. */
+  const { density, setDensity } = useDensity();
+
   /** Bumped on split drag-end; the map reflows then and only then. */
   const [resizeSignal, setResizeSignal] = useState(0);
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
@@ -386,17 +391,22 @@ export function Console({
           <Split
             onResizeEnd={onResizeEnd}
             list={
-              <FleetList
-                rows={ordered}
-                fetchedAt={data?.fetchedAt ?? null}
-                feedStale={data?.feedStale ?? false}
-                selectedId={selectedId}
-                query={query}
-                drift={drift}
-                onResort={resort}
-                onSelect={select}
-                onEdit={setEditingId}
-              />
+              <div className="flex h-full flex-col">
+                {/* §14.5: the strip is read with the list, not the header. */}
+                <ListToolbar density={density} onDensity={setDensity} />
+                <FleetList
+                  density={density}
+                  rows={ordered}
+                  fetchedAt={data?.fetchedAt ?? null}
+                  feedStale={data?.feedStale ?? false}
+                  selectedId={selectedId}
+                  query={query}
+                  drift={drift}
+                  onResort={resort}
+                  onSelect={select}
+                  onEdit={setEditingId}
+                />
+              </div>
             }
             map={
               <FleetMap

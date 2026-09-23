@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
+import type { Density } from '@/lib/density';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -36,6 +37,8 @@ interface Props {
   /** §5.9: withdraws schedule colour from every row at once. */
   feedStale: boolean;
   selectedId: string | null;
+  /** §14 feature 5. */
+  density: Density;
   query: string;
   drift: number;
   onResort: () => void;
@@ -49,6 +52,7 @@ export function FleetList({
   fetchedAt,
   feedStale,
   selectedId,
+  density,
   query,
   drift,
   onResort,
@@ -74,7 +78,9 @@ export function FleetList({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    // §14 feature 5. The estimate has to track the rendered height or
+    // scrollToIndex lands on the wrong row.
+    estimateSize: () => ROW_HEIGHT[density],
     overscan: 8,
     getItemKey: (index) => rows[index]?.id ?? index,
   });
@@ -156,6 +162,7 @@ export function FleetList({
                   fetchedAt={fetchedAt}
                   feedStale={feedStale}
                   columns={columns}
+                  density={density}
                   selected={row.id === selectedId}
                   query={query}
                   onSelect={onSelect}

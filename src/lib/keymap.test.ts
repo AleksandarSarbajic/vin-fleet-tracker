@@ -68,10 +68,10 @@ describe('the registry describes what the console actually binds', () => {
   });
 
   it('marks as planned exactly the keys §14 proposes but has not built', () => {
-    // The brief proposes ? ⌘K P X D. `?` ships with the sheet itself; the
-    // other four arrive with their features, and until then the sheet says
-    // so rather than listing a key that does nothing.
+    // The brief proposes ? ⌘K P X D. `?` shipped with the sheet and `D`
+    // with the density toggle; the rest arrive with their features, and
+    // until then the sheet says so rather than listing a dead key.
     const planned = KEYMAP.filter((b) => b.planned).map((b) => b.keys.join(''));
-    expect(planned.sort()).toEqual(['D', 'P', 'X', '⌘K']);
+    expect(planned.sort()).toEqual(['P', 'X', '⌘K']);
   });
 });

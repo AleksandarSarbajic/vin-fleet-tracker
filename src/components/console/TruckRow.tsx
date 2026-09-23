@@ -15,6 +15,7 @@ import type { Status } from '@/lib/status';
 import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';
+import { ROW_HEIGHT, type Density } from '@/lib/density';
 
 /**
  * design-spec §4.1, with correction 2 applied: Appt 128 AND Status 128, the
@@ -67,7 +68,12 @@ const ETA_INK: Record<Status, string> = {
   UNASSIGNED: 'text-status-neutral-fg',
 };
 
-export const ROW_HEIGHT = 44;
+/**
+ * §14 feature 5. The height is a density token now, not a constant. Re-exported
+ * from lib/density so a component and the virtualiser cannot end up reading
+ * two different numbers.
+ */
+export { ROW_HEIGHT };
 
 /**
  * The 3px status rail (spec §5.5). A class per state, never a hex: the flat
@@ -350,6 +356,8 @@ interface Props {
    */
   fetchedAt: string | null;
   columns: 6 | 8;
+  /** §14 feature 5. Drives the row height and the chip size. */
+  density: Density;
   selected: boolean;
   query: string;
   onSelect: (id: string) => void;
@@ -365,6 +373,7 @@ function TruckRowImpl({
   fetchedAt,
   feedStale,
   columns,
+  density,
   selected,
   query,
   onSelect,
@@ -439,7 +448,7 @@ function TruckRowImpl({
           onSelect(row.id);
         }
       }}
-      style={{ height: ROW_HEIGHT }}
+      style={{ height: ROW_HEIGHT[density] }}
       className={[
         'grid items-center gap-x-[14px] border-b border-line-soft pr-4',
         'cursor-default transition-colors duration-ground outline-offset-[-2px]',
@@ -595,6 +604,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.fetchedAt === b.fetchedAt &&
     a.feedStale === b.feedStale &&
     a.columns === b.columns &&
+    a.density === b.density &&
     a.selected === b.selected &&
     a.query === b.query
   );

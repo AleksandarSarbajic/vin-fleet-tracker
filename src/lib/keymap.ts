@@ -89,7 +89,7 @@ export const KEYMAP: readonly Binding[] = [
   { keys: ['⌘', 'K'], label: 'Jump to a truck, driver or view', group: 'overlays', owner: 'CommandPalette', planned: true },
   { keys: ['P'], label: 'Pin the selected truck', group: 'list', owner: 'FleetList', planned: true },
   { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'FleetList', planned: true },
-  { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'FleetList', planned: true },
+  { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },
 ];
 
 /** Group label as the sheet prints it. */
