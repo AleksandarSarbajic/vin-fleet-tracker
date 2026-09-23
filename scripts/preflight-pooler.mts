@@ -2,6 +2,7 @@ import { config as loadEnv } from 'dotenv';
 import postgres from 'postgres';
 import { z } from 'zod';
 import { createPooledDb, createDirectDb } from '@/db/connection';
+import { LOCK_CLASS, LOCK_OBJECT, createLockClient, holdsLock } from '@/worker/singleton';
 import { FleetQueryRows, LATEST_POSITION_SQL } from '@/server/fleet-query';
 
 /**
@@ -17,12 +18,18 @@ import { FleetQueryRows, LATEST_POSITION_SQL } from '@/server/fleet-query';
  * So it is checked here instead, against the real thing, as a required step
  * before deploy. `npm run preflight`.
  *
- * Three questions, in order of how badly a wrong answer hurts:
+ * Four questions, in order of how badly a wrong answer hurts:
  *   1. Is `prepare: false` set on the connection route handlers use? This is
  *      about OUR config, and it is the only prepared-statement check that is
  *      a pass condition — see the note on burstSurvives.
  *   2. Does the real fleet query still return the shape the row type claims?
- *   3. Is the migration history on the deployed database current?
+ *   3. Does the SESSION pooler pass advisory locks through? The worker's
+ *      single-instance guard is a session-scoped advisory lock, and "session
+ *      mode" is a vendor promise, not a law. If Supavisor ever multiplexes
+ *      session-mode connections the way it does transaction mode, the guard
+ *      goes quiet rather than loud — the same failure shape as `prepare: false`
+ *      and the reason that one is checked here too.
+ *   4. Is the migration history on the deployed database current?
  */
 loadEnv({ path: '.env.local' });
 
@@ -171,7 +178,68 @@ async function main() {
     await pooled.client.end({ timeout: 5 });
   }
 
-  // 3. The session pooler, which migrations and the worker use.
+  /*
+   * 3. Advisory locks survive the session pooler — the worker's whole guard.
+   *
+   * This runs against a LIVE deployment, where a worker is normally already
+   * holding the lock, so "the lock is free" cannot be the pass condition — it
+   * would go red on every deploy after the first, which is a gate that teaches
+   * people to ignore it.
+   *
+   * The property under test is mutual exclusion, and both outcomes demonstrate
+   * it. Either this process takes the lock and a second session is refused, or
+   * this process is itself refused by the running worker. The only failure is
+   * two sessions holding the same lock at once.
+   */
+  const lockA = createLockClient(DIRECT_URL);
+  const lockB = createLockClient(DIRECT_URL);
+  try {
+    const [a] = await lockA<{ locked: boolean }[]>`
+      select pg_try_advisory_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) as locked`;
+
+    if (a?.locked !== true) {
+      // Refused by whatever already holds it — a running worker, which is the
+      // healthy state on a live system and is itself the proof.
+      const [who] = await lockA<{ pid: number }[]>`
+        select pid from pg_locks
+         where locktype = 'advisory' and classid = ${LOCK_CLASS}
+           and objid = ${LOCK_OBJECT} and objsubid = 2 and granted limit 1`;
+      pass(
+        'the worker singleton lock is exclusive',
+        `already held${who ? ` by backend pid ${who.pid}` : ''} — a worker is ` +
+          'running and this session was correctly refused',
+      );
+    } else if (!(await holdsLock(lockA))) {
+      // Took it, cannot see it: the lock landed on a different backend than the
+      // one answering our queries, which means session mode is not.
+      fail(
+        'the lock is visible to the backend that took it',
+        'pg_locks does not show it against pg_backend_pid() — the pooler is ' +
+          'not giving us a stable session, and the singleton guard is void',
+      );
+    } else {
+      const [b] = await lockB<{ locked: boolean }[]>`
+        select pg_try_advisory_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) as locked`;
+      if (b?.locked === false) {
+        pass('the worker singleton lock is exclusive', 'a second session was refused');
+      } else {
+        fail(
+          'the worker singleton lock is exclusive',
+          'BOTH sessions took the same advisory lock. Two workers can run at ' +
+            'once: they will share the ingest cursor and the routing budget',
+        );
+        await lockB`select pg_advisory_unlock(${LOCK_CLASS}, ${LOCK_OBJECT})`.catch(() => {});
+      }
+      await lockA`select pg_advisory_unlock(${LOCK_CLASS}, ${LOCK_OBJECT})`.catch(() => {});
+    }
+  } catch (error) {
+    fail('the worker singleton lock is exclusive', (error as Error).message);
+  } finally {
+    await lockA.end({ timeout: 5 });
+    await lockB.end({ timeout: 5 });
+  }
+
+  // 4. The session pooler, which migrations and the worker use.
   const direct = createDirectDb(DIRECT_URL, 1);
   try {
     const applied = (await direct.db.execute(

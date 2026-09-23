@@ -6,6 +6,7 @@ import { ServerEnv, report } from '@/env/schema';
 import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
+import { SingletonLockError, acquireSingleton } from './singleton';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
@@ -34,8 +35,10 @@ import {
  * one-minute floor and Edge Functions are not built for a persistent poller.
  * Connects over DIRECT_URL — the SESSION pooler — not the transaction pooler.
  *
- * Exactly one of these should run. It is the only thing that talks to
- * Samsara; every client reads our database.
+ * Exactly one of these runs, and that is now ENFORCED rather than intended:
+ * startup takes a Postgres advisory lock and a second instance refuses to
+ * start. See ./singleton.ts for why the promise was not enough. It is the only
+ * thing that talks to Samsara; every client reads our database.
  */
 
 loadEnv({ path: '.env.local' });
@@ -51,6 +54,17 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 let shuttingDown = false;
 
 async function main(): Promise<void> {
+  /**
+   * BEFORE anything else opens a connection or reads a cursor.
+   *
+   * The guard is worth having only at the moment two processes overlap, and
+   * that moment is a deploy: the old worker is still polling while the new one
+   * boots. Acquiring after the first poll would let exactly one cycle of
+   * double-ingestion through, which is enough to advance the cursor past a
+   * page the other instance never read.
+   */
+  const singleton = await acquireSingleton({ url: env.DIRECT_URL, logger });
+
   const { client, db } = createDirectDb(env.DIRECT_URL, 2);
   const samsara = new SamsaraClient({ token: env.SAMSARA_API_TOKEN, logger });
   /**
@@ -176,6 +190,10 @@ async function main(): Promise<void> {
   } finally {
     logger.info('worker stopped');
     await client.end({ timeout: 5 });
+    // Last, so the lock outlives every connection that was doing work under
+    // it. A successor that starts the instant this one exits must not find the
+    // lock free while this process is still finishing a write.
+    await singleton.release();
   }
 }
 
@@ -525,6 +543,20 @@ async function seedIfCold(
 const shortCursor = (c: string): string => (c ? `${c.slice(0, 8)}…` : '(none)');
 
 main().catch((error: unknown) => {
+  /**
+   * A refusal is not a crash, and must not read like one.
+   *
+   * This is the expected outcome of starting a second worker, and the line a
+   * deploy will print when the guard does its job. Logging it as a crash would
+   * send whoever is watching to look for a bug in the thing that worked.
+   */
+  if (error instanceof SingletonLockError) {
+    logger.error('another worker is already running — this one will not start', {
+      reason: error.message,
+    });
+    process.exitCode = 1;
+    return;
+  }
   logger.error('worker crashed', {
     error: error instanceof Error ? error.message : String(error),
   });

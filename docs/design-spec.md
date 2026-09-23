@@ -5155,6 +5155,76 @@ nothing — over several real days before any number is proposed.
 Sample size, stated: 41 consecutive pairs on 30 lanes. Thin.
 
 
+## 12.62 "Exactly one of these should run" was never a mechanism
+
+`worker/index.ts` has carried the sentence *"Exactly one of these should run"*
+since phase 2. It is a true statement of intent and it has never prevented
+anything.
+
+Two instances have existed. Once for real: a worker started before a schema
+swap outlived the migration, and for a while two processes were polling the
+same feed and spending from the same `routing_budget` month row. Once nearly,
+while the §12.61 shadow run was being set up on a second terminal.
+
+### Why a second instance is not merely wasteful
+
+Three pieces of shared state, and none of them survives two writers:
+
+- **The ingest cursor.** Each worker advances it past pages the other has not
+  read, so positions are silently dropped rather than duplicated. This is the
+  expensive one — the data is gone, not doubled.
+- **`routing_budget`.** The ceiling is HERE's free allowance exactly (§12.61),
+  sized against one worker's measured 168 calls a day. Two workers reach it in
+  half a month and the board falls back to lane estimates while every log line
+  reports a rate that looks normal for the process printing it.
+- **`feed_health`.** §12.39 and §12.42 exist to make the stall counters
+  trustworthy. Two processes writing `last_success_at` means neither one's gap
+  measures anything, which quietly undoes the instrumentation that found
+  §12.52.
+
+### The mechanism
+
+A session-scoped Postgres advisory lock, `pg_try_advisory_lock(0x564C, 0x4654)`,
+taken at startup and held for the process lifetime. `try` rather than the
+blocking form: a second instance should fail at the moment somebody is watching
+a deploy, not queue silently and start hours later when nobody is.
+
+**The lock needs its own connection, and this is the part that is easy to get
+wrong.** `createDirectDb` sets `max_lifetime: 60 * 10` and `idle_timeout: 60`
+— correct for the worker's query connection, for §12.39's reasons, and fatal
+for this one. Advisory locks live on a session; postgres.js would recycle the
+connection about ten minutes into a deploy, Postgres would release the lock
+with it, and nothing would say so. That is worse than having no guard, because
+the next person to deploy trusts it. So the lock client is `max: 1`,
+`max_lifetime: 0`, `idle_timeout: 0`, and does nothing else.
+
+**The heartbeat cannot be `select 1`.** postgres.js reconnects transparently,
+so a dropped connection loses the lock and then answers healthily from a new
+backend holding nothing. The check has to ask about the backend —
+`pg_locks … and pid = pg_backend_pid()` — because the connection surviving and
+the lock surviving are different facts and only the second one matters.
+
+**It fails closed.** A worker that has lost the lock cannot know whether
+something else has taken it, and running on is the exact failure being
+prevented. It exits and lets the restart policy try again.
+
+### What is checked where
+
+Mutual exclusion, release, and the never-recycle configuration are unit tests
+against the local cluster. One thing is not testable there: whether Supabase's
+session pooler passes advisory locks through at all. "Session mode" is a vendor
+promise, and if Supavisor ever multiplexed it the way it multiplexes
+transaction mode, the guard would go quiet rather than loud — the same failure
+shape as `prepare: false`, and so checked in the same place, `npm run
+preflight`.
+
+That check asserts exclusivity, never that the lock is free: on a live system a
+worker is normally holding it, and a gate that goes red on every deploy after
+the first is a gate people learn to ignore (§12.32's lesson about the
+`prepare: true` assertion, applied before it could be repeated). Being refused
+by the running worker proves the property just as well as taking it does.
+
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
