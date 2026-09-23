@@ -34,6 +34,8 @@ import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { BulkActionModal } from './BulkActionModal';
 import { usePinned } from '@/hooks/usePinned';
 import { useRowFlash } from '@/hooks/useRowFlash';
+import { FetchErrorBanner } from './FetchErrorBanner';
+import { emptyState, type EmptyAction } from '@/lib/empty-state';
 import { flashView, type RowFlashView } from '@/lib/flash';
 
 /**
@@ -105,7 +107,7 @@ export function Console({
    */
   const { chips, toggleChip, resetChips } = useChipFilters(initialChips, syncUrl);
 
-  const { data, refetch, isFetching } = useFleet(initial);
+  const { data, refetch, isFetching, isError } = useFleet(initial);
   /**
    * Every truck, inactive included, so the Inactive chip (§12.14) has
    * something to filter to. The default view is active only — applied on the
@@ -361,6 +363,36 @@ export function Console({
     [ordered, pins],
   );
 
+  /**
+   * §14 feature 7. Every count the decision needs exists here and nowhere
+   * else: `all` before the chips, `rows` after them, `filtered` after the
+   * search, and `unpinnedRows` after the pinned block took its share.
+   */
+  const empty = useMemo(
+    () =>
+      emptyState({
+        total: all.length,
+        afterChips: rows.length,
+        afterSearch: filtered.length,
+        listed: unpinnedRows.length,
+        query,
+        chipCount: chips.size,
+      }),
+    [all.length, rows.length, filtered.length, unpinnedRows.length, query, chips],
+  );
+
+  const onEmptyAction = useCallback(
+    (action: EmptyAction) => {
+      if (action === 'clear-chips') resetChips();
+      // `setTyped`, not `setQuery`: the field is the source and the debounce
+      // carries it through. Clearing the derived value alone would leave the
+      // box still showing what it no longer filters by.
+      else if (action === 'clear-search') setTyped('');
+      else if (action === 'show-inactive') toggleChip('inactive');
+    },
+    [resetChips, toggleChip],
+  );
+
   const orderedIds = useMemo(() => ordered.map((r) => r.id), [ordered]);
   const bulk = useBulkSelection(orderedIds);
   const [bulkAction, setBulkAction] = useState<'status' | 'note' | null>(null);
@@ -441,6 +473,21 @@ export function Console({
           />
         ) : null}
 
+        {/*
+          §14 feature 7. Distinct from the feed banner above and able to show
+          alongside it: that one says the POSITIONS are old, this says the
+          console stopped being able to ask. Different causes, different fixes.
+        */}
+        {isError ? (
+          <FetchErrorBanner
+            fetchedAt={data?.fetchedAt ?? null}
+            dispatchTz={dispatchTz}
+            pollMs={FLEET_POLL_MS}
+            onRetry={() => void refetch()}
+            retrying={isFetching}
+          />
+        ) : null}
+
         {missingTruck ? (
           <div className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg">
             <span className="flex-1">
@@ -514,6 +561,8 @@ export function Console({
                     feedStale={data?.feedStale ?? false}
                     selectedId={selectedId}
                     query={query}
+                    empty={empty}
+                    onEmptyAction={onEmptyAction}
                     drift={drift}
                     onResort={resort}
                     onSelect={select}

@@ -10,6 +10,8 @@ import { BulkBar } from './BulkBar';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { useResortHold } from '@/hooks/useResortHold';
+import { EmptyList } from './EmptyList';
+import type { EmptyAction, EmptyState } from '@/lib/empty-state';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -71,6 +73,13 @@ interface Props {
     onClear: () => void;
   };
   query: string;
+  /**
+   * §14 feature 7. Non-null when the list has nothing to show, carrying WHICH
+   * of the five reasons it is. Decided in Console, which is the only place
+   * that can see the counts before and after each stage of filtering.
+   */
+  empty: EmptyState | null;
+  onEmptyAction: (action: EmptyAction) => void;
   drift: number;
   onResort: () => void;
   onSelect: (id: string) => void;
@@ -94,6 +103,8 @@ export function FleetList({
   pinRefused,
   bulk,
   query,
+  empty,
+  onEmptyAction,
   drift,
   onResort,
   onSelect,
@@ -245,6 +256,15 @@ export function FleetList({
             {drift} {drift === 1 ? 'row would' : 'rows would'} reorder — click to sort
           </button>
         ) : null}
+
+        {/*
+          §14 feature 7. Where an empty list says why.
+
+          Inside the scroller and below the pinned block on purpose: the
+          "everything here is pinned" case has to appear directly under the
+          block it is talking about, or it reads as a contradiction.
+        */}
+        {empty ? <EmptyList state={empty} onAction={onEmptyAction} /> : null}
 
         {/* The body dims as a whole: the schedule is not to be trusted. */}
         <div

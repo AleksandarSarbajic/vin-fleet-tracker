@@ -5598,6 +5598,28 @@ control rather than beside it: a 340px toast inset far enough to clear a 28px
 control reads as misaligned, and moving existing map chrome to make room is a
 change nobody asked for.
 
+**Feature 7's "loading" half has nothing to attach to, and that is correct.**
+`src/app/page.tsx` renders on the server with the fleet already loaded and
+hands it to `useFleet` as `initialData`; the query then keeps the last good
+fleet through every refetch (`placeholderData`), because a console that blanks
+every 20 seconds is unusable on a night shift. So `data` is never undefined
+and a skeleton would have been dead code from the day it shipped.
+
+The two moments that genuinely are a wait are covered instead: a refetch in
+flight by the header's fetch age, and a refetch that FAILED by a new banner.
+That second one was a real hole — every number on screen simply stopped moving
+and nothing said why. It is amber rather than §9.8's red, and the two can show
+together: §9.8 says the positions are old and an ETA must not be quoted from
+them; this says the console stopped being able to ask. Different causes,
+different fixes.
+
+The empty half is five reasons, not one, decided in `src/lib/empty-state.ts`
+as a pure function of five counts. The ordering is the load-bearing part,
+because the reasons nest — a search matching nothing inside a chip set that
+matched nothing has to report the chips, since clearing the search would not
+help. The fifth reason is the one the console could not have had before this
+phase: everything that matched is in the pinned block a few pixels above.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before
