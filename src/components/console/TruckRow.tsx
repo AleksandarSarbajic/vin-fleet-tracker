@@ -362,6 +362,9 @@ interface Props {
   /** §14 feature 2. Independent of `selected` — see useBulkSelection. */
   checked: boolean;
   onCheck: (id: string, extend: boolean) => void;
+  /** §14 feature 4. */
+  pinned: boolean;
+  onPin: (id: string) => void;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -380,10 +383,13 @@ function TruckRowImpl({
   selected,
   checked,
   onCheck,
+  pinned,
+  onPin,
   query,
   onSelect,
   onEdit,
 }: Props) {
+  const truckLabel = row.truckNumber ?? row.samsaraName;
   const reference = fetchedAt ? new Date(fetchedAt) : undefined;
   const quiet = !feedStale && row.status === 'TOMORROW';
   const stale = feedStale || row.status === 'STALE_GPS';
@@ -461,7 +467,7 @@ function TruckRowImpl({
       }}
       style={{ height: ROW_HEIGHT[density] }}
       className={[
-        'grid items-center gap-x-[14px] border-b border-line-soft pr-4',
+        'group/row grid items-center gap-x-[14px] border-b border-line-soft pr-4',
         'cursor-default transition-colors duration-ground outline-offset-[-2px]',
         columns === 8 ? GRID_8 : GRID_6,
         ground,
@@ -496,11 +502,44 @@ function TruckRowImpl({
       />
 
       <div
-        className={`font-sans text-data tabular-nums ${quiet ? 'font-medium text-text-secondary' : 'font-bold text-text'}`}
+        className={`flex items-center gap-1 font-sans text-data tabular-nums ${quiet ? 'font-medium text-text-secondary' : 'font-bold text-text'}`}
       >
         {/* One vehicle in this org is named literally "Truck" — fall back to
             the raw name rather than render a blank cell. */}
-        {row.truckNumber ?? row.samsaraName}
+        <span className="truncate">{row.truckNumber ?? row.samsaraName}</span>
+        {/*
+          §14.5: "pin after the truck number", in the truck cell rather than a
+          column of its own — three per-row affordances, three cells, and none
+          of them widening a fixed column.
+
+          Filled = pinned. Hollow appears on hover, which is what tells a
+          dispatcher the row is pinnable without printing an outline on every
+          row of a thirty-row list (§14.4's token pair).
+        */}
+        <button
+          type="button"
+          aria-label={pinned ? `Unpin truck ${truckLabel}` : `Pin truck ${truckLabel}`}
+          aria-pressed={pinned}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPin(row.id);
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className={`shrink-0 leading-none transition-opacity duration-ground ${
+            pinned
+              ? 'text-accent opacity-100'
+              : 'text-text-muted opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100'
+          }`}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 2l2.4 6.2 6.6.4-5.1 4.2 1.7 6.4L12 15.8 6.4 19.2l1.7-6.4L3 8.6l6.6-.4z"
+              fill={pinned ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="1.6"
+            />
+          </svg>
+        </button>
       </div>
 
       <div
@@ -637,6 +676,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.density === b.density &&
     a.selected === b.selected &&
     a.checked === b.checked &&
+    a.pinned === b.pinned &&
     a.query === b.query
   );
 });

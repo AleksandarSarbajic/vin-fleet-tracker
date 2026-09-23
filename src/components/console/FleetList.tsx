@@ -7,6 +7,7 @@ import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
+import { PIN_CAP } from '@/lib/pinned';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -43,6 +44,15 @@ interface Props {
   /** §14 feature 2. Checked rows — not the same cursor as selectedId. */
   checked: ReadonlySet<string>;
   onCheck: (id: string, extend: boolean) => void;
+  /**
+   * §14 feature 4. `rows` arrives with the pinned ones ALREADY REMOVED — see
+   * §14.5, "removed from their group, not duplicated". The block above the
+   * list renders them, and every count below stays about the list below.
+   */
+  pinnedRows: FleetRow[];
+  isPinned: (id: string) => boolean;
+  onPin: (id: string) => void;
+  pinRefused: boolean;
   bulk: {
     barOpen: boolean;
     onForceStatus: () => void;
@@ -65,6 +75,10 @@ export function FleetList({
   density,
   checked,
   onCheck,
+  pinnedRows,
+  isPinned,
+  onPin,
+  pinRefused,
   bulk,
   query,
   drift,
@@ -147,6 +161,54 @@ export function FleetList({
           ))}
         </div>
 
+        {/*
+          §14 feature 4. The pinned block, above the list and outside the
+          virtualiser — five rows at most (PIN_CAP), so virtualising them
+          would cost more than it saves.
+
+          §5.7's urgency groups are specified and NOT built, so "above the
+          first group header" resolves to "at the top of the flat list" today.
+          The half of §14.5 that lands now is the one that matters: these rows
+          are removed from the list below, never repeated in it, so every
+          count below still describes what is below.
+        */}
+        {pinnedRows.length > 0 ? (
+          <div className="border-b border-line-hair">
+            <div className="flex h-6 items-center gap-2 bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+              <span className="text-accent">Pinned</span>
+              <span className="tabular-nums">
+                {pinnedRows.length} of {PIN_CAP}
+              </span>
+              <span className="text-text-muted">
+                — not re-sorted, not repeated below
+              </span>
+              {pinRefused ? (
+                <span className="ml-auto text-status-risk-fg">
+                  {PIN_CAP} is the limit — unpin one first
+                </span>
+              ) : null}
+            </div>
+            {pinnedRows.map((row) => (
+              <TruckRow
+                key={row.id}
+                row={row}
+                fetchedAt={fetchedAt}
+                feedStale={feedStale}
+                columns={columns}
+                density={density}
+                selected={row.id === selectedId}
+                checked={checked.has(row.id)}
+                onCheck={onCheck}
+                pinned
+                onPin={onPin}
+                query={query}
+                onSelect={onSelect}
+                onEdit={onEdit}
+              />
+            ))}
+          </div>
+        ) : null}
+
         {drift > 0 ? (
           <button
             type="button"
@@ -185,6 +247,8 @@ export function FleetList({
                   selected={row.id === selectedId}
                   checked={checked.has(row.id)}
                   onCheck={onCheck}
+                  pinned={isPinned(row.id)}
+                  onPin={onPin}
                   query={query}
                   onSelect={onSelect}
                   onEdit={onEdit}

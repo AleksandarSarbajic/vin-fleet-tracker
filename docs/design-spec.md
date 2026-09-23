@@ -541,6 +541,12 @@ explicit group heads (`3d`):
   two stacked sticky layers eat the fold.
 - Footer gains `· N groups open` and a `Collapse all` control.
 
+**Carried forward from §14.5, for when this is built:** the pinned block sits
+above the first group header, pinned trucks are removed from their group
+rather than duplicated, and the group count reads `Late 4 · +1 pinned`. The
+removal half shipped with §14's feature 4 and applies to the flat list today;
+the count wording has nothing to attach to until group heads exist.
+
 ## 5.8 Unassigned on the row (turn 4)
 
 - The **driver cell** reads `Unassigned` in neutral ink (`#b3bac0`) with the

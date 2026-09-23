@@ -32,6 +32,7 @@ import { useDensity } from '@/hooks/useDensity';
 import { ListToolbar } from './ListToolbar';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { BulkActionModal } from './BulkActionModal';
+import { usePinned } from '@/hooks/usePinned';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -314,6 +315,26 @@ export function Console({
    * the map, this drives the bulk bar, and a row can be in either without the
    * other (§14.3).
    */
+  /**
+   * §14 feature 4. The pinned rows come OUT of the list rather than being
+   * repeated at the top of it (§14.5). If they were in both places the fold
+   * footer, the chip counts and "showing 1–20 of 23" would each have to
+   * decide whether to count a pinned truck once or twice, and they would not
+   * all decide the same way.
+   */
+  const pins = usePinned(selectedId);
+  const pinnedRows = useMemo(
+    () =>
+      pins.pinned
+        .map((id) => ordered.find((r) => r.id === id))
+        .filter((r): r is FleetRow => r !== undefined),
+    [pins.pinned, ordered],
+  );
+  const unpinnedRows = useMemo(
+    () => ordered.filter((r) => !pins.isPinned(r.id)),
+    [ordered, pins],
+  );
+
   const orderedIds = useMemo(() => ordered.map((r) => r.id), [ordered]);
   const bulk = useBulkSelection(orderedIds);
   const [bulkAction, setBulkAction] = useState<'status' | 'note' | null>(null);
@@ -441,13 +462,17 @@ export function Console({
                   density={density}
                   checked={bulk.checked}
                   onCheck={bulk.toggle}
+                  pinnedRows={pinnedRows}
+                  isPinned={pins.isPinned}
+                  onPin={pins.toggle}
+                  pinRefused={pins.refused}
                   bulk={{
                     barOpen: bulk.barOpen,
                     onForceStatus: () => setBulkAction('status'),
                     onAddNote: () => setBulkAction('note'),
                     onClear: bulk.clear,
                   }}
-                  rows={ordered}
+                  rows={unpinnedRows}
                   fetchedAt={data?.fetchedAt ?? null}
                   feedStale={data?.feedStale ?? false}
                   selectedId={selectedId}
