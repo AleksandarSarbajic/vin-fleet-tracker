@@ -8,6 +8,8 @@ import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
 import { PIN_CAP } from '@/lib/pinned';
+import type { RowFlashView } from '@/lib/flash';
+import { useResortHold } from '@/hooks/useResortHold';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -50,6 +52,13 @@ interface Props {
    * list renders them, and every count below stays about the list below.
    */
   pinnedRows: FleetRow[];
+  /**
+   * §14 feature 6. Null for a row that is not flashing. A lookup rather than
+   * a field on the row, because the flash is about the LAST POLL and the row
+   * is about now — putting it on the row would mean rebuilding every row
+   * object when one of them changed.
+   */
+  flashFor: (id: string) => RowFlashView | null;
   isPinned: (id: string) => boolean;
   onPin: (id: string) => void;
   pinRefused: boolean;
@@ -76,6 +85,7 @@ export function FleetList({
   checked,
   onCheck,
   pinnedRows,
+  flashFor,
   isPinned,
   onPin,
   pinRefused,
@@ -133,8 +143,20 @@ export function FleetList({
 
   const headers = columns === 8 ? HEADERS_8 : HEADERS_6;
 
+  /**
+   * §14.5's re-sort hold. Tracked here rather than per row: `mouseenter` on
+   * thirty rows is thirty listeners to answer one question about the panel.
+   */
+  const [pointerOver, setPointerOver] = useState(false);
+  const holdResort = useResortHold(drift, pointerOver, checked.size);
+
   return (
-    <div ref={panelRef} className="flex min-h-0 min-w-0 flex-col">
+    <div
+      ref={panelRef}
+      className="flex min-h-0 min-w-0 flex-col"
+      onMouseEnter={() => setPointerOver(true)}
+      onMouseLeave={() => setPointerOver(false)}
+    >
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {/* Sticky INSIDE the scroller, so it survives every scroll position. */}
         <div
@@ -152,7 +174,9 @@ export function FleetList({
             <div
               key={h}
               className={`font-cond text-micro uppercase ${RIGHT_ALIGNED.has(h) ? 'text-right ' : ''}${
-                feedStale && h === 'Position' ? 'text-status-neutral-fg' : 'text-text-muted'
+                feedStale && h === 'Position'
+                  ? 'text-status-neutral-fg'
+                  : 'text-text-muted'
               }`}
             >
               {/* The column says so itself rather than only the rows (§5.9). */}
@@ -179,9 +203,7 @@ export function FleetList({
               <span className="tabular-nums">
                 {pinnedRows.length} of {PIN_CAP}
               </span>
-              <span className="text-text-muted">
-                — not re-sorted, not repeated below
-              </span>
+              <span className="text-text-muted">— not re-sorted, not repeated below</span>
               {pinRefused ? (
                 <span className="ml-auto text-status-risk-fg">
                   {PIN_CAP} is the limit — unpin one first
@@ -199,6 +221,7 @@ export function FleetList({
                 selected={row.id === selectedId}
                 checked={checked.has(row.id)}
                 onCheck={onCheck}
+                flash={flashFor(row.id)}
                 pinned
                 onPin={onPin}
                 query={query}
@@ -209,7 +232,7 @@ export function FleetList({
           </div>
         ) : null}
 
-        {drift > 0 ? (
+        {drift > 0 && !holdResort ? (
           <button
             type="button"
             onClick={onResort}
@@ -247,6 +270,7 @@ export function FleetList({
                   selected={row.id === selectedId}
                   checked={checked.has(row.id)}
                   onCheck={onCheck}
+                  flash={flashFor(row.id)}
                   pinned={isPinned(row.id)}
                   onPin={onPin}
                   query={query}

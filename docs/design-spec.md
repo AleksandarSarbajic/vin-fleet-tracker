@@ -5573,6 +5573,31 @@ wanted the same pixels.
 | **Toast placement** | Moves to the map's top-right: bottom-left now belongs to the bulk bar, and the list's top holds the pinned block. |
 | **Overlays** | Palette, cheat sheet and tour share one scrim and one layer, **only one open at a time**. `⌘K` during the tour ends the tour; `?` inside the palette types a "?". |
 
+### Two collisions that resolved differently here (build notes)
+
+**The re-sort hold guards a mechanism this console does not have.** §14.5
+holds re-sort for up to 10s while the pointer is over the list or 2+ rows are
+checked, "so a click never lands on a row that just moved". That assumes a
+list which re-sorts itself on new data. §12.4 settled the opposite in phase 1:
+order is computed on mount, on a filter or search change, and on explicit user
+action — **a poll never moves a row**. The hazard is already impossible, by a
+stronger mechanism than a timer.
+
+What survives is the *offer*. The "3 rows would reorder" pill appears in flow
+at the top of the list the moment drift becomes non-zero, and everything below
+shifts down by its height — the same defect with a smaller displacement. So
+the hold applies to the pill, on the same two conditions and the same ten
+seconds (`src/hooks/useResortHold.ts`). If §12.4 is ever relaxed, the rule is
+already here and only its subject changes.
+
+**The toast has a third neighbour the brief did not see.** §14.5 moves the
+toast to the map's top-right because the bulk bar takes bottom-left. The map's
+top-right already holds the zoom control (§7), which turn 5 was not drawing
+against. The stack therefore anchors to the map's top-right *below* the zoom
+control rather than beside it: a 340px toast inset far enough to clear a 28px
+control reads as misaligned, and moving existing map chrome to make room is a
+change nobody asked for.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

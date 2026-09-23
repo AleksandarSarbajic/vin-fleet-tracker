@@ -17,6 +17,7 @@ import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';
 import { ROW_HEIGHT, type Density } from '@/lib/density';
 import { addressText, loadText } from '@/lib/copy-text';
+import type { FlashGround, RowFlashView } from '@/lib/flash';
 import { CopyButton } from './CopyButton';
 
 /**
@@ -68,6 +69,21 @@ const ETA_INK: Record<Status, string> = {
   NO_APPT: 'text-status-neutral-fg',
   STALE_GPS: 'text-status-neutral-fg',
   UNASSIGNED: 'text-status-neutral-fg',
+};
+
+/**
+ * §14 feature 6. The flash grounds, one class per family (§14.4).
+ *
+ * A static map for the same reason RAIL and ETA_INK are: Tailwind cannot see
+ * a class name assembled at runtime, so `bg-row-flash-${ground}` would be
+ * correct TypeScript and an empty rule in the stylesheet.
+ */
+const FLASH_BG: Record<FlashGround, string> = {
+  late: 'bg-row-flash-late',
+  risk: 'bg-row-flash-risk',
+  ontime: 'bg-row-flash-ontime',
+  arrived: 'bg-row-flash-arrived',
+  neutral: 'bg-row-flash-neutral',
 };
 
 /**
@@ -364,6 +380,12 @@ interface Props {
   /** §14 feature 2. Independent of `selected` — see useBulkSelection. */
   checked: boolean;
   onCheck: (id: string, extend: boolean) => void;
+  /**
+   * §14 feature 6. Non-null while this row is flashing. Resolved once per
+   * poll in Console rather than per row, so the dispatch zone and the motion
+   * preference do not have to reach every row to be formatted.
+   */
+  flash: RowFlashView | null;
   /** §14 feature 4. */
   pinned: boolean;
   onPin: (id: string) => void;
@@ -385,6 +407,7 @@ function TruckRowImpl({
   selected,
   checked,
   onCheck,
+  flash,
   pinned,
   onPin,
   query,
@@ -401,9 +424,7 @@ function TruckRowImpl({
 
   const appt = apptText(row);
 
-  const position = stale
-    ? `Last seen ${row.cityState ?? '—'}`
-    : (row.cityState ?? '—');
+  const position = stale ? `Last seen ${row.cityState ?? '—'}` : (row.cityState ?? '—');
 
   /*
    * §14.5. Checked and selected are the same ground by design ("= selected"
@@ -411,13 +432,14 @@ function TruckRowImpl({
    * is what tells them apart, which is also what lets the flash borrow this
    * ground for 1.6s without the checked state being lost.
    */
-  const ground = selected || checked
-    ? 'bg-row-selected'
-    : unassigned
-      ? // Marginally sunken, so it reads as inert rather than urgent — it is a
-        // problem of allocation, not of time (design-spec §5.8).
-        'bg-row-unassigned'
-      : 'hover:bg-row-hover';
+  const ground =
+    selected || checked
+      ? 'bg-row-selected'
+      : unassigned
+        ? // Marginally sunken, so it reads as inert rather than urgent — it is a
+          // problem of allocation, not of time (design-spec §5.8).
+          'bg-row-unassigned'
+        : 'hover:bg-row-hover';
 
   return (
     <div
@@ -469,15 +491,40 @@ function TruckRowImpl({
       }}
       style={{ height: ROW_HEIGHT[density] }}
       className={[
-        'group/row grid items-center gap-x-[14px] border-b border-line-soft pr-4',
+        'group/row relative isolate grid items-center gap-x-[14px] border-b border-line-soft pr-4',
         'cursor-default transition-colors duration-ground outline-offset-[-2px]',
         columns === 8 ? GRID_8 : GRID_6,
         ground,
         // Selection is ground + a 3px steel rail on the LEFT EDGE, so it never
         // fights the status stripe in column one.
-        selected ? 'border-l-[3px] border-l-accent' : 'border-l-[3px] border-l-transparent',
+        selected
+          ? 'border-l-[3px] border-l-accent'
+          : 'border-l-[3px] border-l-transparent',
       ].join(' ')}
     >
+      {/*
+        §14 feature 6. The flash.
+
+        An overlay rather than the row's own background, because the ground it
+        has to decay TO is one of three — `row.checked`, the hover ground, or
+        nothing — and a keyframe cannot know which. Fading an opaque layer out
+        above it lands on whichever one is there, which is also exactly what
+        §14.5 means by "flash wins for its 1.6s, then the row settles to
+        row.checked": the tick underneath never moved.
+
+        `-z-10` inside the row's own stacking context (`isolate`) puts it above
+        the row's background and below every cell, so the status rail, the text
+        and the checkbox all stay legible through it. `key` restarts the decay
+        when a row changes twice inside one flash.
+      */}
+      {flash && flash.tag === null ? (
+        <div
+          key={flash.at}
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 -z-10 animate-flash ${FLASH_BG[flash.ground]}`}
+        />
+      ) : null}
+
       {/*
         §14.5. Its own column, sharing no hit area with the row: a click here
         must check without selecting, because selecting also moves the map.
@@ -596,7 +643,12 @@ function TruckRowImpl({
         className={`relative truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
       >
         {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
-        <CopyButton value={loadText(row)} label="Copy load info" glyph="load" offset="0px" />
+        <CopyButton
+          value={loadText(row)}
+          label="Copy load info"
+          glyph="load"
+          offset="0px"
+        />
         <CopyButton
           value={addressText(row)}
           label="Copy address"
@@ -606,16 +658,16 @@ function TruckRowImpl({
       </div>
 
       {/**
-        * Two slots, not one string.
-        *
-        * `by 15:00 CDT` as plain text pushes the number left and the column
-        * stops aligning — §2 sets tabular numerals on the body precisely so
-        * times line up down a column, and a scanning dispatcher loses that
-        * the moment one row indents. The prefix gets its own fixed cell, so
-        * every time in the column starts at the same x whether or not the
-        * row is FCFS, and the marker reads as an annotation rather than as
-        * part of the number.
-        */}
+       * Two slots, not one string.
+       *
+       * `by 15:00 CDT` as plain text pushes the number left and the column
+       * stops aligning — §2 sets tabular numerals on the body precisely so
+       * times line up down a column, and a scanning dispatcher loses that
+       * the moment one row indents. The prefix gets its own fixed cell, so
+       * every time in the column starts at the same x whether or not the
+       * row is FCFS, and the marker reads as an annotation rather than as
+       * part of the number.
+       */}
       <div
         title={apptTitle(row) ?? undefined}
         className={`grid grid-cols-[18px_1fr] items-baseline justify-items-end text-body font-semibold tabular-nums ${quiet ? 'text-text-secondary' : 'text-text'}`}
@@ -627,18 +679,18 @@ function TruckRowImpl({
       </div>
 
       {/**
-        * The time, with the miles hanging under it (§12.47).
-        *
-        * The second line is ABSOLUTELY positioned, which is the whole trick.
-        * Stacked normally, the two lines form a 35.3px block that `items-
-        * center` centres in a 44px row — and measured in Chromium, that puts
-        * the ETA time 8.6px above the Appt time in the very next column. Two
-        * adjacent numeric columns out of line by 8.6px reads as a bug.
-        *
-        * Out of flow, the time stays exactly where it was (measured: 22px
-        * from the row top, identical to before) and the miles sit at 42.6px
-        * in a 44px row.
-        */}
+       * The time, with the miles hanging under it (§12.47).
+       *
+       * The second line is ABSOLUTELY positioned, which is the whole trick.
+       * Stacked normally, the two lines form a 35.3px block that `items-
+       * center` centres in a 44px row — and measured in Chromium, that puts
+       * the ETA time 8.6px above the Appt time in the very next column. Two
+       * adjacent numeric columns out of line by 8.6px reads as a bug.
+       *
+       * Out of flow, the time stays exactly where it was (measured: 22px
+       * from the row top, identical to before) and the miles sit at 42.6px
+       * in a 44px row.
+       */}
       {columns === 8 ? (
         <div title={etaTitle(row)} className="relative text-right">
           <div className={`truncate text-body tabular-nums ${etaInk(row, feedStale)}`}>
@@ -665,15 +717,32 @@ function TruckRowImpl({
         </div>
       ) : null}
 
-      <div className="flex justify-end" data-no-dblclick="">
+      <div className="flex min-w-0 items-center justify-end gap-1.5" data-no-dblclick="">
         {/* A dotted neutral chip carrying the age, fleet-wide (§5.9). */}
         <StatusChip
           status={feedStale ? 'STALE_GPS' : row.status}
           forced={!feedStale && row.override !== null}
-          label={
-            stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined
-          }
+          label={stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined}
         />
+        {/*
+          §14.4, the reduced-motion half: "the flash is replaced by a static
+          tag after the chip for 60s -- the signal SURVIVES without the
+          motion." Never both; with motion the ground already said it.
+
+          The bare clock is the one time in the console without a zone, and it
+          can be: it lives for a minute and always means "just now, where you
+          are sitting". The labelled form with the abbreviation is on `title`,
+          derived by `timeInZone` at render time.
+        */}
+        {flash?.tag ? (
+          <span
+            title={flash.tag.title}
+            className="shrink truncate font-cond text-micro uppercase tracking-[.08em] text-text-muted"
+          >
+            <span aria-hidden="true">◆ </span>
+            {flash.tag.clock}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -694,6 +763,11 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.selected === b.selected &&
     a.checked === b.checked &&
     a.pinned === b.pinned &&
+    // By value, not identity: the view object is rebuilt every poll, and the
+    // three fields are all a row can see of it.
+    a.flash?.ground === b.flash?.ground &&
+    a.flash?.at === b.flash?.at &&
+    a.flash?.tag?.clock === b.flash?.tag?.clock &&
     a.query === b.query
   );
 });

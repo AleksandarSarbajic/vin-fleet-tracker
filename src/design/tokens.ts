@@ -150,3 +150,45 @@ export const palette = {
  * last two steps.
  */
 export const TRAIL_RAMP = [1, 0.75, 0.5, 0.3, 0.15] as const;
+
+/**
+ * §14.4's motion budget, as numbers.
+ *
+ * Here rather than in `tailwind.config.ts` for the same reason the palette is
+ * here: two readers need the same values and only one of them can use a
+ * class. The config builds its `transitionDuration`, `keyframes` and
+ * `animation` from this object, and the hooks that have to OUTLIVE an
+ * animation — the flash ledger, the toast's exit — read the same numbers.
+ *
+ * A row that stops flashing 200ms before its ground finishes decaying, or a
+ * toast unmounted mid-fade, is the failure this prevents. Both have one
+ * cause: a duration written down twice.
+ */
+export const MOTION_MS = {
+  /** §8.3. Ground and selection. */
+  ground: 120,
+  /** §8.3. Map pan; the map jumps instead under reduced motion. */
+  map: 150,
+  /** §14.4. Flash ground decays to the resting ground over this. */
+  flash: 1600,
+  /** §14.4. Chip crossfade. The WIDTH snaps — only opacity is animated. */
+  chip: 160,
+  toastIn: 180,
+  /** Shorter than `toastIn` on purpose: a dismissal must never feel stuck. */
+  toastOut: 120,
+  overlay: 120,
+} as const;
+
+/**
+ * §14.4. Under `prefers-reduced-motion` the flash is not dropped — it becomes
+ * a static tag for a minute, because the signal has to survive the motion
+ * being taken away. Sixty seconds is the dwell of a thing you were not
+ * looking at when it happened.
+ */
+export const FLASH_TAG_MS = 60_000;
+
+export const EASING = {
+  /** Jumps, then decays: the flash is at full ground on frame one. */
+  flash: 'cubic-bezier(.2,0,0,1)',
+  toast: 'cubic-bezier(.2,.8,.2,1)',
+} as const;

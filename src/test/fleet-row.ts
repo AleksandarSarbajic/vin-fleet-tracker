@@ -11,11 +11,31 @@ import type { FleetRow, NextStop } from '@/server/fleet-query';
  * Every field is defaulted to its quietest value so a test states only what it
  * is about. A row that has to spell out forty fields to assert one is a row
  * nobody writes a second test with.
+ *
+ * ## `nextStop` is merged, not replaced
+ *
+ * The obvious shape — one object of defaults with `...over` spread over it —
+ * is wrong for a row that CONTAINS an object. `{ nextStop: { city: null } }`
+ * spread over the defaults replaces the whole stop, so a test meaning "this
+ * stop has no city" silently becomes "this stop has no address, no type, no
+ * appointment and no coordinates either", and it passes for the wrong reason.
+ *
+ * That happened once, in `copy-text.test.ts`, where a local helper had done
+ * its own spreading. The fix lives here instead of there: `nextStop` takes a
+ * PARTIAL and is merged into the default stop, `null` means the truck holds
+ * no load, and the type says both — so the next test to override a nested
+ * field gets the merge without having to know the story.
  */
 
 const TRUCK_ID = '11111111-1111-4111-8111-111111111111';
 
-export function fleetRow(over: Partial<FleetRow> = {}): FleetRow {
+export type FleetRowOver = Partial<Omit<FleetRow, 'nextStop'>> & {
+  /** Merged into the default stop. `null` means the truck holds no load. */
+  nextStop?: Partial<NextStop> | null;
+};
+
+export function fleetRow(over: FleetRowOver = {}): FleetRow {
+  const { nextStop: stopOver, ...rest } = over;
   return {
     id: TRUCK_ID,
     truckNumber: 137,
@@ -45,10 +65,11 @@ export function fleetRow(over: Partial<FleetRow> = {}): FleetRow {
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
-    nextStop: nextStop(),
     openLoadCount: 1,
     apptAt: null,
-    ...over,
+    ...rest,
+    // After the spread, so `rest` cannot carry a `nextStop` past the merge.
+    nextStop: stopOver === null ? null : nextStop(stopOver),
   };
 }
 

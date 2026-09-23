@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fleetRow } from '@/test/fleet-row';
+import { fleetRow, type FleetRowOver } from '@/test/fleet-row';
 import { addressText, loadText } from './copy-text';
 
 /**
@@ -8,42 +8,29 @@ import { addressText, loadText } from './copy-text';
  */
 
 /**
- * `nextStop` is pulled out of `over` before the spread. Leaving it in made
- * the outer `...over` replace the whole stop with the two keys a test wanted
- * to change — so a test for a missing street line was really a test for a
- * stop with no city, state or type either.
+ * The nested merge lives in `fleetRow` now, so this only has to say what is
+ * different about the rows these tests are about. It used to do its own
+ * spreading and got it wrong: `...over` replaced the whole stop, so a test
+ * for a missing street line was really a test for a stop with no city, state
+ * or type either.
  */
-const withStop = (over: Record<string, unknown> = {}) => {
-  const { nextStop: stopOver, ...rest } = over;
-  return fleetRow({
+const withStop = (over: FleetRowOver = {}) =>
+  fleetRow({
     truckNumber: 118,
     driverName: 'M. Kowalczyk',
-    nextStop: {
-      stopId: '11111111-1111-4111-8111-111111111111',
-      loadId: '22222222-2222-4222-8222-222222222222',
-      loadNumber: '12120569',
-      loadStatus: 'DISPATCHED',
-      type: 'DEL',
-      addressLine: '2500 N 11th ST',
-      city: 'Moorhead',
-      state: 'MN',
-      zip: '56560',
-      apptStartUtc: null,
-      apptEndUtc: null,
-      apptTz: 'America/Chicago',
-      apptType: 'APPT',
-      lat: 46.9,
-      lng: -96.76,
-      precision: 'street',
-      accuracyMiles: 0.1,
-      arrivedAt: null,
-      arrivedSource: null,
-      dispatcherNote: null,
-      ...(stopOver as object),
-    },
-    ...rest,
-  } as never);
-};
+    ...over,
+    nextStop:
+      over.nextStop === null
+        ? null
+        : {
+            loadNumber: '12120569',
+            addressLine: '2500 N 11th ST',
+            city: 'Moorhead',
+            state: 'MN',
+            zip: '56560',
+            ...over.nextStop,
+          },
+  });
 
 describe('the address format', () => {
   it('is one line, the way an address is written', () => {

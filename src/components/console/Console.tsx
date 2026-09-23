@@ -33,6 +33,8 @@ import { ListToolbar } from './ListToolbar';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { BulkActionModal } from './BulkActionModal';
 import { usePinned } from '@/hooks/usePinned';
+import { useRowFlash } from '@/hooks/useRowFlash';
+import { flashView, type RowFlashView } from '@/lib/flash';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -307,6 +309,30 @@ export function Console({
     return () => window.removeEventListener('keydown', onKey);
   }, [ordered, selectedId, select, query, editingId]);
 
+  /**
+   * §14 feature 6. Which rows changed since the last poll.
+   *
+   * Reads the same `snapshot` the toasts do — one derivation of "what the
+   * board looked like a poll ago", so the two can never disagree about which
+   * trucks moved. What they do with it differs, and deliberately: see
+   * `lib/flash`'s note on the three toast rules it drops.
+   */
+  const flashes = useRowFlash(snapshot, feedStale, reducedMotion);
+
+  /**
+   * Resolved once per poll rather than once per row. The dispatch zone and
+   * the motion preference are both needed to format a flash and neither is
+   * about a truck, so they stop here instead of reaching every row.
+   */
+  const flashViews = useMemo(() => {
+    const views = new Map<string, RowFlashView>();
+    for (const [id, flash] of flashes) {
+      views.set(id, flashView(flash, dispatchTz, reducedMotion));
+    }
+    return views;
+  }, [flashes, dispatchTz, reducedMotion]);
+  const flashFor = useCallback((id: string) => flashViews.get(id) ?? null, [flashViews]);
+
   /** §14 feature 5. Persisted, and bound to D. */
   const { density, setDensity } = useDensity();
 
@@ -463,6 +489,7 @@ export function Console({
                   checked={bulk.checked}
                   onCheck={bulk.toggle}
                   pinnedRows={pinnedRows}
+                  flashFor={flashFor}
                   isPinned={pins.isPinned}
                   onPin={pins.toggle}
                   pinRefused={pins.refused}
@@ -520,21 +547,21 @@ export function Console({
         ) : null}
 
         {bulkAction ? (
-        <BulkActionModal
-          action={bulkAction}
-          rows={ordered}
-          checked={bulk.checked}
-          onDone={() => {
-            setBulkAction(null);
-            // The checks go with the act. Leaving them would invite the same
-            // override to be applied twice to the same trucks.
-            bulk.clear();
-          }}
-          onClose={() => setBulkAction(null)}
-        />
-      ) : null}
+          <BulkActionModal
+            action={bulkAction}
+            rows={ordered}
+            checked={bulk.checked}
+            onDone={() => {
+              setBulkAction(null);
+              // The checks go with the act. Leaving them would invite the same
+              // override to be applied twice to the same trucks.
+              bulk.clear();
+            }}
+            onClose={() => setBulkAction(null)}
+          />
+        ) : null}
 
-      <ShortcutSheet />
+        <ShortcutSheet />
       </div>
     </OverlayProvider>
   );
