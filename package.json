@@ -20,6 +20,7 @@
     "route:drift": "tsx scripts/ratio-drift.mts",
     "route:gate": "tsx scripts/gate-falsify.mts",
     "shadow:status": "tsx scripts/shadow-status.mts",
+    "shadow:analyse": "tsx scripts/shadow-analyse.mts",
     "test:db:up": "scripts/test-db.sh up",
     "test:db:down": "scripts/test-db.sh down",
     "test:db:migrate": "tsx scripts/test-db-migrate.mts",
