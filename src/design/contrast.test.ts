@@ -51,6 +51,33 @@ describe('the ratios §14.4 measured are still the ratios', () => {
     ).toBeGreaterThanOrEqual(FLOOR);
   });
 
+  /**
+   * §14 feature 8's bar. The three figures in §14.4's table are "7.06-8.91 ·
+   * 3.51 — reused", and they land exactly on tokens that already existed:
+   * the range is late.fg to ontime.fg, and the hollow edge is neutral.bd.
+   *
+   * 3.51 is above the 3:1 floor for a graphical object and deliberately
+   * below the 4.5 text floor — nothing is written inside the bar.
+   *
+   * `neutral.fg` at 8.25 is the fourth ink the strip needed and §14.4 did not
+   * have: an arrival with no appointment to judge it against. Asserted here
+   * so the claim that it sits INSIDE the stated band stays true.
+   */
+  it('the health bar\'s three measured figures are still those figures', () => {
+    const raised = palette.surface.raised;
+    expect(contrast(palette.status.ontime.fg, raised)).toBe(8.91);
+    expect(contrast(palette.status.late.fg, raised)).toBe(7.06);
+    expect(contrast(palette.status.neutral.bd, raised)).toBe(3.51);
+
+    const neutral = contrast(palette.status.neutral.fg, raised);
+    expect(neutral).toBe(8.25);
+    expect(neutral).toBeGreaterThan(7.06);
+    expect(neutral).toBeLessThan(8.91);
+
+    // Graphical objects, not text: 3:1 is the floor that applies.
+    expect(contrast(palette.status.neutral.bd, raised)).toBeGreaterThanOrEqual(3);
+  });
+
   it('every flash ground clears the floor for muted ink', () => {
     // §14.4: the reason the flash peaks at 60% of status.bg. Risk is the
     // floor of the set at 4.56, so darkening any of these needs a new

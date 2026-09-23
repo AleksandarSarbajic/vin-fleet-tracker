@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fleetRow } from '@/test/fleet-row';
+import { fleetHealth, fleetRow } from '@/test/fleet-row';
 import { stubLayout } from '@/test/layout';
 import type { FleetResponse } from '@/hooks/useFleet';
 
@@ -88,6 +88,7 @@ const render = async (initial: FleetResponse) => {
         { client },
         createElement(Console, {
           initial,
+          initialHealth: fleetHealth(),
           dispatchTz: 'America/Chicago',
           user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
           initialQuery: '',
@@ -171,8 +172,7 @@ describe('the offline banner (§9.8)', () => {
 
 describe('the header sync cluster (§9.1)', () => {
   /** The dot is found by its token class, which is the thing that was wrong. */
-  const dot = () =>
-    container!.querySelector('.bg-status-ontime-fg, .bg-status-late-fg');
+  const dot = () => container!.querySelector('.bg-status-ontime-fg, .bg-status-late-fg');
 
   it('is green and counts from the fetch while the feed is healthy', async () => {
     const el = await render(response());

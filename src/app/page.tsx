@@ -4,6 +4,7 @@ import { serverEnv } from '@/env/server';
 import { getSessionUser } from '@/lib/auth';
 import { loadFleet } from '@/server/fleet';
 import { loadAssignmentBoard } from '@/server/assignments';
+import { loadFleetHealth } from '@/server/health';
 import { db } from '@/db';
 
 /** Live positions — never cached. */
@@ -26,11 +27,18 @@ export default async function ConsolePage({
   const params = await searchParams;
   // The driver list feeds the edit modal's picker. Small, and it changes far
   // less often than positions do.
-  const [payload, board] = await Promise.all([loadFleet(), loadAssignmentBoard(db)]);
+  // §14 feature 8 rides along with the prefetch for the same reason the fleet
+  // does: the strip has a value on the first paint, so it never flashes empty.
+  const [payload, board, health] = await Promise.all([
+    loadFleet(),
+    loadAssignmentBoard(db),
+    loadFleetHealth(db, serverEnv.DISPATCH_TZ),
+  ]);
 
   return (
     <Console
       initial={payload}
+      initialHealth={health}
       dispatchTz={serverEnv.DISPATCH_TZ}
       user={{ fullName: user.fullName, email: user.email, role: user.role }}
       initialQuery={first(params['q']) ?? ''}

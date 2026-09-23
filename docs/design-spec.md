@@ -5620,6 +5620,32 @@ matched nothing has to report the chips, since clearing the search would not
 help. The fifth reason is the one the console could not have had before this
 phase: everything that matched is in the pinned block a few pixels above.
 
+**The health strip needed a fourth case §14.4's three treatments did not
+have.** The token table names "solid · hatched · hollow" and measures
+7.06–8.91 · 3.51; those land exactly on `status.ontime.fg` (8.91),
+`status.late.fg` (7.06) and `status.neutral.bd` (3.51) against
+`surface.raised`, all verified in `contrast.test.ts`.
+
+The data has four states, not three. A stop arrived with no appointment on
+file cannot be scored: calling it on time flatters the board, calling it late
+invents a failure, and dropping it from the bar makes the printed "11 of 31
+done" disagree with the segments beside it. It gets its own segment in
+`status.neutral.fg`, which measures **8.25** — inside §14.4's own stated
+7.06–8.91 band, so the measured range does not move. A fourth ink, not a
+fourth treatment: still solid, told apart by position and by the words printed
+beside the bar rather than by hue alone (§5.1).
+
+The lateness rule is `status.ts`'s, restated rather than reinvented: the
+deadline is `apptEndUtc ?? apptStartUtc` and the window IS the grace (§12.1).
+The engine is read for the rule and neither imported nor executed — it
+evaluates a live truck against `now`, and this evaluates a finished stop
+against its own appointment. `status.ts` is untouched, as §14.6 requires while
+the §12.61 shadow run collects.
+
+One asymmetry, deliberate: `remaining` is keyed off the APPOINTMENT's day and
+`done` off the ARRIVAL's. A stop due yesterday and arrived this morning
+belongs in exactly one of them — the second.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

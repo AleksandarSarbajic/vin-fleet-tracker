@@ -36,6 +36,8 @@ import { usePinned } from '@/hooks/usePinned';
 import { useRowFlash } from '@/hooks/useRowFlash';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { emptyState, type EmptyAction } from '@/lib/empty-state';
+import { useFleetHealth } from '@/hooks/useFleetHealth';
+import type { FleetHealth } from '@/server/health';
 import { flashView, type RowFlashView } from '@/lib/flash';
 
 /**
@@ -46,6 +48,8 @@ const NO_ROWS: FleetRow[] = [];
 
 interface Props {
   initial: FleetResponse;
+  /** §14 feature 8. Server-rendered, so the strip never flashes empty. */
+  initialHealth: FleetHealth;
   dispatchTz: string;
   user: AccountUser;
   /**
@@ -66,6 +70,7 @@ interface Props {
 
 export function Console({
   initial,
+  initialHealth,
   dispatchTz,
   user,
   initialQuery,
@@ -335,6 +340,13 @@ export function Console({
   }, [flashes, dispatchTz, reducedMotion]);
   const flashFor = useCallback((id: string) => flashViews.get(id) ?? null, [flashViews]);
 
+  /**
+   * §14 feature 8. Its own query on its own interval: the strip counts
+   * arrivals, which happen a few times a shift, and the fleet poll is twenty
+   * seconds. See `useFleetHealth`.
+   */
+  const { data: health } = useFleetHealth(initialHealth);
+
   /** §14 feature 5. Persisted, and bound to D. */
   const { density, setDensity } = useDensity();
 
@@ -539,7 +551,7 @@ export function Console({
               list={
                 <div className="flex h-full flex-col">
                   {/* §14.5: the strip is read with the list, not the header. */}
-                  <ListToolbar density={density} onDensity={setDensity} />
+                  <ListToolbar density={density} onDensity={setDensity} health={health} />
                   <FleetList
                     density={density}
                     checked={bulk.checked}

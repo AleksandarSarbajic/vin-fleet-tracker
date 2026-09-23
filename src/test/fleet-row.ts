@@ -1,4 +1,5 @@
 import type { FleetRow, NextStop } from '@/server/fleet-query';
+import type { FleetHealth } from '@/server/health';
 
 /**
  * An in-memory `FleetRow`, for tests that render a component rather than
@@ -87,4 +88,13 @@ export function nextStop(over: Partial<NextStop> = {}): NextStop {
     apptStartUtc: null,
     ...over,
   } as NextStop;
+}
+
+/**
+ * §14 feature 8's totals, quiet by default — a day with nothing done and
+ * nothing due, so a test that is not about the strip does not have to say
+ * anything about it.
+ */
+export function fleetHealth(over: Partial<FleetHealth> = {}): FleetHealth {
+  return { day: '2026-09-18', onTime: 0, late: 0, unscheduled: 0, remaining: 0, ...over };
 }

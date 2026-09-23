@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fleetRow, nextStop } from '@/test/fleet-row';
+import { fleetHealth, fleetRow, nextStop } from '@/test/fleet-row';
 import { MOTION_MS } from '@/design/tokens';
 import { stubLayout } from '@/test/layout';
 import type { FleetResponse } from '@/hooks/useFleet';
@@ -90,6 +90,7 @@ const render = async () => {
         { client },
         createElement(Console, {
           initial: INITIAL,
+          initialHealth: fleetHealth(),
           dispatchTz: 'America/Chicago',
           user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
           initialQuery: '',
@@ -273,6 +274,7 @@ describe('miles hang under the ETA (§12.47)', () => {
           { client },
           createElement(Console, {
             initial: { ...INITIAL, fleet: [straight] },
+            initialHealth: fleetHealth(),
             dispatchTz: 'America/Chicago',
             user: { fullName: 'S L', email: null, role: 'admin' as const },
             initialQuery: '',
@@ -373,6 +375,7 @@ describe('the ETA cell carries status ink (§12.49)', () => {
           { client },
           createElement(Console, {
             initial: { ...INITIAL, fleet: [one], feedStale },
+            initialHealth: fleetHealth(),
             dispatchTz: 'America/Chicago',
             user: { fullName: 'S L', email: null, role: 'admin' as const },
             initialQuery: '',
@@ -535,6 +538,7 @@ describe('a truck going LATE raises a toast (§12.50)', () => {
           { client },
           createElement(Console, {
             initial: { ...INITIAL, fleet },
+            initialHealth: fleetHealth(),
             dispatchTz: 'America/Chicago',
             user: { fullName: 'S L', email: null, role: 'admin' as const },
             initialQuery: '',

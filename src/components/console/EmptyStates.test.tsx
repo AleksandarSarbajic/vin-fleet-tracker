@@ -4,7 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fleetRow } from '@/test/fleet-row';
+import { fleetHealth, fleetRow } from '@/test/fleet-row';
 import { stubLayout } from '@/test/layout';
 import type { FleetResponse } from '@/hooks/useFleet';
 
@@ -76,6 +76,7 @@ const mount = async (fleet: FleetResponse['fleet'], query = '', chips: string[] 
             feedStale: false,
             feedNewestAt: '2026-09-18T12:00:00.000Z',
           },
+          initialHealth: fleetHealth(),
           dispatchTz: 'America/Chicago',
           user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
           initialQuery: query,

@@ -59,6 +59,24 @@
     );
   }
 
+  /**
+   * §14 feature 8. The health bar's LATE segment.
+   *
+   * Hatched rather than merely red, for §5.1's reason: the set has to survive
+   * greyscale, and a 6px bar has no room for an icon or a word inside it. The
+   * hatch is what makes "late" legible when the hue is not.
+   *
+   * 45deg and a 4px period, which at 6px tall gives two full strokes across
+   * the segment — one stroke reads as a smudge, four as a solid.
+   */
+  .health-late {
+    background: repeating-linear-gradient(
+      45deg,
+      theme('colors.status.late.fg') 0 2px,
+      theme('colors.status.late.bd') 2px 4px
+    );
+  }
+
   .rail-dotted {
     background: repeating-linear-gradient(
       180deg,
