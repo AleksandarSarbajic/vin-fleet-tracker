@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { isTypingTarget } from '@/lib/keymap';
 
 interface Props {
   value: string;
@@ -15,10 +16,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
   /** "/" focuses search; Esc clears it, then clears selection (§8.1). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
-      if (event.key === '/' && !typing) {
+      if (event.key === '/' && !isTypingTarget(event.target)) {
         event.preventDefault();
         ref.current?.focus();
       }

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import type { Status } from '@/lib/status';
+import { isTypingTarget } from '@/lib/keymap';
 
 /**
  * design-spec §9.1, §12.8, §12.9.
@@ -111,8 +112,7 @@ export function FilterChips({
   /** §8.1: 1–7 toggle, 0 resets to All. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (isTypingTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === '0') {

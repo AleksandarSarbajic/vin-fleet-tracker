@@ -25,6 +25,9 @@ import { Split } from './Split';
 import { FleetMap } from './map/FleetMap';
 import { useDisplayOrder } from './useDisplayOrder';
 import { useChipFilters } from './useChipFilters';
+import { isTypingTarget } from '@/lib/keymap';
+import { OverlayProvider } from '@/components/overlay/OverlayLayer';
+import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -108,7 +111,10 @@ export function Console({
    * runs over the real `active` column rather than being special-cased inside
    * the Inactive chip.
    */
-  const rows = useMemo(() => all.filter((row) => passesFilters(row, chips)), [all, chips]);
+  const rows = useMemo(
+    () => all.filter((row) => passesFilters(row, chips)),
+    [all, chips],
+  );
 
   /* --------------------------- status toasts (§12.50) -------------------- */
 
@@ -250,8 +256,9 @@ export function Console({
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      // §14.1. One guard, shared: the three copies of this check all missed
+      // contenteditable.
+      if (isTypingTarget(event.target)) return;
       // The modal owns the keyboard while it is open — Esc there raises the
       // discard confirm rather than clearing the console's selection.
       if (editingId) return;
@@ -300,125 +307,134 @@ export function Console({
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
 
   return (
-    <div className="flex h-dvh flex-col bg-surface-base">
-      <ConsoleHeader
-        rows={all}
-        chips={chips}
-        onToggleChip={toggleChip}
-        onResetChips={resetChips}
-        query={typed}
-        onQueryChange={setTyped}
-        matchCount={filtered.length}
-        totalCount={rows.length}
-        fetchedAt={data?.fetchedAt ?? null}
-        feedNewestAt={data?.feedNewestAt ?? null}
-        feedStale={feedStale}
-        dispatchTz={dispatchTz}
-        user={user}
-      />
-
-      {/**
-        * §9.8. The half that makes §5.9's dimming legible: the board going
-        * grey says something is wrong, and only this says what, since when,
-        * and that an ETA read off this screen must not be quoted to a broker.
-        */}
-      {feedStale ? (
-        <FeedBanner
-          feedNewestAt={data?.feedNewestAt ?? null}
+    /*
+     * §14.5. One layer for the cheat sheet, the palette and the tour, so two
+     * of them can never be on screen at once. The edit modal stays outside
+     * it: it holds unsaved state and sits above, at z-40.
+     */
+    <OverlayProvider>
+      <div className="flex h-dvh flex-col bg-surface-base">
+        <ConsoleHeader
+          rows={all}
+          chips={chips}
+          onToggleChip={toggleChip}
+          onResetChips={resetChips}
+          query={typed}
+          onQueryChange={setTyped}
+          matchCount={filtered.length}
+          totalCount={rows.length}
           fetchedAt={data?.fetchedAt ?? null}
-          pollMs={FLEET_POLL_MS}
+          feedNewestAt={data?.feedNewestAt ?? null}
+          feedStale={feedStale}
           dispatchTz={dispatchTz}
-          onRetry={() => void refetch()}
-          retrying={isFetching}
+          user={user}
         />
-      ) : null}
 
-      {missingTruck ? (
-        <div className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg">
-          <span className="flex-1">
-            Truck {missingTruck} is not in the active fleet — it may be inactive
-            or the number may be wrong. Showing the whole fleet instead.
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setMissingTruck(null);
-              syncUrl({ truck: null });
-            }}
-            className="font-cond text-micro uppercase tracking-[.08em] text-text"
-          >
-            Dismiss
-          </button>
+        {/**
+         * §9.8. The half that makes §5.9's dimming legible: the board going
+         * grey says something is wrong, and only this says what, since when,
+         * and that an ETA read off this screen must not be quoted to a broker.
+         */}
+        {feedStale ? (
+          <FeedBanner
+            feedNewestAt={data?.feedNewestAt ?? null}
+            fetchedAt={data?.fetchedAt ?? null}
+            pollMs={FLEET_POLL_MS}
+            dispatchTz={dispatchTz}
+            onRetry={() => void refetch()}
+            retrying={isFetching}
+          />
+        ) : null}
+
+        {missingTruck ? (
+          <div className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg">
+            <span className="flex-1">
+              Truck {missingTruck} is not in the active fleet — it may be inactive or the
+              number may be wrong. Showing the whole fleet instead.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setMissingTruck(null);
+                syncUrl({ truck: null });
+              }}
+              className="font-cond text-micro uppercase tracking-[.08em] text-text"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line-soft px-4">
+            <span className="font-cond text-[12px] font-semibold uppercase tracking-[.1em] text-text-secondary">
+              Fleet — {rows.length} trucks · sorted by urgency
+            </span>
+            <span className="font-sans text-small text-text-muted">
+              {selectedId ? (
+                <>
+                  1 selected · <span className="text-accent">Esc</span> to clear
+                </>
+              ) : (
+                <>
+                  <span className="text-accent">/</span> to search
+                </>
+              )}
+            </span>
+          </div>
+
+          <Split
+            onResizeEnd={onResizeEnd}
+            list={
+              <FleetList
+                rows={ordered}
+                fetchedAt={data?.fetchedAt ?? null}
+                feedStale={data?.feedStale ?? false}
+                selectedId={selectedId}
+                query={query}
+                drift={drift}
+                onResort={resort}
+                onSelect={select}
+                onEdit={setEditingId}
+              />
+            }
+            map={
+              <FleetMap
+                rows={filtered}
+                fetchedAt={data?.fetchedAt ?? null}
+                feedStale={data?.feedStale ?? false}
+                selectedId={selectedId}
+                onSelect={select}
+                onEdit={setEditingId}
+                resizeSignal={resizeSignal}
+                reducedMotion={reducedMotion}
+              />
+            }
+          />
         </div>
-      ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line-soft px-4">
-          <span className="font-cond text-[12px] font-semibold uppercase tracking-[.1em] text-text-secondary">
-            Fleet — {rows.length} trucks · sorted by urgency
-          </span>
-          <span className="font-sans text-small text-text-muted">
-            {selectedId ? (
-              <>
-                1 selected · <span className="text-accent">Esc</span> to clear
-              </>
-            ) : (
-              <>
-                <span className="text-accent">/</span> to search
-              </>
-            )}
-          </span>
-        </div>
-
-        <Split
-          onResizeEnd={onResizeEnd}
-          list={
-            <FleetList
-              rows={ordered}
-              fetchedAt={data?.fetchedAt ?? null}
-              feedStale={data?.feedStale ?? false}
-              selectedId={selectedId}
-              query={query}
-              drift={drift}
-              onResort={resort}
-              onSelect={select}
-              onEdit={setEditingId}
-            />
-          }
-          map={
-            <FleetMap
-              rows={filtered}
-              fetchedAt={data?.fetchedAt ?? null}
-              feedStale={data?.feedStale ?? false}
-              selectedId={selectedId}
-              onSelect={select}
-              onEdit={setEditingId}
-              resizeSignal={resizeSignal}
-              reducedMotion={reducedMotion}
-            />
-          }
+        <Toasts
+          toasts={toasts}
+          onOpen={(truckId) => {
+            select(truckId);
+            setEditingId(truckId);
+          }}
+          onExpire={dismissToast}
+          reducedMotion={reducedMotion}
         />
+
+        {editingRow ? (
+          <EditStopModal
+            row={editingRow}
+            drivers={drivers}
+            role={role}
+            dispatchTz={dispatchTz}
+            onClose={() => setEditingId(null)}
+          />
+        ) : null}
+
+        <ShortcutSheet />
       </div>
-
-      <Toasts
-        toasts={toasts}
-        onOpen={(truckId) => {
-          select(truckId);
-          setEditingId(truckId);
-        }}
-        onExpire={dismissToast}
-        reducedMotion={reducedMotion}
-      />
-
-      {editingRow ? (
-        <EditStopModal
-          row={editingRow}
-          drivers={drivers}
-          role={role}
-          dispatchTz={dispatchTz}
-          onClose={() => setEditingId(null)}
-        />
-      ) : null}
-    </div>
+    </OverlayProvider>
   );
 }
