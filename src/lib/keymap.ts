@@ -73,20 +73,44 @@ export interface Binding {
 }
 
 /**
- * The `2g` keymap plus §14's additions. `planned` entries appear in the sheet
- * greyed, because a sheet that lists a key which does nothing is worse than
- * one that admits the key is coming.
+ * The `2g` keymap plus §14's additions.
+ *
+ * `planned` entries appear in the sheet greyed, because a sheet that lists a
+ * key which does nothing is worse than one that admits the key is coming. As
+ * of §14 feature 10 there are none left — the field stays because the next
+ * proposed binding will need it, and because the sheet's greyed branch is
+ * asserted rather than hypothetical.
  */
 export const KEYMAP: readonly Binding[] = [
   { keys: ['↑', '↓'], label: 'Move the selection', group: 'list', owner: 'Console' },
   { keys: ['Enter'], label: 'Open the selected truck', group: 'list', owner: 'Console' },
   { keys: ['E'], label: 'Edit the selected stop', group: 'list', owner: 'Console' },
-  { keys: ['Esc'], label: 'Clear the search, then the selection', group: 'list', owner: 'Console' },
-  { keys: ['1', '–', '7'], label: 'Toggle a status filter', group: 'filters', owner: 'FilterChips' },
+  {
+    keys: ['Esc'],
+    label: 'Clear the search, then the selection',
+    group: 'list',
+    owner: 'Console',
+  },
+  {
+    keys: ['1', '–', '7'],
+    label: 'Toggle a status filter',
+    group: 'filters',
+    owner: 'FilterChips',
+  },
   { keys: ['0'], label: 'Reset to All', group: 'filters', owner: 'FilterChips' },
-  { keys: ['/'], label: 'Filter the list in place', group: 'search', owner: 'SearchField' },
+  {
+    keys: ['/'],
+    label: 'Filter the list in place',
+    group: 'search',
+    owner: 'SearchField',
+  },
   { keys: ['?'], label: 'Show this sheet', group: 'overlays', owner: 'ShortcutSheet' },
-  { keys: ['⌘', 'K'], label: 'Jump to a truck, driver or view', group: 'overlays', owner: 'CommandPalette', planned: true },
+  {
+    keys: ['⌘', 'K'],
+    label: 'Jump to a truck, driver or view',
+    group: 'overlays',
+    owner: 'CommandPalette',
+  },
   { keys: ['P'], label: 'Pin the selected truck', group: 'list', owner: 'usePinned' },
   { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'Console' },
   { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },

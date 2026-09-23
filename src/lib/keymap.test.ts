@@ -68,10 +68,11 @@ describe('the registry describes what the console actually binds', () => {
   });
 
   it('marks as planned exactly the keys §14 proposes but has not built', () => {
-    // The brief proposes ? ⌘K P X D. `?` shipped with the sheet and `D`
-    // with the density toggle; the rest arrive with their features, and
-    // until then the sheet says so rather than listing a dead key.
+    // The brief proposed ? ⌘K P X D. All five have shipped — `⌘K` last, with
+    // the command palette — so nothing is planned any more. This is an
+    // assertion and not a deletion: a binding added to the map without a
+    // handler should fail here rather than appear in the sheet as a live key.
     const planned = KEYMAP.filter((b) => b.planned).map((b) => b.keys.join(''));
-    expect(planned.sort()).toEqual(['⌘K']);
+    expect(planned).toEqual([]);
   });
 });

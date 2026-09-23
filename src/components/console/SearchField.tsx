@@ -53,7 +53,14 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
             onChange('');
           }
         }}
-        placeholder="Truck, driver, city, load…"
+        /*
+         * §14.5 split the two text boxes by verb: `/` filters the list in
+         * place, `⌘K` jumps and closes. The placeholder says which this one
+         * is, because "Truck, driver, city, load…" described what it matches
+         * and not what it does — and with a second box that matches the same
+         * five fields, what it does is the only thing that tells them apart.
+         */
+        placeholder="Filter list…"
         aria-label="Search the fleet"
         className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-muted"
       />
@@ -73,10 +80,30 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
           </button>
         </>
       ) : (
-        <span className="shrink-0 border border-line-hair px-[5px] py-px font-mono text-[11px] text-text-muted">
-          /
+        /*
+         * §14.5: "shows both hints". Two caps rather than one, so the box
+         * that filters also names the box that jumps — which is the only
+         * place a dispatcher will find out the second one exists.
+         */
+        <span className="flex shrink-0 items-center gap-1">
+          <Cap>/</Cap>
+          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
+            filter
+          </span>
+          <Cap>⌘K</Cap>
+          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
+            jump
+          </span>
         </span>
       )}
     </label>
+  );
+}
+
+function Cap({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="border border-line-hair px-[5px] py-px font-mono text-[11px] text-text-muted">
+      {children}
+    </span>
   );
 }

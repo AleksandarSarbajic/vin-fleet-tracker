@@ -73,7 +73,7 @@ describe('the cheat sheet (§14 feature 1)', () => {
     input.remove();
   });
 
-  it("does not open on ⌘? or ctrl+? — those belong to the browser", () => {
+  it('does not open on ⌘? or ctrl+? — those belong to the browser', () => {
     mount(<ShortcutSheet />);
     press('?', { metaKey: true });
     press('?', { ctrlKey: true });
@@ -95,6 +95,12 @@ describe('the cheat sheet (§14 feature 1)', () => {
   it('marks the keys that do not work yet, without promising when they will', () => {
     mount(<ShortcutSheet />);
     press('?');
+    /*
+     * Vacuous today, and kept deliberately: §14 feature 10 shipped the last
+     * planned binding, so this counts zero against zero. It is the assertion
+     * that regains force the moment a proposed key is added to the map ahead
+     * of its handler, which is exactly when the greyed branch matters.
+     */
     const planned = KEYMAP.filter((b) => b.planned).length;
     expect(text().match(/not yet/g) ?? []).toHaveLength(planned);
   });

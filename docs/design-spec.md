@@ -5672,6 +5672,36 @@ vehicle per poll (one truck carried five, five seconds apart), so half an hour
 of raw history is between 60 and 300 rows and the shape of that number is the
 vendor's business. `distinct on` a truncated minute caps it at thirty.
 
+**Views and the palette, and the one thing that decided their shape.** §14.6
+put views first "because ⌘K applies a saved view and would otherwise ship with
+a dead entry", and that held.
+
+A **view** is the chip set and the search term — the two things that decide
+which trucks are on screen — and deliberately not the selected truck (a
+cursor; saving it would make applying a view move the map), the row density
+(a person's preference, which would then fight `D`) or the pinned block
+(also a person, and applying a view must never change which trucks someone
+chose to watch). It refuses rather than overwrites, on the pin cap's ruling.
+
+§14.3's **no-writes rule** for ⌘K is enforced where the catalogue is built
+rather than remembered at each call site: `lib/palette` has a closed `ACTION`
+set and a closed `kind` set, so a writing command cannot be added without
+adding a kind and failing a test. Two candidates were considered and left
+out — "Clear the filters", which is `0` and a saved view away, and "Open the
+selected stop", which raises a form that writes. That form is the line the
+rule draws.
+
+**The last `planned` binding has shipped.** `KEYMAP` now has none, so
+`ShortcutSheet`'s greyed "not yet" branch is asserted against zero. The
+assertion and the branch both stay: they regain force the moment a proposed
+key is added to the map ahead of its handler, which is exactly when a sheet
+listing a dead key does damage.
+
+**§14.5's "the placeholder becomes 'Filter list…' and shows both hints"** is
+the only place a dispatcher finds out the second box exists, so the field
+prints two caps — `/ filter` and `⌘K jump` — rather than the single `/` it
+carried since phase 2.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

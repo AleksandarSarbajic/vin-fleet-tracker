@@ -30,7 +30,9 @@ import { refusalMessage, type SavedView } from '@/lib/views';
 import { isTypingTarget } from '@/lib/keymap';
 import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
+import { CommandPalette } from '@/components/overlay/CommandPalette';
 import { useDensity } from '@/hooks/useDensity';
+import { nextDensity } from '@/lib/density';
 import { ListToolbar } from './ListToolbar';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { BulkActionModal } from './BulkActionModal';
@@ -257,6 +259,12 @@ export function Console({
       syncUrl({ truck: typeof number === 'number' ? String(number) : null });
     },
     [rows, syncUrl],
+  );
+
+  /** §14 feature 10. The palette prints the selected truck's own label. */
+  const selectedRow = useMemo(
+    () => (selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null),
+    [selectedId, rows],
   );
 
   const editingRow = useMemo(
@@ -675,6 +683,30 @@ export function Console({
             onClose={() => setBulkAction(null)}
           />
         ) : null}
+
+        {/*
+          §14 feature 10. Inside the provider, and it builds its own action
+          list: "Show keyboard shortcuts" is a move on the overlay layer, and
+          the layer is only reachable from within its own provider — which
+          Console renders and therefore cannot read.
+        */}
+        <CommandPalette
+          trucks={ordered}
+          views={savedViews.views}
+          selectedLabel={
+            selectedRow === null
+              ? null
+              : `Truck ${selectedRow.truckNumber ?? selectedRow.samsaraName}`
+          }
+          selectedPinned={selectedId !== null && pins.isPinned(selectedId)}
+          density={density}
+          onSelectTruck={select}
+          onApplyView={applyView}
+          onTogglePin={() => {
+            if (selectedId) pins.toggle(selectedId);
+          }}
+          onToggleDensity={() => setDensity(nextDensity(density))}
+        />
 
         <ShortcutSheet />
       </div>
