@@ -37,6 +37,7 @@ import { ListToolbar } from './ListToolbar';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { BulkActionModal } from './BulkActionModal';
 import { usePinned } from '@/hooks/usePinned';
+import { TruckTimeline } from './TruckTimeline';
 import { useRowFlash } from '@/hooks/useRowFlash';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { emptyState, type EmptyAction } from '@/lib/empty-state';
@@ -226,6 +227,8 @@ export function Console({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** §12.10: Enter opens the edit modal on the selected row. */
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** §14 feature 15. Read-only, so it needs no dirty state and no confirm. */
+  const [timelineId, setTimelineId] = useState<string | null>(null);
   const [missingTruck, setMissingTruck] = useState<string | null>(null);
   const resolvedInitialTruck = useRef(false);
 
@@ -265,6 +268,11 @@ export function Console({
   const selectedRow = useMemo(
     () => (selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null),
     [selectedId, rows],
+  );
+
+  const timelineRow = useMemo(
+    () => (timelineId ? (rows.find((r) => r.id === timelineId) ?? null) : null),
+    [timelineId, rows],
   );
 
   const editingRow = useMemo(
@@ -641,6 +649,7 @@ export function Console({
                   selectedId={selectedId}
                   onSelect={select}
                   onEdit={setEditingId}
+                  onTimeline={setTimelineId}
                   resizeSignal={resizeSignal}
                   reducedMotion={reducedMotion}
                 />
@@ -658,6 +667,15 @@ export function Console({
             />
           </div>
         </div>
+
+        {timelineRow ? (
+          <TruckTimeline
+            truckId={timelineRow.id}
+            truckLabel={String(timelineRow.truckNumber ?? timelineRow.samsaraName)}
+            dispatchTz={dispatchTz}
+            onClose={() => setTimelineId(null)}
+          />
+        ) : null}
 
         {editingRow ? (
           <EditStopModal

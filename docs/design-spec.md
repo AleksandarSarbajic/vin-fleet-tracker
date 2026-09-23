@@ -5702,6 +5702,42 @@ the only place a dispatcher finds out the second box exists, so the field
 prints two caps — `/ filter` and `⌘K jump` — rather than the single `/` it
 carried since phase 2.
 
+**The timeline sits next to three deferred surfaces, so the line is drawn in
+the query rather than in a component.** §12.15 defers **History**, the
+**audit-log view** and **override review** to v2, and warns that the `History`
+button in §9.4's detail panel needs hiding until then because it would
+"promise a reversal path that does not exist". §14 feature 15 asks for a
+per-truck timeline, which is adjacent to all three.
+
+What it does:
+
+- Reads `stops`, `loads`, `overrides` and `profiles` — **never `audit_log`**.
+  That table is written on every edit and nothing reads it back; the first
+  thing that does should be the audit view, designed as one.
+- Shows the overrides on **this truck's** stops. `4c`'s deferred override
+  review is a fleet-wide weekly screen for judging whether overrides are used
+  honestly; this answers "why does this truck say ARRIVED when it is on the
+  interstate", which the row already half-answers with the forced glyph.
+- Carries **no action at all** — no undo, no restore, no reverse — and says so
+  at its foot: *"A record, not a control."* Silence about having no undo
+  invites exactly the question the deferral was meant to close.
+
+Three smaller rulings inside it. `stopState` is read off `arrived_at` and
+`departed_at` and never off `loads.status`, which is a label for the whole
+load and can say `AT_RECEIVER` while the second of three stops is ahead. An
+override has **three** end states, not two — cleared is a dispatcher changing
+their mind, expired is §9.5 working as designed, and printing both as "ended"
+loses the only interesting difference. And lateness restates §12.1's rule
+exactly as §14 feature 8 does: the deadline is `apptEnd ?? apptStart`, and the
+window is the grace.
+
+It opens from the map popup and is **not** on the shared overlay layer. That
+layer is the palette, the cheat sheet and the tour, and "only one at a time"
+is its whole point — a timeline must not close the tour that is explaining
+it. It sits at z-40 beside `EditStopModal`, which is the precedent for a
+surface outside that set, and it needs no discard confirm because it holds
+nothing.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

@@ -69,6 +69,8 @@ interface Props {
   onSelect: (id: string | null) => void;
   /** §12.10's Enter, reachable from the map too. */
   onEdit: (id: string) => void;
+  /** §14 feature 15. */
+  onTimeline: (id: string) => void;
   /** Incremented on split drag-end. The map reflows then, never mid-drag. */
   resizeSignal: number;
   reducedMotion: boolean;
@@ -81,6 +83,7 @@ export function FleetMap({
   selectedId,
   onSelect,
   onEdit,
+  onTimeline,
   resizeSignal,
   reducedMotion,
 }: Props) {
@@ -270,6 +273,7 @@ export function FleetMap({
               row={selectedRow}
               fetchedAt={fetchedAt}
               onEdit={onEdit}
+              onTimeline={onTimeline}
               onClose={() => onSelect(null)}
             />
           ) : null}

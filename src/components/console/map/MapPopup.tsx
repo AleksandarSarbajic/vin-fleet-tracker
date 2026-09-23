@@ -124,11 +124,19 @@ export function MapPopup({
   row,
   fetchedAt,
   onEdit,
+  onTimeline,
   onClose,
 }: {
   row: FleetRow;
   fetchedAt: string | null;
   onEdit: (id: string) => void;
+  /**
+   * §14 feature 15. The popup is the per-truck surface that already exists,
+   * so the timeline opens from here rather than from a new binding — §14
+   * proposed five keys and no more, and a sixth is an addition the cheat
+   * sheet cannot justify.
+   */
+  onTimeline: (id: string) => void;
   onClose: () => void;
 }) {
   if (row.lat === null || row.lng === null) return null;
@@ -251,7 +259,14 @@ export function MapPopup({
           </Row>
         </div>
 
-        <div className="flex justify-end border-t border-line-soft px-[10px] py-2">
+        <div className="flex justify-end gap-2 border-t border-line-soft px-[10px] py-2">
+          <button
+            type="button"
+            onClick={() => onTimeline(row.id)}
+            className="h-7 border border-line-hair px-2.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+          >
+            Timeline
+          </button>
           <button
             type="button"
             onClick={() => onEdit(row.id)}
