@@ -16,3 +16,9 @@ next-env.d.ts
 
 # local test cluster (scripts/test-db.sh)
 .testdb/
+
+# Branding source under consideration, not an asset yet (§14 feature 13).
+# The file stays on disk to be looked at; it is not committed while it is
+# undecided. Today's copy is a 500x302 JPEG misnamed .png, which is too weak
+# a source for a 16px tile — see §14.6.
+logo.png
