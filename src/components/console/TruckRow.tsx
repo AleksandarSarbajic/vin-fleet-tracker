@@ -16,6 +16,8 @@ import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { StatusChip } from './StatusChip';
 import { ROW_HEIGHT, type Density } from '@/lib/density';
+import { addressText, loadText } from '@/lib/copy-text';
+import { CopyButton } from './CopyButton';
 
 /**
  * design-spec §4.1, with correction 2 applied: Appt 128 AND Status 128, the
@@ -581,11 +583,26 @@ function TruckRowImpl({
         </div>
       ) : null}
 
+      {/*
+        §14.5 places copy "at the right edge of Next stop and the load cell".
+        DEVIATION, and the reason: this row has no load cell. The load number
+        lives inside Next stop and only when the truck holds more than one
+        load (§12.13), so both controls sit here — the cell that carries both
+        facts. They are absolutely positioned over the truncation, so neither
+        widens a fixed column, which is the constraint §14.5 actually set.
+      */}
       <div
         title={stopTitle(row) ?? undefined}
-        className={`truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
+        className={`relative truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
       >
         {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
+        <CopyButton value={loadText(row)} label="Copy load info" glyph="load" offset="0px" />
+        <CopyButton
+          value={addressText(row)}
+          label="Copy address"
+          glyph="address"
+          offset="54px"
+        />
       </div>
 
       {/**
