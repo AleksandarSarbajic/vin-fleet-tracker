@@ -14,7 +14,10 @@ export function useChipFilters(
   syncUrl: (next: { chips: FilterKey[] }) => void,
 ) {
   const [chips, setChips] = useState<Set<FilterKey>>(
-    () => new Set(initialChips.filter((c): c is FilterKey => FILTER_KEYS.includes(c as FilterKey))),
+    () =>
+      new Set(
+        initialChips.filter((c): c is FilterKey => FILTER_KEYS.includes(c as FilterKey)),
+      ),
   );
 
   /**
@@ -42,10 +45,27 @@ export function useChipFilters(
     [chips, syncUrl],
   );
 
+  /**
+   * §14 feature 11. The whole set at once, for applying a saved view.
+   *
+   * Separate from `toggleChip` rather than a loop over it: toggling four
+   * chips would write the URL four times and leave four entries where the
+   * dispatcher made one choice. Same rule as above — the URL is written from
+   * the event, once.
+   */
+  const applyChips = useCallback(
+    (keys: readonly FilterKey[]) => {
+      const next = new Set(keys);
+      setChips(next);
+      syncUrl({ chips: [...next] });
+    },
+    [syncUrl],
+  );
+
   const resetChips = useCallback(() => {
     setChips(new Set());
     syncUrl({ chips: [] });
   }, [syncUrl]);
 
-  return { chips, toggleChip, resetChips };
+  return { chips, toggleChip, applyChips, resetChips };
 }

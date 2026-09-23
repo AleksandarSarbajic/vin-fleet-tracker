@@ -25,6 +25,8 @@ import { Split } from './Split';
 import { FleetMap } from './map/FleetMap';
 import { useDisplayOrder } from './useDisplayOrder';
 import { useChipFilters } from './useChipFilters';
+import { useSavedViews, viewChips } from './useSavedViews';
+import { refusalMessage, type SavedView } from '@/lib/views';
 import { isTypingTarget } from '@/lib/keymap';
 import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
@@ -110,7 +112,10 @@ export function Console({
    * toggle used to call syncUrl inside a setChips updater, which React runs
    * during render — so router.replace fired mid-render.
    */
-  const { chips, toggleChip, resetChips } = useChipFilters(initialChips, syncUrl);
+  const { chips, toggleChip, applyChips, resetChips } = useChipFilters(
+    initialChips,
+    syncUrl,
+  );
 
   const { data, refetch, isFetching, isError } = useFleet(initial);
   /**
@@ -393,6 +398,34 @@ export function Console({
     [all.length, rows.length, filtered.length, unpinnedRows.length, query, chips],
   );
 
+  /**
+   * §14 feature 11. A view is the chip set and the search term — the two
+   * things that decide which trucks are on screen — and nothing else. Not the
+   * selected truck, which is a cursor; not density or pins, which belong to a
+   * person rather than to a slice of the fleet. See `lib/views`.
+   */
+  const viewState = useMemo(() => ({ query, chips: [...chips] }), [query, chips]);
+  const savedViews = useSavedViews(viewState);
+
+  const applyView = useCallback(
+    (view: SavedView) => {
+      // `setTyped`, not `setQuery`: the field is the source and the debounce
+      // carries it through. Setting the derived value would leave the search
+      // box showing the term the previous view was filtered by.
+      setTyped(view.query);
+      applyChips(viewChips(view));
+    },
+    [applyChips],
+  );
+
+  const saveView = useCallback(
+    (name: string) => {
+      const refusal = savedViews.save(name);
+      return refusal === null ? null : refusalMessage(refusal, name);
+    },
+    [savedViews],
+  );
+
   const onEmptyAction = useCallback(
     (action: EmptyAction) => {
       if (action === 'clear-chips') resetChips();
@@ -467,6 +500,16 @@ export function Console({
           feedStale={feedStale}
           dispatchTz={dispatchTz}
           user={user}
+          views={{
+            saved: savedViews.views,
+            active: savedViews.active,
+            onApply: applyView,
+            onSave: saveView,
+            onRemove: savedViews.remove,
+            // Nothing to save when the board already IS a saved view; the
+            // save would only be refused as a duplicate a moment later.
+            canSaveCurrent: savedViews.active === null,
+          }}
         />
 
         {/**

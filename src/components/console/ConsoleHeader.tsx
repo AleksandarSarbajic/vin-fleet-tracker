@@ -7,10 +7,17 @@ import { SearchField } from './SearchField';
 import { FilterChips, type FilterKey } from './FilterChips';
 import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
+import { SavedViews } from './SavedViews';
+import type { SavedView } from '@/lib/views';
 
 /** design-spec §9.1. 56px, raised ground, hairline bottom. */
 
-function Clock({ instant, zone, label, primary }: {
+function Clock({
+  instant,
+  zone,
+  label,
+  primary,
+}: {
   instant: Date;
   zone: string;
   label: string;
@@ -69,6 +76,15 @@ interface Props {
    * sign out and no way to see which account you were on.
    */
   user: AccountUser;
+  /** §14 feature 11. A view IS a chip set and a search term, so it lives here. */
+  views: {
+    saved: SavedView[];
+    active: SavedView | null;
+    onApply: (view: SavedView) => void;
+    onSave: (name: string) => string | null;
+    onRemove: (id: string) => void;
+    canSaveCurrent: boolean;
+  };
 }
 
 export function ConsoleHeader({
@@ -85,6 +101,7 @@ export function ConsoleHeader({
   feedStale,
   dispatchTz,
   user,
+  views,
 }: Props) {
   /**
    * Seeded from the FETCH instant, not from the clock.
@@ -131,6 +148,14 @@ export function ConsoleHeader({
       />
 
       <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+        <SavedViews
+          views={views.saved}
+          active={views.active}
+          onApply={views.onApply}
+          onSave={views.onSave}
+          onRemove={views.onRemove}
+          canSaveCurrent={views.canSaveCurrent}
+        />
         <FilterChips
           rows={rows}
           selected={chips}
@@ -147,11 +172,11 @@ export function ConsoleHeader({
 
       <div className="flex items-center gap-4">
         {/**
-          * §9.1. The dot is `status.ontime.fg` when healthy and
-          * `status.late.fg` when the feed is down, and the label changes with
-          * it: `Last sync 06:41 · 9m ago`, naming the instant rather than only
-          * the age, because the instant is what gets said down a phone.
-          */}
+         * §9.1. The dot is `status.ontime.fg` when healthy and
+         * `status.late.fg` when the feed is down, and the label changes with
+         * it: `Last sync 06:41 · 9m ago`, naming the instant rather than only
+         * the age, because the instant is what gets said down a phone.
+         */}
         <div className="flex items-center gap-[7px]">
           <span
             className={`h-[7px] w-[7px] ${feedStale ? 'bg-status-late-fg' : 'bg-status-ontime-fg'}`}
