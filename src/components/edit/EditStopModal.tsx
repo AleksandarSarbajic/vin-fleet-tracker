@@ -608,14 +608,14 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
                 {stop ? `Edit stop — truck ${truckName}` : `New load — truck ${truckName}`}
               </h2>
-              <p className="mt-0.5 text-small text-text-muted">
+              <p className="mt-0.5 text-small text-text-mutedOnOverlay">
                 {stop
                   ? (stop.loadNumber ?? 'Load number not given yet')
                   : 'No load on this truck yet'}
                 {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
               </p>
             </div>
-            <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
+            <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
               Esc close
             </span>
           </div>
@@ -643,7 +643,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             {/* ---------------------------- assignment --------------------- */}
             <fieldset disabled={!mayEdit} className="border-0 p-0">
               <legend className="mb-2 flex w-full items-baseline justify-between border-b border-line-soft pb-1.5">
-                <span className="font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+                <span className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
                   Assignment
                 </span>
                 <span className="font-cond text-micro uppercase tracking-[.09em] text-status-risk-fg">
@@ -714,7 +714,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                   </span>
                 </label>
               </div>
-              <p className="mt-1.5 text-small text-text-muted">
+              <p className="mt-1.5 text-small text-text-mutedOnOverlay">
                 {currentDriverName
                   ? `Current assignment: ${currentDriverName}.`
                   : 'No driver on this truck.'}{' '}
@@ -752,7 +752,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
             {/* --------------------------- stop & load --------------------- */}
             <fieldset disabled={!mayEdit} className="mt-4 border-0 p-0">
-              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
                 Stop &amp; load
               </legend>
 
@@ -789,7 +789,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                 <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-line-soft py-1 pl-3 text-small">
                   {basisDetails.map((detail) => (
                     <Fragment key={detail.label}>
-                      <dt className="text-text-muted">{detail.label}</dt>
+                      <dt className="text-text-mutedOnOverlay">{detail.label}</dt>
                       <dd className="text-text-secondary">{detail.value}</dd>
                     </Fragment>
                   ))}
@@ -832,7 +832,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
             {/* ------------------------------ note ------------------------- */}
             <fieldset disabled={!mayEdit} className="mt-4 border-0 p-0">
-              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
                 Dispatcher note · visible to the next shift
               </legend>
               <textarea
@@ -974,7 +974,7 @@ function Field({
       {error ? (
         <span className="mt-1 block text-small text-status-late-fg">{error}</span>
       ) : help ? (
-        <span className="mt-1 block text-small text-text-muted">{help}</span>
+        <span className="mt-1 block text-small text-text-mutedOnOverlay">{help}</span>
       ) : null}
     </label>
   );

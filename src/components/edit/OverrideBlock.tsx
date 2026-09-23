@@ -87,7 +87,7 @@ export function OverrideBlock({
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
-      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
         Status override
       </legend>
 
@@ -101,7 +101,7 @@ export function OverrideBlock({
             className={`h-9 flex-1 border-l border-line-hair px-3 font-cond text-micro uppercase tracking-[.08em] first:border-l-0 ${
               draft.forced === segment.value
                 ? 'bg-accent text-text-inverse'
-                : 'bg-surface-overlay text-text-muted'
+                : 'bg-surface-overlay text-text-mutedOnOverlay'
             }`}
           >
             {segment.label}
@@ -111,7 +111,7 @@ export function OverrideBlock({
 
       {/* The engine keeps computing the real status the whole time (§9.5). */}
       <div className="mt-2 flex items-center justify-between border border-line-hair bg-surface-raised px-[11px] py-[9px]">
-        <span className="text-small text-text-muted">
+        <span className="text-small text-text-mutedOnOverlay">
           {forcing ? 'Computed status, currently overridden' : 'Computed status'}
         </span>
         <StatusChip status={computed} />
@@ -159,7 +159,7 @@ export function OverrideBlock({
                     className={`h-[26px] border px-2 font-cond text-micro uppercase tracking-[.08em] ${
                       draft.expiry === preset
                         ? 'border-accent bg-surface-overlay text-text'
-                        : 'border-line-soft text-text-muted'
+                        : 'border-line-soft text-text-mutedOnOverlay'
                     }`}
                   >
                     {EXPIRY_LABEL[preset]}
@@ -216,13 +216,13 @@ export function OverrideBlock({
                   className="h-10 w-full border border-line-hair bg-surface-sunken px-2.5 text-body tabular-nums text-text"
                 />
               </label>
-              <p className="col-span-1 self-end pb-2.5 text-small text-text-muted">
+              <p className="col-span-1 self-end pb-2.5 text-small text-text-mutedOnOverlay">
                 Wall time in your own zone, converted on the server — the same
                 path an appointment takes.
               </p>
             </div>
           ) : (
-            <p className="mt-2 text-small text-text-muted">
+            <p className="mt-2 text-small text-text-mutedOnOverlay">
               There is no &ldquo;never&rdquo;. At expiry the row returns to its
               computed status silently — nothing was decided by a person at that
               moment, so there is no toast.
@@ -246,16 +246,16 @@ export function OverrideBlock({
             </button>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-[14px] gap-y-[7px] text-body">
-            <dt className="text-text-muted">Showing</dt>
+            <dt className="text-text-mutedOnOverlay">Showing</dt>
             <dd className="text-text">{live.forcedStatus} — forced</dd>
-            <dt className="text-text-muted">Reason</dt>
+            <dt className="text-text-mutedOnOverlay">Reason</dt>
             <dd className="text-text">{live.reasonLabel}</dd>
-            <dt className="text-text-muted">Set by</dt>
+            <dt className="text-text-mutedOnOverlay">Set by</dt>
             <dd className="text-text">
               {live.setByName ?? 'unknown'} ·{' '}
               {timeInZone(new Date(live.setAtUtc), zone, { weekday: true })}
             </dd>
-            <dt className="text-text-muted">Expires</dt>
+            <dt className="text-text-mutedOnOverlay">Expires</dt>
             <dd className="tabular-nums text-text">
               {timeInZone(new Date(live.expiresAtUtc), zone, { weekday: true })}
             </dd>

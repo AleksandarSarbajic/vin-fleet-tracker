@@ -74,7 +74,7 @@ export function ArrivalFields({
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
-      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
         Arrival
       </legend>
 
@@ -117,13 +117,13 @@ export function ArrivalFields({
                   className="h-10 w-full border border-line-hair bg-surface-sunken px-2 pr-12 text-body text-text"
                 />
                 {abbrev ? (
-                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnOverlay">
                     {abbrev}
                   </span>
                 ) : null}
               </div>
             </label>
-            <p className="self-end pb-2 text-small text-text-muted">
+            <p className="self-end pb-2 text-small text-text-mutedOnOverlay">
               {/* Not "your clock": the number that matters is the receiver's,
                   and offering a second one invites typing it in. */}
               When the truck reached the receiver, on the receiver&rsquo;s clock.
@@ -138,7 +138,7 @@ export function ArrivalFields({
            * of opening the modal and pressing Save.
            */}
           {storedSource === 'detected' ? (
-            <p className="mt-2 text-small text-text-muted">
+            <p className="mt-2 text-small text-text-mutedOnOverlay">
               This arrival was detected from GPS. Changing the time replaces that
               with your own entry, and the row will read <em>marked</em> instead of{' '}
               <em>arrived</em>.

@@ -13,7 +13,7 @@ import { DriverName } from '@/components/DriverName';
  */
 
 function Appt({ utc, tz }: { utc: string | null; tz: string | null }) {
-  if (!utc || !tz) return <span className="text-text-muted">none</span>;
+  if (!utc || !tz) return <span className="text-text-mutedOnOverlay">none</span>;
   return <span className="tabular-nums">{timeInZone(new Date(utc), tz, { weekday: true })}</span>;
 }
 
@@ -54,7 +54,7 @@ export function ReassignConfirm({
               <p className="font-sans text-data font-bold tabular-nums text-text">
                 {gaining.truckLabel}
               </p>
-              <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-text-muted">
+              <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-text-mutedOnOverlay">
                 gains a driver
               </p>
               <Line label="From">
@@ -100,7 +100,7 @@ export function ReassignConfirm({
                   </Line>
                 </>
               ) : (
-                <p className="text-body text-text-muted">
+                <p className="text-body text-text-mutedOnOverlay">
                   No other truck is affected — this driver is not on one.
                 </p>
               )}
@@ -108,11 +108,11 @@ export function ReassignConfirm({
           </div>
 
           <p className="mt-3 text-[13px] leading-[1.6] text-text">{preview.summary}</p>
-          <p className="mt-2 text-small text-text-muted">{preview.note}</p>
+          <p className="mt-2 text-small text-text-mutedOnOverlay">{preview.note}</p>
         </div>
 
         <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-          <span className="text-small text-text-muted">
+          <span className="text-small text-text-mutedOnOverlay">
             {losing
               ? `Reversible from truck ${losing.truckLabel}'s history — history ships in v2.`
               : 'Reversible by clearing the driver again.'}
@@ -143,7 +143,7 @@ export function ReassignConfirm({
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <p className="grid grid-cols-[76px_1fr] gap-x-2 text-body text-text">
-      <span className="text-text-muted">{label}</span>
+      <span className="text-text-mutedOnOverlay">{label}</span>
       <span className="truncate">{children}</span>
     </p>
   );

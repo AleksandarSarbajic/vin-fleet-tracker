@@ -118,7 +118,7 @@ export function AppointmentFields({
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
-      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+      <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
         Appointment — as written on the rate confirmation
       </legend>
 
@@ -154,7 +154,7 @@ export function AppointmentFields({
                 className={`h-9 px-3 font-cond text-micro uppercase tracking-[.08em] ${
                   draft.type === type
                     ? 'bg-accent text-text-inverse'
-                    : 'bg-surface-overlay text-text-muted'
+                    : 'bg-surface-overlay text-text-mutedOnOverlay'
                 }`}
               >
                 {type}
@@ -274,7 +274,7 @@ export function AppointmentFields({
           {error || endError ? (
             <p className="mt-2 text-small text-status-late-fg">{error ?? endError}</p>
           ) : (
-            <p className="mt-2 text-small text-text-muted">
+            <p className="mt-2 text-small text-text-mutedOnOverlay">
               {draft.type === 'FCFS'
                 ? 'Receiving hours, as the facility keeps them. A truck arriving after the latest hour is late for this stop.'
                 : 'Typed as the facility reads it. The server converts to UTC — the zone above is what it converts from.'}
@@ -282,7 +282,7 @@ export function AppointmentFields({
           )}
         </>
       ) : (
-        <p className="text-small text-text-muted">
+        <p className="text-small text-text-mutedOnOverlay">
           No appointment. The truck reads <span className="text-status-neutral-fg">No appt</span>{' '}
           until one is entered.
         </p>
