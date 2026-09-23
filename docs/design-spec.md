@@ -5738,6 +5738,32 @@ it. It sits at z-40 beside `EditStopModal`, which is the precedent for a
 surface outside that set, and it needs no discard confirm because it holds
 nothing.
 
+**§14.5's shared scrim decided what the tour is.** *"Palette, cheat sheet and
+tour share one scrim and one layer, only one open at a time."* A tour that
+cuts a hole in the scrim to point at a control cannot share a scrim — it needs
+its own geometry, measured against whichever element it points at, and the
+moment it has that it is a second layer wearing the first one's name. So it is
+a stepped panel that NAMES the surfaces rather than a spotlight that points at
+them.
+
+The second reason is stronger than the first. A spotlight has to know where a
+control is, so every step becomes a ref into a component and the tour breaks
+silently when that component moves. This breaks loudly instead: every key a
+step names is looked up in `KEYMAP`, and a step naming a key the console does
+not have fails a test. It is §14.1's cheat-sheet argument applied to the one
+other surface that describes the console to a person.
+
+"Has seen the tour" is stored as a **version, not a boolean**, so a step added
+to explain a new feature can show itself again without showing the whole tour
+to someone who has already read it.
+
+It does **not** open itself when `localStorage` is unavailable. A tour that
+cannot record having been seen would open on every single load, which is worse
+than never opening — and private browsing, a blocked origin and a server
+render all land there. The shortcut sheet offers it back, so it is never
+unreachable, and being skipped counts as having been seen: crediting only
+"Done" teaches people to close it faster rather than to read it.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

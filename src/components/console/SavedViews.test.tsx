@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fleetHealth, fleetRow } from '@/test/fleet-row';
 import { stubLayout } from '@/test/layout';
 import { VIEW_CAP, VIEW_STORAGE_KEY } from '@/lib/views';
+import { TOUR_STORAGE_KEY, TOUR_VERSION } from '@/lib/tour';
 
 /**
  * §14 feature 11, wired. `views.test.ts` proves the rules; this proves the
@@ -58,6 +59,14 @@ beforeEach(() => {
       length: 0,
     },
   });
+  /*
+   * §14 feature 12 opens itself on a first visit, and this suite gives the
+   * console working storage — so without this the whole file would run with a
+   * modal over the board. It passes either way, which is exactly why it is
+   * worth pinning: a suite that is accidentally testing through an overlay
+   * will mask the first real thing that overlay breaks.
+   */
+  store.set(TOUR_STORAGE_KEY, String(TOUR_VERSION));
   restoreLayout = stubLayout({ width: 1100, height: 600 });
   container = document.createElement('div');
   document.body.appendChild(container);

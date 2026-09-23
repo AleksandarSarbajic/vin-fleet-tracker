@@ -31,6 +31,7 @@ import { isTypingTarget } from '@/lib/keymap';
 import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
 import { CommandPalette } from '@/components/overlay/CommandPalette';
+import { OnboardingTour } from '@/components/overlay/OnboardingTour';
 import { useDensity } from '@/hooks/useDensity';
 import { nextDensity } from '@/lib/density';
 import { ListToolbar } from './ListToolbar';
@@ -727,6 +728,7 @@ export function Console({
         />
 
         <ShortcutSheet />
+        <OnboardingTour />
       </div>
     </OverlayProvider>
   );

@@ -127,6 +127,22 @@ export function ShortcutSheet() {
           );
         })}
       </div>
+
+      {/*
+        §14 feature 12's way back in. The tour opens itself once and then
+        never again, so without this it would be unreachable — and it is not
+        worth a binding of its own (§14 proposed five keys and no more).
+        Opening it REPLACES this sheet, because the layer holds one value.
+      */}
+      <div className="border-t border-line-soft px-4 py-2">
+        <button
+          type="button"
+          onClick={() => show('tour')}
+          className="font-cond text-micro uppercase tracking-[.09em] text-accent hover:text-accent-hover"
+        >
+          Take the tour again
+        </button>
+      </div>
     </Overlay>
   );
 }
