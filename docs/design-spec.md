@@ -5419,3 +5419,189 @@ What else breaks:
 **Not ruled on.** The street guard (§12.55) plus a manual arrival control get
 us 133 and 135 without any of this, and learning wants a real week of arrivals
 before it has anything worth learning from.
+
+
+# 14. The fifteen features (design turn 5)
+
+Extracted from `design/Fleet_Tracker_dc.html` turn 5 — "Brief part 2: new
+tokens, measured · the busy-day composite · what competes". Turns 1–4 are the
+console that already exists; turn 5 is the only new material.
+
+**Read this, not the HTML.** CLAUDE.md's rule stands: from phase 1 onward the
+spec is the source. This section exists so that rule keeps holding for work
+the designer produced without the spec in hand — their own note says *"I don't
+have docs/design-spec.md; 2g + 3e are the spec being extended."*
+
+## 14.1 What turn 5 is, and what it is not
+
+It is three things: **5a** exact tokens with measured contrast, **5b** one
+composite of a busy day with most features on screen at once, and **5c** the
+collisions between features and the rule each one produced.
+
+It is **not** the detailed screens. Turn 5 closes with "approve 5a–5c, then
+detailed screens in brief order", so nine features have a measured token or a
+stated rule to build against and six do not. Which is which is recorded in
+§14.6, because a reviewer should be able to tell a drawn screen from an
+interpretation at a glance.
+
+Two notes the designer attached, both carried here so they are not lost with
+the HTML:
+
+- **The keymap could not be pulled from source.** No codebase was connected,
+  so the cheat sheet's contents are the `2g` keymap (`/ Esc ↑↓ Enter E 1–7 0`)
+  plus the new bindings proposed in turn 5 (`? ⌘K P X D`), asserted rather than
+  verified. The build resolves this by rendering the sheet from a **keymap
+  registry** rather than a hand-written list, so the document cannot disagree
+  with the application.
+- **"The brief says twelve and lists fifteen. All fifteen are in scope."**
+
+## 14.2 The contrast defect in every existing modal
+
+Found while measuring, and confirmed here independently:
+
+```
+text.muted #858d94 on surface.overlay #252a30 : 4.29   FAIL
+text.mutedOnOverlay #949ca4 on #252a30        : 5.20   passes
+```
+
+Every modal — `2c`, `3a`, `4a`, `4c` — renders muted ink at 4.29:1, under the
+4.5:1 floor. The replacement colour is already in the palette as
+`mutedOnSelected`; only the ground it is used against is new.
+
+**Why it survived:** `src/design/tokens.test.ts` enforces that no component
+hardcodes a hex, which is a different rule. Nothing asserted a ratio, so a
+failing pair passed every check for months. The fix ships with a contrast
+test, because a measurement nothing re-runs is a measurement that was true
+once.
+
+## 14.3 Relationships decided before drawing (5a preamble)
+
+- **The health strip is secondary.** Chips stay the filter and the only live
+  count; the strip prints nothing a chip already prints. It shows the day's
+  outcome — stops done, on time vs late — which no chip can express, because
+  an `Arrived` chip counts trucks on site *now*, not deliveries made.
+- **Multi-select is checkboxes** in a 28px leading column; shift-click on a
+  checkbox extends a range. Plain shift-click on rows was **rejected**: a row
+  click already means select + map follow, and ↑↓ own the selection.
+- **The trail is selected-only.** Thirty trails at once would read as traffic,
+  not history.
+- **⌘K is navigation plus view-only actions** — pin, density, apply a saved
+  view, open shortcuts. **No status writes**: a write from the palette would
+  skip the reason and expiry form.
+- **`?` is matched on the key value, not the physical key**, since on US
+  layouts it shares a key with `/`. Suppressed inside inputs, textareas and
+  contenteditable — the same guard as every other single-key binding.
+
+## 14.4 Tokens (5a), measured
+
+Additions only. Colours belong in `src/design/tokens.ts` and are spread into
+the Tailwind config; nothing here may be spelled out in a component.
+
+| Token · feature | Pair as rendered | Ratio | Source |
+|---|---|---|---|
+| `row.checked` §2 | `#949ca4` on `#1b222b` | 5.76 | = selected |
+| checkbox §2 | `#6e767d` edge · tick on accent | 3.86 · 8.96 | reused |
+| pin §4 | filled accent = pinned · hollow `#858d94` on hover | 8.96 · 5.30 | reused |
+| `row.flash.*` §6 §14 | late `#2b1c1c` risk `#2b2417` ontime `#15261d` arrived `#19232c` | ≥ 4.56 | new |
+| `trail` §9 | accent 1 → .75 → .5 → .3 → .15 on sunken | 9.45 5.79 3.21 1.91 1.33 | new |
+| health bar §8 | solid · hatched · hollow on raised | 7.06–8.91 · 3.51 | reused |
+| `text.mutedOnOverlay` §1 §10 §12 | `#949ca4` on `#252a30` | 4.29 → 5.20 | new · fix |
+| kbd cap §1 §10 | ⌘K primary on base, hair edge | 14.91 | reused |
+| `scrim` §1 §10 §12 | `rgb(9 11 13 / .72)` over base → `#0c0f11` | n/a | new |
+| copied §3 | icon + the word, never hue alone | 9.82 | reused |
+| favicon tile §13 | cyan on navy · navy tile on a dark tab bar | 5.57 · **1.34** | brand |
+
+**Three measurements changed a design decision**, and each is a rule rather
+than a preference:
+
+1. **Flash peaks at 60% of `status.bg`, not at it.** At full strength the
+   flash grounds fail muted ink (4.02–4.48). This is the only derived colour
+   in the pass.
+2. **Trail dots older than ~12 min fall below 3:1 on purpose.** They carry
+   direction; the marker carries status.
+3. **The favicon's navy tile disappears on a dark tab bar** at 1.34:1, so §13
+   gets a 1px cyan edge at 16 and 32px.
+
+```ts
+text:  { mutedOnOverlay: '#949ca4' },
+row:   { checked: '#1b222b',                    /* = selected */
+         flash: { late: '#2b1c1c', risk: '#2b2417',
+                  ontime: '#15261d', arrived: '#19232c',
+                  neutral: '#1f2327' } },       /* status.bg @ 60% over base */
+trail: { DEFAULT: '#94bce3', ramp: [1, .75, .5, .3, .15] },  /* newest → 30 min */
+scrim: 'rgb(9 11 13 / .72)',
+spacing: { 'row-comfortable': '44px', 'row-compact': '32px',
+           'chip-comfortable': '21px', 'chip-compact': '18px' },
+transitionDuration: { flash: '1600ms', chip: '160ms',
+                      'toast-in': '180ms', 'toast-out': '120ms',
+                      overlay: '120ms' },
+transitionTimingFunction: { flash: 'cubic-bezier(.2,0,0,1)',
+                            toast: 'cubic-bezier(.2,.8,.2,1)' },
+```
+
+### The whole motion budget
+
+| | |
+|---|---|
+| **Flash** | ground jumps to `row.flash` at 0ms, decays to its resting ground over 1600ms. No border flash, no scale. |
+| **Chip flip** | old chip fades out as the new fades in, 160ms. Width **snaps** — no layout animation. |
+| **Toast** | in: 8px rise + fade, 180ms. Out: fade, 120ms. Never takes focus. |
+| **Overlays** | palette, cheat sheet, tour: opacity only, 120ms. |
+| **Reduced motion** | everything becomes 0ms, and the flash is replaced by a static `◆ changed 04:11` tag after the chip for 60s. **The signal survives without the motion** — it is not simply dropped. |
+
+## 14.5 What competed, and the rule each collision produced (5c)
+
+These are the load-bearing decisions. Each one exists because two features
+wanted the same pixels.
+
+| Collision | Rule |
+|---|---|
+| **Flash vs checked ground** | Both tint the row. Flash wins for its 1.6s, then the row settles to `row.checked`. Checked state is carried by the tick, so nothing is lost while the ground is borrowed. |
+| **Re-sort under the cursor** | A flip re-sorts the row, and with a flash that is legible. But while the pointer is over the list, or 2+ rows are checked, re-sort is **held (max 10s)** so a click never lands on a row that just moved. The flash and toast still fire in place. |
+| **Bulk bar vs fold footer** | The same 44px slot. The bar replaces the footer while 2+ are checked, and keeps the one fact that mattered — the problems-below-the-fold count — at its right end. |
+| **Pinned vs urgency groups** | Above 40 trucks (`3d`) the pinned block sits above the first group header. Pinned trucks are **removed from their group, not duplicated**, and the group count reads "Late 4 · +1 pinned". Cap of 5 so the block never pushes the problem set below the fold. |
+| **Pin vs checkbox vs copy** | Three per-row affordances, three different cells: checkbox in its own column, pin after the truck number, copy at the right edge of `Next stop` and the load cell, **on hover only**. None shares a hit area; none widens a fixed column. |
+| **Search field vs ⌘K** | Two text boxes that both find trucks, split by verb: `/` filters the list in place, `⌘K` jumps and closes. The placeholder becomes "Filter list…" and shows both hints. |
+| **Health strip vs chips** | No number appears in both. Chips: trucks by state now. Strip: stops done today, split on time / late. Placed in the **list toolbar**, not the header, so it is read with the list rather than competing with the chip row. |
+| **Trail vs markers** | Dots, no stroke, 4–5px — smaller than any marker (14px+) and **never a line**, so a future route preview can own the solid line. The selected marker gains a steel edge so trail and head read as one object. |
+| **Toast placement** | Moves to the map's top-right: bottom-left now belongs to the bulk bar, and the list's top holds the pinned block. |
+| **Overlays** | Palette, cheat sheet and tour share one scrim and one layer, **only one open at a time**. `⌘K` during the tour ends the tour; `?` inside the palette types a "?". |
+
+## 14.6 Build order, and what each feature was built from
+
+Two deviations from the brief's order, both forced by §14.5: **density before
+bulk and pinned**, because the bulk bar and the checkbox column depend on the
+row geometry being settled; and **saved views before the palette**, because
+⌘K applies a saved view and would otherwise ship with a dead entry.
+
+| # | Feature | Stage | Built from |
+|---|---|---|---|
+| — | tokens, contrast fix, contrast test | 0 | **approved** (5a) |
+| — | keymap registry | 0 | interpretation — enabling work |
+| — | shared overlay layer | 0 | **approved** (5c overlays) |
+| 1 | keyboard cheat sheet (`?`) | 1 | interpretation (contents listed, no screen) |
+| 5 | row density toggle | 2 | **approved** (5a spacing pair) |
+| 2 | bulk override / bulk note | 2 | **approved** (5a, 5c) |
+| 4 | recent/pinned trucks | 2 | **approved** (5c) |
+| 3 | copy address / load info | 2 | interpretation (placement ruled, formats not) |
+| 6 | flash on change | 3 | **approved** (5a motion, 5c) |
+| 14 | toast/status transitions | 3 | **approved** (5a motion, 5c) |
+| 7 | empty / loading states | 3 | interpretation |
+| 8 | fleet health strip | 4 | **approved** (5a, 5c) |
+| 9 | movement trail | 4 | **approved** (5a ramp, 5c) |
+| 11 | saved filter views | 5 | interpretation |
+| 10 | command palette (⌘K) | 5 | **approved** (5b, 5c) |
+| 15 | per-truck timeline | 6 | interpretation |
+| 12 | onboarding tour | 6 | interpretation |
+| 13 | favicon / branding | 6 | **held** — see below |
+
+**§13 is held.** The only asset in the repo is a 500×302 JPEG named
+`logo.png`, which is too weak a source for a 16px tile, and the `SmallLogo.png`
+derivatives the brief says to drop do not exist here. 5a's requirement — a 1px
+cyan edge at 16/32px, because the navy tile reads 1.34:1 on a dark tab bar —
+stands and is waiting on a better source.
+
+**The strip's one boundary.** "Stops done today, on time vs late" is not on
+the fleet row, so §8 derives it in a separate read-only query. It does not
+touch the routing or status modules, which are frozen while the §12.61 shadow
+run collects.

@@ -26,6 +26,322 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 .dv-next a{color:#94bce3}
 </style></helmet>
 
+<section class="dv-turn" id="t5" style="--color-text:#e9ebed;--color-divider:rgba(255,255,255,.14)">
+<div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Brief part 2 — new tokens, measured · the busy-day composite · what competes</span></div>
+
+<div style="display:flex;flex-wrap:wrap;gap:26px;margin:0 0 30px;max-width:1240px">
+<div style="flex:1 1 380px;min-width:320px;padding:18px 20px;border:1px solid rgba(255,255,255,.13);background:#15181b">
+<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#858d94;margin-bottom:10px">Relationships decided before drawing</div>
+<ul style="margin:0;padding-left:16px;font:400 12.5px/1.65 'Barlow',sans-serif;color:#a9b0b6">
+<li><span style="color:#e9ebed">Health strip is secondary; chips stay the filter and the only live count.</span> The strip prints nothing a chip already prints. It shows the day's outcome — stops done, on time vs late — which no chip can express, because an Arrived chip counts trucks on site now, not deliveries made.</li>
+<li><span style="color:#e9ebed">Multi-select is checkboxes</span> in a 28px leading column; shift-click on a checkbox extends a range. Plain shift-click on rows was rejected: row click already means select + map follow, and ↑↓ own selection.</li>
+<li><span style="color:#e9ebed">Trail is selected-only</span> — your assumption holds. 30 trails at once would read as traffic, not history.</li>
+<li><span style="color:#e9ebed">⌘K is navigation plus view-only actions</span> (pin, density, apply a saved view, open shortcuts). No status writes: a write from the palette would skip the reason and expiry form.</li>
+<li><span style="color:#e9ebed"><span style="font-family:ui-monospace,Menlo,monospace">?</span> is matched on the key value, not the physical key</span> — on US layouts it shares a key with <span style="font-family:ui-monospace,Menlo,monospace">/</span>. Suppressed inside inputs, textareas and contenteditable, same guard as every single-key binding.</li>
+</ul>
+</div>
+<div style="flex:1 1 380px;min-width:320px;padding:18px 20px;border:1px solid rgba(255,255,255,.13);background:#15181b">
+<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#858d94;margin-bottom:10px">Caveats before the detailed screens</div>
+<ul style="margin:0;padding-left:16px;font:400 12.5px/1.65 'Barlow',sans-serif;color:#a9b0b6">
+<li><span style="color:#ff8a7a">No codebase is connected</span>, so the keymap can't be pulled from source. The cheat sheet will list the <a class="dv-oid" href="#2g">2g</a> keymap (/ Esc ↑↓ Enter E 1–7 0) plus the new bindings proposed here: <span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">? ⌘K P X D</span>. Connect the repo and I'll diff against it.</li>
+<li>I don't have <span style="color:#e9ebed">docs/design-spec.md</span>; <a class="dv-oid" href="#2g">2g</a> + <a class="dv-oid" href="#3e">3e</a> are the spec being extended.</li>
+<li>The brief says twelve and lists fifteen. All fifteen are in scope.</li>
+<li><span style="color:#e9ebed">Found while measuring:</span> muted ink inside every existing modal (<a class="dv-oid" href="#2c">2c</a> <a class="dv-oid" href="#3a">3a</a> <a class="dv-oid" href="#4a">4a</a> <a class="dv-oid" href="#4c">4c</a>) is #858d94 on #252a30 — <span style="color:#ff8a7a">4.29:1, a fail</span>. New token below; I'll apply it retroactively in the next pass.</li>
+</ul>
+</div>
+</div>
+
+<div class="dv-opts">
+
+<div class="dv-opt" id="5a">
+<div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>New and reused tokens — every pair the fifteen features introduce, measured</div>
+<div class="dv-card blueprint" style="width:1180px;padding:24px">
+<i class="corner tl" style="color:rgba(233,235,237,.5)"></i><i class="corner tr" style="color:rgba(233,235,237,.5)"></i><i class="corner bl" style="color:rgba(233,235,237,.5)"></i><i class="corner br" style="color:rgba(233,235,237,.5)"></i>
+<div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:30px">
+<div>
+<div style="display:grid;grid-template-columns:150px minmax(0,1fr) 92px 70px;align-items:center">
+<div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#858d94;padding-bottom:8px">Token · feature</div>
+<div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#858d94;padding-bottom:8px">Pair as rendered</div>
+<div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#858d94;padding-bottom:8px;text-align:right">Ratio</div>
+<div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#858d94;padding-bottom:8px;text-align:right">Source</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">row.checked<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§2 bulk</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09)"><span style="display:inline-block;padding:4px 9px;background:#1b222b;font:400 12px 'Barlow',sans-serif;color:#949ca4">#949ca4 on #1b222b</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">5.76</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">= selected</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">checkbox<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§2 bulk</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:12px"><span style="width:14px;height:14px;border:1px solid #6e767d"></span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6">#6e767d edge on base</span><span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;background:#94bce3"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#15181b" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6">tick on accent</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">3.86 · 8.96</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">reused</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">pin<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§4 pinned</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:10px"><svg width="14" height="14" viewBox="0 0 24 24" fill="#94bce3" stroke="#94bce3" stroke-width="1.5" stroke-linejoin="round"><path d="M12 17v5" fill="none"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6">filled accent = pinned · hollow #858d94 on hover = pinnable</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">8.96 · 5.30</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">reused</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">row.flash.*<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§6 · §14</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;flex-wrap:wrap;gap:6px"><span style="padding:4px 8px;background:#2b1c1c;font:400 11.5px 'Barlow',sans-serif;color:#858d94">late #2b1c1c</span><span style="padding:4px 8px;background:#2b2417;font:400 11.5px 'Barlow',sans-serif;color:#858d94">risk #2b2417</span><span style="padding:4px 8px;background:#15261d;font:400 11.5px 'Barlow',sans-serif;color:#858d94">on time #15261d</span><span style="padding:4px 8px;background:#19232c;font:400 11.5px 'Barlow',sans-serif;color:#858d94">arrived #19232c</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">≥ 4.56</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#e9ebed">new</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">trail<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§9 map</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:8px;background:#0f1215;padding-left:9px"><span style="width:5px;height:5px;border-radius:50%;background:#94bce3"></span><span style="width:4px;height:4px;border-radius:50%;background:#94bce3;opacity:.75"></span><span style="width:4px;height:4px;border-radius:50%;background:#94bce3;opacity:.5"></span><span style="width:4px;height:4px;border-radius:50%;background:#94bce3;opacity:.3"></span><span style="width:4px;height:4px;border-radius:50%;background:#94bce3;opacity:.15"></span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6;margin-left:6px">accent 1 → .75 → .5 → .3 → .15 on sunken</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace"><span style="color:#5ed69b">9.45 5.79 3.21</span> <span style="color:#f2b23f">1.91 1.33</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#e9ebed">new</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">health bar<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§8 strip</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:10px"><span style="display:flex;width:150px;height:8px;background:#1d2126;outline:4px solid #1d2126"><span style="width:40px;background:#5ed69b"></span><span style="width:6px;background:repeating-linear-gradient(135deg,#ff8a7a 0 1.5px,transparent 1.5px 3px)"></span><span style="flex:1;border:1px solid #6e767d"></span></span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6">solid · hatched · hollow on raised</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">7.06–8.91 · 3.51</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">reused</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">text.mutedOnOverlay<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§1 §10 §12 · all modals</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;gap:6px"><span style="padding:4px 8px;background:#252a30;font:400 11.5px 'Barlow',sans-serif;color:#858d94;text-decoration:line-through">#858d94 on #252a30</span><span style="padding:4px 8px;background:#252a30;font:400 11.5px 'Barlow',sans-serif;color:#949ca4">#949ca4 on #252a30</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace"><span style="color:#ff8a7a">4.29</span> <span style="color:#858d94">→</span> <span style="color:#5ed69b">5.20</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#e9ebed">new · fix</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">kbd cap<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§1 §10</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:6px"><span style="font:500 11px ui-monospace,monospace;color:#e9ebed;background:#15181b;border:1px solid rgba(255,255,255,.14);padding:1px 6px">⌘</span><span style="font:500 11px ui-monospace,monospace;color:#e9ebed;background:#15181b;border:1px solid rgba(255,255,255,.14);padding:1px 6px">K</span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6;margin-left:4px">primary on base, hair edge</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">14.91</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">reused</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">scrim<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§1 §10 §12</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09)"><span style="display:inline-block;padding:4px 9px;background:#0c0f11;border:1px solid rgba(255,255,255,.09);font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6">rgb(9 11 13 / .72) over base → #0c0f11 · text never sits on it</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#858d94">n/a</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#e9ebed">new</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">copied<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§3 copy</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5ed69b" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#5ed69b">Copied</span><span style="font:400 11.5px 'Barlow',sans-serif;color:#a9b0b6;margin-left:6px">icon + word, never hue alone</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace;color:#5ed69b">9.82</div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">reused</div>
+
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);font:500 12px/1.3 'Barlow',sans-serif;color:#e9ebed">favicon tile<span style="display:block;font:400 11px 'Barlow',sans-serif;color:#858d94">§13</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);display:flex;gap:6px"><span style="padding:4px 8px;background:#0d2b6b;font:600 11.5px 'Barlow',sans-serif;color:#29b6d8">cyan on navy</span><span style="padding:4px 8px;background:#202124;font:600 11.5px 'Barlow',sans-serif;color:#0d2b6b;outline:1px solid rgba(255,255,255,.1)">navy tile on a dark tab bar</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);text-align:right;font:500 11px ui-monospace,monospace"><span style="color:#5ed69b">5.57</span> · <span style="color:#ff8a7a">1.34</span></div>
+<div style="padding:9px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);text-align:right;font:400 11px 'Barlow',sans-serif;color:#858d94">brand</div>
+</div>
+<div style="font:400 11.5px/1.6 'Barlow',sans-serif;color:#858d94;margin-top:12px">Three results changed a design decision. <span style="color:#a9b0b6">Flash</span> at full status.bg fails muted ink (4.02–4.48), so the pulse peaks at 60% of it — the only derived colour in this pass. <span style="color:#a9b0b6">Trail</span> dots older than ~12 min fall below 3:1 on purpose: they carry direction, the marker carries status. <span style="color:#a9b0b6">Favicon</span>: the navy tile disappears on a dark tab bar, so §13 gets a 1px cyan edge at 16/32px.</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px">
+<div>
+<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#858d94;margin-bottom:10px">tailwind.config.ts — additions only</div>
+<pre style="margin:0;padding:14px;background:#0f1215;border:1px solid rgba(255,255,255,.1);font:400 11px/1.65 ui-monospace,Menlo,monospace;color:#a9b0b6;overflow:auto">text:  { mutedOnOverlay:'#949ca4' },
+row:   { checked:'#1b222b', /* = selected */
+         flash:{ late:'#2b1c1c', risk:'#2b2417',
+                 ontime:'#15261d', arrived:'#19232c',
+                 neutral:'#1f2327' } },
+       /* status.bg @ 60% over surface.base */
+trail: { DEFAULT:'#94bce3',
+         ramp:[1,.75,.5,.3,.15] }, /* newest → 30 min */
+scrim: 'rgb(9 11 13 / .72)',
+spacing:{ 'row-comfortable':'44px',
+          'row-compact':'32px',
+          'chip-comfortable':'21px',
+          'chip-compact':'18px' },
+transitionDuration:{ flash:'1600ms', chip:'160ms',
+          'toast-in':'180ms', 'toast-out':'120ms',
+          overlay:'120ms' },
+transitionTimingFunction:{
+          flash:'cubic-bezier(.2,0,0,1)',
+          toast:'cubic-bezier(.2,.8,.2,1)' }</pre>
+</div>
+<div>
+<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#858d94;margin-bottom:10px">Motion — the whole budget</div>
+<div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font:400 12px/1.5 'Barlow',sans-serif;color:#a9b0b6">
+<span style="color:#e9ebed">Flash</span><span>Ground jumps to row.flash (0ms), decays to its resting ground over 1600ms. No border flash, no scale.</span>
+<span style="color:#e9ebed">Chip flip</span><span>Old chip fades out as new fades in, 160ms. Width snaps — no layout animation.</span>
+<span style="color:#e9ebed">Toast</span><span>In: 8px rise + fade, 180ms. Out: fade, 120ms. Never takes focus.</span>
+<span style="color:#e9ebed">Overlays</span><span>Palette, cheat sheet, tour: opacity only, 120ms.</span>
+<span style="color:#e9ebed">Reduced</span><span>Everything becomes 0ms. Flash is replaced by a static <span style="color:#e9ebed">◆ changed 04:11</span> tag after the chip for 60s — the signal survives without the motion.</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="dv-opt" id="5b">
+<div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Normal busy day — pinned · compact · health strip · flash · bulk selection · trail · toast · ⌘K open<span onClick="{{ togglePalette }}" style="flex:none;white-space:nowrap;align-self:center;margin-left:10px;cursor:pointer;display:inline-flex;align-items:center;height:22px;padding:0 9px;border:1px solid #94bce3;color:#94bce3;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase" style-hover="background:#252a30">{{ paletteBtn }}</span></div>
+<div class="dv-card" style="width:1728px;height:1040px;display:grid;grid-template-rows:56px 1fr;overflow:hidden;position:relative">
+
+<div style="display:grid;grid-template-columns:auto 1px minmax(240px,340px) auto 1fr auto;align-items:center;gap:0 16px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
+<div style="display:flex;align-items:center;gap:12px"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
+<div style="height:24px;background:rgba(255,255,255,.13)"></div>
+<label style="display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:#15181b;border:1px solid rgba(255,255,255,.14)">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#858d94" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+<span style="font:400 13px 'Barlow',sans-serif;color:#858d94;flex:1;white-space:nowrap">Filter list…</span>
+<span style="font:500 11px ui-monospace,monospace;color:#858d94;border:1px solid rgba(255,255,255,.14);padding:1px 5px">/</span>
+<span style="font:500 11px ui-monospace,monospace;color:#858d94;border:1px solid rgba(255,255,255,.14);padding:1px 5px;white-space:nowrap;flex:none">⌘K jump</span>
+</label>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid rgba(255,255,255,.16);color:#e9ebed;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>Views<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#858d94" stroke-width="1.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+<div style="display:flex;align-items:center;gap:7px;overflow:hidden">
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:#252a30;border:1px solid #94bce3;color:#e9ebed;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">All<span style="font-family:'Barlow';color:#94bce3">30</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid #6b3129;color:#ff8a7a;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Late<span style="font-family:'Barlow'">3</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid #6b5224;color:#f2b23f;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">At risk<span style="font-family:'Barlow'">4</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid #27573a;color:#5ed69b;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">On time<span style="font-family:'Barlow'">12</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid #37516b;color:#9cc4e8;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Arrived<span style="font-family:'Barlow'">3</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid rgba(255,255,255,.14);color:#858d94;font:400 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Tomorrow<span style="font-family:'Barlow'">5</span></span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px dashed #6e767d;color:#b3bac0;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Data issues<span style="font-family:'Barlow'">3</span></span>
+</div>
+<div style="display:flex;align-items:center;gap:16px">
+<div style="display:flex;align-items:center;gap:7px"><span style="width:7px;height:7px;background:#5ed69b"></span><span style="font:400 12px 'Barlow',sans-serif;color:#a9b0b6">Synced 4s ago</span></div>
+<div style="display:flex;align-items:baseline;gap:9px;border-left:1px solid rgba(255,255,255,.13);padding-left:16px">
+<span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font:600 15px/1.05 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">14:31</span><span style="font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:#a9b0b6">CDT · DISPATCH</span></span>
+<span style="display:flex;flex-direction:column;align-items:flex-end"><span style="font:400 13px/1.05 'Barlow',sans-serif;color:#949ca4;font-variant-numeric:tabular-nums">21:31</span><span style="font:400 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;color:#858d94">CEST · YOU</span></span>
+</div>
+<span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid rgba(255,255,255,.14);font:600 11px 'Barlow Condensed',sans-serif;color:#a9b0b6">AK</span>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 1px 685px;min-height:0">
+<div style="display:grid;grid-template-rows:38px 26px auto 1fr 44px;min-width:0;min-height:0">
+
+<div style="display:flex;align-items:center;gap:18px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+<span style="font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94;white-space:nowrap">Stops today</span>
+<span style="display:flex;width:200px;height:8px"><span style="width:53px;background:#5ed69b"></span><span style="width:6px;background:repeating-linear-gradient(135deg,#ff8a7a 0 1.5px,transparent 1.5px 3px)"></span><span style="flex:1;border:1px solid #6e767d"></span></span>
+<span style="display:flex;align-items:baseline;gap:12px;font:400 12px 'Barlow',sans-serif;color:#a9b0b6;font-variant-numeric:tabular-nums;white-space:nowrap"><span><span style="color:#e9ebed;font-weight:600">11</span> of 38 done</span><span><span style="color:#5ed69b;font-weight:600">10</span> on time</span><span><span style="color:#ff8a7a;font-weight:600">1</span> late</span></span>
+<span style="margin-left:auto;display:flex;align-items:center;gap:10px">
+<span style="display:flex;gap:4px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;background:#252a30;color:#e9ebed;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Urgency</span><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;color:#858d94;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Appt</span><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;color:#858d94;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">No.</span></span>
+<span style="width:1px;height:18px;background:rgba(255,255,255,.13)"></span>
+<span style="display:flex;border:1px solid rgba(255,255,255,.14)"><span title="Comfortable" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;color:#858d94"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5h18M3 12h18M3 19h18"/></svg></span><span title="Compact" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;background:#94bce3;color:#15181b"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4h18M3 9h18M3 14h18M3 19h18"/></svg></span></span>
+</span>
+</div>
+
+<div style="display:grid;grid-template-columns:28px 3px 80px 128px minmax(0,1fr) minmax(0,1.25fr) 96px 64px 118px;align-items:center;gap:0 12px;padding-right:16px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
+<div style="display:flex;justify-content:center"><span style="width:14px;height:14px;border:1px solid #6e767d;display:flex;align-items:center;justify-content:center"><span style="width:8px;height:2px;background:#94bce3"></span></span></div><div></div>
+<div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94">Truck</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94">Driver</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94">Position</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94">Next stop</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94;text-align:right">Appt</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94;text-align:right">ETA</div><div style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#858d94;text-align:right">Status</div>
+</div>
+
+<div style="border-bottom:2px solid #37516b">
+<div style="display:flex;align-items:center;gap:7px;height:24px;padding:0 16px 0 40px;background:#15181b"><svg width="11" height="11" viewBox="0 0 24 24" fill="#94bce3" stroke="#94bce3" stroke-width="1.5" stroke-linejoin="round"><path d="M12 17v5" fill="none"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg><span style="font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#a9b0b6;white-space:nowrap;flex:none">Pinned · 3 of 5</span><span style="font:400 11px 'Barlow',sans-serif;color:#858d94">— not re-sorted, not repeated below</span></div>
+<sc-for list="{{ busyPinned }}" as="t" hint-placeholder-count="3">
+<div style="display:grid;grid-template-columns:28px 3px 80px 128px minmax(0,1fr) minmax(0,1.25fr) 96px 64px 118px;align-items:center;gap:0 12px;height:32px;padding-right:16px;border-top:1px solid rgba(255,255,255,.08);background:{{ t.rowBg }};box-shadow:{{ t.rail }}">
+<div style="display:flex;justify-content:center"><span style="width:14px;height:14px;border:1px solid {{ t.cbBd }};background:{{ t.cbBg }}"></span></div>
+<div style="align-self:stretch;background:{{ t.stripe }}"></div>
+<div style="display:flex;align-items:center;gap:6px"><span style="font-family:'Barlow';font-size:14px;color:{{ t.noColor }};font-weight:{{ t.noWeight }};font-variant-numeric:tabular-nums">{{ t.no }}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="#94bce3" stroke="#94bce3" stroke-width="1.5" stroke-linejoin="round"><path d="M12 17v5" fill="none"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></div>
+<div style="font:400 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.driverColor }}">{{ t.driver }}</div>
+<div style="font:500 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.posColor }}">{{ t.pos }}</div>
+<div style="font:400 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.nextColor }}">{{ t.next }}</div>
+<div style="font:600 12.5px 'Barlow',sans-serif;text-align:right;font-variant-numeric:tabular-nums;color:{{ t.apptColor }}">{{ t.appt }}</div>
+<div style="font:500 12.5px 'Barlow',sans-serif;text-align:right;font-variant-numeric:tabular-nums;color:{{ t.etaColor }}">{{ t.eta }}</div>
+<div style="display:flex;justify-content:flex-end"><span style="display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;font-family:'Barlow Condensed';font-size:10.5px;line-height:1;letter-spacing:.08em;text-transform:uppercase;background:{{ t.bg }};color:{{ t.fg }};border:1px {{ t.bs }} {{ t.bd }};font-weight:{{ t.chipWeight }}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="{{ t.i1 }}"/><path d="{{ t.i2 }}"/><path d="{{ t.i3 }}"/></svg>{{ t.label }}</span></div>
+</div>
+</sc-for>
+</div>
+
+<div style="overflow:hidden;min-height:0">
+<sc-for list="{{ busyRows }}" as="t" hint-placeholder-count="22">
+<div style="display:grid;grid-template-columns:28px 3px 80px 128px minmax(0,1fr) minmax(0,1.25fr) 96px 64px 118px;align-items:center;gap:0 12px;height:32px;padding-right:16px;border-bottom:1px solid rgba(255,255,255,.08);background:{{ t.rowBg }}">
+<div style="display:flex;justify-content:center"><span style="width:14px;height:14px;border:1px solid {{ t.cbBd }};background:{{ t.cbBg }};display:flex;align-items:center;justify-content:center"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="{{ t.cbTick }}" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></span></div>
+<div style="align-self:stretch;background:{{ t.stripe }}"></div>
+<div style="font-family:'Barlow';font-size:14px;color:{{ t.noColor }};font-weight:{{ t.noWeight }};font-variant-numeric:tabular-nums">{{ t.no }}</div>
+<div style="font:400 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.driverColor }}">{{ t.driver }}</div>
+<div style="font:500 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.posColor }}">{{ t.pos }}</div>
+<div style="font:400 12.5px 'Barlow',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:{{ t.nextColor }}">{{ t.next }}</div>
+<div style="font:600 12.5px 'Barlow',sans-serif;text-align:right;font-variant-numeric:tabular-nums;color:{{ t.apptColor }}">{{ t.appt }}</div>
+<div style="font:500 12.5px 'Barlow',sans-serif;text-align:right;font-variant-numeric:tabular-nums;color:{{ t.etaColor }}">{{ t.eta }}</div>
+<div style="display:flex;justify-content:flex-end"><span style="display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;font-family:'Barlow Condensed';font-size:10.5px;line-height:1;letter-spacing:.08em;text-transform:uppercase;font-variant-numeric:tabular-nums;background:{{ t.bg }};color:{{ t.fg }};border:1px {{ t.bs }} {{ t.bd }};font-weight:{{ t.chipWeight }}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="{{ t.i1 }}"/><path d="{{ t.i2 }}"/><path d="{{ t.i3 }}"/></svg>{{ t.label }}</span></div>
+</div>
+</sc-for>
+</div>
+
+<div style="display:flex;align-items:center;gap:10px;padding:0 16px;background:#1d2126;border-top:1px solid #94bce3">
+<span style="font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#e9ebed;font-variant-numeric:tabular-nums">2 trucks selected</span>
+<span style="font:400 11.5px 'Barlow',sans-serif;color:#949ca4">1091 · 1112</span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;margin-left:8px;border:1px solid rgba(255,255,255,.16);color:#e9ebed;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v3M12 16v3M5 12h3M16 12h3"/><circle cx="12" cy="12" r="3.2"/></svg>Force status…</span>
+<span style="display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid rgba(255,255,255,.16);color:#e9ebed;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Add note…</span>
+<span style="display:inline-flex;align-items:center;height:30px;padding:0 10px;color:#a9b0b6;font:600 11.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Clear <span style="font:500 10.5px ui-monospace,monospace;margin-left:6px;border:1px solid rgba(255,255,255,.14);padding:1px 4px">Esc</span></span>
+<span style="margin-left:auto;font:400 11.5px 'Barlow',sans-serif;color:#5ed69b;font-variant-numeric:tabular-nums">0 problems below the fold</span>
+</div>
+</div>
+
+<div style="background:rgba(255,255,255,.13)"></div>
+
+<div style="display:grid;grid-template-rows:1fr auto;background:#0f1215;min-width:0">
+<div style="position:relative;overflow:hidden">
+<div style="position:absolute;inset:0;background-image:linear-gradient(rgba(148,188,227,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(148,188,227,.07) 1px,transparent 1px);background-size:64px 64px"></div>
+<sc-for list="{{ trailDots }}" as="d" hint-placeholder-count="0"><span style="position:absolute;left:{{ d.x }};top:{{ d.y }};width:{{ d.s }};height:{{ d.s }};border-radius:50%;background:#94bce3;opacity:{{ d.o }};transform:translate(-50%,-50%)"></span></sc-for>
+<div style="position:absolute;left:297px;top:383px"><svg width="32" height="32" viewBox="0 0 26 26"><path d="M13 4 22 20H4Z" fill="#ff8a7a" stroke="#94bce3" stroke-width="2"/></svg></div>
+<div style="position:absolute;left:334px;top:388px;display:inline-flex;align-items:center;height:20px;padding:0 6px;background:#1d2126;border:1px solid #94bce3;font:700 12px 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">1063</div>
+<div style="position:absolute;left:84px;top:668px;font:400 10.5px 'Barlow',sans-serif;color:#858d94">−30 min</div>
+<div style="position:absolute;left:460px;top:250px"><svg width="30" height="30" viewBox="0 0 26 26"><path d="M13 4 22 20H4Z" fill="#ff8a7a" stroke="#15181b" stroke-width="1.5"/></svg></div>
+<div style="position:absolute;left:250px;top:170px"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 4 21 12l-8 8-8-8Z" fill="#f2b23f" stroke="#15181b" stroke-width="1.5"/></svg></div>
+<div style="position:absolute;left:96px;top:420px"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 4 21 12l-8 8-8-8Z" fill="#f2b23f" stroke="#15181b" stroke-width="1.5"/></svg></div>
+<div style="position:absolute;left:520px;top:480px"><svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="7.5" fill="#5ed69b" stroke="#15181b" stroke-width="1.5"/></svg></div>
+<div style="position:absolute;left:198px;top:540px"><svg width="26" height="26" viewBox="0 0 26 26"><rect x="6" y="6" width="14" height="14" fill="#9cc4e8" stroke="#15181b" stroke-width="1.5"/></svg></div>
+<div style="position:absolute;left:560px;top:620px;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;background:#1d2126;border:1px solid #94bce3;font:600 13px 'Barlow',sans-serif;color:#e9ebed">11</div>
+<div style="position:absolute;left:420px;top:120px;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;background:#1d2126;border:1px solid #94bce3;font:600 13px 'Barlow',sans-serif;color:#e9ebed">6</div>
+<div style="position:absolute;right:14px;top:14px;width:330px;background:#252a30;border:1px solid #6b3129;box-shadow:0 10px 30px rgba(0,0,0,.45);display:flex;gap:10px;padding:11px 12px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff8a7a" stroke-width="1.8" stroke-linecap="round" style="flex:none;margin-top:1px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+<div style="flex:1;min-width:0"><div style="font:600 12.5px 'Barlow',sans-serif;color:#e9ebed">1105 is now Late</div><div style="font:400 11.5px/1.45 'Barlow',sans-serif;color:#949ca4;font-variant-numeric:tabular-nums">ETA 14:52 against a 13:30 CDT appt.</div></div>
+<span style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#94bce3;align-self:center">Show</span>
+</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 12px;border-top:1px solid rgba(255,255,255,.13);font:400 10.5px 'Barlow',sans-serif;color:#858d94"><span>Trail: 1063, last 30 min, 1 dot per 70s · selected truck only</span><span>© Mapbox · OpenStreetMap</span></div>
+</div>
+</div>
+
+<sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ true }}">
+<div style="position:absolute;inset:0;background:rgba(9,11,13,.72)"></div>
+<div class="blueprint" style="position:absolute;left:554px;top:110px;width:620px;background:#252a30;border:1px solid rgba(255,255,255,.18);box-shadow:0 16px 48px rgba(0,0,0,.55)">
+<i class="corner tl" style="color:rgba(233,235,237,.5)"></i><i class="corner tr" style="color:rgba(233,235,237,.5)"></i><i class="corner bl" style="color:rgba(233,235,237,.5)"></i><i class="corner br" style="color:rgba(233,235,237,.5)"></i>
+<div style="display:flex;align-items:center;gap:10px;height:50px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.13)">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#949ca4" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+<span style="font:500 16px 'Barlow',sans-serif;color:#e9ebed">late</span><span style="width:1px;height:20px;background:#94bce3;margin-left:-8px"></span>
+<span style="margin-left:auto;font:400 11.5px 'Barlow',sans-serif;color:#949ca4">Jump to a truck, driver or view</span>
+</div>
+<div style="padding:6px 0">
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:8px 14px 4px"><span style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#949ca4;white-space:nowrap">Trucks · status matches</span><span style="font:400 10.5px 'Barlow',sans-serif;color:#949ca4">3</span></div>
+<div style="display:grid;grid-template-columns:52px 1fr auto;align-items:center;gap:12px;height:36px;padding:0 14px;background:#1b222b;box-shadow:inset 3px 0 0 #94bce3"><span style="font:700 14px 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">1063</span><span style="font:400 12.5px 'Barlow',sans-serif;color:#e9ebed">M. Kowalczyk · Kansas City, MO</span><span style="display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;background:#3a1f1c;border:1px solid #6b3129;color:#ff8a7a;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Late</span></div>
+<div style="display:grid;grid-template-columns:52px 1fr auto;align-items:center;gap:12px;height:36px;padding:0 14px"><span style="font:700 14px 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">1105</span><span style="font:400 12.5px 'Barlow',sans-serif;color:#a9b0b6">K. Marek · Memphis, TN</span><span style="display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;background:#3a1f1c;border:1px solid #6b3129;color:#ff8a7a;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Late</span></div>
+<div style="display:grid;grid-template-columns:52px 1fr auto;align-items:center;gap:12px;height:36px;padding:0 14px"><span style="font:700 14px 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">1070</span><span style="font:400 12.5px 'Barlow',sans-serif;color:#a9b0b6">D. Petrov · Phoenix, AZ</span><span style="display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;background:#3a1f1c;border:1px solid #6b3129;color:#ff8a7a;font:600 10.5px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase">Late</span></div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 14px 4px;border-top:1px solid rgba(255,255,255,.08);margin-top:4px"><span style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#949ca4">Views</span><span style="font:400 10.5px 'Barlow',sans-serif;color:#949ca4">2</span></div>
+<div style="display:flex;align-items:center;gap:10px;height:34px;padding:0 14px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a9b0b6" stroke-width="1.5" stroke-linecap="round"><path d="M3 6h18M7 12h10M10 18h4"/></svg><span style="font:400 12.5px 'Barlow',sans-serif;color:#e9ebed">Filter: Late</span><span style="font:400 11.5px 'Barlow',sans-serif;color:#949ca4">chip 2</span></div>
+<div style="display:flex;align-items:center;gap:10px;height:34px;padding:0 14px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a9b0b6" stroke-width="1.5" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg><span style="font:400 12.5px 'Barlow',sans-serif;color:#e9ebed;white-space:nowrap">Saved view: Midwest problems</span><span style="font:400 11.5px 'Barlow',sans-serif;color:#949ca4">yours</span></div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 14px 4px;border-top:1px solid rgba(255,255,255,.08);margin-top:4px"><span style="font:600 10.5px 'Barlow Condensed',sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#949ca4">Drivers</span><span style="font:400 11.5px 'Barlow',sans-serif;color:#949ca4">No driver matches "late"</span></div>
+</div>
+<div style="display:flex;align-items:center;gap:14px;height:34px;padding:0 14px;border-top:1px solid rgba(255,255,255,.13);background:#1d2126;font:400 11px 'Barlow',sans-serif;color:#949ca4">
+<span><span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">↑↓</span> move</span><span><span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">Enter</span> select on list + map</span><span><span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">Tab</span> next group</span><span style="margin-left:auto"><span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">Esc</span> close</span>
+</div>
+</div>
+</sc-if>
+</div>
+<div style="width:1728px;font:400 11.5px/1.6 'Barlow',sans-serif;color:#858d94">14:31 CDT, 30 trucks, compact density: 3 pinned + 22 sorted rows visible, against 20 in comfortable. 1105 flipped At risk → Late while on screen — it re-sorted into the Late group and is mid-flash at the 60% ground; the toast names it. 1091 and 1112 are checked, so the bulk bar has taken the footer's slot and carries the fold count at its right end. 1063 is pinned, selected and trailing on the map. Toggle the palette with the button above the frame.</div>
+</div>
+
+<div class="dv-opt" id="5c">
+<div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>What competed in <a class="dv-oid" href="#5b">5b</a>, and the rule each collision produced</div>
+<div class="dv-card" style="width:1180px;padding:22px 24px">
+<div style="display:grid;grid-template-columns:200px 1fr;gap:0">
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Flash vs checked ground</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Both tint the row. Flash wins for its 1.6s, then the row settles to row.checked. Checked state is carried by the tick, so nothing is lost while the ground is borrowed.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Re-sort under the cursor</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">A flip re-sorts the row, and with a flash that is legible. But while the pointer is over the list or 2+ rows are checked, re-sort is held (max 10s) so a click never lands on a row that just moved. The flash and toast still fire in place.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Bulk bar vs fold footer</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Same 44px slot. The bar replaces the footer while 2+ are checked and keeps the one fact that mattered — the problems-below-the-fold count — at its right end.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Pinned vs urgency groups</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Above 40 trucks (<a class="dv-oid" href="#3d">3d</a>) the pinned block sits above the first group header. Pinned trucks are removed from their group, not duplicated, and the group count reads "Late 4 · +1 pinned". Cap of 5 so the block never pushes the problem set below the fold.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Pin vs checkbox vs copy</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Three per-row affordances, three different cells: checkbox in its own column, pin after the truck number, copy at the right edge of Next stop and the load cell on hover only. None shares a hit area; none widens a fixed column.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Search field vs ⌘K</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Two text boxes that both find trucks. Split by verb: <span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">/</span> filters the list in place, <span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">⌘K</span> jumps and closes. The field's placeholder now says "Filter list…" and shows both hints.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Health strip vs chips</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">No number appears in both. Chips: trucks by state now. Strip: stops done today, split on time / late. Placed in the list toolbar, not the header, so it's read with the list rather than competing with the chip row.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Trail vs markers</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Dots, no stroke, 4–5px — smaller than any marker (14px+) and never a line, so a future route preview can own the solid line. The selected marker gains a steel edge so trail and head read as one object.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Toast placement</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Moved to the map's top-right: bottom-left now belongs to the bulk bar, and the list's top holds the pinned block.</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);font:500 12.5px 'Barlow',sans-serif;color:#e9ebed">Overlays</div>
+<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.09);border-bottom:1px solid rgba(255,255,255,.09);font:400 12px/1.55 'Barlow',sans-serif;color:#a9b0b6">Palette, cheat sheet and tour share one scrim and one layer — only one open at a time. ⌘K during the tour ends the tour; <span style="font-family:ui-monospace,Menlo,monospace;color:#e9ebed">?</span> inside the palette types a "?".</div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Next: approve 5a–5c, then detailed screens in brief order — cheat sheet, bulk confirm, copy formats, pinned states, density pair, flash + reduced-motion, empty-state family, strip, trail, palette, saved views, tour, favicon set, toast motion, timeline.</p>
+</section>
+
 <section class="dv-turn" id="t4" style="--color-text:#e9ebed;--color-divider:rgba(255,255,255,.14)">
 <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Both halves of a reassignment · derived zones · reviewable overrides</span></div>
 
@@ -162,7 +478,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The same console in January — every abbreviation recomputed, nothing hard-coded</div>
 <div class="dv-card" style="width:1180px;height:610px;display:grid;grid-template-rows:56px 40px 28px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
-<div style="display:flex;align-items:center;gap:12px"><img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
+<div style="display:flex;align-items:center;gap:12px"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
 <div></div>
 <div style="display:flex;align-items:center;gap:16px">
 <div style="display:flex;align-items:center;gap:7px"><span style="width:7px;height:7px;background:#5ed69b"></span><span style="font:400 12px 'Barlow',sans-serif;color:#a9b0b6;font-variant-numeric:tabular-nums">Synced 12s ago</span></div>
@@ -462,7 +778,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div class="dv-card" style="width:1728px;height:1040px;display:grid;grid-template-rows:56px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1px minmax(280px,420px) 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
 <div style="display:flex;align-items:center;gap:12px">
-<img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:30px;width:auto">
+<img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto">
 <span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span>
 </div>
 <div style="height:24px;background:rgba(255,255,255,.13)"></div>
@@ -547,7 +863,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div class="dv-card" style="width:1728px;height:1040px;display:grid;grid-template-rows:56px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1px minmax(280px,380px) 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
 <div style="display:flex;align-items:center;gap:12px">
-<img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:30px;width:auto">
+<img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto">
 <span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span>
 </div>
 <div style="height:24px;background:rgba(255,255,255,.13)"></div>
@@ -711,32 +1027,31 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 </div>
 
 <div class="dv-opt" id="3f">
-<div class="dv-olabel"><a class="dv-oid" href="#3f">3f</a>Login, mark and favicon — knockout placeholder plus the exact asset list</div>
+<div class="dv-olabel"><a class="dv-oid" href="#3f">3f</a>Login, mark and favicon — email/password only · interim assets derived from SmallLogo.png</div>
 <div style="display:flex;flex-wrap:wrap;gap:18px">
 <div class="dv-card" style="width:1180px;height:720px;position:relative;background:#0f1215;display:flex;align-items:center;justify-content:center;overflow:hidden">
 <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(148,188,227,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(148,188,227,.06) 1px,transparent 1px);background-size:64px 64px"></div>
 <div class="blueprint" style="position:relative;width:420px;background:#15181b;border:1px solid rgba(255,255,255,.14);padding:34px 32px">
 <i class="corner tl" style="color:rgba(233,235,237,.5)"></i><i class="corner tr" style="color:rgba(233,235,237,.5)"></i><i class="corner bl" style="color:rgba(233,235,237,.5)"></i><i class="corner br" style="color:rgba(233,235,237,.5)"></i>
-<img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:54px;width:auto;display:block;margin-bottom:22px">
+<img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:54px;width:auto;display:block;margin-bottom:22px">
 <div style="font:600 22px/1.1 'Barlow Condensed',sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</div>
 <div style="font:400 12.5px/1.5 'Barlow',sans-serif;color:#a9b0b6;margin:6px 0 24px">Dispatch console. Authorised users only.</div>
 <label style="display:block;margin-bottom:14px"><span style="display:block;font:500 11.5px 'Barlow',sans-serif;color:#a9b0b6;margin-bottom:5px">Work email</span><span style="display:flex;align-items:center;height:44px;padding:0 11px;background:#0f1215;border:1px solid rgba(255,255,255,.16);font:500 13.5px 'Barlow',sans-serif;color:#e9ebed">alex@vinlogistics.com</span></label>
 <label style="display:block;margin-bottom:8px"><span style="display:block;font:500 11.5px 'Barlow',sans-serif;color:#a9b0b6;margin-bottom:5px">Password</span><span style="display:flex;align-items:center;gap:8px;height:44px;padding:0 11px;background:#0f1215;border:1px solid #94bce3;outline:2px solid #94bce3;outline-offset:1px;font:500 13.5px 'Barlow',sans-serif;color:#e9ebed;letter-spacing:.2em">••••••••••<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#858d94" stroke-width="1.5" stroke-linecap="round" style="margin-left:auto"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.6"/></svg></span></label>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px"><span style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border:1px solid rgba(255,255,255,.2);background:#0f1215"></span><span style="font:400 12px 'Barlow',sans-serif;color:#a9b0b6">Keep me signed in</span></span><a href="#3f" style="font:400 12px 'Barlow',sans-serif;color:#94bce3">Reset password</a></div>
-<div style="display:flex;align-items:center;justify-content:center;height:46px;background:#94bce3;color:#15181b;font:600 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px">Sign in</div>
-<div style="display:flex;align-items:center;justify-content:center;height:46px;border:1px solid rgba(255,255,255,.16);color:#e9ebed;font:600 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase">Continue with Google Workspace</div>
+<div style="display:flex;align-items:center;justify-content:center;height:46px;background:#94bce3;color:#15181b;font:600 13px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase">Sign in</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);font:400 10.5px 'Barlow',sans-serif;color:#858d94"><span>Vin Logistics Inc · dispatch</span><span style="font-variant-numeric:tabular-nums">v0.1 · build 2026.09.16</span></div>
 </div>
-<div style="position:absolute;left:24px;bottom:20px;font:400 10.5px 'Barlow',sans-serif;color:#5d646b">Mark shown is the placeholder SVG · sunken ground #0f1215 · card #15181b</div>
+<div style="position:absolute;left:24px;bottom:20px;font:400 10.5px 'Barlow',sans-serif;color:#5d646b">Email and password only — Google Workspace is not built (ruling §12.53) · mark: assets/mark-knockout.png</div>
 </div>
 
 <div class="dv-card blueprint" style="width:530px;padding:22px">
 <i class="corner tl" style="color:rgba(233,235,237,.5)"></i><i class="corner tr" style="color:rgba(233,235,237,.5)"></i><i class="corner bl" style="color:rgba(233,235,237,.5)"></i><i class="corner br" style="color:rgba(233,235,237,.5)"></i>
-<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#858d94;margin-bottom:12px">Placeholder in place, three sizes</div>
+<div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#858d94;margin-bottom:12px">Interim assets in place — derived from the 500×302 PNG, not traced</div>
 <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:22px">
-<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#1d2126;border:1px solid rgba(255,255,255,.12)"><img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Header · 30px tall</span></div>
-<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#15181b;border:1px solid rgba(255,255,255,.12)"><img src="assets/mark-knockout.svg" alt="Vin Logistics Inc" style="height:54px;width:auto"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Login · 54px tall</span></div>
-<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#15181b;border:1px solid rgba(255,255,255,.12)"><img src="assets/favicon-placeholder.svg" alt="Favicon placeholder" style="width:32px;height:32px"><img src="assets/favicon-placeholder.svg" alt="Favicon placeholder" style="width:16px;height:16px"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Favicon · 32 and 16px — monogram only, wordmark is illegible here</span></div>
+<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#1d2126;border:1px solid rgba(255,255,255,.12)"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Header · 30px tall</span></div>
+<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#15181b;border:1px solid rgba(255,255,255,.12)"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:54px;width:auto"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Login · 54px tall</span></div>
+<div style="display:flex;align-items:center;gap:14px;padding:10px 12px;background:#15181b;border:1px solid rgba(255,255,255,.12)"><img src="assets/icons/apple-touch-icon.png" alt="Apple touch icon" style="width:60px;height:60px"><img src="assets/icons/favicon-32.png" alt="Favicon 32px" style="width:32px;height:32px"><img src="assets/icons/favicon-32.png" alt="Favicon 16px" style="width:16px;height:16px"><span style="font:400 11.5px 'Barlow',sans-serif;color:#858d94">Touch icon · favicon 32 and 16px — swoosh monogram only, navy knocked out to white, cyan kept</span></div>
 </div>
 
 <div style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.13em;text-transform:uppercase;color:#858d94;margin-bottom:10px">What to have produced</div>
@@ -750,7 +1065,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <span style="color:#e9ebed;font-family:ui-monospace;font-size:11px">icon-192.png / icon-512.png</span><span>PWA set, opaque ground.</span>
 <span style="color:#e9ebed;font-family:ui-monospace;font-size:11px">icon-maskable-512.png</span><span>512 × 512 with the monogram inside the centre 80% safe zone.</span>
 </div>
-<div style="font:400 11.5px/1.6 'Barlow',sans-serif;color:#858d94;margin-top:12px">The cyan from your logo appears in exactly two places in the whole product — the mark itself and this login card. Everywhere else the interactive colour is steel #94bce3, so the mark keeps its brand and the UI keeps its status palette. When the real files land, only the four <span style="color:#a9b0b6">img src</span> references change; no layout moves.</div>
+<div style="font:400 11.5px/1.6 'Barlow',sans-serif;color:#858d94;margin-top:12px">The cyan from your logo appears in exactly two places in the whole product — the mark itself and this login card. Everywhere else the interactive colour is steel #94bce3, so the mark keeps its brand and the UI keeps its status palette. The files in <span style="color:#a9b0b6">assets/</span> and <span style="color:#a9b0b6">assets/icons/</span> are pixel derivatives of SmallLogo.png — recoloured, cropped and resized, never redrawn. They replace the CSS brightness filter everywhere. They do not meet the outlined-vector spec above; when a vector source arrives, the same filenames are re-exported and no layout moves.</div>
 </div>
 </div>
 </div>
@@ -792,7 +1107,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 
 <div style="display:grid;grid-template-columns:auto 1px minmax(280px,420px) 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
 <div style="display:flex;align-items:center;gap:12px">
-<img src="uploads/SmallLogo.png" alt="Vin Logistics Inc" style="height:30px;width:auto;filter:brightness(2.5) saturate(.85)">
+<img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto">
 <span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span>
 </div>
 <div style="height:24px;background:rgba(255,255,255,.13)"></div>
@@ -887,7 +1202,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div class="dv-card" style="width:1728px;height:1040px;display:grid;grid-template-rows:56px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1px minmax(280px,420px) 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
 <div style="display:flex;align-items:center;gap:12px">
-<img src="uploads/SmallLogo.png" alt="Vin Logistics Inc" style="height:30px;width:auto;filter:brightness(2.5) saturate(.85)">
+<img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto">
 <span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span>
 </div>
 <div style="height:24px;background:rgba(255,255,255,.13)"></div>
@@ -1071,7 +1386,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Search active — query matched across truck, driver and city</div>
 <div class="dv-card" style="width:1728px;height:430px;display:grid;grid-template-rows:56px 32px 28px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1px 460px 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
-<div style="display:flex;align-items:center;gap:12px"><img src="uploads/SmallLogo.png" alt="Vin Logistics Inc" style="height:30px;width:auto;filter:brightness(2.5) saturate(.85)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
+<div style="display:flex;align-items:center;gap:12px"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
 <div style="height:24px;background:rgba(255,255,255,.13)"></div>
 <label style="display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:#15181b;border:1px solid #94bce3;outline:2px solid #94bce3;outline-offset:1px">
 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94bce3" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
@@ -1145,7 +1460,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 
 <div class="dv-card" style="width:1728px;height:482px;display:grid;grid-template-rows:56px 38px 28px 1fr;overflow:hidden">
 <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:0 18px;padding:0 18px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
-<div style="display:flex;align-items:center;gap:12px"><img src="uploads/SmallLogo.png" alt="Vin Logistics Inc" style="height:30px;width:auto;filter:brightness(2.5) saturate(.85)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
+<div style="display:flex;align-items:center;gap:12px"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:30px;width:auto"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#e9ebed">Fleet Tracker</span></div>
 <div></div>
 <div style="display:flex;align-items:center;gap:16px"><div style="display:flex;align-items:center;gap:7px"><span style="width:7px;height:7px;background:#ff8a7a"></span><span style="font:500 12px 'Barlow',sans-serif;color:#ff8a7a;font-variant-numeric:tabular-nums">Last sync 06:41 · 9m ago</span></div><span style="font:600 13px 'Barlow',sans-serif;color:#e9ebed;font-variant-numeric:tabular-nums">04:12 CDT</span></div>
 </div>
@@ -1180,7 +1495,7 @@ body{margin:0;background:#0b0e10;font-family:"Barlow",system-ui,sans-serif}
 <div style="display:flex;gap:18px">
 <div class="dv-card" style="width:390px;height:844px;display:grid;grid-template-rows:44px 52px 40px 1fr 56px;overflow:hidden">
 <div style="display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:#1d2126;border-bottom:1px solid rgba(255,255,255,.13)">
-<div style="display:flex;align-items:center;gap:8px"><img src="uploads/SmallLogo.png" alt="Vin Logistics Inc" style="height:22px;width:auto;filter:brightness(2.5) saturate(.85)"><span style="font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#e9ebed">Fleet</span></div>
+<div style="display:flex;align-items:center;gap:8px"><img src="assets/mark-knockout.png" alt="Vin Logistics Inc" style="height:22px;width:auto"><span style="font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#e9ebed">Fleet</span></div>
 <div style="display:flex;align-items:center;gap:8px"><span style="width:6px;height:6px;background:#5ed69b"></span><span style="font:400 11px 'Barlow',sans-serif;color:#a9b0b6;font-variant-numeric:tabular-nums">12s · 04:12 CDT</span></div>
 </div>
 <div style="display:flex;align-items:center;padding:0 14px">
@@ -1903,9 +2218,52 @@ fontFamily: {
     return late.concat(stale, [u], rest).slice(0, 10);
   }
 
+  busy() {
+    const f = this.fleet(30);
+    const pinNos = ['1063', '1161', '1140'], checkNos = ['1091', '1112'];
+    const dress = (t, o) => {
+      const sel = o.selected, ck = checkNos.indexOf(t.no) > -1, fl = o.flash;
+      t.rowBg = fl ? '#2b1c1c' : (sel || ck) ? '#1b222b' : 'transparent';
+      t.rail = sel ? 'inset 3px 0 0 #94bce3' : 'none';
+      t.cbBg = ck ? '#94bce3' : 'transparent';
+      t.cbBd = ck ? '#94bce3' : '#6e767d';
+      t.cbTick = ck ? '#15181b' : 'none';
+      if (sel || ck) { t.driverColor = sel ? '#e9ebed' : t.driverColor; if (t.nextColor === '#858d94') t.nextColor = '#949ca4'; }
+      t.flashTag = fl ? 'was At risk' : '';
+      return t;
+    };
+    const pinned = pinNos.map(n => dress(f.find(t => t.no === n), { selected: n === '1063' }));
+    let rows = f.filter(t => pinNos.indexOf(t.no) < 0);
+    const i = rows.findIndex(t => t.no === '1105');
+    const r = rows.splice(i, 1)[0];
+    const flipped = this.deco([r.no, r.driver, r.pos, r.next, r.appt, '14:52', 'late']);
+    rows.splice(1, 0, flipped);
+    rows = rows.map(t => dress(t, { flash: t === flipped }));
+    return { pinned, rows };
+  }
+
+  trail() {
+    const out = [], n = 26, p0 = [118, 650], c = [150, 470], p2 = [312, 402];
+    for (let k = 0; k < n; k++) {
+      const t = k / (n - 1), u = 1 - t;
+      const x = u * u * p0[0] + 2 * u * t * c[0] + t * t * p2[0];
+      const y = u * u * p0[1] + 2 * u * t * c[1] + t * t * p2[1];
+      const o = t > 0.66 ? 1 : t > 0.4 ? 0.75 : t > 0.2 ? 0.5 : t > 0.08 ? 0.3 : 0.15;
+      out.push({ x: Math.round(x) + 'px', y: Math.round(y) + 'px', o, s: t > 0.66 ? '5px' : '4px' });
+    }
+    return out;
+  }
+
   renderVals() {
     const trucks = this.build();
+    const b = this.busy();
     return {
+      busyPinned: b.pinned,
+      busyRows: b.rows,
+      trailDots: this.trail(),
+      paletteOpen: this.state.palette !== false,
+      paletteBtn: this.state.palette !== false ? 'Close palette to inspect what it covers' : 'Reopen ⌘K palette',
+      togglePalette: () => this.setState(s => ({ palette: s.palette === false })),
       trucks,
       trucksSearch: trucks.filter(t => ['1147','1140','1134'].indexOf(t.no) > -1),
       trucksRest: trucks.slice(1),
