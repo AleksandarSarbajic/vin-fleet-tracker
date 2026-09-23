@@ -82,6 +82,7 @@ const config: Config = {
         },
         'toast-out': { from: { opacity: '1' }, to: { opacity: '0' } },
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'fade-out': { from: { opacity: '1' }, to: { opacity: '0' } },
       },
       animation: {
         flash: `flash-decay ${ms(MOTION_MS.flash)} ${EASING.flash} forwards`,
@@ -90,7 +91,11 @@ const config: Config = {
         // Opacity only, 120ms. No scale and no slide: these open over a list
         // that may be moving, and a panel that also moves reads as a jump.
         overlay: `fade-in ${ms(MOTION_MS.overlay)} linear both`,
+        // §14.4's chip flip, as the pair it is: the outgoing chip fades out
+        // over the same 160ms the incoming one fades in. The WIDTH snaps —
+        // the outgoing copy is out of flow, so it cannot animate the layout.
         chip: `fade-in ${ms(MOTION_MS.chip)} ${EASING.toast} both`,
+        'chip-out': `fade-out ${ms(MOTION_MS.chip)} ${EASING.toast} forwards`,
       },
       /**
        * §14.4's density pair. The row heights are a token rather than a

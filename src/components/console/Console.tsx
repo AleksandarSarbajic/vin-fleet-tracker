@@ -478,63 +478,74 @@ export function Console({
             </span>
           </div>
 
-          <Split
-            onResizeEnd={onResizeEnd}
-            list={
-              <div className="flex h-full flex-col">
-                {/* §14.5: the strip is read with the list, not the header. */}
-                <ListToolbar density={density} onDensity={setDensity} />
-                <FleetList
-                  density={density}
-                  checked={bulk.checked}
-                  onCheck={bulk.toggle}
-                  pinnedRows={pinnedRows}
-                  flashFor={flashFor}
-                  isPinned={pins.isPinned}
-                  onPin={pins.toggle}
-                  pinRefused={pins.refused}
-                  bulk={{
-                    barOpen: bulk.barOpen,
-                    onForceStatus: () => setBulkAction('status'),
-                    onAddNote: () => setBulkAction('note'),
-                    onClear: bulk.clear,
-                  }}
-                  rows={unpinnedRows}
+          {/*
+            §14 feature 14. The toast stack anchors HERE, to the split area,
+            not to the window: bottom-left belongs to the bulk bar now
+            (§14.5), and the replacement is "the map's top-right". On a wide
+            screen that is the right pane; below 1086px the map becomes a
+            toggle and this is the only box that is the visible pane either
+            way. Fixed to the viewport it would float over the header instead.
+          */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <Split
+              onResizeEnd={onResizeEnd}
+              list={
+                <div className="flex h-full flex-col">
+                  {/* §14.5: the strip is read with the list, not the header. */}
+                  <ListToolbar density={density} onDensity={setDensity} />
+                  <FleetList
+                    density={density}
+                    checked={bulk.checked}
+                    onCheck={bulk.toggle}
+                    pinnedRows={pinnedRows}
+                    flashFor={flashFor}
+                    reducedMotion={reducedMotion}
+                    isPinned={pins.isPinned}
+                    onPin={pins.toggle}
+                    pinRefused={pins.refused}
+                    bulk={{
+                      barOpen: bulk.barOpen,
+                      onForceStatus: () => setBulkAction('status'),
+                      onAddNote: () => setBulkAction('note'),
+                      onClear: bulk.clear,
+                    }}
+                    rows={unpinnedRows}
+                    fetchedAt={data?.fetchedAt ?? null}
+                    feedStale={data?.feedStale ?? false}
+                    selectedId={selectedId}
+                    query={query}
+                    drift={drift}
+                    onResort={resort}
+                    onSelect={select}
+                    onEdit={setEditingId}
+                  />
+                </div>
+              }
+              map={
+                <FleetMap
+                  rows={filtered}
                   fetchedAt={data?.fetchedAt ?? null}
                   feedStale={data?.feedStale ?? false}
                   selectedId={selectedId}
-                  query={query}
-                  drift={drift}
-                  onResort={resort}
                   onSelect={select}
                   onEdit={setEditingId}
+                  resizeSignal={resizeSignal}
+                  reducedMotion={reducedMotion}
                 />
-              </div>
-            }
-            map={
-              <FleetMap
-                rows={filtered}
-                fetchedAt={data?.fetchedAt ?? null}
-                feedStale={data?.feedStale ?? false}
-                selectedId={selectedId}
-                onSelect={select}
-                onEdit={setEditingId}
-                resizeSignal={resizeSignal}
-                reducedMotion={reducedMotion}
-              />
-            }
-          />
-        </div>
+              }
+            />
 
-        <Toasts
-          toasts={toasts}
-          onOpen={(truckId) => {
-            select(truckId);
-            setEditingId(truckId);
-          }}
-          onExpire={dismissToast}
-          reducedMotion={reducedMotion}
-        />
+            <Toasts
+              toasts={toasts}
+              onOpen={(truckId) => {
+                select(truckId);
+                setEditingId(truckId);
+              }}
+              onExpire={dismissToast}
+              reducedMotion={reducedMotion}
+            />
+          </div>
+        </div>
 
         {editingRow ? (
           <EditStopModal

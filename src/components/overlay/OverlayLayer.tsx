@@ -113,7 +113,10 @@ export function Overlay({
   return (
     <div
       className={`fixed inset-0 z-30 grid place-items-center bg-scrimOverlay p-6 ${
-        reduced ? '' : 'duration-overlay transition-opacity'
+        // `animate-`, not `transition-`: a transition needs two renders with
+        // different values and this element has one — it did not exist a
+        // frame ago. The transition class here was a no-op.
+        reduced ? '' : 'animate-overlay'
       }`}
       role="dialog"
       aria-modal="true"

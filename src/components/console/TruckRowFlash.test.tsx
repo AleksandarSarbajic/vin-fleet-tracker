@@ -36,6 +36,7 @@ const mount = (flash: RowFlashView | null) => {
         checked={false}
         onCheck={() => {}}
         flash={flash}
+        reducedMotion={flash?.tag !== undefined && flash?.tag !== null}
         pinned={false}
         onPin={() => {}}
         query=""

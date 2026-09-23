@@ -5,6 +5,7 @@ import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fleetRow, nextStop } from '@/test/fleet-row';
+import { MOTION_MS } from '@/design/tokens';
 import { stubLayout } from '@/test/layout';
 import type { FleetResponse } from '@/hooks/useFleet';
 
@@ -397,10 +398,18 @@ describe('the ETA cell carries status ink (§12.49)', () => {
 
   it('colours AT_RISK and ON_TIME with their own', async () => {
     expect(
-      await mountOne({ status: 'AT_RISK', etaAbsence: 'has-eta', etaUtc: '2026-09-18T22:05:00.000Z' }),
+      await mountOne({
+        status: 'AT_RISK',
+        etaAbsence: 'has-eta',
+        etaUtc: '2026-09-18T22:05:00.000Z',
+      }),
     ).toContain('text-status-risk-fg');
     expect(
-      await mountOne({ status: 'ON_TIME', etaAbsence: 'has-eta', etaUtc: '2026-09-18T22:05:00.000Z' }),
+      await mountOne({
+        status: 'ON_TIME',
+        etaAbsence: 'has-eta',
+        etaUtc: '2026-09-18T22:05:00.000Z',
+      }),
     ).toContain('text-status-ontime-fg');
   });
 
@@ -417,13 +426,21 @@ describe('the ETA cell carries status ink (§12.49)', () => {
   });
 
   it('refuses ink for "no ETA" — not a time, not a judgement', async () => {
-    const cls = await mountOne({ status: 'LATE', etaAbsence: 'address-not-located', etaUtc: null });
+    const cls = await mountOne({
+      status: 'LATE',
+      etaAbsence: 'address-not-located',
+      etaUtc: null,
+    });
     expect(cls).toContain('text-text-secondary');
     expect(cls).not.toContain('text-status-late-fg');
   });
 
   it('refuses ink for a dash', async () => {
-    const cls = await mountOne({ status: 'NO_APPT', etaAbsence: 'no-appointment', etaUtc: null });
+    const cls = await mountOne({
+      status: 'NO_APPT',
+      etaAbsence: 'no-appointment',
+      etaUtc: null,
+    });
     expect(cls).toContain('text-text-secondary');
   });
 
@@ -532,8 +549,18 @@ describe('a truck going LATE raises a toast (§12.50)', () => {
     return client;
   };
 
-  const onTime = fleetRow({ id: ROW_A.id, truckNumber: 101, samsaraName: 'Truck #101', status: 'ON_TIME' });
-  const late = fleetRow({ id: ROW_A.id, truckNumber: 101, samsaraName: 'Truck #101', status: 'LATE' });
+  const onTime = fleetRow({
+    id: ROW_A.id,
+    truckNumber: 101,
+    samsaraName: 'Truck #101',
+    status: 'ON_TIME',
+  });
+  const late = fleetRow({
+    id: ROW_A.id,
+    truckNumber: 101,
+    samsaraName: 'Truck #101',
+    status: 'LATE',
+  });
   const toastEl = () => container!.querySelector('[data-toast]');
 
   beforeEach(() => {
@@ -593,7 +620,21 @@ describe('a truck going LATE raises a toast (§12.50)', () => {
     });
 
     expect(openModalTruck()).toBe('101');
-    // And it takes itself away once acted on.
+
+    /**
+     * §14 feature 14 changed what "takes itself away" looks like. It used to
+     * unmount on the click; it now fades for `MOTION_MS.toastOut` first,
+     * because the modal takes a moment to arrive and a toast blinking out in
+     * that moment reads as the click having missed.
+     *
+     * So the assertion is in two parts: marked as leaving straight away, gone
+     * once the fade has run. Asserting only the second would pass if the exit
+     * animation were deleted.
+     */
+    expect(toastEl()?.hasAttribute('data-leaving')).toBe(true);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, MOTION_MS.toastOut + 40));
+    });
     expect(toastEl()).toBeNull();
   });
 });

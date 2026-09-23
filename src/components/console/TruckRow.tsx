@@ -14,7 +14,7 @@ export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
 import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
-import { StatusChip } from './StatusChip';
+import { ChipFlip } from './ChipFlip';
 import { ROW_HEIGHT, type Density } from '@/lib/density';
 import { addressText, loadText } from '@/lib/copy-text';
 import type { FlashGround, RowFlashView } from '@/lib/flash';
@@ -386,6 +386,8 @@ interface Props {
    * preference do not have to reach every row to be formatted.
    */
   flash: RowFlashView | null;
+  /** §14 feature 14. Drives the chip crossfade, and the flash's absence. */
+  reducedMotion: boolean;
   /** §14 feature 4. */
   pinned: boolean;
   onPin: (id: string) => void;
@@ -408,6 +410,7 @@ function TruckRowImpl({
   checked,
   onCheck,
   flash,
+  reducedMotion,
   pinned,
   onPin,
   query,
@@ -719,10 +722,11 @@ function TruckRowImpl({
 
       <div className="flex min-w-0 items-center justify-end gap-1.5" data-no-dblclick="">
         {/* A dotted neutral chip carrying the age, fleet-wide (§5.9). */}
-        <StatusChip
+        <ChipFlip
           status={feedStale ? 'STALE_GPS' : row.status}
           forced={!feedStale && row.override !== null}
           label={stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined}
+          reducedMotion={reducedMotion}
         />
         {/*
           §14.4, the reduced-motion half: "the flash is replaced by a static
@@ -763,6 +767,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.selected === b.selected &&
     a.checked === b.checked &&
     a.pinned === b.pinned &&
+    a.reducedMotion === b.reducedMotion &&
     // By value, not identity: the view object is rebuilt every poll, and the
     // three fields are all a row can see of it.
     a.flash?.ground === b.flash?.ground &&

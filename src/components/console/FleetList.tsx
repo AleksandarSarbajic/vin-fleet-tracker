@@ -59,6 +59,8 @@ interface Props {
    * object when one of them changed.
    */
   flashFor: (id: string) => RowFlashView | null;
+  /** §14 feature 14. One read at the top, not one matchMedia listener per row. */
+  reducedMotion: boolean;
   isPinned: (id: string) => boolean;
   onPin: (id: string) => void;
   pinRefused: boolean;
@@ -86,6 +88,7 @@ export function FleetList({
   onCheck,
   pinnedRows,
   flashFor,
+  reducedMotion,
   isPinned,
   onPin,
   pinRefused,
@@ -222,6 +225,7 @@ export function FleetList({
                 checked={checked.has(row.id)}
                 onCheck={onCheck}
                 flash={flashFor(row.id)}
+                reducedMotion={reducedMotion}
                 pinned
                 onPin={onPin}
                 query={query}
@@ -271,6 +275,7 @@ export function FleetList({
                   checked={checked.has(row.id)}
                   onCheck={onCheck}
                   flash={flashFor(row.id)}
+                  reducedMotion={reducedMotion}
                   pinned={isPinned(row.id)}
                   onPin={onPin}
                   query={query}
