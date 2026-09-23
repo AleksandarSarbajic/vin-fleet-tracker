@@ -1,6 +1,7 @@
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { FleetRow } from '@/server/fleet-query';
 import { isProblem } from '@/lib/status';
+import type { TrailDot } from '@/lib/trail';
 
 export interface TruckFeatureProps extends Record<string, unknown> {
   id: string;
@@ -112,4 +113,34 @@ export function boundsOf(rows: FleetRow[]): Bounds | null {
 
   if (seen === 0) return null;
   return { west, south, east, north };
+}
+
+/* ---------------------------------- trail ------------------------------ */
+
+export interface TrailFeatureProps extends Record<string, unknown> {
+  opacity: number;
+  radius: number;
+  step: number;
+}
+
+export type TrailCollection = FeatureCollection<Point, TrailFeatureProps>;
+
+const EMPTY_TRAIL: TrailCollection = { type: 'FeatureCollection', features: [] };
+
+/**
+ * §14 feature 9. Opacity and radius ride on each feature rather than being
+ * baked into five layers: a layer per ramp step would be five sources, five
+ * filters and five places to forget a token.
+ */
+export function trailCollection(dots: readonly TrailDot[]): TrailCollection {
+  if (dots.length === 0) return EMPTY_TRAIL;
+  return {
+    type: 'FeatureCollection',
+    features: dots.map((dot) => ({
+      type: 'Feature',
+      id: dot.step,
+      geometry: { type: 'Point', coordinates: [dot.lng, dot.lat] },
+      properties: { opacity: dot.opacity, radius: dot.radius, step: dot.step },
+    })),
+  };
 }

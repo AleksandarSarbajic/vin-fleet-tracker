@@ -5646,6 +5646,32 @@ One asymmetry, deliberate: `remaining` is keyed off the APPOINTMENT's day and
 `done` off the ARRIVAL's. A stop due yesterday and arrived this morning
 belongs in exactly one of them — the second.
 
+**The trail's steel edge already existed.** §14.5 asks that "the selected
+marker gains a steel edge so trail and head read as one object".
+`selectionLayer` has carried a 2px `accent.DEFAULT` stroke since phase 2, so
+the requirement is met by what is there; adding a second edge would have
+doubled the ring. The trail source is declared before it, so the dots paint
+underneath.
+
+**The trail drops its newest reading.** It is built from position history, and
+the newest history row is the one the marker is drawn at — keeping it would
+put a full-opacity dot under a 14px marker and spend the brightest step of
+`TRAIL_RAMP` saying what the marker already says.
+
+It buckets by AGE rather than taking the last five rows. The worker polls
+every 30 seconds, so the last five rows are the last two and a half minutes —
+a trail that never reaches past the end of the block the truck is on.
+Bucketing into five six-minute steps spreads the dots across the whole half
+hour whatever the poll cadence does, and degrades honestly: a truck tracked
+for nine minutes gets two dots, not five crowded ones. A parked truck yields
+five dots at one coordinate, which draws as one dot beside the marker — that
+is what "has not moved in half an hour" looks like, and is not a bug.
+
+The query returns one row per MINUTE. The feed sends several readings per
+vehicle per poll (one truck carried five, five seconds apart), so half an hour
+of raw history is between 60 and 300 rows and the shape of that number is the
+vendor's business. `distinct on` a truncated minute caps it at thirty.
+
 ## 14.6 Build order, and what each feature was built from
 
 Two deviations from the brief's order, both forced by §14.5: **density before

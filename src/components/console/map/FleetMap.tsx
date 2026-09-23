@@ -1,12 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import Map, {
-  Layer,
-  Source,
-  type MapMouseEvent,
-  type MapRef,
-} from 'react-map-gl/mapbox';
+import Map, { Layer, Source, type MapMouseEvent, type MapRef } from 'react-map-gl/mapbox';
 import type { GeoJSONSource } from 'mapbox-gl';
 import type { Point } from 'geojson';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -21,12 +16,14 @@ import {
   SOURCE_CLUSTERED,
   SOURCE_PROBLEM,
   SOURCE_SELECTION,
+  SOURCE_TRAIL,
   clusterBubbleLayer,
   clusterCountLayer,
   clusteredPointsLayer,
   problemPointsLayer,
   renderClusterImages,
   selectionLayer,
+  trailLayer,
 } from './layers';
 import { renderMarkerImages } from './markers';
 import {
@@ -35,8 +32,11 @@ import {
   boundsOf,
   selectionCollection,
   splitForMap,
+  trailCollection,
 } from './geo';
 import { MapPopup } from './MapPopup';
+import { useTrail } from '@/hooks/useTrail';
+import { trailDots } from '@/lib/trail';
 import { MapFooter, MarkerKey, ZoomControl } from './MapChrome';
 
 /**
@@ -185,6 +185,23 @@ export function FleetMap({
     [reducedMotion],
   );
 
+  /**
+   * §14 feature 9. Selected-only (§14.3): nothing is fetched while nothing is
+   * selected, and the dots are shaped against `fetchedAt` rather than a fresh
+   * clock — the same reference every age on a row is measured from, so the
+   * trail and the marker cannot disagree about how old a reading is.
+   */
+  const { data: trailPoints } = useTrail(selectedId);
+  const trail = useMemo(
+    () =>
+      trailCollection(
+        trailPoints
+          ? trailDots(trailPoints, fetchedAt ? Date.parse(fetchedAt) : Date.now())
+          : [],
+      ),
+    [trailPoints, fetchedAt],
+  );
+
   /** Newest fix across the fleet — what the footer reports. */
   const newestPositionAt = useMemo(() => {
     let newest: string | null = null;
@@ -197,57 +214,66 @@ export function FleetMap({
   return (
     <div className="relative flex h-full w-full flex-col bg-surface-sunken">
       <div className="relative min-h-0 flex-1">
-      <ZoomControl onZoom={zoom} />
-      <MarkerKey />
-      <Map
-        ref={mapRef}
-        mapboxAccessToken={clientEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
-        mapStyle="mapbox://styles/mapbox/dark-v11"
-        initialViewState={US_FALLBACK}
-        onLoad={handleLoad}
-        onClick={handleClick}
-        interactiveLayerIds={[
-          LAYER_CLUSTER_BUBBLE,
-          LAYER_CLUSTERED_POINTS,
-          LAYER_PROBLEM_POINTS,
-        ]}
-        cursor="default"
-        attributionControl={false}
-        reuseMaps
-        style={{ width: '100%', height: '100%' }}
-      >
-        {/* Selection first, so its ring paints beneath the markers. */}
-        <Source id={SOURCE_SELECTION} type="geojson" data={selection}>
-          <Layer {...selectionLayer} />
-        </Source>
-
-        <Source
-          id={SOURCE_CLUSTERED}
-          type="geojson"
-          data={clustered}
-          cluster
-          clusterMaxZoom={CLUSTER_MAX_ZOOM}
-          clusterRadius={CLUSTER_RADIUS}
+        <ZoomControl onZoom={zoom} />
+        <MarkerKey />
+        <Map
+          ref={mapRef}
+          mapboxAccessToken={clientEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
+          mapStyle="mapbox://styles/mapbox/dark-v11"
+          initialViewState={US_FALLBACK}
+          onLoad={handleLoad}
+          onClick={handleClick}
+          interactiveLayerIds={[
+            LAYER_CLUSTER_BUBBLE,
+            LAYER_CLUSTERED_POINTS,
+            LAYER_PROBLEM_POINTS,
+          ]}
+          cursor="default"
+          attributionControl={false}
+          reuseMaps
+          style={{ width: '100%', height: '100%' }}
         >
-          <Layer {...clusterBubbleLayer} />
-          <Layer {...clusterCountLayer} />
-          <Layer {...clusteredPointsLayer} />
-        </Source>
+          {/*
+          The trail first of all, so the dots paint under the selection ring
+          and under every marker. §14.5 wants "trail and head reading as one
+          object", and the head has to be on top for that to be true.
+        */}
+          <Source id={SOURCE_TRAIL} type="geojson" data={trail}>
+            <Layer {...trailLayer} />
+          </Source>
 
-        {/* Last, so problem markers paint above cluster bubbles. */}
-        <Source id={SOURCE_PROBLEM} type="geojson" data={problem}>
-          <Layer {...problemPointsLayer} />
-        </Source>
+          {/* Selection next, so its ring paints beneath the markers. */}
+          <Source id={SOURCE_SELECTION} type="geojson" data={selection}>
+            <Layer {...selectionLayer} />
+          </Source>
 
-        {selectedRow ? (
-          <MapPopup
-            row={selectedRow}
-            fetchedAt={fetchedAt}
-            onEdit={onEdit}
-            onClose={() => onSelect(null)}
-          />
-        ) : null}
-      </Map>
+          <Source
+            id={SOURCE_CLUSTERED}
+            type="geojson"
+            data={clustered}
+            cluster
+            clusterMaxZoom={CLUSTER_MAX_ZOOM}
+            clusterRadius={CLUSTER_RADIUS}
+          >
+            <Layer {...clusterBubbleLayer} />
+            <Layer {...clusterCountLayer} />
+            <Layer {...clusteredPointsLayer} />
+          </Source>
+
+          {/* Last, so problem markers paint above cluster bubbles. */}
+          <Source id={SOURCE_PROBLEM} type="geojson" data={problem}>
+            <Layer {...problemPointsLayer} />
+          </Source>
+
+          {selectedRow ? (
+            <MapPopup
+              row={selectedRow}
+              fetchedAt={fetchedAt}
+              onEdit={onEdit}
+              onClose={() => onSelect(null)}
+            />
+          ) : null}
+        </Map>
       </div>
       <MapFooter fetchedAt={fetchedAt} newestPositionAt={newestPositionAt} />
     </div>

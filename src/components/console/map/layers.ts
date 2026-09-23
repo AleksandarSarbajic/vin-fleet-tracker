@@ -15,8 +15,10 @@ export const CLUSTER_RADIUS = 50;
 export const SOURCE_CLUSTERED = 'trucks-clustered';
 export const SOURCE_PROBLEM = 'trucks-problem';
 export const SOURCE_SELECTION = 'truck-selection';
+export const SOURCE_TRAIL = 'truck-trail';
 
 export const LAYER_SELECTION = 'truck-selection-ring';
+export const LAYER_TRAIL = 'truck-trail-dots';
 export const LAYER_CLUSTER_BUBBLE = 'cluster-bubble';
 export const LAYER_CLUSTER_COUNT = 'cluster-count';
 export const LAYER_CLUSTERED_POINTS = 'trucks-clustered-points';
@@ -63,6 +65,39 @@ export const selectionLayer: CircleLayerSpecification = {
     'circle-stroke-color': palette.accent.DEFAULT,
   },
 };
+
+/**
+ * §14 feature 9, §14.5:
+ *
+ * > Dots, no stroke, 4–5px — smaller than any marker (14px+) and **never a
+ * > line**, so a future route preview can own the solid line.
+ *
+ * A circle layer and not a line layer, permanently. The solid line is spoken
+ * for, and a trail drawn as one would have to be undrawn before a route
+ * preview could be added.
+ *
+ * Radius and opacity are read from each feature (`trailCollection`), so the
+ * ramp lives in `TRAIL_RAMP` and `trailDots` rather than in five layers here.
+ * §14.4: the tail falling below 3:1 is deliberate — past roughly twelve
+ * minutes a dot carries direction only, and the marker carries status.
+ *
+ * Declared before the selection ring, so the dots paint under everything.
+ * §14.5 asks the selected marker to gain "a steel edge so trail and head read
+ * as one object"; `selectionLayer` has carried that 2px accent stroke since
+ * phase 2, so it already does.
+ */
+export const trailLayer: CircleLayerSpecification = {
+  id: LAYER_TRAIL,
+  type: 'circle',
+  source: SOURCE_TRAIL,
+  paint: {
+    'circle-radius': ['get', 'radius'],
+    'circle-color': palette.trail,
+    'circle-opacity': ['get', 'opacity'],
+    // "no stroke", literally: a stroke would make a 4px dot read as a ring.
+    'circle-stroke-width': 0,
+  },
+} as unknown as CircleLayerSpecification;
 
 export const clusterBubbleLayer = {
   id: LAYER_CLUSTER_BUBBLE,
