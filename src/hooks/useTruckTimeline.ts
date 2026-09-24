@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { httpErrorFrom } from '@/lib/http-error';
 import type { TimelineStop } from '@/server/timeline';
 
 /**
@@ -19,7 +20,7 @@ export function useTruckTimeline(truckId: string | null) {
       const response = await fetch(`/api/timeline?truck=${truckId!}`, {
         cache: 'no-store',
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      if (!response.ok) throw await httpErrorFrom(response);
       return ((await response.json()) as { stops: TimelineStop[] }).stops;
     },
     enabled: truckId !== null,

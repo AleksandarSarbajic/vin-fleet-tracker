@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { httpErrorFrom } from '@/lib/http-error';
 import type { FleetRow } from '@/server/fleet-query';
 
 /**
@@ -20,17 +21,8 @@ export interface FleetResponse {
 
 async function fetchFleet(): Promise<FleetResponse> {
   const response = await fetch('/api/fleet', { cache: 'no-store' });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-      reference?: string;
-    } | null;
-    throw new Error(
-      body?.reference
-        ? `${body.error ?? 'Request failed'} (${body.reference})`
-        : (body?.error ?? `Request failed: ${response.status}`),
-    );
-  }
+  // Carries the status, so `retry` can tell a blip from a 429 (see providers).
+  if (!response.ok) throw await httpErrorFrom(response);
   return (await response.json()) as FleetResponse;
 }
 

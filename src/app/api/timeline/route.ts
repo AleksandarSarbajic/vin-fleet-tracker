@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/db';
 import { AuthError, requireUser } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { loadTruckTimeline } from '@/server/timeline';
 
 /** §14 feature 15. Read-only, never cached. */
@@ -11,7 +17,9 @@ const Query = z.object({ truck: z.string().uuid() });
 
 export async function GET(request: Request) {
   try {
-    await requireUser();
+    await enforceRateLimit('address', clientAddress(request));
+    const user = await requireUser();
+    await enforceRateLimit('read.heavy', user.id);
     const parsed = Query.safeParse({
       truck: new URL(request.url).searchParams.get('truck'),
     });
@@ -23,6 +31,7 @@ export async function GET(request: Request) {
       { headers: { 'cache-control': 'no-store' } },
     );
   } catch (error: unknown) {
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

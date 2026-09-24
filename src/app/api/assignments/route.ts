@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { AuthError, requireRole, requireUser } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { BulkAssignmentSave } from '@/lib/assignments';
 import {
   AssignmentConflictError,
@@ -12,6 +18,7 @@ export const dynamic = 'force-dynamic';
 
 /** Route handlers answer for themselves — a JSON client never gets HTML. */
 function failure(error: unknown, prefix: string) {
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -26,9 +33,11 @@ function failure(error: unknown, prefix: string) {
   );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireUser();
+    await enforceRateLimit('address', clientAddress(request));
+    const user = await requireUser();
+    await enforceRateLimit('read', user.id);
     return NextResponse.json(await loadAssignmentBoard(db), {
       headers: { 'cache-control': 'no-store' },
     });
@@ -40,7 +49,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     // Checked server-side on every mutating route, whatever the UI showed.
+    await enforceRateLimit('address', clientAddress(request));
     const user = await requireRole('dispatcher');
+    // The two-sided reassignment transaction.
+    await enforceRateLimit('write', user.id);
 
     const parsed = BulkAssignmentSave.safeParse(await request.json());
     if (!parsed.success) {

@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { AuthError, requireRole } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { StopEdit } from '@/lib/stop-edit';
 import { statusConfig } from '@/server/fleet';
 import { saveStopEdit, StopEditError } from '@/server/stop-edit';
@@ -11,7 +17,11 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    await enforceRateLimit('address', clientAddress(request));
     const user = await requireRole('dispatcher');
+    // The tightest limit in the set: every save geocodes through an external
+    // service and there is deliberately no cache layer to absorb a retry loop.
+    await enforceRateLimit('geocode', user.id);
 
     const parsed = StopEdit.safeParse(await request.json());
     if (!parsed.success) {
@@ -58,7 +68,8 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    if (error instanceof AuthError) {
+    if (error instanceof RateLimitError) return rateLimitResponse(error);
+  if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const reference = `STOP-500-${Date.now().toString(36).toUpperCase()}`;

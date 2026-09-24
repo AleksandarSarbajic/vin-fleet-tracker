@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/db';
 import { AuthError, requireRole, requireUser } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { DriverCreate } from '@/lib/driver';
 import {
   DriverError,
@@ -15,6 +21,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 function failure(error: unknown, prefix: string) {
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -30,9 +37,11 @@ function failure(error: unknown, prefix: string) {
 }
 
 /** Open merge candidates, for the prompt on the assignment board (§12.35). */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireUser();
+    await enforceRateLimit('address', clientAddress(request));
+    const user = await requireUser();
+    await enforceRateLimit('read', user.id);
     return NextResponse.json(
       { candidates: await openMergeCandidates(db) },
       { headers: { 'cache-control': 'no-store' } },
@@ -75,6 +84,7 @@ const Action = z.discriminatedUnion('action', [
 
 export async function POST(request: Request) {
   try {
+    await enforceRateLimit('address', clientAddress(request));
     const parsed = Action.safeParse(await request.json());
     if (!parsed.success) {
       const first = parsed.error.issues[0];
@@ -87,6 +97,7 @@ export async function POST(request: Request) {
     switch (parsed.data.action) {
       case 'create': {
         const user = await requireRole('dispatcher');
+        await enforceRateLimit('write', user.id);
         const result = await createDriver(db, {
           actorUserId: user.id,
           driver: parsed.data.driver,
@@ -98,6 +109,7 @@ export async function POST(request: Request) {
       }
       case 'link': {
         const user = await requireRole('admin');
+        await enforceRateLimit('write', user.id);
         const result = await linkDriver(db, {
           actorUserId: user.id,
           appDriverId: parsed.data.appDriverId,
@@ -109,6 +121,7 @@ export async function POST(request: Request) {
         // Dismissing only says "not the same person" — a dispatcher knows
         // that better than an admin does, and it destroys nothing.
         const user = await requireRole('dispatcher');
+        await enforceRateLimit('write', user.id);
         await dismissMergeCandidate(db, {
           actorUserId: user.id,
           candidateId: parsed.data.candidateId,
@@ -117,6 +130,7 @@ export async function POST(request: Request) {
       }
       case 'retire': {
         const user = await requireRole('admin');
+        await enforceRateLimit('write', user.id);
         await retireDriver(db, {
           actorUserId: user.id,
           driverId: parsed.data.driverId,

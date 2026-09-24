@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { AuthError, requireRole } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { ClearOverrideInput, OverrideInput } from '@/lib/override';
 import { statusConfig } from '@/server/fleet';
 import { OverrideError, clearOverride, setOverride } from '@/server/override';
@@ -21,6 +27,7 @@ function failure(error: unknown) {
       { status: 400 },
     );
   }
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -34,8 +41,10 @@ function failure(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    await enforceRateLimit('address', clientAddress(request));
     // Re-checked server-side on every mutating route, whatever the UI showed.
     const user = await requireRole('dispatcher');
+    await enforceRateLimit('write', user.id);
     const parsed = OverrideInput.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
@@ -64,7 +73,9 @@ export async function POST(request: Request) {
 /** `Clear now`. Returns the row to its computed status immediately. */
 export async function DELETE(request: Request) {
   try {
+    await enforceRateLimit('address', clientAddress(request));
     const user = await requireRole('dispatcher');
+    await enforceRateLimit('write', user.id);
     const parsed = ClearOverrideInput.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });

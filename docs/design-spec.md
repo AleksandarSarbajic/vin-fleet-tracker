@@ -5372,6 +5372,61 @@ singleton guard silently. `WorkerEnv` refuses both `:6543` and the IPv6-only
   matters most in. journald is the **primary** record for this process; Sentry
   is the second copy, and the second copy must not be the only legible one.
 
+
+## 12.65 Limiting what arrives, without the client making it worse
+
+`samsara/client.ts` limited the calls we make TO Samsara. Nothing limited the
+calls made to us. Every mutating route is behind auth, so the blast radius is a
+signed-in dispatcher rather than the internet — but `/api/stops` geocodes
+through an external service on every save, with deliberately no cache layer to
+absorb a retry loop, and `/api/fleet` runs the full lateral join.
+
+**A token bucket, and that is not incidental.** §12.60's standing rule is that
+`total / elapsed` is nonsense early in any window and that a `> 0` check does
+not rescue it. A token bucket never divides by time-since-start: it holds a
+level and refills at a fixed rate, so it is immune to that shape *by
+construction* rather than by anyone remembering to floor a denominator. It is
+also the same `TokenBucket` the outbound limiter already used, so the algorithm
+exists once in this codebase.
+
+Two keys per request. A loose per-ADDRESS bucket is spent before
+authentication, because `requireUser()` revalidates the token with Supabase
+over the network and an unauthenticated loop therefore costs us a round trip
+per request even though it never gets past the 401 — a limit that only applies
+after auth does not cover the cheapest way to make us work. The per-USER bucket
+is the one meant to bind: dispatchers share an office address, so one stuck tab
+must not throttle the room.
+
+Limits are sized against what the console actually does, with roughly an order
+of magnitude of headroom, because **a limit a real dispatcher can reach is a
+bug report rather than a guard**. Three tabs polling the fleet is nine requests
+a minute against sixty sustained.
+
+### The client was answering 429 by asking again
+
+The part that would have been missed. TanStack Query was configured
+`retry: 1`, and the console's fetchers threw a bare `Error` carrying only a
+message — so every failure looked alike and a 429 was answered by immediately
+spending another token. **A limiter whose client reacts by retrying is not a
+limiter; it deepens the hole it exists to stop digging.**
+
+`HttpError` carries the status, and the retry predicate refuses to retry 429,
+401 and 403 — the last two because they are decisions rather than accidents
+and a second identical request cannot change the caller's role.
+
+### What is asserted
+
+Not the numbers. The numbers will be tuned. What is asserted is that **every
+exported route handler spends an address token, every route that authenticates
+applies a per-user limit, and every route maps `RateLimitError` to a 429 rather
+than an unexplained 500** — scanned across `src/app/api`, with a second test
+pinning the file count so a directory rename cannot turn the scan green by
+finding nothing. Wiring this touched eleven files, and route fifteen will be
+written by copying one of them; the copy source has to be provably right.
+
+Verified live: 126 requests answered 401, then 429 with `retry-after`, while a
+different client address was still answering 401.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

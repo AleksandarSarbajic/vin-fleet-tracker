@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { httpErrorFrom } from '@/lib/http-error';
 import { FLEET_POLL_MS } from './useFleet';
 import type { TrailPoint } from '@/lib/trail';
 
@@ -22,7 +23,7 @@ export function useTrail(truckId: string | null) {
       const response = await fetch(`/api/trail?truck=${truckId!}`, {
         cache: 'no-store',
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      if (!response.ok) throw await httpErrorFrom(response);
       return ((await response.json()) as { points: TrailPoint[] }).points;
     },
     enabled: truckId !== null,

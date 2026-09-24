@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { serverEnv } from '@/env/server';
 import { AuthError, requireUser } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { loadFleetHealth } from '@/server/health';
 
 /**
@@ -14,13 +20,16 @@ import { loadFleetHealth } from '@/server/health';
  */
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireUser();
+    await enforceRateLimit('address', clientAddress(request));
+    const user = await requireUser();
+    await enforceRateLimit('read', user.id);
     return NextResponse.json(await loadFleetHealth(db, serverEnv.DISPATCH_TZ), {
       headers: { 'cache-control': 'no-store' },
     });
   } catch (error: unknown) {
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

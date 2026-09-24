@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { httpErrorFrom } from '@/lib/http-error';
 import type { FleetHealth } from '@/server/health';
 
 /**
@@ -15,7 +16,7 @@ export const HEALTH_POLL_MS = 60_000;
 
 async function fetchHealth(): Promise<FleetHealth> {
   const response = await fetch('/api/health', { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) throw await httpErrorFrom(response);
   return (await response.json()) as FleetHealth;
 }
 

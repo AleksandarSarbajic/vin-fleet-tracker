@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { db } from '@/db';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { AuthError, requireRole } from '@/lib/auth';
+import {
+  RateLimitError,
+  clientAddress,
+  enforceRateLimit,
+  rateLimitResponse,
+} from '@/server/rate-limit';
 import { BulkNoteInput, BulkOverrideInput } from '@/lib/override';
 import { BulkError, bulkNote, bulkOverride } from '@/server/bulk';
 import { statusConfig } from '@/server/fleet';
@@ -36,6 +42,7 @@ function failure(error: unknown) {
       { status: 400 },
     );
   }
+  if (error instanceof RateLimitError) return rateLimitResponse(error);
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -50,7 +57,9 @@ function failure(error: unknown) {
 export async function POST(request: Request) {
   try {
     // Re-checked server-side on every mutating route, whatever the UI showed.
+    await enforceRateLimit('address', clientAddress(request));
     const user = await requireRole('dispatcher');
+    await enforceRateLimit('write', user.id);
     const parsed = BulkRequest.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
