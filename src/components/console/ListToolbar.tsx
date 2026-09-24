@@ -27,14 +27,24 @@ export function ListToolbar({
   health: FleetHealth;
 }) {
   return (
-    <div className="flex h-7 items-center justify-between gap-3 border-b border-line-soft bg-surface-base px-2">
+    <div /*
+       * h-8 (32px), not h-7 (28px). The bar was sized around an 18px control;
+       * a 26px one needs 3px of clearance either side to sit in it rather
+       * than against it.
+       */
+      className="flex h-8 items-center justify-between gap-3 border-b border-line-soft bg-surface-base px-2">
       <FleetHealthStrip health={health} />
 
       <div className="flex shrink-0 items-center gap-2">
         <span className="font-cond text-micro uppercase tracking-[.11em] text-text-muted">
           Density
         </span>
-        <div className="flex" role="group" aria-label="Row density">
+        {/*
+          `gap-1.5`, exactly as the chip row uses. The control was a bare
+          `flex`, so the two buttons shared an edge and read as one cramped
+          block rather than a segmented pair.
+        */}
+        <div className="flex items-center gap-1.5" role="group" aria-label="Row density">
           {DENSITIES.map((option) => {
             const active = option === density;
             return (
@@ -43,9 +53,30 @@ export function ListToolbar({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onDensity(option)}
-                className={`h-[18px] border px-2 font-cond text-micro uppercase tracking-[.09em] ${
+                /*
+                 * The segmented pattern the chips actually use, rather than a
+                 * near-miss of it.
+                 *
+                 * This claimed in its own comment to follow the chip row and
+                 * then diverged on every measurement that matters: `h-[18px]`
+                 * against the chips' 26, no gap, `tracking-[.09em]` against
+                 * .08, and no transition at all — so the active state changed
+                 * instantly where every other control in the console grounds
+                 * over 120ms (§8.3).
+                 *
+                 * 18px was not a token either. §14.4's `chip-compact: 18px` is
+                 * the STATUS chip inside a row, which shrinks with density;
+                 * borrowing that number for a toolbar control made the control
+                 * the size of a row ornament.
+                 *
+                 * The active state is `bg-surface-overlay` like a selected
+                 * chip, plus `border-accent` and full-strength ink — the
+                 * accent edge is what distinguishes "this is a toggle you set"
+                 * from "this is a filter you picked".
+                 */
+                className={`flex h-[26px] shrink-0 items-center border px-2 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground ${
                   active
-                    ? 'border-accent bg-row-selected text-text'
+                    ? 'border-accent bg-surface-overlay text-text'
                     : 'border-line-soft text-text-muted hover:bg-row-hover'
                 }`}
               >

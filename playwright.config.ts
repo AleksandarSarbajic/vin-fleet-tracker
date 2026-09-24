@@ -42,16 +42,10 @@ export default defineConfig({
 
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
-    /**
-     * A dispatch monitor, not a laptop.
-     *
-     * The list drops columns as it narrows (§4.1's truncation order), and at
-     * Playwright's 1280 default the ETA column is not rendered at all — which
-     * silently turned an assertion about every ETA reading `stale` into an
-     * assertion about an element that does not exist. The suite should run at
-     * the width the console is actually used at.
+    /*
+     * The viewport is set per-project, below: a device preset overrides
+     * anything declared here, so putting it in this block does nothing.
      */
-    viewport: { width: 1920, height: 1080 },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
@@ -61,7 +55,20 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/dispatcher.json' },
+      use: {
+        ...devices['Desktop Chrome'],
+        /*
+         * AFTER the device spread, not before, and not in the top-level `use`.
+         *
+         * `devices['Desktop Chrome']` carries its own `viewport: 1280x720`,
+         * and a project's `use` beats the top-level one — so the 1920x1080 set
+         * above was silently discarded and every spec ran at 720px high. It
+         * looked configured and was not, which is the same shape of defect as
+         * an assertion that cannot fail.
+         */
+        viewport: { width: 1920, height: 1080 },
+        storageState: 'e2e/.auth/dispatcher.json',
+      },
       dependencies: ['setup'],
       // auth.spec.ts asserts the redirect and the login itself, so it must
       // start signed OUT. It sets its own storageState.

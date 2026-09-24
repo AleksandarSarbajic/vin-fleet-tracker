@@ -177,7 +177,23 @@ export function Split({ list, map, onResizeEnd }: Props) {
   return (
     <div
       ref={boxRef}
-      className="grid min-h-0 flex-1"
+      /*
+       * `grid-rows-[minmax(0,1fr)]` is load-bearing, not tidiness.
+       *
+       * With columns declared and no rows, the grid gets ONE IMPLICIT `auto`
+       * ROW, and an auto row is sized by its content. So a list of 40 trucks
+       * made the row 1,978px tall inside a 630px container, the overflow
+       * escaped to the document, and the whole page scrolled — header out of
+       * view at the top, map attribution sliding past the bottom. §12.17 and
+       * §14 both specify the opposite: the list scrolls inside its own box
+       * while the header and map stay put.
+       *
+       * `minmax(0, 1fr)` pins the row to the container's height and gives its
+       * children a definite height to resolve `100%` and `flex-1` against.
+       * The `0` minimum is the half that matters: a bare `1fr` has an `auto`
+       * minimum and grows to fit content exactly as before.
+       */
+      className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
       style={{ gridTemplateColumns: `${pct}% ${HANDLE_PX}px 1fr` }}
     >
       {list}

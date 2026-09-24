@@ -87,6 +87,14 @@ export interface SeedOptions {
   feedAgeMinutes?: number;
   /** The Chicago stop's appointment, as a UTC instant. */
   appointmentUtc?: Date;
+  /**
+   * Extra trucks beyond the three named ones.
+   *
+   * A layout question cannot be asked of a three-row list: it fits, so nothing
+   * overflows and every container looks correctly bounded. The real fleet is
+   * ~34 trucks, and overflow is the whole point of the test.
+   */
+  extraTrucks?: number;
 }
 
 export async function seedFleet(sql: postgres.Sql, options: SeedOptions = {}): Promise<void> {
@@ -142,6 +150,17 @@ export async function seedFleet(sql: postgres.Sql, options: SeedOptions = {}): P
   await stop(IDS.stopDallas, IDS.loadDallas, 'Dallas', 'TX', '75201', 32.7831, -96.8067, 'street');
   // Same coordinates as the truck. Zero miles away, and still not an arrival.
   await stop(IDS.stopZip, IDS.loadZip, 'Chicago', 'IL', '60602', ZIP_STOP.lat, ZIP_STOP.lng, 'zip');
+
+  // Filler, so the list is longer than the viewport.
+  for (let i = 0; i < (options.extraTrucks ?? 0); i += 1) {
+    const n = 200 + i;
+    const [t] = await sql<{ id: string }[]>`
+      insert into trucks (samsara_vehicle_id, samsara_name, truck_number, active)
+      values (${`sv-${n}`}, ${`Truck #${n}`}, ${n}, true) returning id`;
+    await sql`
+      insert into positions (truck_id, lat, lng, heading, speed_mph, recorded_at, formatted_location)
+      values (${t!.id}, ${41.8 + i * 0.01}, ${-87.6 - i * 0.01}, null, 0, ${recordedAt}, ${'Chicago, IL'})`;
+  }
 
   await sql`
     insert into feed_health (id, newest_position_at, last_success_at, cursor, missed_cycles)

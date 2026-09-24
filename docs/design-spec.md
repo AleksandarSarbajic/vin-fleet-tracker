@@ -5537,6 +5537,103 @@ nobody re-seeded. It writes `detected`: these stand in for arrivals the sweep
 found, and claiming a dispatcher marked them would put a person in an audit
 trail who was never there.
 
+
+## 12.68 The whole page scrolled, and the backstop that hid it
+
+Reported from the running console: the header scrolled off the top and the
+map's attribution slid up past its own boundary. The app had stopped being a
+fixed shell with one scrolling list and become an ordinary long web page.
+
+### The mechanism
+
+§14 feature 5 (`a14e60e`) wrapped the list in a new flex container so the
+density toolbar could sit above it:
+
+```
+-  <FleetList … />
++  <div className="flex h-full flex-col">
++    <ListToolbar … />
++    <FleetList … />
+```
+
+That wrapper is a child of `Split`'s grid, which declares
+`gridTemplateColumns` and **no rows** — so the grid has one implicit `auto`
+row, and an `auto` row is sized by its content. `h-full` resolving against a
+row sized by its own content is circular, and the wrapper also lacked
+`min-h-0`, whose default `auto` refuses to shrink below content. So
+`FleetList`'s `flex-1 overflow-y-auto` resolved against an unbounded height:
+
+```
+div.grid min-h-0 flex-1                   h=630    ← correctly bounded
+  div.flex h-full flex-col                h=1978   ← blows out
+    div.min-h-0 flex-1 overflow-y-auto    client=1920 scroll=1920
+```
+
+The scroll container existed the whole time. It simply never had a height it
+was required to stay inside, so it grew to fit and had nothing left to scroll.
+
+**It could not have been caught by the existing specs**, and not by accident:
+the fixture had three trucks. Three rows fit, nothing overflows, and every
+container measures correctly bounded. The fleet is ~34 trucks. A layout test
+that does not overflow is a layout test that asks nothing.
+
+### The fix, and the thing that nearly passed for one
+
+`grid-rows-[minmax(0,1fr)]` on the split, and `min-h-0` on the wrapper. Either
+is sufficient alone; both are kept.
+
+`overflow-hidden` on the shell was added at the same time as "belt and
+braces", and measuring it was the useful part:
+
+```
+revert both structural fixes, keep overflow-hidden
+    page does not scroll    PASS   ← the visible symptom is gone
+    list scrolls            FAIL
+    map stays bounded       FAIL
+```
+
+**It masks the symptom and fixes nothing.** With only that line in place the
+header stays put and the list becomes unscrollable — strictly worse than the
+bug, because the rows below the fold stop being reachable at all. It is kept
+as a statement of intent, and `e2e/layout.spec.ts` asserts the properties that
+matter — the LIST scrolls, the MAP stays inside its pane — so a future
+structural break fails a test instead of hiding behind it.
+
+### And the viewport that was never applied
+
+Found while reproducing. The Playwright config set
+`use: { viewport: 1920x1080 }` at the top level and then spread
+`devices['Desktop Chrome']` — which carries its own `viewport: 1280x720` — in
+the project's `use`, which wins. Every spec had been running at 720px high.
+It looked configured and was not: the same shape as an assertion that cannot
+fail, one file over.
+
+## 12.69 The density control claimed to follow a pattern it did not
+
+Its own comment said it "follows the segmented pattern the chips already use".
+It diverged on every measurement that matters:
+
+```
+                 density (was)   filter chip
+height           18px            26px
+gap              none            6px
+tracking         .09em           .08em
+transition       none            120ms (§8.3 ground)
+```
+
+18px was not a token for this either. §14.4 defines `chip-compact: 18px` as
+the STATUS chip inside a row, which shrinks with density — borrowing that
+number for a toolbar control sized the control like a row ornament, which is
+what "undersized and cramped" was describing.
+
+The bar around it was `h-7` (28px), sized for the 18px control; a 26px one
+needs `h-8` to sit in it rather than against it.
+
+The active state is `bg-surface-overlay` like a selected chip, plus
+`border-accent`: the accent edge is what separates "a toggle you set" from "a
+filter you picked", which are different kinds of state in the same row of
+controls.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

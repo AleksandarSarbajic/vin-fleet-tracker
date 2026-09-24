@@ -502,7 +502,24 @@ export function Console({
      * it: it holds unsaved state and sits above, at z-40.
      */
     <OverlayProvider>
-      <div className="flex h-dvh flex-col bg-surface-base">
+      {/*
+        `overflow-hidden` states the rule — the shell is exactly the viewport
+        and never scrolls as a page — but it is NOT the fix, and must not be
+        read as one.
+
+        Measured: with the two structural fixes reverted and only this in
+        place, the page-scroll symptom disappears while the list still cannot
+        scroll and the map still overflows its pane. That is a worse state
+        than the bug it appears to cure, because the rows below the fold
+        become unreachable instead of merely awkward.
+
+        The fix is `grid-rows-[minmax(0,1fr)]` in Split.tsx and `min-h-0` on
+        the wrapper below, either of which is sufficient on its own. This line
+        is the statement of intent, and `e2e/layout.spec.ts` asserts the real
+        property — that the LIST scrolls and the MAP stays bounded — so a
+        future structural break fails a test rather than hiding behind this.
+      */}
+      <div className="flex h-dvh flex-col overflow-hidden bg-surface-base">
         <ConsoleHeader
           rows={all}
           chips={chips}
@@ -608,8 +625,19 @@ export function Console({
           <div className="relative flex min-h-0 flex-1 flex-col">
             <Split
               onResizeEnd={onResizeEnd}
+              /*
+               * `min-h-0` beside `h-full` on the wrapper below.
+               *
+               * §14 feature 5 introduced that wrapper to sit the density
+               * toolbar above the list. A flex child's default
+               * `min-height: auto` refuses to shrink below its content, so
+               * FleetList's own `flex-1 overflow-y-auto` resolved against an
+               * unbounded height and grew to 1,920px instead of scrolling.
+               * The scroll container was there the whole time; it simply
+               * never had a height it was required to stay inside.
+               */
               list={
-                <div className="flex h-full flex-col">
+                <div className="flex h-full min-h-0 flex-col">
                   {/* §14.5: the strip is read with the list, not the header. */}
                   <ListToolbar density={density} onDensity={setDensity} health={health} />
                   <FleetList
