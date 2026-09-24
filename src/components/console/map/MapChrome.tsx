@@ -23,6 +23,9 @@ const KEY_ROWS: Status[] = [
   'ARRIVED',
   'TOMORROW',
   'STALE_GPS',
+  // Its own row since it gained the slash (§13.4). Until then it was a grey
+  // ring with nothing distinct to show, and "Data issue" stood in for it.
+  'UNASSIGNED',
 ];
 
 /**
@@ -68,6 +71,28 @@ function Swatch({ status }: { status: Status }) {
             fill="none"
             strokeWidth="1.5"
             className="stroke-status-tomorrow-fg"
+          />
+        </svg>
+      );
+    // The marker's ⊘ at legend scale — same ring, same slash, same direction
+    // (markers.ts). 14px draws the 26-unit box at 0.54, so the 1.8 slash lands
+    // near 1 CSS px: the heaviest line in the key, which is what keeps it from
+    // blurring into the ring at this size.
+    case 'UNASSIGNED':
+      return (
+        <svg {...common} aria-hidden="true">
+          <circle
+            cx="13"
+            cy="13"
+            r="7.2"
+            strokeWidth="1.5"
+            className="fill-status-neutral-bg stroke-status-neutral-fg"
+          />
+          <path
+            d="M7.91 7.91 18.09 18.09"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            className="stroke-status-neutral-fg"
           />
         </svg>
       );

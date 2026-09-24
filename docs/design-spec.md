@@ -809,7 +809,8 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
   border, top-right at 16/14px inset.
 - **Marker key**: bottom-right, `rgba(21,24,27,.92)` ground, `line.hair`
   border, Micro heading `Marker key`, then one 11px row per shape — Late, At
-  risk, On time, Arrived, Tomorrow, Data issue.
+  risk, On time, Arrived, Tomorrow, Data issue, Unassigned (added with its
+  ⊘ shape, §13.4).
 - **Map footer** (26px): `line.hair` top, Micro-step 10.5 `text.muted`. Left
   is contextual (`Positions from ELD · newest 12s ago`, or
   `Clusters break apart above zoom 6 · problem markers never cluster`, or
