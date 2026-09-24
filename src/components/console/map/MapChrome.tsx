@@ -16,6 +16,18 @@ import { BASEMAPS, BASEMAP_CREDITS, type Basemap } from '@/lib/basemap';
  * it without replacing it.
  */
 
+/**
+ * One row per marker, and no row standing in for more than one shape.
+ *
+ * Until §13.4 a single "Data issue" row drew Stale GPS's swatch and stood for
+ * all three neutral markers — the filter chip's bucket, not a shape. Now each
+ * has its own row under its own status label.
+ *
+ * The neutral three follow the urgency sort (lib/status.ts), which is also
+ * the order the list shows them in. It has a second, measured benefit: it
+ * keeps No appt's dashed ring from sitting directly under Stale GPS's dotted
+ * one, the closest pair in the set at 14px.
+ */
 const KEY_ROWS: Status[] = [
   'LATE',
   'AT_RISK',
@@ -23,10 +35,26 @@ const KEY_ROWS: Status[] = [
   'ARRIVED',
   'TOMORROW',
   'STALE_GPS',
-  // Its own row since it gained the slash (§13.4). Until then it was a grey
-  // ring with nothing distinct to show, and "Data issue" stood in for it.
   'UNASSIGNED',
+  'NO_APPT',
 ];
+
+/**
+ * Stale GPS's hatch, as chords rather than a clipped pattern: the same 45°
+ * lines at the same 3.5 pitch and phase as `hatchCircle` in markers.ts
+ * (x − y = c for c = −26 + 3.5k), each cut to the r 7.2 disc. A chord needs
+ * no clipPath, so there is no document-wide id to keep unique.
+ */
+const HATCH_R = 7.2;
+const HATCH_PATH = Array.from({ length: 23 }, (_, k) => -26 + 3.5 * k)
+  .filter((c) => Math.abs(c) / Math.SQRT2 < HATCH_R)
+  .map((c) => {
+    const h = Math.sqrt(HATCH_R ** 2 - c ** 2 / 2) / Math.SQRT2;
+    const [fx, fy] = [13 + c / 2, 13 - c / 2];
+    const f = (n: number) => n.toFixed(2);
+    return `M${f(fx - h)} ${f(fy - h)}L${f(fx + h)} ${f(fy + h)}`;
+  })
+  .join('');
 
 /**
  * Small flat swatches matching the marker shapes, at legend scale.
@@ -96,7 +124,10 @@ function Swatch({ status }: { status: Status }) {
           />
         </svg>
       );
-    default:
+    // The marker's dashed ring and `?`, point for point from markers.ts: the
+    // canvas arc (12.25, 12, r 1.7, from π clockwise to 2.35π) is the path's
+    // A command, large-arc and clockwise.
+    case 'NO_APPT':
       return (
         <svg {...common} aria-hidden="true">
           <circle
@@ -104,8 +135,36 @@ function Swatch({ status }: { status: Status }) {
             cy="13"
             r="7.2"
             strokeWidth="1.5"
-            strokeDasharray="1.5 2.2"
+            strokeDasharray="3 2.6"
             className="fill-status-neutral-bg stroke-status-neutral-fg"
+          />
+          <path
+            d="M10.55 12A1.7 1.7 0 1 1 13.02 13.51M13 13.4V14.4"
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            className="stroke-status-neutral-fg"
+          />
+          <circle cx="13" cy="16.4" r="0.6" className="fill-status-neutral-fg" />
+        </svg>
+      );
+    // Hatched disc, dotted edge — the marker, hatch included. The key used to
+    // draw the dotted ring alone, which is not what the map shows, and at 14px
+    // left it one dash length away from No appt. The hatch is what separates
+    // the two on the map, so it is what separates them here.
+    case 'STALE_GPS':
+      return (
+        <svg {...common} aria-hidden="true">
+          <circle cx="13" cy="13" r="7.2" className="fill-status-neutral-bg" />
+          <path d={HATCH_PATH} strokeWidth="1.2" className="stroke-status-neutral-fg" />
+          <circle
+            cx="13"
+            cy="13"
+            r="7.2"
+            fill="none"
+            strokeWidth="1.5"
+            strokeDasharray="1.5 2.2"
+            className="stroke-status-neutral-fg"
           />
         </svg>
       );
@@ -202,7 +261,7 @@ export function MarkerKey() {
           className="flex items-center gap-[7px] font-sans text-[11px] text-text-secondary"
         >
           <Swatch status={status} />
-          {status === 'STALE_GPS' ? 'Data issue' : STATUS_LABEL[status]}
+          {STATUS_LABEL[status]}
         </span>
       ))}
     </div>

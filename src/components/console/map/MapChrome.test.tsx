@@ -29,16 +29,50 @@ const rows = () =>
 const rowFor = (label: string) => rows().find((r) => r.textContent === label);
 
 describe('the marker key', () => {
-  it('lists one row per shape, Unassigned last', () => {
+  /**
+   * Eight rows for eight markers, each under its own status label. There used
+   * to be a "Data issue" row drawing one shape and standing for three.
+   */
+  it('lists one row per marker, the neutral three in urgency order', () => {
     expect(rows().map((r) => r.textContent)).toEqual([
       'Late',
       'At risk',
       'On time',
       'Arrived',
       'Tomorrow',
-      'Data issue',
+      'Stale GPS',
       'Unassigned',
+      'No appt',
     ]);
+  });
+
+  /**
+   * At 14px the `?` is two pixels tall; what still separates No appt from
+   * its neighbours at 1x is a DASHED ring (not Stale GPS's dotted one, not a
+   * solid one) with a mark inside it. Both halves are held.
+   */
+  it("draws No appt's dashed ring and its question mark", () => {
+    const row = rowFor('No appt');
+    const ring = row?.querySelector('circle[stroke-dasharray]');
+    expect(ring?.getAttribute('stroke-dasharray')).toBe('3 2.6');
+    expect(row?.querySelector('path')?.getAttribute('d')).toBe(
+      'M10.55 12A1.7 1.7 0 1 1 13.02 13.51M13 13.4V14.4',
+    );
+    expect(row?.querySelector('circle[r="0.6"]')).not.toBeNull();
+  });
+
+  /**
+   * The key used to draw Stale GPS as a dotted ring alone, which is not the
+   * marker and at 1x sat one dash length from No appt. The hatch is the six
+   * chords of markers.ts's pattern that cross the disc.
+   */
+  it("draws Stale GPS as the marker does: hatched, with a dotted edge", () => {
+    const row = rowFor('Stale GPS');
+    expect(row?.querySelector('circle[stroke-dasharray]')?.getAttribute('stroke-dasharray')).toBe(
+      '1.5 2.2',
+    );
+    const hatch = row?.querySelector('path')?.getAttribute('d') ?? '';
+    expect(hatch.match(/M/g)).toHaveLength(6);
   });
 
   /**

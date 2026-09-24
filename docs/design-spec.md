@@ -808,9 +808,16 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
 - **Zoom control**: two stacked 32×32 buttons, `surface.raised`, `line.hair`
   border, top-right at 16/14px inset.
 - **Marker key**: bottom-right, `rgba(21,24,27,.92)` ground, `line.hair`
-  border, Micro heading `Marker key`, then one 11px row per shape — Late, At
-  risk, On time, Arrived, Tomorrow, Data issue, Unassigned (added with its
-  ⊘ shape, §13.4).
+  border, Micro heading `Marker key`, then one 11px row per **marker** —
+  Late, At risk, On time, Arrived, Tomorrow, Stale GPS, Unassigned, No appt.
+  Eight rows, no row standing in for more than one shape. *(Drawn as six,
+  with a `Data issue` row showing Stale GPS's swatch for all three neutral
+  statuses. Split once Unassigned had a shape of its own, §13.4. The neutral
+  three follow the urgency sort, which also keeps No appt's dashed ring from
+  sitting directly under Stale GPS's dotted one.)* Each swatch is its marker
+  at 14px, including Stale GPS's hatch — at 1x the hatch is what separates it
+  from No appt, whose `?` is two pixels tall there and reads only as a mark
+  inside the ring.
 - **Map footer** (26px): `line.hair` top, Micro-step 10.5 `text.muted`. Left
   is contextual (`Positions from ELD · newest 12s ago`, or
   `Clusters break apart above zoom 6 · problem markers never cluster`, or
