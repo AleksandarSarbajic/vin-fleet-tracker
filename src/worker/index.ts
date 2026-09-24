@@ -70,7 +70,21 @@ initWorkerSentry({
  * exit and standing down.
  */
 const die = (what: string, cause: unknown): void => {
-  logger.error(what, { cause, fatal: true });
+  logger.error(what, {
+    /**
+     * The message on the LINE, not only in `cause`.
+     *
+     * `cause` is stripped before serialisation — an Error stringifies to `{}` —
+     * and is carried to Sentry for its stack. That is right, but it left the
+     * fatal log line reading `{"msg":"uncaught exception","fatal":true}` and
+     * nothing else, which on a headless host is the whole failure with the
+     * cause removed. journald is the primary record here; Sentry is the second
+     * copy, and the second copy must not be the only legible one.
+     */
+    error: cause instanceof Error ? cause.message : String(cause),
+    cause,
+    fatal: true,
+  });
   // The flush is bounded inside; a Sentry outage must not hold the exit open.
   void flushWorkerSentry().finally(() => process.exit(1));
 };
@@ -87,7 +101,15 @@ if (!parsedEnv.success) {
   const detail = report('worker', parsedEnv.error);
   // Through the logger, so the misconfiguration reaches Sentry rather than
   // only the terminal of whoever happened to run it.
-  logger.error('invalid worker environment', { cause: new Error(detail) });
+  logger.error('invalid worker environment', {
+    // One field per problem, so journald shows WHICH variable is wrong rather
+    // than that one of them is. This is the first thing a misconfigured deploy
+    // prints, and it is read over SSH with nothing else to go on.
+    problems: parsedEnv.error.issues.map(
+      (i) => `${i.path.join('.') || '(root)'}: ${i.message}`,
+    ),
+    cause: new Error(detail),
+  });
   await flushWorkerSentry();
   throw new Error(detail);
 }
