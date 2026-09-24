@@ -243,14 +243,30 @@ const SHAPES: Record<Status, Shape> = {
     },
   },
 
-  // Solid-outline circle. Same neutral pair as No appt and Stale GPS; told
-  // apart by the border style, exactly as the chips are.
+  // Solid-outline circle with a slash: ⊘. Same neutral pair as No appt and
+  // Stale GPS; told apart by the border style, exactly as the chips are.
+  //
+  // The slash closes §13.4. Without it this was a grey ring whose dark fill
+  // vanishes into dark ground — Tomorrow's silhouette, one step of grey
+  // lighter — and the plate (§12.70) put the two side by side on identical
+  // ground. The mark is the chip's own driver-slash (StatusChip.tsx, same
+  // top-left to bottom-right direction), so it adds no hue and no new
+  // vocabulary; it is one line, ring to ring, and heavier than Stale GPS's
+  // hatch so a single stroke never reads as a sparse hatch.
   UNASSIGNED: {
     draw: (ctx) => {
       circlePath(ctx, 7.2);
       ctx.fillStyle = NEUTRAL_FILL;
       ctx.fill();
       ctx.lineWidth = 1.5;
+      ctx.strokeStyle = NEUTRAL;
+      ctx.stroke();
+      const d = 7.2 * Math.SQRT1_2;
+      ctx.beginPath();
+      ctx.moveTo(C - d, C - d);
+      ctx.lineTo(C + d, C + d);
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
       ctx.strokeStyle = NEUTRAL;
       ctx.stroke();
     },
@@ -267,9 +283,10 @@ export interface MarkerImage {
 /**
  * Rasterises all eight. Browser only — needs a canvas.
  *
- * On the dark basemap this draws exactly what it always drew: the plate code
- * path does not run, and the images are byte-identical to the pre-satellite
- * ones (checked in the browser against the previous commit's renderer).
+ * On the dark basemap the plate code path does not run: seven of the eight
+ * images are byte-identical to the pre-satellite ones (checked in the browser
+ * against the previous commit's renderer). Unassigned differs on both
+ * basemaps, deliberately — it gained its slash (§13.4).
  */
 export function renderMarkerImages(basemap: Basemap = 'dark'): MarkerImage[] {
   const out: MarkerImage[] = [];

@@ -464,7 +464,7 @@ Marker shape is the primary channel. 26×26 viewBox, `stroke: surface.base`
 | `ARRIVED` | **Square** 14×14 with a check | `#9cc4e8` | `#15181b`, check in `#15181b` |
 | `NO_APPT` | **Dashed circle** r 7.2 + `?` glyph | `#262a2f` | `#b3bac0`, `stroke-dasharray: 3 2.6` |
 | `STALE_GPS` | **Hatched circle** r 7.2 | 45° hatch pattern, 4px pitch, `#b3bac0` 1.4 | `#b3bac0`, `stroke-dasharray: 1.5 2.2` |
-| `UNASSIGNED` | **Solid-outline circle** | `#262a2f` | `#b3bac0` solid 1px |
+| `UNASSIGNED` | **Solid-outline circle with a slash** (⊘, the chip's driver-slash, top-left → bottom-right, ring to ring, 1.8) — §13.4 | `#262a2f` | `#b3bac0` solid 1px |
 
 ## 5.4 Chip icons
 
@@ -5714,14 +5714,19 @@ checked by rendering both in the browser and comparing the buffers.
 24px, so trucks parked close together overlap more on satellite. Problem
 markers never cluster by design, so a yard of them stacks.
 
-### What the plate made visible rather than fixed
+### What the plate made visible — and then closed
 
 §13.4 again, now unmissable. On the plate, **Tomorrow and Unassigned read as
 near-twins**: Unassigned's dark fill (`#262a2f`) disappears into the plate
 exactly as it disappears into the dark basemap, leaving "a grey ring on a dark
 disc" for both, one step of grey apart (`#858d94` against `#b3bac0`). The
-plate carries the dark-map appearance over as it is, flaws included — which is
-the point of it, and also why this is still open.
+plate carries the dark-map appearance over as it is, flaws included. The plate
+made the existing problem more visible; it did not create it.
+
+Closed in the same change by giving Unassigned a slash (⊘) on both basemaps —
+see §13.4. The other seven images are still byte-identical to the
+pre-satellite renderer on the dark map and to the plate renderer on
+satellite; only Unassigned changed, on both.
 
 ### And the footer had been out of compliance since phase 3
 
@@ -5737,8 +5742,8 @@ that a test holds to the terms.
 The contradictions found during extraction, plus what real use has since
 raised. **These have not been ruled on.**
 
-13.1–13.5 came out of the phase-0 extraction; of those, four are cosmetic or
-deferred and one (§13.3) has since been resolved. **§13.6 and §13.7 are
+13.1–13.5 came out of the phase-0 extraction; of those, three are cosmetic or
+deferred and two (§13.3, §13.4) have since been resolved. **§13.6 and §13.7 are
 different in kind** — both were raised by real trucks rather than by reading
 the drawings, and both are held open deliberately: §13.6 to see whether the
 misreading happens again, §13.7 because the idea is sound and the shape is
@@ -5780,13 +5785,23 @@ Below 900px of list width the row drops to six columns: Position and ETA are
 cut, type and padding are untouched. Kept here as a pointer because the
 arithmetic that produced it is worth not re-deriving.
 
-## 13.4 Unassigned and Tomorrow markers are both circles
+## 13.4 Unassigned and Tomorrow markers are both circles — **RESOLVED, see §12.70**
 
-> **Measured on satellite, §12.70.** On the satellite plate the two read as
-> near-twins — a grey ring on a dark disc, one step of grey apart. The dark
-> basemap has the same property for the same reason (Unassigned's dark fill
-> vanishes into dark ground). Still open; the satellite view makes it
-> impossible to miss.
+> **Resolved 2026-09-24.** Unassigned now carries a slash through the ring —
+> ⊘ against Tomorrow's plain ○ — so the pair separates by silhouette like the
+> rest of the set, on both basemaps and in greyscale. The slash is the
+> Unassigned chip's own driver-slash (§5.4), in the same direction, so it adds
+> no hue (turn 4's "no new hue" holds) and no new vocabulary. It is one 1.8
+> stroke, ring to ring, heavier and single where Stale GPS's hatch is fine and
+> repeated, so the two do not blur. Tomorrow is untouched and stays the
+> quietest marker in the set.
+>
+> Found on satellite: on the plate the two read as near-twins — a grey ring on
+> a dark disc, one step of grey apart. The dark basemap had the same property
+> for the same reason (Unassigned's dark fill vanishes into dark ground); the
+> plate made it more visible, it did not make it new.
+
+The original finding, kept for the reasoning:
 
 `TOMORROW` is a hollow circle, no fill, `#858d94` 1.5 stroke. `UNASSIGNED` is
 a solid-outline circle, `#262a2f` fill, `#b3bac0` 1.5 stroke. They separate by
