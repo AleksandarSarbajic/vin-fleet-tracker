@@ -5471,10 +5471,37 @@ Worth recording because both would have passed review:
 
 - `/\bstale\b/` never matched. A row's `textContent` concatenates its cells
   with no whitespace, so the ETA reads `…CDTstale1m` and a word boundary has
-  nothing to sit on.
+  nothing to sit on. In the POSITIVE assertion this failed loudly; in the
+  NEGATIVE one (`toHaveCount(0)`) a matcher that can never match is trivially
+  satisfied, so it passed whatever the console did.
 - The ETA column **does not exist** at the default split width. The first
-  version asserted on an element that could not be there, and a test that
-  cannot fail is not a passing test.
+  version asserted on an element that could not be there.
+
+Both are fixed, and — because "I fixed it" is the same claim the broken
+version made — the fixes were **mutation-tested**: a defect was injected, the
+test was required to go red, and the defect reverted.
+
+```
+M1  the ETA stops saying `stale` while the feed is stale     FAILS  ✓
+M2  the rail is no longer withdrawn fleet-wide               FAILS  ✓
+M3  the eight-column layout is not forced (no ETA cell)      FAILS  ✓
+M4  `feedStale` inverted — a fresh feed claims `stale`       FAILS  ✓
+```
+
+M4 run twice against the same injected defect is the one worth keeping:
+
+```
+    hasText: 'stale'     FAILS   — catches it
+    /\bstale\b/          PASSES  — green-lights a broken console
+```
+
+The general rule this leaves behind: **a negative assertion is only as good as
+the matcher's ability to match something.** `toHaveCount(0)` with a selector
+that cannot select is indistinguishable from a passing test, and the only way
+to tell them apart is to break the thing on purpose and watch. Where a test
+depends on a precondition it does not control — here, a layout that only
+exists at a given width — the precondition is asserted too, so a silent change
+produces a failure that names itself rather than an assertion about nothing.
 
 ## 12.67 `--clear` is verified now, not reported
 

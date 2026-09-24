@@ -26,6 +26,22 @@ async function wideList(page: import('@playwright/test').Page): Promise<void> {
   await page.addInitScript(() => window.localStorage.setItem('ft.splitPct', '82'));
 }
 
+/**
+ * Proves the eight-column layout is really on before anything asserts about a
+ * cell that only exists there.
+ *
+ * Without this the failure mode is silent in the direction that matters: if
+ * `wideList` ever stops working, an assertion about the ETA column becomes an
+ * assertion about nothing, and the honest way to stop that is to check the
+ * precondition rather than to trust it.
+ */
+async function expectEtaColumn(page: import('@playwright/test').Page): Promise<void> {
+  await expect(
+    page.getByRole('row').first(),
+    'the list is not in its eight-column layout, so there is no ETA cell to assert on',
+  ).toContainText('ETA');
+}
+
 test('a fresh feed shows no banner and leaves the ETAs alone', async ({ page }) => {
   await resetWorld({ feedAgeMinutes: 1 });
   await wideList(page);
@@ -33,14 +49,21 @@ test('a fresh feed shows no banner and leaves the ETAs alone', async ({ page }) 
   await expect(page.getByLabel('Search the fleet')).toBeVisible();
 
   await expect(page.getByText(banner)).toHaveCount(0);
-  // The list really is in its eight-column layout, so the check below is
-  // looking at a cell that exists.
-  await expect(page.getByRole('row').first()).toContainText('ETA');
+  await expectEtaColumn(page);
   /**
-   * Substring, not `/\bstale\b/`. A row's textContent concatenates its cells
-   * with no whitespace between them, so the ETA reads `…11:07 CDTstale1m` and
-   * a word boundary never matches. The first version of this looked correct
-   * and asserted nothing.
+   * Substring, not `/\bstale\b/`, and the difference is load-bearing.
+   *
+   * A row's textContent concatenates its cells with no whitespace between
+   * them, so the ETA reads `…11:07 CDTstale1m` and a word boundary has nothing
+   * to sit on. In a NEGATIVE assertion like this one that is invisible: a
+   * matcher that can never match trivially satisfies `toHaveCount(0)`, so the
+   * test passes whatever the app does.
+   *
+   * Measured rather than argued. With `feedStale` inverted in `etaText`, so a
+   * fresh feed wrongly claims `stale` on every row:
+   *
+   *     hasText: 'stale'     FAILS   — catches the defect
+   *     /\bstale\b/          PASSES  — green-lights a broken console
    */
   await expect(page.locator('[data-row-id]').filter({ hasText: 'stale' })).toHaveCount(0);
   await expect(page.locator('[data-row-id] .rail-dotted')).toHaveCount(0);
@@ -58,6 +81,8 @@ test('an old feed announces itself and withdraws every ETA at once', async ({ pa
   // an ETA read off this screen must not be quoted to a broker.
   await expect(page.getByText(banner)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/do not quote an ETA from this screen/)).toBeVisible();
+
+  await expectEtaColumn(page);
 
   /**
    * And the part that is actually fleet-wide: EVERY row's ETA reads `stale`,
