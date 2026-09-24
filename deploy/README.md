@@ -82,10 +82,34 @@ systemctl enable --now vin-fleet-worker.service
 
 ## Deploying a new commit
 
-**Stop before starting.** The singleton guard refuses a second instance, but
-only once the *first* one holds the lock — a worker started before the guard
-existed holds nothing, and so does a worker that has already exited. The guard
-makes an overlap loud; it does not make an unordered cutover safe.
+```sh
+scripts/deploy.sh [<sha>]      # defaults to HEAD
+```
+
+**The gates live inside that script rather than beside it.** `PROJECT_BRIEF.md`
+asks for "two gates, not notes", and the way a note becomes a gate is that the
+only convenient path to production runs through it:
+
+| gate | what it covers that nothing else does |
+|---|---|
+| `npm run check` | typecheck, lint, the unit suite |
+| `npm run preflight` | the REAL transaction pooler — `prepare: false`, the fleet query's row shape, and the advisory lock the singleton guard is built on. The local cluster cannot reproduce any of it (§12.32, §12.62) |
+| `npm run db:verify` | RLS on every table, deny-by-default policies, no anon/authenticated grants, and the `feed_health` singleton that nothing recreates (§12.34) |
+| `npm run e2e` | the browser flows: middleware redirect, a real session, hydration, the map, and one write path end to end |
+
+It also refuses to deploy a dirty tree, or a commit that is not on a remote —
+deploying something that exists only on one laptop is the failure this phase
+removed, and the deploy script should not be the place it comes back.
+
+**Stop before start.** The script does this, and the ordering is not a
+nicety: the singleton guard refuses a second instance only once the first one
+holds the lock, so it makes an overlap *loud* rather than making an unordered
+cutover *safe* (§12.64).
+
+Afterwards it proves two things rather than assuming them — that the service is
+active on the expected commit, and that a second instance really is refused.
+
+### By hand, if the script is not an option
 
 ```sh
 systemctl stop vin-fleet-worker.service       # SIGTERM: finishes the cycle,
@@ -95,14 +119,6 @@ sudo -u vinfleet git fetch origin
 sudo -u vinfleet git checkout --detach <sha>
 sudo -u vinfleet npm ci --omit=dev
 systemctl start vin-fleet-worker.service
-```
-
-Then confirm the guard is live, which is the only check that proves the thing
-worth proving:
-
-```sh
-sudo -u vinfleet env $(grep -v '^#' /etc/vin-fleet-tracker/worker.env | xargs) \
-  ./node_modules/.bin/tsx src/worker/index.ts   # must exit 1 and name the holder
 ```
 
 `npm ci --omit=dev` skips vitest, playwright, typescript and eslint. It does

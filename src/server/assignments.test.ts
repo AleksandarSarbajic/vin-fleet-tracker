@@ -215,3 +215,76 @@ withDb('saving the board', () => {
     expect(result).toMatchObject({ assigned: 0, cleared: 0, unchanged: 1 });
   });
 });
+
+/**
+ * A driver moving between two trucks, in BOTH payload orders.
+ *
+ * Found by the Playwright reassignment spec, which got a 500 where every unit
+ * test here had passed. The apply loop closed and opened truck by truck, so
+ * when the gaining truck was processed first the insert ran while the driver
+ * still held an open assignment on the losing truck, and
+ * `assignments_one_open_per_driver` refused it. The same two changes in the
+ * other order succeeded.
+ *
+ * That is the worst shape a bug can have: correct-looking code whose
+ * correctness depends on the order a client happened to serialise its edits
+ * in. Both orders are asserted, because passing in one of them is what hid it.
+ */
+withDb('a driver moving between two trucks', () => {
+  const move = (gainingFirst: boolean) => async (tx: Tx) => {
+    const [from, to] = [await makeTruck(tx), await makeTruck(tx)];
+    const driver = await makeDriver(tx);
+    await assign(tx, from!.id, driver.id);
+
+    const changes = [
+      { truckId: to!.id, driverId: driver.id },
+      { truckId: from!.id, driverId: null },
+    ];
+    await saveAssignments(tx as unknown as Tx, {
+      actorUserId: null,
+      changes: gainingFirst ? changes : [changes[1]!, changes[0]!],
+    });
+
+    const open = await tx
+      .select({ truckId: assignments.truckId, driverId: assignments.driverId })
+      .from(assignments)
+      .where(and(eq(assignments.driverId, driver.id), isNull(assignments.endedAt)));
+    return { open, from: from!.id, to: to!.id };
+  };
+
+  it('works when the GAINING truck comes first in the payload', async () => {
+    // The order that used to fail.
+    const { open, to } = await rolledBack(move(true));
+    expect(open).toHaveLength(1);
+    expect(open[0]!.truckId).toBe(to);
+  });
+
+  it('works when the LOSING truck comes first in the payload', async () => {
+    const { open, to } = await rolledBack(move(false));
+    expect(open).toHaveLength(1);
+    expect(open[0]!.truckId).toBe(to);
+  });
+
+  it('closes the old assignment rather than deleting it', async () => {
+    const rows = await rolledBack(async (tx) => {
+      const [from, to] = [await makeTruck(tx), await makeTruck(tx)];
+      const driver = await makeDriver(tx);
+      await assign(tx, from!.id, driver.id);
+      await saveAssignments(tx as unknown as Tx, {
+        actorUserId: null,
+        changes: [
+          { truckId: to!.id, driverId: driver.id },
+          { truckId: from!.id, driverId: null },
+        ],
+      });
+      return tx
+        .select({ truckId: assignments.truckId, endedAt: assignments.endedAt })
+        .from(assignments)
+        .where(eq(assignments.driverId, driver.id));
+    });
+    // Two rows: the closed one and the open one. History is what the audit
+    // trail is read out of, so the old row must survive.
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((r) => r.endedAt === null)).toHaveLength(1);
+  });
+});

@@ -292,19 +292,49 @@ export async function saveAssignments(
     let cleared = 0;
     let unchanged = 0;
 
+    /**
+     * EVERY CLOSE BEFORE ANY OPEN. The ordering is the whole correctness
+     * argument, and doing it per-truck was wrong.
+     *
+     * Moving a driver between two trucks arrives as two changes in one
+     * payload: truck A gains them, truck B loses them. Closing and opening
+     * truck by truck meant that if A was processed first, the insert for A ran
+     * while the driver was still open on B — and
+     * `assignments_one_open_per_driver` refused it. The same two changes in
+     * the other order succeeded, so whether a reassignment worked depended on
+     * the order the client happened to serialise its edits in.
+     *
+     * Found by the Playwright reassignment spec, which moves a driver between
+     * two trucks and got a 500. Every unit test had sent the changes in the
+     * lucky order.
+     */
+    const applying: {
+      truckId: string;
+      driverId: string | null;
+      current: { id: string; driverId: string } | undefined;
+    }[] = [];
+
     for (const [truckId, driverId] of requested) {
       const current = openByTruck.get(truckId);
       if ((current?.driverId ?? null) === driverId) {
         unchanged += 1;
         continue;
       }
+      applying.push({ truckId, driverId, current });
+    }
 
-      if (current) {
-        await tx
-          .update(assignments)
-          .set({ endedAt: sql`now()` })
-          .where(eq(assignments.id, current.id));
-      }
+    // Pass 1: release every driver who is moving or being removed. After this
+    // loop no driver in `applying` holds an open assignment.
+    for (const { current } of applying) {
+      if (!current) continue;
+      await tx
+        .update(assignments)
+        .set({ endedAt: sql`now()` })
+        .where(eq(assignments.id, current.id));
+    }
+
+    // Pass 2: only now can the new rows exist without colliding.
+    for (const { truckId, driverId, current } of applying) {
       if (driverId !== null) {
         await tx
           .insert(assignments)

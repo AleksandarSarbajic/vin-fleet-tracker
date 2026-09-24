@@ -13,8 +13,16 @@ export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
 
-/** Hosts a test may talk to. Everything else is somebody's production system. */
-export const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+/**
+ * Hosts a test may talk to. Everything else is somebody's production system.
+ *
+ * Re-exported from the env schema, which needs the same list to allow a
+ * loopback DATABASE_URL for the Playwright suite. Two copies of "what counts
+ * as local" would eventually disagree, and the one that matters here decides
+ * whether a truncate is allowed to run.
+ */
+export { LOCAL_HOSTS } from '@/env/schema';
+import { LOCAL_HOSTS } from '@/env/schema';
 
 /**
  * THE REFUSAL LIVES HERE, not in vitest.setup.ts.

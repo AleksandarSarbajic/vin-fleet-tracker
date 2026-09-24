@@ -29,6 +29,23 @@ const sentryDsn = (which: string) =>
       message: `${which} does not look like a Sentry DSN`,
     });
 
+/**
+ * An optional variable that is PRESENT BUT BLANK is absent.
+ *
+ * `.env.example` ships `SENTRY_WORKER_DSN=` with no value, and the schema's own
+ * error message tells people to copy that file. Without this, following that
+ * instruction produces empty strings, which are not `undefined`, so `.optional()`
+ * does not apply — the URL check fails and the two blank DSNs then collide as
+ * "the same DSN". The app refuses to start, and the advice it gives you is the
+ * thing that broke it.
+ *
+ * vitest.setup.ts already learned this and wrote it down: it DELETES the
+ * production credentials rather than blanking them, "because an empty string is
+ * a value that a `??` will happily keep". Same defect, other direction.
+ */
+const blankIsAbsent = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema);
+
 export const ClientEnv = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z
     .string()
@@ -55,7 +72,7 @@ export const ClientEnv = z.object({
    * stop the console from loading, for the same reason the worker treats its
    * own DSN as optional.
    */
-  NEXT_PUBLIC_SENTRY_DSN: sentryDsn('NEXT_PUBLIC_SENTRY_DSN').optional(),
+  NEXT_PUBLIC_SENTRY_DSN: blankIsAbsent(sentryDsn('NEXT_PUBLIC_SENTRY_DSN').optional()),
 });
 
 const secretKey = (which: string) =>
@@ -66,6 +83,24 @@ const secretKey = (which: string) =>
       `${which} must be a secret key (sb_secret_…). The legacy service_role ` +
         `JWT is deprecated and newer projects do not have one.`,
     );
+
+/**
+ * Hosts that cannot be anybody's production database.
+ *
+ * Defined here rather than in the test helpers because the app's own schema is
+ * now the thing that has to recognise them, and `src/test/url.ts` re-exports
+ * this rather than keeping a second copy. One list, one meaning of "local".
+ */
+export const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+/** Is this connection string pointed at a disposable cluster on this machine? */
+export function isLoopbackDatabase(url: string): boolean {
+  try {
+    return LOCAL_HOSTS.has(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
 
 export function isIanaZone(tz: string): boolean {
   try {
@@ -80,24 +115,39 @@ const serverShape = z.object({
     DATABASE_URL: z
       .string()
       .url()
-      .refine((u) => u.includes('pooler.supabase.com:6543'), {
+      /**
+       * The transaction pooler, OR a loopback cluster.
+       *
+       * The loopback exception exists for the Playwright suite, which runs the
+       * real app against `./.testdb` so that its fixtures are disposable. The
+       * guard is not weakened by it: what it is really catching is 5432-vs-6543
+       * confusion against a Supabase host, and `127.0.0.1` is not a way of
+       * getting that wrong. A loopback URL in production points at nothing and
+       * fails loudly on the first query rather than quietly under load, which
+       * is the failure mode this rule exists to prevent.
+       */
+      .refine((u) => u.includes('pooler.supabase.com:6543') || isLoopbackDatabase(u), {
         message:
-          'DATABASE_URL must be the TRANSACTION pooler (…pooler.supabase.com:6543). ' +
-          'Using the session pooler or a direct connection here exhausts ' +
-          'connections under load and looks like an application bug.',
+          'DATABASE_URL must be the TRANSACTION pooler (…pooler.supabase.com:6543), ' +
+          'or a loopback test cluster. Using the session pooler or a direct ' +
+          'connection here exhausts connections under load and looks like an ' +
+          'application bug.',
       }),
 
     DIRECT_URL: z
       .string()
       .url()
-      .refine((u) => !/db\.[a-z0-9]+\.supabase\.co/.test(u), {
+      .refine((u) => isLoopbackDatabase(u) || !/db\.[a-z0-9]+\.supabase\.co/.test(u), {
         message:
           'DIRECT_URL must not be db.<ref>.supabase.co — that host is ' +
           'IPv6-only without the paid add-on and most worker hosts have no ' +
           'outbound IPv6. Use the SESSION pooler (…pooler.supabase.com:5432).',
       })
-      .refine((u) => u.includes('pooler.supabase.com:5432'), {
-        message: 'DIRECT_URL must be the SESSION pooler (…pooler.supabase.com:5432).',
+      /** Loopback for the same reason as DATABASE_URL above. */
+      .refine((u) => u.includes('pooler.supabase.com:5432') || isLoopbackDatabase(u), {
+        message:
+          'DIRECT_URL must be the SESSION pooler (…pooler.supabase.com:5432), ' +
+          'or a loopback test cluster.',
       }),
 
     SUPABASE_SECRET_KEY: secretKey('SUPABASE_SECRET_KEY'),
@@ -116,7 +166,7 @@ const serverShape = z.object({
      * whole dispatch console off the air over an enrichment it already knows
      * how to live without.
      */
-    HERE_API_KEY: z.string().min(1).optional(),
+    HERE_API_KEY: blankIsAbsent(z.string().min(1).optional()),
 
     /**
      * Monthly ceiling on routing calls (§12.59, §12.61).
@@ -169,10 +219,10 @@ const serverShape = z.object({
      * enrichment must never be able to take the ingestion worker off the air.
      * A fleet nobody can see is worse than errors nobody records.
      */
-    SENTRY_WORKER_DSN: sentryDsn('SENTRY_WORKER_DSN').optional(),
+    SENTRY_WORKER_DSN: blankIsAbsent(sentryDsn('SENTRY_WORKER_DSN').optional()),
 
     /** Usually the deployed commit, so an event can name the code it came from. */
-    SENTRY_RELEASE: z.string().min(1).optional(),
+    SENTRY_RELEASE: blankIsAbsent(z.string().min(1).optional()),
 
     SAMSARA_API_TOKEN: z.string().min(1),
     SAMSARA_ORG_ID: z.string().regex(/^\d+$/, 'SAMSARA_ORG_ID must be numeric'),
@@ -196,9 +246,12 @@ const serverShape = z.object({
  *
  * Shared by both schemas below, because both runtimes can get it wrong.
  */
-const sentryProjectsDiffer = (e: { SENTRY_WORKER_DSN?: string | undefined }): boolean =>
-  e.SENTRY_WORKER_DSN === undefined ||
-  e.SENTRY_WORKER_DSN !== process.env['NEXT_PUBLIC_SENTRY_DSN'];
+const sentryProjectsDiffer = (e: { SENTRY_WORKER_DSN?: string | undefined }): boolean => {
+  const app = process.env['NEXT_PUBLIC_SENTRY_DSN']?.trim();
+  // Two blanks are two absences, not one shared project.
+  if (!e.SENTRY_WORKER_DSN || !app) return true;
+  return e.SENTRY_WORKER_DSN !== app;
+};
 
 const SENTRY_PROJECTS_DIFFER = {
   path: ['SENTRY_WORKER_DSN'],

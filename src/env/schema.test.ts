@@ -208,6 +208,43 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
   });
 });
 
+describe('the loopback exception for the e2e suite', () => {
+  const LOCAL = 'postgres://postgres@127.0.0.1:55432/fleet_test';
+
+  /**
+   * Playwright runs the REAL app against ./.testdb so its fixtures are
+   * disposable. Without this the app refuses to boot for the browser suite,
+   * and the only alternatives are pointing e2e at production data or not
+   * testing the app at all.
+   */
+  it('accepts a loopback cluster for both connections', () => {
+    const r = ServerEnv.safeParse({ ...validServer, DATABASE_URL: LOCAL, DIRECT_URL: LOCAL });
+    expect(r.success).toBe(true);
+  });
+
+  /**
+   * And the guard it must NOT have weakened. What this rule really catches is
+   * 5432-vs-6543 confusion against a Supabase host; 127.0.0.1 is not a way of
+   * getting that wrong, but pointing DATABASE_URL at the session pooler still
+   * is.
+   */
+  it('still refuses the session pooler as DATABASE_URL', () => {
+    const r = ServerEnv.safeParse({
+      ...validServer,
+      DATABASE_URL: `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`,
+    });
+    expect(errorOn(r, 'DATABASE_URL')).toMatch(/TRANSACTION pooler/);
+  });
+
+  it('still refuses the IPv6-only host, which loopback must not excuse', () => {
+    const r = ServerEnv.safeParse({
+      ...validServer,
+      DIRECT_URL: `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
+    });
+    expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
+  });
+});
+
 describe('WorkerEnv holds strictly less than the app does', () => {
   /** Exactly what the droplet's systemd EnvironmentFile carries. */
   const validWorker = {
@@ -337,4 +374,47 @@ describe('isIanaZone', () => {
   it.each(['CDT', 'Not/AZone', ''])('rejects %s', (tz) =>
     expect(isIanaZone(tz)).toBe(false),
   );
+});
+
+describe('a blank optional variable is an absent one', () => {
+  /**
+   * `.env.example` ships `SENTRY_WORKER_DSN=` with no value, and the schema's
+   * own failure message tells people to copy that file. Blank strings are not
+   * `undefined`, so `.optional()` did not apply: the URL check failed, the two
+   * blank DSNs then collided as "the same DSN", and the app refused to start
+   * on the advice it had just given. Caught by the Playwright web server,
+   * which passes empty strings to switch Sentry off.
+   */
+  it('accepts the environment produced by copying .env.example', () => {
+    const r = ServerEnv.safeParse({
+      ...validServer,
+      SENTRY_WORKER_DSN: '',
+      SENTRY_RELEASE: '',
+      HERE_API_KEY: '',
+    });
+    expect(r.success, JSON.stringify(r.success ? {} : r.error.issues)).toBe(true);
+    expect(r.success && r.data.SENTRY_WORKER_DSN).toBeUndefined();
+    expect(r.success && r.data.HERE_API_KEY).toBeUndefined();
+  });
+
+  it('does not read two blanks as one shared Sentry project', () => {
+    const before = process.env['NEXT_PUBLIC_SENTRY_DSN'];
+    process.env['NEXT_PUBLIC_SENTRY_DSN'] = '';
+    try {
+      const r = ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: '' });
+      expect(errorOn(r, 'SENTRY_WORKER_DSN')).toBe('');
+    } finally {
+      if (before === undefined) delete process.env['NEXT_PUBLIC_SENTRY_DSN'];
+      else process.env['NEXT_PUBLIC_SENTRY_DSN'] = before;
+    }
+  });
+
+  it('still rejects a non-blank value that is not a DSN', () => {
+    const r = ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: 'nonsense' });
+    expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/must be a Sentry DSN URL/);
+  });
+
+  it('accepts a blank client DSN too', () => {
+    expect(ClientEnv.safeParse({ ...validClient, NEXT_PUBLIC_SENTRY_DSN: '' }).success).toBe(true);
+  });
 });

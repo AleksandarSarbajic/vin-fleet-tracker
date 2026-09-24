@@ -22,3 +22,4 @@ next-env.d.ts
 # undecided. Today's copy is a 500x302 JPEG misnamed .png, which is too weak
 # a source for a 16px tile — see §14.6.
 logo.png
+e2e/.auth/
