@@ -76,8 +76,7 @@ export function isIanaZone(tz: string): boolean {
   }
 }
 
-export const ServerEnv = z
-  .object({
+const serverShape = z.object({
     DATABASE_URL: z
       .string()
       .url()
@@ -183,59 +182,104 @@ export const ServerEnv = z
       .refine(isIanaZone, { message: 'DISPATCH_TZ must be a valid IANA zone' })
       .default('America/Chicago'),
 
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  })
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+});
+
+/**
+ * The two Sentry projects must stay two projects.
+ *
+ * Pasting one DSN into both variables is the easy mistake — they look alike,
+ * they arrive at the same time, and nothing downstream errors. The result is
+ * that worker events and app events land in one stream and the separation the
+ * two projects exist to provide is silently gone, which is discovered weeks
+ * later while looking for something else.
+ *
+ * Shared by both schemas below, because both runtimes can get it wrong.
+ */
+const sentryProjectsDiffer = (e: { SENTRY_WORKER_DSN?: string | undefined }): boolean =>
+  e.SENTRY_WORKER_DSN === undefined ||
+  e.SENTRY_WORKER_DSN !== process.env['NEXT_PUBLIC_SENTRY_DSN'];
+
+const SENTRY_PROJECTS_DIFFER = {
+  path: ['SENTRY_WORKER_DSN'],
+  message:
+    'SENTRY_WORKER_DSN and NEXT_PUBLIC_SENTRY_DSN are the same DSN. They ' +
+    'are meant to be separate Sentry projects so the worker and the app ' +
+    'keep separate streams and separate quotas.',
+};
+
+/**
+ * §12.59. The HERE key must not be any value that reaches a browser.
+ *
+ * Broader than the guard it replaces, which compared one token against one
+ * named counterpart. `NEXT_PUBLIC_*` is the whole client surface — Next
+ * inlines every one of them into the bundle by literal substitution — so this
+ * compares against all of them, and therefore also catches the mistake the
+ * narrow version could not: someone adding `NEXT_PUBLIC_HERE_API_KEY` to make
+ * it reachable from a map component.
+ *
+ * A routing key in a network tab is a metered API anyone can spend, and HERE's
+ * free allowance is 5,000 transactions a month — one afternoon of somebody
+ * else's script.
+ */
+const hereKeyIsNotPublic = (e: { HERE_API_KEY?: string | undefined }): boolean =>
+  e.HERE_API_KEY === undefined || publicValues().every((v) => v !== e.HERE_API_KEY);
+
+const HERE_KEY_IS_NOT_PUBLIC = {
+  path: ['HERE_API_KEY'],
+  message:
+    'HERE_API_KEY is also exposed as a NEXT_PUBLIC_* variable, which ' +
+    'ships to every browser. Routing is metered: keep the key server-side ' +
+    'and issue a separate one if a client ever genuinely needs HERE.',
+};
+
+/**
+ * What the NEXT APP needs. Everything.
+ */
+export const ServerEnv = serverShape
   .refine((e) => e.SUPABASE_SECRET_KEY !== e.WORKER_SUPABASE_SECRET_KEY, {
     path: ['WORKER_SUPABASE_SECRET_KEY'],
     message:
       'SUPABASE_SECRET_KEY and WORKER_SUPABASE_SECRET_KEY are identical. ' +
       'Issue a separate key per service so either can be rotated alone.',
   })
-  /**
-   * The two Sentry projects must stay two projects.
-   *
-   * Pasting one DSN into both variables is the easy mistake — they look alike,
-   * they arrive at the same time, and nothing downstream errors. The result is
-   * that worker events and app events land in one stream and the separation
-   * the two projects exist to provide is silently gone, which is discovered
-   * weeks later while looking for something else.
-   */
-  .refine(
-    (e) =>
-      e.SENTRY_WORKER_DSN === undefined ||
-      e.SENTRY_WORKER_DSN !== process.env['NEXT_PUBLIC_SENTRY_DSN'],
-    {
-      path: ['SENTRY_WORKER_DSN'],
-      message:
-        'SENTRY_WORKER_DSN and NEXT_PUBLIC_SENTRY_DSN are the same DSN. They ' +
-        'are meant to be separate Sentry projects so the worker and the app ' +
-        'keep separate streams and separate quotas.',
-    },
-  )
-  /**
-   * §12.59. The HERE key must not be any value that reaches a browser.
-   *
-   * Broader than the guard it replaces, which compared one token against one
-   * named counterpart. `NEXT_PUBLIC_*` is the whole client surface — Next
-   * inlines every one of them into the bundle by literal substitution — so
-   * this compares against all of them, and therefore also catches the
-   * mistake the narrow version could not: someone adding
-   * `NEXT_PUBLIC_HERE_API_KEY` to make it reachable from a map component.
-   *
-   * A routing key in a network tab is a metered API anyone can spend, and
-   * HERE's free allowance is 5,000 transactions a month — one afternoon of
-   * somebody else's script.
-   */
-  .refine(
-    (e) => e.HERE_API_KEY === undefined || publicValues().every((v) => v !== e.HERE_API_KEY),
-    {
-      path: ['HERE_API_KEY'],
-      message:
-        'HERE_API_KEY is also exposed as a NEXT_PUBLIC_* variable, which ' +
-        'ships to every browser. Routing is metered: keep the key server-side ' +
-        'and issue a separate one if a client ever genuinely needs HERE.',
-    },
-  );
+  .refine(sentryProjectsDiffer, SENTRY_PROJECTS_DIFFER)
+  .refine(hereKeyIsNotPublic, HERE_KEY_IS_NOT_PUBLIC);
+
+/**
+ * What the WORKER needs, which is strictly less (phase 6, item 2).
+ *
+ * The worker's only database credential is `DIRECT_URL`. It holds NO Supabase
+ * API key and no transaction-pooler string, because it uses neither: its data
+ * access is `createDirectDb`, and `lib/supabase/admin.ts` — the only consumer
+ * of either secret key — imports `server-only` and is therefore unreachable
+ * from a standalone Node process by construction.
+ *
+ * Validating the worker against the full `ServerEnv` is what forced the
+ * question. It demanded `SUPABASE_SECRET_KEY` — the APP's key — before the
+ * worker would boot, so deploying the worker to its own host meant copying the
+ * app's credential onto a machine that cannot use it. That is precisely the
+ * coupling the two-key split exists to prevent (§ the `.refine` above: "so
+ * either can be rotated alone"), reintroduced by a validation rule rather than
+ * by any code that reads the value.
+ *
+ * So the worker host now holds four secrets, not seven, and rotating the app's
+ * Supabase key does not involve it at all.
+ */
+export const WorkerEnv = serverShape
+  .pick({
+    DIRECT_URL: true,
+    SAMSARA_API_TOKEN: true,
+    SAMSARA_ORG_ID: true,
+    HERE_API_KEY: true,
+    ROUTING_MONTHLY_CEILING: true,
+    SENTRY_WORKER_DSN: true,
+    SENTRY_RELEASE: true,
+    DISPATCH_TZ: true,
+    NODE_ENV: true,
+  })
+  .refine(sentryProjectsDiffer, SENTRY_PROJECTS_DIFFER)
+  .refine(hereKeyIsNotPublic, HERE_KEY_IS_NOT_PUBLIC);
 
 /** Every value Next will inline into the client bundle. */
 function publicValues(): string[] {

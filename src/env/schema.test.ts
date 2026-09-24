@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ClientEnv, ServerEnv, isIanaZone } from './schema';
+import { ClientEnv, ServerEnv, WorkerEnv, isIanaZone } from './schema';
 
 const REF = 'ywfotpjljshxrgxlgcdp';
 const POOLER = 'aws-1-eu-west-1.pooler.supabase.com';
@@ -205,6 +205,62 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
      */
     expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBe(5_000);
     expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBeLessThanOrEqual(5_000);
+  });
+});
+
+describe('WorkerEnv holds strictly less than the app does', () => {
+  /** Exactly what the droplet's systemd EnvironmentFile carries. */
+  const validWorker = {
+    DIRECT_URL: `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`,
+    SAMSARA_API_TOKEN: 'samsara_api_x',
+    SAMSARA_ORG_ID: '45975',
+    NODE_ENV: 'production',
+  };
+
+  /**
+   * THE POINT OF THE SPLIT. Validating the worker against `ServerEnv` demanded
+   * SUPABASE_SECRET_KEY — the APP's key — before the worker would start, so
+   * giving the worker its own host meant copying the app's credential onto a
+   * machine that cannot use it: `lib/supabase/admin.ts` is the only consumer
+   * of either key and imports `server-only`, which a standalone Node process
+   * can never satisfy.
+   *
+   * That is the two-key rotation split being undone by a validation rule
+   * rather than by anything that reads the value.
+   */
+  it('starts with no Supabase API key and no transaction pooler string', () => {
+    const r = WorkerEnv.safeParse(validWorker);
+    expect(r.success).toBe(true);
+  });
+
+  it('is what ServerEnv would have refused, which is why it exists', () => {
+    // The same environment, judged by the app's schema: three missing secrets.
+    const asApp = ServerEnv.safeParse(validWorker);
+    expect(asApp.success).toBe(false);
+    for (const field of ['DATABASE_URL', 'SUPABASE_SECRET_KEY', 'WORKER_SUPABASE_SECRET_KEY']) {
+      expect(errorOn(asApp, field), `${field} should be required of the app`).not.toBe('');
+    }
+  });
+
+  it('still insists on the session pooler — the mistake already made once', () => {
+    const r = WorkerEnv.safeParse({
+      ...validWorker,
+      DIRECT_URL: `postgresql://postgres.${REF}:pw@${POOLER}:6543/postgres`,
+    });
+    expect(errorOn(r, 'DIRECT_URL')).toMatch(/SESSION pooler/);
+  });
+
+  it('still refuses the IPv6-only direct host', () => {
+    const r = WorkerEnv.safeParse({
+      ...validWorker,
+      DIRECT_URL: `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
+    });
+    expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
+  });
+
+  it('keeps the routing ceiling default, so the guard exists without being set', () => {
+    const r = WorkerEnv.safeParse(validWorker);
+    expect(r.success && r.data.ROUTING_MONTHLY_CEILING).toBe(5_000);
   });
 });
 

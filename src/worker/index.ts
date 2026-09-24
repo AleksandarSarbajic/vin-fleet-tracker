@@ -2,7 +2,7 @@ import { config as loadEnv } from 'dotenv';
 import { sql } from 'drizzle-orm';
 import { createDirectDb } from '@/db/connection';
 import { trucks } from '@/db/schema';
-import { ServerEnv, report } from '@/env/schema';
+import { WorkerEnv, report } from '@/env/schema';
 import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
@@ -77,7 +77,12 @@ const die = (what: string, cause: unknown): void => {
 process.on('uncaughtException', (error) => die('uncaught exception', error));
 process.on('unhandledRejection', (reason) => die('unhandled rejection', reason));
 
-const parsedEnv = ServerEnv.safeParse(process.env);
+/**
+ * `WorkerEnv`, not `ServerEnv`: the worker's only database credential is
+ * DIRECT_URL, and validating it against the app's schema would demand the
+ * app's Supabase secret key on a host that cannot use it (see env/schema.ts).
+ */
+const parsedEnv = WorkerEnv.safeParse(process.env);
 if (!parsedEnv.success) {
   const detail = report('worker', parsedEnv.error);
   // Through the logger, so the misconfiguration reaches Sentry rather than
