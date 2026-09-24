@@ -1,0 +1,53 @@
+[Unit]
+Description=Vin Logistics fleet ingestion worker
+Documentation=https://github.com/AleksandarSarbajic/vin-fleet-tracker
+# The worker's first act is a Postgres connection; starting before the network
+# is routable just burns a restart attempt against the limit below.
+After=network-online.target
+Wants=network-online.target
+
+# A MISCONFIGURED WORKER MUST GIVE UP, NOT SPIN.
+# Five failures inside five minutes and systemd stops trying. The case this is
+# sized for is the singleton guard (§12.62) refusing to start because another
+# instance holds the lock: that exits non-zero every time and will never
+# succeed by being retried, so an unbounded loop would be 2,880 pointless
+# Samsara-less starts a day and a journal full of the same line.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=vinfleet
+Group=vinfleet
+WorkingDirectory=/opt/vin-fleet-tracker
+EnvironmentFile=/etc/vin-fleet-tracker/worker.env
+ExecStart=/opt/vin-fleet-tracker/node_modules/.bin/tsx src/worker/index.ts
+
+Restart=on-failure
+RestartSec=10s
+
+# SIGTERM is handled: the worker finishes the cycle it is in, closes the pool,
+# then releases the advisory lock. 45s covers a 30s poll plus the Sentry flush;
+# killing it sooner would strand the lock until Postgres reaped the session.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+SyslogIdentifier=vin-fleet-worker
+
+# --- hardening: this process needs the network and nothing else ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# npm/node cache only. /opt/vin-fleet-tracker stays read-only, which is the
+# point: a deploy is a git checkout, never something the service does to itself.
+ReadWritePaths=/var/lib/vinfleet
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

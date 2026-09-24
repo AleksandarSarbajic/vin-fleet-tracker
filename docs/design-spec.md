@@ -5298,6 +5298,80 @@ is not redundancy; it is two issues that each look half as frequent as the
 problem is. Ours also flushes before exiting, which is what makes the last
 error before a shutdown — usually the one that explains it — actually ship.
 
+
+## 12.64 The worker leaves the laptop, and the counters start meaning something
+
+§12.52 ended with the stall diagnosis suspended rather than answered: a
+suspended process produces the same evidence as a database problem, `pmset`
+showed 233 sleep events in one working day, and so **every `feed_health` figure
+recorded on that machine includes the host's sleep schedule**. The ruling was
+that the question could only be re-opened from a host that stays awake.
+
+The worker now runs as `vin-fleet-worker.service` on a small Ubuntu VPS, under
+an unprivileged account, from a pinned commit. `deploy/` holds the unit file,
+the journald retention config and the procedure — in the repository, because a
+deployment that exists only in one machine's state is the configuration-level
+version of the problem this move solved for logs.
+
+**The measurement boundary is 2026-09-24 13:29:30 UTC.** The cumulative
+counters span both eras and are not comparable across it; at the cutover they
+read `missed_cycles 1854` and `longest_stall_seconds 22587`, all of it earned
+on a sleeping laptop. Counters after that instant are the first that measure
+Supabase.
+
+### The cutover, and the guard that did not cover it
+
+Stop before start, and the ordering is not a nicety. §12.62's guard refuses a
+second instance **only once the first one holds the lock**, and a worker
+started before the guard existed holds nothing. During this deployment a full
+worker was started on the droplet to check that its environment loaded, while
+the laptop worker was still polling — it acquired the lock unopposed and ran
+for under half a minute against production. The audit found nothing damaged:
+`missed_cycles` unchanged, no new `feed_stalls` row, positions steady at
+~100/minute across the window, `routing_budget` unmoved at 718, `route_shadow`
+still 18 lanes. But the correct check was a non-mutating one, and the guard is
+what makes an overlap loud rather than what makes an unordered cutover safe.
+
+The real cutover produced a gap of roughly 40 seconds, below `STALL_SECONDS`,
+so it recorded **no stall row at all** — a normal restart, which is what it was.
+An induced `SIGKILL` confirmed `Restart=on-failure`: back in ten seconds, lock
+released and reacquired rather than stranded.
+
+### What the host does not hold
+
+Deploying the worker asked a question the schema had been answering wrongly.
+`ServerEnv` demanded `SUPABASE_SECRET_KEY` — the **app's** key — before the
+worker would boot, so giving the worker its own host meant copying the app's
+credential onto a machine that cannot use it: `lib/supabase/admin.ts` is the
+only consumer of either secret key and imports `server-only`, which a
+standalone Node process can never satisfy.
+
+That is the two-key rotation split being undone by a validation rule rather
+than by anything that reads the value. `WorkerEnv` is the subset the worker
+actually needs; its only database credential is the session pooler string, and
+rotating the app's Supabase key no longer involves the worker host at all.
+
+**`DIRECT_URL` must be the session pooler**, and the reason is now stronger
+than connection economics. Advisory locks are session-scoped, so pointing the
+worker at the transaction pooler would not merely be slower — it would void the
+singleton guard silently. `WorkerEnv` refuses both `:6543` and the IPv6-only
+`db.<ref>.supabase.co` host, the latter being a mistake already made once.
+
+### Two things deploying found that reading had not
+
+- **`npm ci --omit=dev` exited 127.** The install itself was fine; the
+  `prepare` lifecycle script ran `husky`, a devDependency absent by definition
+  from a production install. Git hooks are a developer convenience and their
+  absence on a server is the expected state, not a failure.
+- **A fatal line that did not say what was fatal.** The worker's first run on
+  the host printed `{"msg":"invalid worker environment"}` and
+  `{"msg":"uncaught exception","fatal":true}` — the whole failure with the
+  cause removed. `cause` is deliberately stripped before serialisation, since
+  an Error stringifies to `{}`, and carried to Sentry for its stack. That split
+  is right, and it had quietly made journald useless for the one case it
+  matters most in. journald is the **primary** record for this process; Sentry
+  is the second copy, and the second copy must not be the only legible one.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
