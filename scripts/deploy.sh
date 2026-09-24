@@ -84,9 +84,15 @@ ssh "$HOST" "set -e
     exit 1
   fi
   head -1 /tmp/second.log; rm -f /tmp/second.log
-  echo '--- last poll ---'
-  journalctl -u $SERVICE --no-pager -o cat | grep -m1 'poll: ingested' | cut -c1-160 || \\
-    echo '(no poll yet — check again in 30s)'"
+  # tail, NOT `grep -m1`. The first version printed the FIRST poll in the
+  # entire journal -- a line from a previous deploy -- under the heading
+  # "last poll", which reads exactly like a worker that has not polled
+  # since. A verification step that can show stale evidence is worse than
+  # one that shows none.
+  echo '--- most recent poll ---'
+  RECENT=\$(journalctl -u $SERVICE --no-pager -o cat --since '-3 min' | grep 'poll: ingested' | tail -1)
+  if [ -n "\$RECENT" ]; then echo "\$RECENT" | cut -c1-160;
+  else echo '(no poll in the last 3 minutes -- watch journalctl -u $SERVICE -f)'; fi"
 
 say "deployed ${SHA:0:12}"
 echo "journalctl -u $SERVICE -f   # to watch it"
