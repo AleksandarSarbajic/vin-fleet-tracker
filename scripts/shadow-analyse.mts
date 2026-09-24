@@ -40,13 +40,17 @@ interface Row {
   errorMiles: number;
   straight: number;
   city: string | null;
+  /** Destination place, the unit of independence. See `lanes()`. */
+  lane: string;
 }
 
 const rows = (await db.execute(sql`
   select abs(ratio_cached - ratio_prev) as stability,
          error_miles                   as "errorMiles",
          straight_miles                as straight,
-         dest_city                     as city
+         dest_city                     as city,
+         coalesce(dest_city || ', ' || dest_state,
+                  round(dest_lat::numeric, 2) || ',' || round(dest_lng::numeric, 2)) as lane
   from route_shadow
   -- Only truck-moved is gateable: the other reasons mean the cached row is
   -- about somewhere else, not merely older. A warmed lane only.
@@ -81,16 +85,59 @@ function pOfChance(costs: number[], nSkip: number, observedGap: number): number 
   return atLeastAsExtreme / SHUFFLES;
 }
 
+/**
+ * How independent the observations are, printed beside every p it qualifies.
+ *
+ * The permutation test assumes exchangeable observations. They are not: rows
+ * on one destination share its road network, its approach geometry and often
+ * the same truck minutes apart. At 30 approach observations on 2026-09-24,
+ * 22 came from Joliet and Minooka — two stops beside the yard the fleet
+ * circulates around — so "30 observations" was nearer four places' worth.
+ * A p over that set is optimistic by an amount the shuffle cannot see.
+ *
+ * The unit is the destination PLACE (city, state), not the stop: two stops in
+ * Joliet are one approach geometry. That is the coarser grouping, so it errs
+ * toward showing LESS independence, which is the safe direction.
+ *
+ *   top-2   share of the rows the two biggest places supply
+ *   eff     effective number of places, 1 / sum(share^2) — equals the place
+ *           count when rows are spread evenly, and falls toward 1 as one
+ *           place dominates
+ */
+function lanes(set: Row[]): { places: number; top2: number; eff: number } {
+  const counts = new Map<string, number>();
+  for (const r of set) counts.set(r.lane, (counts.get(r.lane) ?? 0) + 1);
+  const sorted = [...counts.values()].sort((a, b) => b - a);
+  const n = set.length || 1;
+  return {
+    places: counts.size,
+    top2: ((sorted[0] ?? 0) + (sorted[1] ?? 0)) / n,
+    eff: 1 / sorted.reduce((acc, c) => acc + (c / n) ** 2, 0),
+  };
+}
+const lanesText = (set: Row[]) => {
+  const l = lanes(set);
+  return `${String(l.places).padStart(2)} pl, top-2 ${(l.top2 * 100).toFixed(0).padStart(3)}%, eff ${l.eff.toFixed(1).padStart(4)}`;
+};
+
 function sweep(name: string, set: Row[]): void {
   console.log(`\n${name}: ${set.length} observations`);
   if (set.length === 0) return;
+  const whole = lanes(set);
+  const counts = new Map<string, number>();
+  for (const r of set) counts.set(r.lane, (counts.get(r.lane) ?? 0) + 1);
+  console.log(
+    `  from ${whole.places} place(s), effectively ${whole.eff.toFixed(1)}; top two supply ${(whole.top2 * 100).toFixed(0)}%:  ` +
+    [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · '),
+  );
   const all = set.map(minutes);
   console.log(
     `  cost if skipped, ALL   p50 ${pct(all, 0.5).toFixed(1)}  ` +
     `p90 ${pct(all, 0.9).toFixed(1)}  max ${Math.max(...all).toFixed(1)} min`,
   );
   console.log(
-    '\n   eps   skip rate      SKIPPED p50/p90    KEPT p50/p90   separation   gap    p(chance)',
+    '\n   eps   skip rate      SKIPPED p50/p90    KEPT p50/p90   separation   gap    p(chance)' +
+    '   | SKIPPED from                 | KEPT from',
   );
   for (const eps of EPSILONS) {
     const skip = set.filter((r) => r.stability < eps);
@@ -114,7 +161,8 @@ function sweep(name: string, set: Row[]): void {
       `${s50.toFixed(1).padStart(6)} / ${pct(sk, 0.9).toFixed(1).padStart(6)}  ` +
       `${k50.toFixed(1).padStart(6)} / ${pct(kp, 0.9).toFixed(1).padStart(6)}   ` +
       `${(k50 > 0 ? `${(s50 / k50).toFixed(2)}x` : '—').padStart(8)}  ` +
-      `${gap.toFixed(2).padStart(6)}  ${(p === null ? 'n/a' : p.toFixed(3)).padStart(9)}`,
+      `${gap.toFixed(2).padStart(6)}  ${(p === null ? 'n/a' : p.toFixed(3)).padStart(9)}` +
+      `   | ${lanesText(skip)} | ${lanesText(keep)}`,
     );
   }
 }
@@ -143,6 +191,8 @@ console.log(
 console.log(
   '\nseparation 1.0 = the gate predicts nothing. p(chance) is a permutation\n' +
   `test over ${SHUFFLES.toLocaleString()} relabelings; several eps are tested, so a single\n` +
-  'borderline p is not evidence.\n',
+  'borderline p is not evidence. The shuffle treats every row as independent; the\n' +
+  '"from" columns say how true that is. A small p with a low eff, or with SKIPPED\n' +
+  'and KEPT drawn from different places, may be measuring places rather than the gate.\n',
 );
 await client.end();

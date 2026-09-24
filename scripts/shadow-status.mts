@@ -72,33 +72,58 @@ const perHour = (row?.usable ?? 0) / hours;
 console.log(`\n  usable rate   ${perHour.toFixed(1)}/h over ${hours.toFixed(1)} h`);
 
 /**
- * The approach bar accrues per APPROACH, not per hour, and the overnight of
- * 2026-09-22 proved it: 11.8 uninterrupted hours produced two arrivals and
- * seven observations inside 25 miles, so an hourly rate read 0.6/h and
- * forecast 55 hours that had nothing to do with anything.
+ * The approach bar is projected from its OWN observed rate, over a trailing
+ * 24 hours. It used to be projected from arrivals, and the data disproved
+ * that model.
  *
- * The cause is structural. The recompute floor is 10 miles, so a lane
- * crossing its last 25 miles can only trigger two or three recomputes before
- * it arrives. The supply is bounded by how many trucks finish a run, and a
- * parked fleet at 3am supplies none however long it is left.
+ * The old reasoning: the recompute floor is 10 miles, so a lane crossing its
+ * last 25 miles triggers two or three recomputes before it arrives — supply
+ * is bounded by trucks finishing runs, so project from arrivals per day.
+ * What actually happened, read-only against production on 2026-09-24:
+ *
+ *   - the last detected arrival was 09-22 21:25 UTC, and none followed;
+ *   - yet 12 under-25 observations accrued on 09-23 and 11 on 09-24;
+ *   - so the script printed "nothing is being supplied" on a day that
+ *     supplied eleven.
+ *
+ * The cause: most shadow lanes are `DEMO-` stops put on real trucks, and no
+ * load has been entered since 09-22. The trucks are not driving to these
+ * stops; they pass near them on their real routes, and a pass-by inside 25
+ * miles is an under-25 observation with no arrival at the end of it. Arrivals
+ * measure trucks finishing runs, which is not what this bar counts.
+ *
+ * Why 24 hours, not the run's average and not an hourly rate: the overnight
+ * of 2026-09-22 produced 7 observations in 11.8 hours of a parked fleet, so
+ * any window shorter than a day swings with the time of day. A full trailing
+ * day holds one of each hour. Under 24 hours of run there is no full window,
+ * and the script refuses to project rather than extrapolate from a partial
+ * one — the §12.60 rule.
  */
 const approaches = row?.approaches ?? 0;
 const endgame = row?.endgame ?? 0;
-const perApproach = approaches > 0 ? endgame / approaches : 0;
-
 console.log(
   `  approach yield   ${endgame} observations from ${approaches} approach${approaches === 1 ? '' : 'es'}` +
-  (approaches > 0 ? `   (${perApproach.toFixed(1)} each)` : ''),
+  (approaches > 0 ? `   (${(endgame / approaches).toFixed(1)} each)` : ''),
 );
-if (approaches > 0 && approaches < 3) {
-  console.log('  ^ provisional: fewer than three approaches is not a yield yet.');
-}
 
-/** How often the fleet actually finishes a run — the supply side. */
+const [recent] = (await db.execute(sql`
+  select count(*) filter (where ratio_prev is not null
+                            and straight_miles < 25)::int as day
+  from route_shadow
+  where observed_at > now() - interval '24 hours'`)) as unknown as { day: number }[];
+const endgamePerDay = recent?.day ?? 0;
+const fullDay = (row?.hours ?? 0) >= 24;
+console.log(
+  fullDay
+    ? `  under-25 rate    ${endgamePerDay} in the last 24 h`
+    : `  under-25 rate    not projected: the run is ${(row?.hours ?? 0).toFixed(1)} h old, under one full day`,
+);
+
+/** Still printed, because it is still true — just not the supply. */
 const [arr] = (await db.execute(sql`
   select count(*)::int as day from stops
   where arrived_at > now() - interval '24 hours'`)) as unknown as { day: number }[];
-const arrivalsPerDay = arr?.day ?? 0;
+console.log(`  arrivals         ${arr?.day ?? 0} in the last 24 h (not the supply; see the comment above)`);
 
 const done = (row?.usable ?? 0) >= NEED_USABLE && endgame >= NEED_ENDGAME;
 if (done) {
@@ -106,19 +131,19 @@ if (done) {
 } else if (endgame >= NEED_ENDGAME) {
   const hoursLeft = perHour > 0 ? (NEED_USABLE - (row?.usable ?? 0)) / perHour : 0;
   console.log(`\n  approaches done; ~${hoursLeft.toFixed(0)} h of driving left for the usable bar.`);
-} else if (perApproach > 0) {
-  const needed = Math.ceil((NEED_ENDGAME - endgame) / perApproach);
-  console.log(`\n  ~${needed} more approach${needed === 1 ? '' : 'es'} needed — trucks finishing a run,`);
-  if (arrivalsPerDay > 0) {
-    console.log(
-      `  not hours. The fleet completed ${arrivalsPerDay} in the last 24 h,\n` +
-      `  which puts it near ${(needed / arrivalsPerDay).toFixed(1)} more active day(s) at that pace.`,
-    );
-  } else {
-    console.log('  not hours. No arrivals in the last 24 h, so nothing is being supplied.');
-  }
+} else if (!fullDay) {
+  console.log(`\n  ${NEED_ENDGAME - endgame} more under-25 observations needed; no projection until a full day has run.`);
+} else if (endgamePerDay > 0) {
+  const left = NEED_ENDGAME - endgame;
+  console.log(
+    `\n  ${left} more under-25 observation${left === 1 ? '' : 's'} needed; at the last day's ${endgamePerDay}/day, ` +
+    `about ${(left / endgamePerDay).toFixed(1)} more day(s).`,
+  );
 } else {
-  console.log('\n  no approach observed yet: nothing has come inside 25 miles on a warmed lane.');
+  console.log(
+    `\n  ${NEED_ENDGAME - endgame} more under-25 observations needed, and the last 24 h produced none —\n` +
+    '  no truck passed within 25 miles of a warmed lane. No projection from a zero rate.',
+  );
 }
 console.log();
 await client.end();
