@@ -5225,6 +5225,79 @@ the first is a gate people learn to ignore (§12.32's lesson about the
 by the running worker proves the property just as well as taking it does.
 
 
+
+## 12.63 The Sentry upgrade that would have started sending the session cookie
+
+Two Sentry projects, not one: the app and the worker are separate runtimes
+with separate failure modes. The app fails per-request in front of a
+dispatcher who can retry and say what happened; the worker fails alone at 3am.
+Pointed at a single project the second kind disappears behind the volume of
+the first, and neither gets its own quota. Startup refuses two identical DSNs,
+because pasting one into both variables breaks nothing visible.
+
+A DSN itself is **not a secret** — it is write-only ingest, which is why
+`NEXT_PUBLIC_SENTRY_DSN` is a deliberate exception to this project's rule
+about that prefix. The exception is on the merits: the alternative is proxying
+every browser error through our own route, which is a lot of machinery to hide
+a value designed to be seen.
+
+### What was nearly missed
+
+**Sentry v11 removed `sendDefaultPii` and replaced it with `dataCollection`,
+inverting the default.** In v10 an unset `sendDefaultPii` was restrictive. In
+v11 an unset `dataCollection` collects:
+
+```
+userInfo             true
+cookies              true
+httpHeaders          { request: true, response: true }
+httpBodies           all four directions
+databaseQueryData    true
+stackFrameVariables  true
+```
+
+For this application that means the dispatcher's **Supabase session cookie** —
+an auth credential, squarely covered by the rule that secrets do not leave the
+server — plus **stop-edit payloads** (street address, dock, the dispatcher's
+free-text note, the driver's name) and **bound query parameters**, which is the
+same data again by another route. None of it is needed to find out why a route
+handler threw; the stack, the route and the reference code are.
+
+Nothing would have failed. The config would have looked finished, the tests
+would have passed, and the leak would have started at the first error.
+
+### What it means beyond Sentry
+
+The policy lives in **one** module, `src/lib/sentry-privacy.ts`, imported by all
+four `Sentry.init` sites (Node, edge, browser, worker). A privacy rule that has
+to be remembered four times is one that will eventually be applied three times,
+and the fourth is not a gap but a leak.
+
+The test that matters is not the one asserting today's values — it is the one
+asserting that **no `Sentry.init` anywhere lacks `dataCollection`**, with a
+second test pinning the expected list of init sites so the scan cannot pass by
+finding nothing. Next time the defect will not be a wrong value; it will be a
+fifth runtime that never asked.
+
+### What is captured, and what is not
+
+The worker reports through `logger.error` rather than by intercepting the
+console. Interception would have caught the same calls — `logger.ts` emits via
+`console.error` — and grouped them uselessly, because the event message would
+be the serialised JSON line and every event would group by its own unique
+payload. Sentry would show thousands of singletons instead of "this failed 400
+times". Warnings and info become breadcrumbs instead of events: the worker
+warns on things that are true for a while rather than wrong, on a schedule, and
+as events they would be a pager that is always going off.
+
+Sentry's own `OnUncaughtException` and `OnUnhandledRejection` integrations are
+**removed**, and `worker/index.ts` owns both handlers. Left in, every crash is
+reported twice — once by Sentry's handler and once by ours, since ours reports
+through `logger.error` to attach the worker's context. Two events for one crash
+is not redundancy; it is two issues that each look half as frequent as the
+problem is. Ours also flushes before exiting, which is what makes the last
+error before a shutdown — usually the one that explains it — actually ship.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

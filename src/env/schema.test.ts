@@ -208,6 +208,70 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
   });
 });
 
+describe('the two Sentry projects', () => {
+  const APP = 'https://abc123@o4512140256739328.ingest.de.sentry.io/4512140286558288';
+  const WORKER = 'https://def456@o4512140256739328.ingest.de.sentry.io/4512140304580688';
+
+  /**
+   * The refine reads NEXT_PUBLIC_SENTRY_DSN off process.env, because that is
+   * where Next will have inlined it from. Set and restored around each case.
+   */
+  const withPublicDsn = <T,>(value: string | undefined, body: () => T): T => {
+    const before = process.env['NEXT_PUBLIC_SENTRY_DSN'];
+    if (value === undefined) delete process.env['NEXT_PUBLIC_SENTRY_DSN'];
+    else process.env['NEXT_PUBLIC_SENTRY_DSN'] = value;
+    try {
+      return body();
+    } finally {
+      if (before === undefined) delete process.env['NEXT_PUBLIC_SENTRY_DSN'];
+      else process.env['NEXT_PUBLIC_SENTRY_DSN'] = before;
+    }
+  };
+
+  it('accepts two different DSNs', () => {
+    const r = withPublicDsn(APP, () =>
+      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: WORKER }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  /**
+   * The mistake this exists for: the two DSNs arrive together, look alike, and
+   * pasting one into both variables breaks nothing visible. It silently merges
+   * the worker's stream into the app's, so the 3am failures nobody is watching
+   * end up behind the volume of the ones somebody already saw.
+   */
+  it('refuses one DSN used for both runtimes', () => {
+    const r = withPublicDsn(APP, () =>
+      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: APP }),
+    );
+    expect(r.success).toBe(false);
+    expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/separate Sentry projects/);
+  });
+
+  it('treats both as optional — reporting must not gate the worker starting', () => {
+    // The same ruling as HERE_API_KEY (§12.31): an enrichment that can refuse
+    // to boot the ingestion worker is a worse outage than the one it reports.
+    const r = withPublicDsn(undefined, () => ServerEnv.safeParse(validServer));
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.SENTRY_WORKER_DSN).toBeUndefined();
+  });
+
+  it('rejects a DSN that is not a URL', () => {
+    const r = withPublicDsn(undefined, () =>
+      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: 'not-a-dsn' }),
+    );
+    expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/must be a Sentry DSN URL/);
+  });
+
+  it('accepts the app DSN on the client schema and tolerates its absence', () => {
+    expect(ClientEnv.safeParse({ ...validClient, NEXT_PUBLIC_SENTRY_DSN: APP }).success).toBe(
+      true,
+    );
+    expect(ClientEnv.safeParse(validClient).success).toBe(true);
+  });
+});
+
 describe('isIanaZone', () => {
   it.each(['America/Chicago', 'America/Phoenix', 'Europe/Belgrade', 'UTC'])(
     'accepts %s',

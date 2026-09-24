@@ -7,6 +7,7 @@ import { SamsaraClient } from '@/samsara/client';
 import { sleep } from '@/samsara/backoff';
 import { logger } from './logger';
 import { SingletonLockError, acquireSingleton } from './singleton';
+import { flushWorkerSentry, initWorkerSentry, sentryActive } from './sentry';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
@@ -43,8 +44,48 @@ import {
 
 loadEnv({ path: '.env.local' });
 
+/**
+ * BEFORE the environment is validated, and read straight off `process.env`
+ * rather than out of the parsed config.
+ *
+ * The chicken-and-egg is the point: a misconfigured environment is a real and
+ * likely way for this process to die on a host nobody is watching, and if
+ * reporting waited for `ServerEnv` to parse, that exact failure would be the
+ * one that never got reported. A malformed DSN degrades to no reporting rather
+ * than to a crash, so reading it early costs nothing.
+ */
+initWorkerSentry({
+  dsn: process.env['SENTRY_WORKER_DSN'],
+  environment: process.env['NODE_ENV'] ?? 'development',
+  release: process.env['SENTRY_RELEASE'],
+});
+
+/**
+ * The crash handlers this process owns (see ./sentry.ts for why Sentry's own
+ * are removed).
+ *
+ * Both report through `logger`, so the event carries the worker's context and
+ * the same line lands in journald; both then flush and exit non-zero, which is
+ * what lets systemd count a failure and back off rather than seeing a clean
+ * exit and standing down.
+ */
+const die = (what: string, cause: unknown): void => {
+  logger.error(what, { cause, fatal: true });
+  // The flush is bounded inside; a Sentry outage must not hold the exit open.
+  void flushWorkerSentry().finally(() => process.exit(1));
+};
+process.on('uncaughtException', (error) => die('uncaught exception', error));
+process.on('unhandledRejection', (reason) => die('unhandled rejection', reason));
+
 const parsedEnv = ServerEnv.safeParse(process.env);
-if (!parsedEnv.success) throw new Error(report('worker', parsedEnv.error));
+if (!parsedEnv.success) {
+  const detail = report('worker', parsedEnv.error);
+  // Through the logger, so the misconfiguration reaches Sentry rather than
+  // only the terminal of whoever happened to run it.
+  logger.error('invalid worker environment', { cause: new Error(detail) });
+  await flushWorkerSentry();
+  throw new Error(detail);
+}
 const env = parsedEnv.data;
 
 const POLL_INTERVAL_MS = 30_000;
@@ -78,6 +119,13 @@ async function main(): Promise<void> {
   logger.info('worker starting', {
     orgId: env.SAMSARA_ORG_ID,
     pollIntervalMs: POLL_INTERVAL_MS,
+    /**
+     * Stated rather than assumed. A DSN typo degrades silently to no
+     * reporting, and the whole point of this process being on a host nobody
+     * watches is that silence is indistinguishable from health.
+     */
+    errorReporting: sentryActive() ? 'sentry' : 'none (no SENTRY_WORKER_DSN)',
+    release: env.SENTRY_RELEASE ?? '(unset)',
   });
 
   const stop = (signal: string) => {
@@ -101,7 +149,7 @@ async function main(): Promise<void> {
       await seedIfCold(db, samsara);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error('startup failed', { error: message });
+      logger.error('startup failed', { error: message, cause: error });
       await recordFailure(db, `startup: ${message}`);
       throw error;
     }
@@ -156,6 +204,7 @@ async function main(): Promise<void> {
         // away and the feed_health row is what tells the UI we are behind.
         const message = error instanceof Error ? error.message : String(error);
         logger.error('poll cycle failed', {
+          cause: error,
           error: message,
           // How long the fleet has been unobserved, which the error alone
           // never said.
@@ -194,6 +243,9 @@ async function main(): Promise<void> {
     // it. A successor that starts the instant this one exits must not find the
     // lock free while this process is still finishing a write.
     await singleton.release();
+    // Last thing the process does: the error that caused a shutdown is
+    // usually the one still sitting in the transport queue.
+    await flushWorkerSentry();
   }
 }
 
@@ -385,6 +437,7 @@ async function pollOnce(
     sweep = await sweepArrivals(db, logger);
   } catch (error: unknown) {
     logger.error('arrival sweep failed', {
+      cause: error,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -414,6 +467,7 @@ async function pollOnce(
     reportBudget(routing.budget);
   } catch (error: unknown) {
     logger.error('routing sweep failed', {
+      cause: error,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -554,11 +608,12 @@ main().catch((error: unknown) => {
     logger.error('another worker is already running — this one will not start', {
       reason: error.message,
     });
-    process.exitCode = 1;
+    void flushWorkerSentry().finally(() => process.exit(1));
     return;
   }
   logger.error('worker crashed', {
+    cause: error,
     error: error instanceof Error ? error.message : String(error),
   });
-  process.exitCode = 1;
+  void flushWorkerSentry().finally(() => process.exit(1));
 });

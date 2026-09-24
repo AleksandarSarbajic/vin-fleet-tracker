@@ -5,6 +5,30 @@ import { z } from 'zod';
  * unit tested. client.ts and server.ts do the parsing.
  */
 
+/**
+ * A Sentry DSN (phase 6, item 4).
+ *
+ * NOT a secret, and the one place in this file where that is true. A DSN is a
+ * write-only ingest address: it can file an event and cannot read one, which
+ * is why Sentry's own browser SDK is built around shipping it to every client.
+ * So `NEXT_PUBLIC_SENTRY_DSN` is a deliberate exception to the rule the rest
+ * of this schema enforces, and it is an exception on the merits rather than
+ * for convenience — the alternative is proxying every browser error through
+ * our own route, which is a lot of machinery to hide a value that is designed
+ * to be seen.
+ *
+ * Validated as a URL rather than by prefix: Sentry's ingest hostnames are
+ * region-specific (this org is on `.ingest.de.sentry.io`) and a `startsWith`
+ * check would have to be edited the first time a project moved region.
+ */
+const sentryDsn = (which: string) =>
+  z
+    .string()
+    .url(`${which} must be a Sentry DSN URL (https://<key>@<org>.ingest.<region>.sentry.io/<id>)`)
+    .refine((u) => u.includes('sentry.io') || u.includes('sentry'), {
+      message: `${which} does not look like a Sentry DSN`,
+    });
+
 export const ClientEnv = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z
     .string()
@@ -25,6 +49,13 @@ export const ClientEnv = z.object({
   NEXT_PUBLIC_MAPBOX_TOKEN: z
     .string()
     .startsWith('pk.', 'Mapbox browser tokens start with pk. — sk. is secret.'),
+
+  /**
+   * The APP's Sentry project. Optional: error reporting must not be able to
+   * stop the console from loading, for the same reason the worker treats its
+   * own DSN as optional.
+   */
+  NEXT_PUBLIC_SENTRY_DSN: sentryDsn('NEXT_PUBLIC_SENTRY_DSN').optional(),
 });
 
 const secretKey = (which: string) =>
@@ -128,6 +159,22 @@ export const ServerEnv = z
      */
     ROUTING_MONTHLY_CEILING: z.coerce.number().int().positive().default(5_000),
 
+    /**
+     * The WORKER's Sentry project — a different project from the app's, not a
+     * second copy of the same DSN. The two runtimes fail differently: the app
+     * fails per-request in front of somebody who can see it, the worker fails
+     * alone at 3am. Pointed at one project, the second kind disappears behind
+     * the volume of the first, and neither gets its own quota.
+     *
+     * Optional, like HERE_API_KEY and for the same reason (§12.31): an
+     * enrichment must never be able to take the ingestion worker off the air.
+     * A fleet nobody can see is worse than errors nobody records.
+     */
+    SENTRY_WORKER_DSN: sentryDsn('SENTRY_WORKER_DSN').optional(),
+
+    /** Usually the deployed commit, so an event can name the code it came from. */
+    SENTRY_RELEASE: z.string().min(1).optional(),
+
     SAMSARA_API_TOKEN: z.string().min(1),
     SAMSARA_ORG_ID: z.string().regex(/^\d+$/, 'SAMSARA_ORG_ID must be numeric'),
 
@@ -144,6 +191,27 @@ export const ServerEnv = z
       'SUPABASE_SECRET_KEY and WORKER_SUPABASE_SECRET_KEY are identical. ' +
       'Issue a separate key per service so either can be rotated alone.',
   })
+  /**
+   * The two Sentry projects must stay two projects.
+   *
+   * Pasting one DSN into both variables is the easy mistake — they look alike,
+   * they arrive at the same time, and nothing downstream errors. The result is
+   * that worker events and app events land in one stream and the separation
+   * the two projects exist to provide is silently gone, which is discovered
+   * weeks later while looking for something else.
+   */
+  .refine(
+    (e) =>
+      e.SENTRY_WORKER_DSN === undefined ||
+      e.SENTRY_WORKER_DSN !== process.env['NEXT_PUBLIC_SENTRY_DSN'],
+    {
+      path: ['SENTRY_WORKER_DSN'],
+      message:
+        'SENTRY_WORKER_DSN and NEXT_PUBLIC_SENTRY_DSN are the same DSN. They ' +
+        'are meant to be separate Sentry projects so the worker and the app ' +
+        'keep separate streams and separate quotas.',
+    },
+  )
   /**
    * §12.59. The HERE key must not be any value that reaches a browser.
    *
