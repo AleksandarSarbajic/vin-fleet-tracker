@@ -5427,6 +5427,89 @@ written by copying one of them; the copy source has to be provably right.
 Verified live: 126 requests answered 401, then 429 with `retry-after`, while a
 different client address was still answering 401.
 
+
+## 12.66 What the browser suite found on its first run
+
+The Playwright scope is deliberately narrow — components render in Vitest since
+§12.37, so modals, focus traps and pickers stay there. What is left is what a
+browser is the only way to observe. It found two real defects immediately,
+which is the argument for the suite rather than a footnote to it.
+
+### The reassignment depended on the order the client sent its edits
+
+`saveAssignments` closed and opened assignments **truck by truck**, walking the
+requested changes in order. Moving a driver from truck B to truck A arrives as
+two changes in one payload, and if A was processed first the insert ran while
+the driver was still open on B — so `assignments_one_open_per_driver` refused
+it and the save returned 500. **The same two changes in the other order
+succeeded.**
+
+Every unit test had sent the lucky order. That is the worst shape a defect can
+have: code that looks right, is right half the time, and whose correctness
+lives in a client's serialisation order rather than anywhere it can be read.
+
+Every close now runs before any open. Both orders are pinned by tests, and the
+lucky-order test passes against the broken code too — kept deliberately,
+because that is the evidence of how it hid.
+
+### Copying `.env.example` broke the app
+
+The optional Sentry variables ship blank in `.env.example`, and the schema's
+own failure message says to copy that file. A blank string is not `undefined`,
+so `.optional()` did not apply: the URL check failed, the two blank DSNs then
+collided as "the same DSN", and the app refused to start **on the advice it had
+just given**. A blank optional variable is now an absent one.
+
+`vitest.setup.ts` had already written this lesson down — it DELETES production
+credentials rather than blanking them, "because an empty string is a value that
+a `??` will happily keep". The same defect, one file away, in the other
+direction.
+
+### Two tests that looked correct and asserted nothing
+
+Worth recording because both would have passed review:
+
+- `/\bstale\b/` never matched. A row's `textContent` concatenates its cells
+  with no whitespace, so the ETA reads `…CDTstale1m` and a word boundary has
+  nothing to sit on.
+- The ETA column **does not exist** at the default split width. The first
+  version asserted on an element that could not be there, and a test that
+  cannot fail is not a passing test.
+
+## 12.67 `--clear` is verified now, not reported
+
+The brief's last instruction before deploying is one command, and that command
+has been wrong before: §12.21 made an empty load number a real state, the seed
+writes some to exercise it, and `load_number LIKE 'DEMO-%'` does not match
+NULL. One demo load in seven survived the clear — the data that must not reach
+production, surviving the one command whose job is to remove it.
+
+The selection and the delete moved to `src/server/demo-data.ts` so they can be
+TESTED. A script cannot assert about itself.
+
+The command now **verifies rather than reports**. "Deleted 27 loads" is a
+statement about the query that just ran, which is true of any query; the useful
+statement is that nothing recognisably demo remains, counted three independent
+ways afterwards, with a non-zero exit if it does not. `DEMO_NOTE` is defined
+once and re-exported, because two copies drifting by one character reproduce
+§12.21 by another route.
+
+Verified against the disposable cluster rather than by running it at
+production and reading the output: 7 loads (6 numbered, **1 with no number**),
+14 stops, 2 already arrived — then zero of everything, counted by `psql`
+afterwards rather than by the command that did the deleting.
+
+### And the seed itself had been broken since §12.57
+
+Found while setting that verification up. `seed-demo.mts` writes `arrived_at`
+on the first leg of older loads and never wrote `arrived_source`, which
+migration 0016 pairs with it — `(arrived_at is null) = (arrived_source is
+null)`. So `npm run seed:demo` had been failing on its first arrived stop for
+several phases, and nobody noticed because the demo data already existed and
+nobody re-seeded. It writes `detected`: these stand in for arrivals the sweep
+found, and claiming a dispatcher marked them would put a person in an audit
+trail who was never there.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

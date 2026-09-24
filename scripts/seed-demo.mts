@@ -13,16 +13,17 @@
  * produced.
  */
 import { config as loadEnv } from 'dotenv';
-import { eq, inArray, like, or, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 import { loads, stops, trucks } from '../src/db/schema.ts';
 import { AppointmentInput } from '../src/lib/appointment.ts';
 import { DEMO_NOTE, PLACES } from './demo-places.mts';
+import { clearDemoData, isClean } from '../src/server/demo-data.ts';
 import { resolveAppointment } from '../src/server/appointment.ts';
 
 loadEnv({ path: '.env.local' });
 
-const PREFIX = 'DEMO-';
+import { DEMO_PREFIX as PREFIX } from '../src/server/demo-data.ts';
 
 /**
  * Addresses with the zone AND the coordinates stated, because there is no
@@ -54,28 +55,33 @@ if (process.env.NODE_ENV === 'production' && !clearOnly && !process.argv.include
 /**
  * Everything this script has ever written, and nothing else.
  *
- * Matched on the note as well as the load number. Matching the number alone
- * missed one demo load in seven: §12.21 made an empty load number a real
- * state, the seed writes some to exercise it, and `load_number LIKE 'DEMO-%'`
- * does not match NULL. Those rows survived `--clear` — which is exactly the
- * data that must not reach production, surviving the one command whose job
- * is to remove it.
+ * The selection and the delete live in `src/server/demo-data.ts` so they can
+ * be tested; a script cannot assert about itself, and this command has been
+ * wrong before (§12.21: `load_number LIKE 'DEMO-%'` does not match NULL, and
+ * one demo load in seven survived).
+ *
+ * It VERIFIES rather than reports. "Deleted 27 loads" is a statement about the
+ * query that just ran, which is true of any query; the useful statement is
+ * that nothing recognisably demo is left, counted independently afterwards.
  */
-const demoLoads = await db
-  .selectDistinct({ id: loads.id })
-  .from(loads)
-  .leftJoin(stops, eq(stops.loadId, loads.id))
-  .where(
-    or(like(loads.loadNumber, `${PREFIX}%`), eq(stops.dispatcherNote, DEMO_NOTE)),
-  );
-
-if (demoLoads.length > 0) {
-  await db.delete(loads).where(
-    inArray(loads.id, demoLoads.map((l) => l.id)),
-  );
-  console.log(`cleared ${demoLoads.length} demo load(s) (stops cascade)`);
+const cleared = await clearDemoData(db);
+if (cleared.loadsDeleted > 0) {
+  console.log(`cleared ${cleared.loadsDeleted} demo load(s) (stops cascade)`);
 }
+
+if (!isClean(cleared.remnants)) {
+  console.error(
+    'DEMO DATA SURVIVED THE CLEAR. Do not deploy.\n' +
+      `  loads still numbered DEMO-  : ${cleared.remnants.numberedLoads}\n` +
+      `  stops still carrying the note: ${cleared.remnants.notedStops}\n` +
+      `  loads reachable from those    : ${cleared.remnants.loadsWithNotedStops}`,
+  );
+  await client.end();
+  process.exit(1);
+}
+
 if (clearOnly) {
+  console.log('clear verified: no demo loads, no demo stops remain.');
   await client.end();
   process.exit(0);
 }
@@ -154,8 +160,22 @@ for (const [index, truck] of fleet.entries()) {
       appointmentEndUtc: appt.endUtc ? sql`${appt.endUtc}::timestamptz` : null,
       appointmentTz: appt.tz,
       appointmentType: input.type,
-      // The first leg of the older loads is already done.
+      /**
+       * The first leg of the older loads is already done.
+       *
+       * `arrivedSource` travels with `arrivedAt` or the row is refused:
+       * §12.57 added `stops_arrived_source_paired`, which says
+       * `(arrived_at is null) = (arrived_source is null)`, and this script was
+       * never updated for it — so `npm run seed:demo` had been failing on its
+       * first arrived stop ever since migration 0016. Found while verifying
+       * `--clear` against the disposable cluster.
+       *
+       * `detected` rather than `dispatcher`: these stand in for arrivals the
+       * worker's sweep found, and claiming a person marked them would put a
+       * human in an audit trail who was never there.
+       */
       arrivedAt: leg.seq === 1 && index % 4 === 0 ? sql`now() - interval '5 hours'` : null,
+      arrivedSource: leg.seq === 1 && index % 4 === 0 ? 'detected' : null,
       departedAt: leg.seq === 1 && index % 4 === 0 ? sql`now() - interval '4 hours'` : null,
     });
     stopCount += 1;

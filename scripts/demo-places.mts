@@ -26,8 +26,13 @@ export const PLACES = [
   { address: '1750 South 4800 West', city: 'Salt Lake City', state: 'UT', zip: '84104', tz: 'America/Denver' },
 ] as const;
 
-/** On every demo stop. A human reads this; `--clear` matches it. */
-export const DEMO_NOTE = 'DEMO SEED — safe to delete';
+/**
+ * Re-exported, not redefined. The clear command matches on this exact string,
+ * and two copies that drift by one character produce a `--clear` that reports
+ * success while leaving the data behind — which is §12.21's failure again by
+ * a different route.
+ */
+export { DEMO_NOTE } from '../src/server/demo-data.ts';
 
 /**
  * Which real place replaces each ORIGINAL seeded city, for `demo:relocate`.
