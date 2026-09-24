@@ -1,5 +1,6 @@
 import type { Status } from '@/lib/status';
 import { palette } from '@/design/tokens';
+import type { Basemap } from '@/lib/basemap';
 
 /**
  * The eight status markers, drawn once to canvases and handed to Mapbox with
@@ -27,6 +28,62 @@ const C = MARKER_SIZE / 2;
 const INK = palette.surface.base;
 const NEUTRAL = palette.status.neutral.fg;
 const NEUTRAL_FILL = palette.status.neutral.bg;
+
+/* ------------------------------------------------------------------------ *
+ * Satellite: every marker sits on a plate (§12.70)
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The dark ground each marker was designed against, carried with it.
+ *
+ * Measured at the 22 trucks' real positions, zoom 9 and 13, the imagery under
+ * this fleet is MID-TONE — median relative luminance 0.139. Every marker in
+ * the dark-map set separates from its ground with one of two pairs: a light
+ * fill inside a dark stroke, or a dark fill inside a light stroke. Both pairs
+ * straddle mid-grey, so on mid-grey ground both edges go weak at once:
+ *
+ *     Tomorrow   passes 3:1 at  0% of locations, worst 1.00 (invisible)
+ *     Stale GPS  passes 3:1 at 30%
+ *     No appt    passes 3:1 at 55%
+ *     Unassigned passes 3:1 at 68%
+ *
+ * The plate fixes that without redesigning a single marker. Inside it, each
+ * glyph sits on exactly the ground it was drawn for, so Tomorrow stays hollow
+ * and quietest, the shape channel (§5.3) is untouched, and the dark-map
+ * contrast work still holds.
+ */
+export const PLATE_FILL = palette.surface.base;
+export const PLATE_RIM = palette.text.DEFAULT;
+
+/**
+ * The plate then has to separate from the imagery, and it does so for EVERY
+ * possible ground rather than for the samples that happened to be measured.
+ * Against ground luminance L the rim's ratio falls as L rises and the plate's
+ * rises; the worst case is where they cross, and at that point both are
+ * 3.84:1. `markers.test.ts` sweeps L from 0 to 1 to hold that.
+ */
+const PLATE_RADIUS = 12;
+const PLATE_RIM_WIDTH = 1.25;
+
+/**
+ * The glyph, scaled about the centre, so its outermost corner clears the rim.
+ * The image keeps its 26px box — Mapbox's `updateImage` requires identical
+ * dimensions, and one box size for both basemaps keeps icon placement the
+ * same — so the plate costs the glyph 18% of its size. Late's triangle
+ * corner, the furthest point in the set at 11.4px, lands at 9.9px against the
+ * rim's inner edge at 11.4px.
+ */
+const GLYPH_ON_PLATE = 0.82;
+
+function drawPlate(ctx: CanvasRenderingContext2D): void {
+  ctx.beginPath();
+  ctx.arc(C, C, PLATE_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = PLATE_FILL;
+  ctx.fill();
+  ctx.lineWidth = PLATE_RIM_WIDTH;
+  ctx.strokeStyle = PLATE_RIM;
+  ctx.stroke();
+}
 
 interface Shape {
   draw: (ctx: CanvasRenderingContext2D) => void;
@@ -207,8 +264,14 @@ export interface MarkerImage {
   data: ImageData;
 }
 
-/** Rasterises all eight. Browser only — needs a canvas. */
-export function renderMarkerImages(): MarkerImage[] {
+/**
+ * Rasterises all eight. Browser only — needs a canvas.
+ *
+ * On the dark basemap this draws exactly what it always drew: the plate code
+ * path does not run, and the images are byte-identical to the pre-satellite
+ * ones (checked in the browser against the previous commit's renderer).
+ */
+export function renderMarkerImages(basemap: Basemap = 'dark'): MarkerImage[] {
   const out: MarkerImage[] = [];
   for (const [status, shape] of Object.entries(SHAPES) as [Status, Shape][]) {
     const canvas = document.createElement('canvas');
@@ -217,6 +280,12 @@ export function renderMarkerImages(): MarkerImage[] {
     const ctx = canvas.getContext('2d');
     if (!ctx) continue;
     ctx.scale(SCALE, SCALE);
+    if (basemap === 'satellite') {
+      drawPlate(ctx);
+      ctx.translate(C, C);
+      ctx.scale(GLYPH_ON_PLATE, GLYPH_ON_PLATE);
+      ctx.translate(-C, -C);
+    }
     shape.draw(ctx);
     out.push({
       id: markerImageId(status),

@@ -5634,6 +5634,104 @@ The active state is `bg-surface-overlay` like a selected chip, plus
 filter you picked", which are different kinds of state in the same row of
 controls.
 
+
+## 12.70 Satellite, and the marker that disappeared on it
+
+A basemap toggle beside the zoom control: the dark style the console was
+designed on, or `satellite-streets-v12` — streets rather than bare imagery,
+because a dispatcher still needs road names to say where a truck is. Stored
+per browser under `ft.basemap`, read in an effect exactly as density is.
+
+**Beside the zoom control, not beneath it.** The toast stack anchors at
+`right-4 top-[76px]`, directly under the zoom buttons and 340px wide; a
+control stacked there would be covered by every status toast for six seconds.
+
+### Cost
+
+Checked against Mapbox's pricing rather than assumed free: web maps are billed
+per map load — 50,000 a month free, then $5.00 per 1,000 — and a map load
+"includes unlimited Vector Tiles API and Raster Tiles API requests", so
+satellite imagery has no separate line item. Switching style inside a map is
+not billed. **Observed, not just read:** a page load sends one `map.load`
+telemetry event; three basemap switches send `style.load` three times and
+`map.load` never. `e2e/basemap.spec.ts` counts those events.
+
+### The marker images, and a bug that predates the toggle
+
+`setStyle` discards every image registered with `addImage`. react-map-gl
+restores its `<Source>` and `<Layer>` children after a style change and
+nothing restores the images, so the naive toggle drew no trucks at all while
+the list kept showing them. Images are now re-registered on every
+`style.load`, and `styleimagemissing` answers the race inside a load.
+
+Measuring that turned up the older bug: **the committed code logged
+`Image "truck-TOMORROW" could not be loaded` on every page load**, because
+images were registered in `onLoad`, which Mapbox fires after the first frame
+has already drawn the symbol layers. The listeners are now attached from a
+callback ref — the moment the map exists, far ahead of the style's own fetch —
+and the warnings are gone from both the first load and every switch.
+
+### Legibility, measured at the fleet's real positions
+
+The satellite ground was sampled around the 22 active trucks' actual
+positions, at zoom 9 and 13 — 44 grounds — and each marker's outline and
+interior were read off its rendered pixels rather than from a colour list.
+The ground is **mid-tone**: median luminance 0.139. That is the worst case for
+this marker set, whose members separate from dark ground with a light-fill /
+dark-stroke or dark-fill / light-stroke pair — pairs that straddle mid-grey,
+so on mid-grey ground both edges go weak together:
+
+```
+                 grounds at 3:1   worst
+At risk          100%             3.09
+On time          100%             3.16
+Arrived          100%             3.14
+Late              70%             2.80   (luminance only — salmon on green
+                                          is a strong hue contrast and reads)
+Unassigned        68%             2.74
+No appt           55%             2.69
+Stale GPS         30%             2.02
+Tomorrow           0%             1.00   the ground's own luminance
+```
+
+**The fix is a plate, on satellite only.** Each marker sits on a disc of
+`surface.base` — the ground it was designed against — with a 1.25px rim of
+`text.DEFAULT`. Inside the plate every glyph is on its designed ground again,
+so no marker is redesigned: Tomorrow stays hollow and quietest, and §5.3's
+shape channel is untouched. The glyph is drawn at 82% so its outermost point
+clears the rim inside the unchanged 26px image.
+
+The plate is legible on EVERY ground, which is a stronger claim than the 44
+samples can make: the rim's ratio falls as the ground brightens and the
+plate's rises, and where they cross both are **3.86:1**. `markers.test.ts`
+sweeps ground luminance 0→1 to hold it. Re-measured on the same 44 grounds:
+every marker, 100% of grounds, 100% of pixels, worst 3.88.
+
+The dark-map images are **byte-identical** to the previous commit's —
+checked by rendering both in the browser and comparing the buffers.
+
+**Cost of the plate:** each marker's footprint grows from the glyph (~15px) to
+24px, so trucks parked close together overlap more on satellite. Problem
+markers never cluster by design, so a yard of them stacks.
+
+### What the plate made visible rather than fixed
+
+§13.4 again, now unmissable. On the plate, **Tomorrow and Unassigned read as
+near-twins**: Unassigned's dark fill (`#262a2f`) disappears into the plate
+exactly as it disappears into the dark basemap, leaving "a grey ring on a dark
+disc" for both, one step of grey apart (`#858d94` against `#b3bac0`). The
+plate carries the dark-map appearance over as it is, flaws included — which is
+the point of it, and also why this is still open.
+
+### And the footer had been out of compliance since phase 3
+
+Satellite styles must credit "© Maxar". Checking that requirement showed that
+Mapbox's terms also require "© Mapbox" and "© OpenStreetMap" to be LINKS, plus
+an "Improve this map" link. The footer — the product's only attribution, since
+the map's control is disabled — carried the first two as plain text and
+omitted the third. All four are links now, from a list in `lib/basemap.ts`
+that a test holds to the terms.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
@@ -5683,6 +5781,12 @@ cut, type and padding are untouched. Kept here as a pointer because the
 arithmetic that produced it is worth not re-deriving.
 
 ## 13.4 Unassigned and Tomorrow markers are both circles
+
+> **Measured on satellite, §12.70.** On the satellite plate the two read as
+> near-twins — a grey ring on a dark disc, one step of grey apart. The dark
+> basemap has the same property for the same reason (Unassigned's dark fill
+> vanishes into dark ground). Still open; the satellite view makes it
+> impossible to miss.
 
 `TOMORROW` is a hollow circle, no fill, `#858d94` 1.5 stroke. `UNASSIGNED` is
 a solid-outline circle, `#262a2f` fill, `#b3bac0` 1.5 stroke. They separate by

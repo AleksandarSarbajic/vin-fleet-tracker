@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import Map, { Layer, Source, type MapMouseEvent, type MapRef } from 'react-map-gl/mapbox';
-import type { GeoJSONSource } from 'mapbox-gl';
+import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 import type { Point } from 'geojson';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { clientEnv } from '@/env/client';
@@ -37,7 +37,9 @@ import {
 import { MapPopup } from './MapPopup';
 import { useTrail } from '@/hooks/useTrail';
 import { trailDots } from '@/lib/trail';
-import { MapFooter, MarkerKey, ZoomControl } from './MapChrome';
+import { BasemapToggle, MapFooter, MarkerKey, ZoomControl } from './MapChrome';
+import { useBasemap } from '@/hooks/useBasemap';
+import { BASEMAP_STYLE } from '@/lib/basemap';
 
 /**
  * The map never re-renders per truck.
@@ -100,13 +102,87 @@ export function FleetMap({
   );
   const selection = useMemo(() => selectionCollection(selectedRow), [selectedRow]);
 
-  /** Register the marker and cluster images once, before any layer needs them. */
+  const { basemap, ready: basemapReady, setBasemap } = useBasemap();
+  /** Read by the image registration below, which runs from Mapbox events. */
+  const basemapRef = useRef(basemap);
+  useEffect(() => {
+    basemapRef.current = basemap;
+  }, [basemap]);
+
+  /**
+   * Put every marker and cluster image into the CURRENT style.
+   *
+   * This used to run once, from `onLoad`. That was enough while the map had
+   * one style for its whole life, and it is the thing a basemap toggle breaks
+   * first: `setStyle` discards every image registered with `addImage`.
+   * react-map-gl re-adds its `<Source>` and `<Layer>` children after a style
+   * change; nothing re-adds the images, so every symbol layer would point at
+   * an image that no longer exists and the fleet would silently vanish from
+   * the map while the list went on showing it.
+   *
+   * `updateImage` when the id is already present rather than skipping it: the
+   * two basemaps may be given different pixels for the same marker, and
+   * skipping would leave the previous basemap's version in place.
+   */
+  const registerImages = useCallback((map: MapboxMap) => {
+    const images = [...renderMarkerImages(basemapRef.current), ...renderClusterImages()];
+    for (const { id, data } of images) {
+      if (map.hasImage(id)) map.updateImage(id, data);
+      else map.addImage(id, data, { pixelRatio: 2 });
+    }
+  }, []);
+
+  /** Maps already wired, so `reuseMaps` re-mounting cannot double the listeners. */
+  const wired = useRef(new WeakSet<MapboxMap>());
+
+  /**
+   * Wire the image listeners the moment the map EXISTS — a callback ref, not
+   * `onLoad`.
+   *
+   * `onLoad` is too late, and was too late before any toggle existed: Mapbox
+   * fires it after the first frame, and react-map-gl has already added the
+   * symbol layers by then, so the first frame asked for `truck-*` images that
+   * were not registered yet. Measured on the committed code before this
+   * change: every page load logged `Image "truck-TOMORROW" could not be
+   * loaded` and `Image "truck-UNASSIGNED" could not be loaded`, and those
+   * markers were drawn a frame late.
+   *
+   * react-map-gl builds the map asynchronously and exposes no
+   * `onStyleImageMissing` prop, so the ref is the earliest hook there is. It
+   * fires as soon as the instance exists, and the style's own network fetch
+   * is far slower than that.
+   */
+  const attachMap = useCallback(
+    (ref: MapRef | null) => {
+      mapRef.current = ref;
+      const map = ref?.getMap();
+      if (!map || wired.current.has(map)) return;
+      wired.current.add(map);
+
+      /**
+       * Every style, including each basemap switch. `styleDiffing` is off on
+       * the <Map> below, so a switch is always a full reload and always fires
+       * this.
+       */
+      map.on('style.load', () => registerImages(map));
+      /**
+       * The race inside any load: a symbol layer drawn before `style.load` has
+       * reached us. Mapbox asks for the image by id instead of drawing a hole;
+       * this answers for ours and leaves any other id alone.
+       */
+      map.on('styleimagemissing', (event: { id: string }) => {
+        if (event.id.startsWith('truck-') || event.id.startsWith('cluster')) {
+          registerImages(map);
+        }
+      });
+      if (map.isStyleLoaded()) registerImages(map);
+    },
+    [registerImages],
+  );
+
   const handleLoad = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (!map) return;
-    for (const { id, data } of [...renderMarkerImages(), ...renderClusterImages()]) {
-      if (!map.hasImage(id)) map.addImage(id, data, { pixelRatio: 2 });
-    }
 
     if (didFit.current) return;
     didFit.current = true;
@@ -218,11 +294,32 @@ export function FleetMap({
     <div className="relative flex h-full w-full flex-col bg-surface-sunken">
       <div className="relative min-h-0 flex-1">
         <ZoomControl onZoom={zoom} />
+        <BasemapToggle basemap={basemap} onChange={setBasemap} />
         <MarkerKey />
+        {/*
+          Not mounted until the stored basemap has been read. Mounting at the
+          default and switching a frame later would load the dark style, fetch
+          its tiles, and then throw both away for a satellite user on every
+          page load — a visible flash, and work nobody asked for.
+        */}
+        {basemapReady ? (
         <Map
-          ref={mapRef}
+          ref={attachMap}
           mapboxAccessToken={clientEnv.NEXT_PUBLIC_MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/dark-v11"
+          mapStyle={BASEMAP_STYLE[basemap]}
+          /*
+           * A full reload on every switch, never a diff. The two styles share
+           * nothing worth diffing, and a full reload is what guarantees
+           * `style.load` fires — which is where the marker images go back in.
+           *
+           * Changing this prop calls `setStyle` on the SAME map instance, and
+           * that is what keeps the toggle free: Mapbox bills per Map
+           * constructed — the `map.load` telemetry event — and not per style.
+           * Measured: a page load sends `map.load` once; three basemap
+           * switches send `style.load` three times and `map.load` never.
+           * e2e/basemap.spec.ts counts those events rather than trusting this.
+           */
+          styleDiffing={false}
           initialViewState={US_FALLBACK}
           onLoad={handleLoad}
           onClick={handleClick}
@@ -278,8 +375,13 @@ export function FleetMap({
             />
           ) : null}
         </Map>
+        ) : null}
       </div>
-      <MapFooter fetchedAt={fetchedAt} newestPositionAt={newestPositionAt} />
+      <MapFooter
+        fetchedAt={fetchedAt}
+        newestPositionAt={newestPositionAt}
+        basemap={basemap}
+      />
     </div>
   );
 }

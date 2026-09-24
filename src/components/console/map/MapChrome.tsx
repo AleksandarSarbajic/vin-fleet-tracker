@@ -3,6 +3,7 @@
 import { STATUSES, type Status } from '@/lib/status';
 import { STATUS_LABEL } from '@/lib/status';
 import { elapsed } from '@/lib/format';
+import { BASEMAPS, BASEMAP_CREDITS, type Basemap } from '@/lib/basemap';
 
 /**
  * Map chrome from design-spec §9.3: zoom control, marker key, and the 26px
@@ -108,6 +109,62 @@ export function ZoomControl({
   );
 }
 
+const BASEMAP_LABEL: Record<Basemap, string> = { dark: 'Map', satellite: 'Satellite' };
+
+/**
+ * Dark map or satellite imagery.
+ *
+ * Beside the zoom control, not beneath it — and that is a measured constraint,
+ * not taste. The toast stack (§14 feature 14) anchors to this pane at
+ * `right-4 top-[76px]`, directly under the zoom buttons, 340px wide; a control
+ * stacked under the zoom would sit exactly where every status toast lands and
+ * be covered for six seconds at a time.
+ *
+ * `right-[56px]` is the zoom stack's 16px inset + 34px width + a 6px gap, so
+ * the two read as one cluster of map controls at the same height.
+ *
+ * A joined pair rather than density's separated one: over satellite imagery a
+ * gap between two buttons is a strip of photograph, which reads as clutter. The
+ * active side is marked the way density marks it — an accent edge on an
+ * overlay ground — so "a setting you chose" looks the same everywhere.
+ */
+export function BasemapToggle({
+  basemap,
+  onChange,
+}: {
+  basemap: Basemap;
+  onChange: (basemap: Basemap) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Basemap"
+      className="absolute right-[56px] top-[14px] z-10 flex border border-line-hair bg-surface-raised"
+    >
+      {BASEMAPS.map((option, index) => {
+        const active = option === basemap;
+        return (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(option)}
+            className={`flex h-8 items-center px-3 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground ${
+              index > 0 ? 'border-l border-line-hair' : ''
+            } ${
+              active
+                ? 'bg-surface-overlay text-text ring-1 ring-inset ring-accent'
+                : 'text-text-muted hover:bg-row-hover'
+            }`}
+          >
+            {BASEMAP_LABEL[option]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MarkerKey() {
   return (
     <div className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px]">
@@ -130,15 +187,24 @@ export function MarkerKey() {
 export function MapFooter({
   newestPositionAt,
   fetchedAt,
+  basemap,
 }: {
   newestPositionAt: string | null;
   /** Same reference as every other age on screen — see ConsoleHeader. */
   fetchedAt: string | null;
+  /** Satellite imagery carries a credit of its own. */
+  basemap: Basemap;
 }) {
   const age = elapsed(newestPositionAt, fetchedAt ? new Date(fetchedAt) : undefined);
   return (
-    <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-line-hair px-3 font-sans text-micro normal-case tracking-normal text-text-muted">
-      <span>
+    /*
+      `min-h`, not `h`. The credits below are required and must stay legible;
+      a fixed 26px bar was already overflowing when both halves wrapped, and
+      satellite adds a fifth credit. The informational half truncates; the
+      required half is allowed to wrap onto a second line instead.
+    */
+    <div className="flex min-h-[26px] shrink-0 items-center justify-between gap-4 border-t border-line-hair px-3 py-1 font-sans text-micro normal-case tracking-normal text-text-muted">
+      <span className="min-w-0 truncate">
         Positions from ELD{age ? ` · newest ${age} ago` : ''} · problem markers
         never cluster
       </span>
@@ -153,9 +219,33 @@ export function MapFooter({
         * and excluding it is a bet. Phase 3 already missed an attribution
         * once; this is what not repeating that looks like.
         */}
-      <span>
-        © Mapbox · OpenStreetMap · This product uses the Census Bureau Data API
-        but is not endorsed or certified by the Census Bureau.
+      {/*
+        Links, not text, and that is the correction rather than a restyle.
+
+        Mapbox's attribution terms (checked 2026-09-24) require "© Mapbox" and
+        "© OpenStreetMap" to be LINKS and require an "Improve this map" link.
+        This footer carried the first two as plain text and omitted the third
+        since phase 3 — while the comment above it said, correctly, that it is
+        the only attribution in the product. Satellite styles additionally
+        require "© Maxar". The list lives in lib/basemap.ts so a test can hold
+        it to the terms.
+      */}
+      <span className="text-right" data-testid="map-credits">
+        {BASEMAP_CREDITS[basemap].map((credit) => (
+          <span key={credit.href}>
+            <a
+              href={credit.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 hover:text-text hover:underline"
+            >
+              {credit.label}
+            </a>
+            {' · '}
+          </span>
+        ))}
+        This product uses the Census Bureau Data API but is not endorsed or
+        certified by the Census Bureau.
       </span>
     </div>
   );
