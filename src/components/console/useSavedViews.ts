@@ -8,6 +8,7 @@ import {
   addView,
   readViews,
   removeView,
+  renameView,
   writeViews,
   type SavedView,
   type SaveRefusal,
@@ -32,6 +33,8 @@ export function useSavedViews(state: ViewState): {
   active: SavedView | null;
   save: (name: string) => SaveRefusal | null;
   remove: (id: string) => void;
+  /** §12.81. Returns the refusal, or null when it renamed. */
+  rename: (id: string, name: string) => SaveRefusal | null;
   atCap: boolean;
 } {
   const [views, setViews] = useState<SavedView[]>([]);
@@ -70,9 +73,20 @@ export function useSavedViews(state: ViewState): {
     });
   }, []);
 
+  const rename = useCallback(
+    (id: string, name: string): SaveRefusal | null => {
+      const result = renameView(views, id, name);
+      if (result.refused) return result.refused;
+      setViews(result.views);
+      writeViews(result.views);
+      return null;
+    },
+    [views],
+  );
+
   const active = useMemo(() => activeView(views, state), [views, state]);
 
-  return { views, active, save, remove, atCap: views.length >= VIEW_CAP };
+  return { views, active, save, remove, rename, atCap: views.length >= VIEW_CAP };
 }
 
 /** The chip list a view is applied as — narrowed, since storage is not typed. */

@@ -6121,6 +6121,25 @@ down: 1440 fits with 27px spare, 1680 181px, 1920 300px.
 `e2e/header.spec.ts` runs the same no-scroll + no-overlap check at all three
 widths in BOTH feed states, and asserts the two lines' wording.
 
+## 12.81 Saved views: rename, and a list that grows down, not across
+
+Checked before building: the Views control was already a dropdown — list
+with a one-line description per view, apply, save the current chips + search
+under a name (duplicate and empty names refused), delete. Two gaps:
+
+- **No rename.** A mistyped name meant deleting the view and rebuilding its
+  chips. Each row now has `Rename` beside `Delete`: the row becomes its name
+  field, Enter commits, Esc backs out (one press, one undo — the menu stays
+  open). Same rules as saving: whitespace collapsed, 40 chars, never empty,
+  never another view's name; its own name in different case is allowed.
+- **A cap that was really a layout limit.** `VIEW_CAP` was 8 "and the menu
+  stays one screen without scrolling". The list is now its own scroll box
+  (`max-h: min(60vh, 360px)`) inside the fixed 280px menu, with the save row
+  outside the scroll; the cap is 50, a bound on a runaway store only.
+
+A view is the chip set and the search term. There is no user-selectable sort
+(the list is always by urgency, §12.4), so there is no sort state to save.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

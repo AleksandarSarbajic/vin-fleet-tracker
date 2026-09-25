@@ -551,6 +551,10 @@ export function Console({
             onApply: applyView,
             onSave: saveView,
             onRemove: savedViews.remove,
+            onRename: (id: string, name: string) => {
+              const refusal = savedViews.rename(id, name);
+              return refusal === null ? null : refusalMessage(refusal, name);
+            },
             // Nothing to save when the board already IS a saved view; the
             // save would only be refused as a duplicate a moment later.
             canSaveCurrent: savedViews.active === null,

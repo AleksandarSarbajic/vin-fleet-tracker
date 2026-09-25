@@ -9,6 +9,7 @@ import {
   normalizeName,
   readViews,
   removeView,
+  renameView,
   sameView,
   writeViews,
   type SavedView,
@@ -87,8 +88,39 @@ describe('names', () => {
   });
 });
 
+describe('renaming (§12.81)', () => {
+  const two = () => {
+    let views: SavedView[] = [];
+    views = save(views, 'Late today').views;
+    return save(views, 'On time').views;
+  };
+
+  it('renames one view and nothing else', () => {
+    const views = two();
+    const out = renameView(views, views[0]!.id, '  Late   this morning ');
+    expect(out.refused).toBeNull();
+    expect(out.views.map((v) => v.name)).toEqual(['Late this morning', 'On time']);
+    expect(out.views[0]!.chips).toEqual(views[0]!.chips);
+  });
+
+  it('refuses another view’s name, in any case', () => {
+    const views = two();
+    expect(renameView(views, views[1]!.id, 'LATE TODAY').refused).toBe('duplicate-name');
+  });
+
+  it('allows its own name in different case — a correction, not a collision', () => {
+    const views = two();
+    expect(renameView(views, views[0]!.id, 'late TODAY').refused).toBeNull();
+  });
+
+  it('refuses an empty name', () => {
+    const views = two();
+    expect(renameView(views, views[0]!.id, '   ').refused).toBe('empty-name');
+  });
+});
+
 describe('the cap', () => {
-  it('refuses the ninth rather than dropping the first', () => {
+  it('refuses one past the cap rather than dropping the first', () => {
     let views: SavedView[] = [];
     for (let i = 0; i < VIEW_CAP; i += 1) views = save(views, `View ${i}`).views;
     const result = save(views, 'One more');

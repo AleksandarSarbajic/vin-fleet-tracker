@@ -28,6 +28,7 @@ export function SavedViews({
   onApply,
   onSave,
   onRemove,
+  onRename,
   canSaveCurrent,
 }: {
   views: SavedView[];
@@ -36,6 +37,8 @@ export function SavedViews({
   /** Returns the sentence to print on a refusal, or null when it saved. */
   onSave: (name: string) => string | null;
   onRemove: (id: string) => void;
+  /** §12.81. Returns the sentence to print on a refusal, or null when it renamed. */
+  onRename: (id: string, name: string) => string | null;
   /**
    * False when the board is showing a view that is already saved — there is
    * nothing to save, and offering it would invite a duplicate the save then
@@ -47,6 +50,12 @@ export function SavedViews({
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  /** §12.81. The one view being renamed, if any, and its draft name. */
+  const [renaming, setRenaming] = useState<{
+    id: string;
+    name: string;
+    error: string | null;
+  } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const menuId = useId();
@@ -60,10 +69,11 @@ export function SavedViews({
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      // Esc backs out of the name field first, and closes the menu second.
+      // Esc backs out of a name field first, and closes the menu second.
       // One press should undo one thing.
       event.stopPropagation();
-      if (naming) setNaming(false);
+      if (renaming) setRenaming(null);
+      else if (naming) setNaming(false);
       else setOpen(false);
     };
     const onFocusOut = () => {
@@ -80,7 +90,7 @@ export function SavedViews({
       document.removeEventListener('keydown', onKey);
       node?.removeEventListener('focusout', onFocusOut);
     };
-  }, [open, naming]);
+  }, [open, naming, renaming]);
 
   // The field is only there once, and focus belongs in it the moment it is.
   useEffect(() => {
@@ -108,6 +118,7 @@ export function SavedViews({
         onClick={() => {
           setOpen((was) => !was);
           setNaming(false);
+          setRenaming(null);
           setError(null);
         }}
         className={`flex h-[26px] shrink-0 items-center gap-1.5 border px-3 font-cond text-micro uppercase tracking-[.09em] ${
@@ -136,34 +147,83 @@ export function SavedViews({
               No saved views yet. Filter the board, then save it here.
             </p>
           ) : (
-            views.map((view) => (
-              <div key={view.id} className="group/view flex items-center">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    onApply(view);
-                    setOpen(false);
-                  }}
-                  className={`flex min-w-0 flex-1 flex-col items-start px-3 py-1.5 text-left hover:bg-row-hover ${
-                    view.id === active?.id ? 'text-accent' : 'text-text'
-                  }`}
-                >
-                  <span className="w-full truncate text-body">{view.name}</span>
-                  <span className="w-full truncate font-sans text-small text-text-mutedOnSelected">
-                    {describe(view)}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Delete the view ${view.name}`}
-                  onClick={() => onRemove(view.id)}
-                  className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100"
-                >
-                  Delete
-                </button>
-              </div>
-            ))
+            /*
+             * §12.81. The list scrolls inside a menu of fixed width and capped
+             * height, so views grow it DOWNWARD and never wider — the chip row
+             * at 1440px was the lesson in a header that grows sideways. The
+             * save row stays outside the scroll, always one reach away.
+             */
+            <div data-view-list="" className="max-h-[min(60vh,360px)] overflow-y-auto">
+              {views.map((view) =>
+                renaming?.id === view.id ? (
+                  <div key={view.id} className="px-3 py-1.5">
+                    <input
+                      autoFocus
+                      value={renaming.name}
+                      maxLength={VIEW_NAME_MAX}
+                      aria-label={`New name for ${view.name}`}
+                      onChange={(e) =>
+                        setRenaming({ ...renaming, name: e.target.value, error: null })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        const refusal = onRename(view.id, renaming.name);
+                        if (refusal === null) setRenaming(null);
+                        else setRenaming({ ...renaming, error: refusal });
+                      }}
+                      className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none"
+                    />
+                    {renaming.error ? (
+                      <p role="alert" className="mt-1 text-small text-status-risk-fg">
+                        {renaming.error}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-small text-text-muted">
+                        Enter to rename · Esc to cancel
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div key={view.id} className="group/view flex items-center">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onApply(view);
+                        setOpen(false);
+                      }}
+                      className={`flex min-w-0 flex-1 flex-col items-start px-3 py-1.5 text-left hover:bg-row-hover ${
+                        view.id === active?.id ? 'text-accent' : 'text-text'
+                      }`}
+                    >
+                      <span className="w-full truncate text-body">{view.name}</span>
+                      <span className="w-full truncate font-sans text-small text-text-mutedOnSelected">
+                        {describe(view)}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Rename the view ${view.name}`}
+                      onClick={() =>
+                        setRenaming({ id: view.id, name: view.name, error: null })
+                      }
+                      className="shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete the view ${view.name}`}
+                      onClick={() => onRemove(view.id)}
+                      className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ),
+              )}
+            </div>
           )}
 
           <div className="mt-1 border-t border-line-hair pt-1">

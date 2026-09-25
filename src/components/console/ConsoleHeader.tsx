@@ -85,6 +85,7 @@ interface Props {
     onApply: (view: SavedView) => void;
     onSave: (name: string) => string | null;
     onRemove: (id: string) => void;
+    onRename: (id: string, name: string) => string | null;
     canSaveCurrent: boolean;
   };
 }
@@ -199,6 +200,7 @@ export function ConsoleHeader({
             onApply={views.onApply}
             onSave={views.onSave}
             onRemove={views.onRemove}
+            onRename={views.onRename}
             canSaveCurrent={views.canSaveCurrent}
           />
           <FilterChips

@@ -328,8 +328,114 @@ describe('the trigger', () => {
   });
 });
 
+/**
+ * §12.81. Renaming was the one thing the menu could not do: a dispatcher who
+ * mistyped a name had to delete the view and rebuild its chips to fix it.
+ */
+describe('renaming', () => {
+  const renameField = () =>
+    container!.querySelector<HTMLInputElement>('input[aria-label^="New name for"]');
+  const renameTo = async (value: string) => {
+    const field = renameField()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+  };
+  const renameButton = (name: string) =>
+    [...container!.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === `Rename the view ${name}`,
+    );
+
+  it('renames in place, keeps the chips, and the trigger follows', async () => {
+    await mount(['late']);
+    await openMenu();
+    await saveAs('Late tday');
+    await openMenu();
+    await click(renameButton('Late tday'));
+    expect(renameField()?.value).toBe('Late tday');
+    await renameTo('Late today');
+
+    const stored = JSON.parse(store.get(VIEW_STORAGE_KEY) ?? '[]') as {
+      name: string;
+      chips: string[];
+    }[];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ name: 'Late today', chips: ['late'] });
+    expect(renameField()).toBeNull();
+    expect(viewsTrigger()?.textContent).toContain('Late today');
+  });
+
+  it('refuses another view’s name, and says so without losing either', async () => {
+    store.set(
+      VIEW_STORAGE_KEY,
+      JSON.stringify([
+        { id: 'a', name: 'Late today', query: '', chips: ['late'] },
+        { id: 'b', name: 'On time', query: '', chips: ['ontime'] },
+      ]),
+    );
+    await mount();
+    await openMenu();
+    await click(renameButton('On time'));
+    await renameTo('late TODAY');
+    expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
+      'already saved',
+    );
+    const stored = JSON.parse(store.get(VIEW_STORAGE_KEY) ?? '[]') as { name: string }[];
+    expect(stored.map((v) => v.name)).toEqual(['Late today', 'On time']);
+  });
+
+  it('Esc backs out of the rename without closing the menu', async () => {
+    store.set(
+      VIEW_STORAGE_KEY,
+      JSON.stringify([{ id: 'a', name: 'Late today', query: '', chips: ['late'] }]),
+    );
+    await mount();
+    await openMenu();
+    await click(renameButton('Late today'));
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(renameField()).toBeNull();
+    expect(viewsTrigger()?.getAttribute('aria-expanded')).toBe('true');
+  });
+});
+
+/**
+ * §12.81. Views grow the menu DOWNWARD: the list is its own scroll box inside
+ * a fixed-width menu, so a long list can never widen anything.
+ */
+it('scrolls the list inside a fixed-width menu rather than growing it', async () => {
+  store.set(
+    VIEW_STORAGE_KEY,
+    JSON.stringify(
+      Array.from({ length: 30 }, (_, i) => ({
+        id: `v${i}`,
+        name: `View ${i}`,
+        query: `q${i}`,
+        chips: [],
+      })),
+    ),
+  );
+  await mount();
+  await openMenu();
+  const list = container!.querySelector('[data-view-list]');
+  expect(list?.className).toContain('overflow-y-auto');
+  expect(list?.className).toMatch(/max-h-/);
+  expect(container!.querySelector('[role="menu"]')?.className).toContain('w-[280px]');
+  expect(list?.querySelectorAll('[role="menuitem"]')).toHaveLength(30);
+});
+
 describe('the cap', () => {
-  it('refuses the ninth rather than dropping the first', async () => {
+  it('refuses one past the cap rather than dropping the first', async () => {
     const existing = Array.from({ length: VIEW_CAP }, (_, i) => ({
       id: `v${i}`,
       name: `View ${i}`,

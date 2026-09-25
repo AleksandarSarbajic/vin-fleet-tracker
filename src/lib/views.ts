@@ -27,8 +27,15 @@
  * pin it took typing. Both the cap and a name collision refuse and say so.
  */
 
-/** Eight, and the menu stays one screen without scrolling. */
-export const VIEW_CAP = 8;
+/**
+ * Fifty. It was eight, "and the menu stays one screen without scrolling" —
+ * which made the cap a layout constraint wearing a policy's clothes: the
+ * ninth view was refused because the MENU could not hold it, not because
+ * anyone should stop at eight. The list now scrolls inside a fixed-width,
+ * height-capped menu (§12.81), so it grows downward and never wider, and the
+ * cap is only a bound on a hand-edited or runaway store.
+ */
+export const VIEW_CAP = 50;
 export const VIEW_STORAGE_KEY = 'ft.views';
 export const VIEW_NAME_MAX = 40;
 
@@ -146,6 +153,25 @@ export function addView(
     ],
     refused: null,
   };
+}
+
+/**
+ * A new name for one view, by the same rules as saving one: whitespace
+ * collapsed, length capped, never empty, never another view's name. Its OWN
+ * name in different case is allowed — renaming "late today" to "Late today" is
+ * a correction, not a collision.
+ */
+export function renameView(
+  views: readonly SavedView[],
+  id: string,
+  rawName: string,
+): SaveResult {
+  const name = normalizeName(rawName);
+  if (name === '') return { views: [...views], refused: 'empty-name' };
+  if (views.some((v) => v.id !== id && sameName(v.name, name))) {
+    return { views: [...views], refused: 'duplicate-name' };
+  }
+  return { views: views.map((v) => (v.id === id ? { ...v, name } : v)), refused: null };
 }
 
 export function removeView(views: readonly SavedView[], id: string): SavedView[] {
