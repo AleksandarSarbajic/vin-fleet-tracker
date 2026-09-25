@@ -165,58 +165,6 @@ export function needsRecompute(
   return moved > threshold ? 'truck-moved' : null;
 }
 
-/* ------------------------------ shadow observation ----------------------- */
-
-/**
- * §12.61. What a ratio-stability gate WOULD have decided here, and what the
- * decision would have cost. The gate is not built and nothing skips.
- *
- * The gate's proposal is: skip a `truck-moved` recompute when the lane's
- * ratio has been holding still, because the drift measurement says a still
- * ratio predicts a cheap call. `stabilityDelta` is what it would look at —
- * movement between the two routes BEFORE this one, which is all it could
- * know at the moment of deciding.
- *
- * `errorMiles` is what it could not know: the board would have gone on
- * showing `straight x ratioCached` when the truth is `straight x ratioNow`,
- * and that difference is only available because the call really happened.
- * The whole table exists for this one asymmetry.
- *
- * No threshold appears here. Storing a verdict would freeze an eps chosen
- * before the data arrived — §12.31's mistake, recording a conclusion instead
- * of its inputs.
- */
-export interface ShadowObservation {
-  straightMiles: number;
-  /** r(i-2). Null on a lane with only one prior route: a real state. */
-  ratioPrev: number | null;
-  /** r(i-1) — what the row was showing until this call returned. */
-  ratioCached: number;
-  /** r(i) — the truth this call established. */
-  ratioNow: number;
-  /** |r(i-1) - r(i-2)|: the gate's input. Null when there is no r(i-2). */
-  stabilityDelta: number | null;
-  /** straight x |r(i) - r(i-1)|: the gate's cost. */
-  errorMiles: number;
-}
-
-export function shadowObservation(input: {
-  straightMiles: number;
-  ratioPrev: number | null;
-  ratioCached: number;
-  ratioNow: number;
-}): ShadowObservation {
-  return {
-    straightMiles: input.straightMiles,
-    ratioPrev: input.ratioPrev,
-    ratioCached: input.ratioCached,
-    ratioNow: input.ratioNow,
-    stabilityDelta:
-      input.ratioPrev === null ? null : Math.abs(input.ratioCached - input.ratioPrev),
-    errorMiles: input.straightMiles * Math.abs(input.ratioNow - input.ratioCached),
-  };
-}
-
 /* -------------------------------- the basis ------------------------------ */
 
 /**

@@ -568,14 +568,6 @@ export const stopRoutes = pgTable(
      * spread across our own lanes was 1.070 to 1.460.
      */
     laneRatio: doublePrecision('lane_ratio').notNull(),
-    /**
-     * §12.61. The ratio this row is REPLACING, carried forward so the lane's
-     * previous-but-one measurement is exact rather than reconstructed by
-     * ordering `route_samples` on a `now()` that is transaction-start time.
-     *
-     * Read by nothing in the routing path. Shadow observation only.
-     */
-    prevLaneRatio: doublePrecision('prev_lane_ratio'),
 
     /** The stop's coordinates when routed. A re-geocode invalidates the row. */
     stopLat: doublePrecision('stop_lat').notNull(),
@@ -667,8 +659,11 @@ export const routeSamples = pgTable(
  * of `route_samples`, whose rows sit 12–17 minutes apart because that is how
  * often the rule routes a lane, and a replay needs the answer in between.
  *
- * Nothing reads it. No recompute is skipped. It is dropped when the question
- * is answered.
+ * CLOSED (§12.73). The question was answered on 2026-09-25 — the gate is
+ * not built — and the worker no longer writes here. The 412 rows are kept as
+ * the verdict's raw evidence (`npm run shadow:analyse` re-reads them), and a
+ * trigger refuses any new insert or update, so "no more rows" is the
+ * database's rule rather than merely the absence of a writer.
  *
  * The threshold is deliberately NOT stored — the raw ratios are, so any eps
  * can be swept later without re-running the fleet.
@@ -677,8 +672,12 @@ export const routeShadow = pgTable(
   'route_shadow',
   {
     id: uuid('id').primaryKey().default(newId),
-    /** Provenance only, like route_samples (§12.54). */
-    stopId: uuid('stop_id').references(() => stops.id, { onDelete: 'set null' }),
+    /**
+     * Provenance only, like route_samples (§12.54). No foreign key since
+     * 0019: its `ON DELETE SET NULL` would UPDATE this closed table on every
+     * stop deletion, and the closing trigger would refuse it (§12.73).
+     */
+    stopId: uuid('stop_id'),
     destLat: doublePrecision('dest_lat').notNull(),
     destLng: doublePrecision('dest_lng').notNull(),
     destCity: text('dest_city'),

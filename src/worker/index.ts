@@ -484,7 +484,6 @@ async function pollOnce(
     outcomes: {} as Record<RouteOutcome, number>,
     routedBecause: {},
     failures: {},
-    shadowRows: 0,
     blocked: [],
   };
   try {

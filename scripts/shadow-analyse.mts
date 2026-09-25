@@ -1,6 +1,10 @@
 /**
  * The §12.61 shadow run's verdict. `npm run shadow:analyse`
  *
+ * The run is CLOSED (§12.73): it concluded on 2026-09-25, the gate is not
+ * built, and `route_shadow` refuses new rows. This stays because the 412 rows
+ * do — it re-reads the evidence the verdict rests on, and reads nothing else.
+ *
  * Read-only. Sweeps eps over the truck-profile observations and asks, for
  * each, the only two questions that matter:
  *

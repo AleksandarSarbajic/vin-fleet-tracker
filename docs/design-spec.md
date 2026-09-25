@@ -5811,6 +5811,69 @@ generated types are pre-listed in `tsconfig.json` so a build never rewrites
 that file. `src/test/build-dirs.test.ts` holds both halves; removing either
 fails it.
 
+## 12.73 The shadow run's verdict, and the clean slate
+
+**§12.61's question is answered: the ratio-stability gate is not built.**
+`shadow:analyse` ran once, when the stopping rule was met on 2026-09-25 (392
+usable observations of 150; 41 under 25 miles of 40).
+
+| cohort | n | places (eff) | best-looking eps | separation | p | what it rests on |
+|---|---|---|---|---|---|---|
+| all gateable | 344 | 8 (4.5) | 0.05, skips 73% | 0.71x | 0.031 | balanced across places |
+| under 25 mi | 24 | 4 (3.2) | 0.03, skips 13% | 0.30x | 0.005 | **three Fargo rows — one place** |
+| under 25 mi | 24 | 4 (3.2) | 0.10, skips 46% | 0.45x | 0.025 | 4 places, eff 3.3 |
+| beyond 25 mi | 320 | 8 (4.6) | 0.05, skips 76% | 0.69x | 0.012 | balanced across places |
+
+- Six eps were tested per cohort, so a single result needs p < 0.008 to mean
+  anything. None reaches it.
+- The approach's smallest p is exactly the case the concentration column was
+  added to expose: every skipped row from one destination, eff 1.0.
+- Where a weak effect is real and place-balanced (beyond 25 mi, ~0.7x), the
+  recomputes the gate would skip still cost a median ~4.5 min of ETA error and
+  a p90 of 15–17 min — the same standard §12.61 used to reject a 0.77-minute
+  gap as "not a reason to stop making a quarter of the recomputes".
+- One caveat, stated rather than resolved: the stopping rule's 40 counted
+  every recompute reason, while only `truck-moved` is gateable; the cohort the
+  analysis could use was 24. The verdict does not depend on it.
+
+§12.61's cost problem (~5,800 calls/month against 5,000) stands, and the
+per-lane distance rules costed there are where to look next — not this gate.
+
+### What was removed, and what was kept
+
+- **Removed:** the worker's `route_shadow` write and its `shadowRows` count,
+  `shadowObservation` and its tests, `stop_routes.prev_lane_ratio` (read by
+  nothing in routing; migration 0019), and `shadow:status`.
+- **Kept, closed:** `route_shadow` and its 412 rows, the verdict's raw
+  evidence, still readable by `shadow:analyse`. Migration 0019 adds a trigger
+  that refuses any INSERT or UPDATE, so "no more rows" is the database's rule
+  rather than merely the absence of a writer. `route-shadow-closed.test.ts`
+  holds it; dropping the trigger fails it.
+- drizzle-kit's snapshots stop at 0010, so `db:generate` proposed re-creating
+  tables that already exist. 0019 is hand-written, like 0017 and 0018.
+- **The first draft of 0019 would have broken every deletion in the product,
+  and the suite caught it before deploy.** `route_shadow.stop_id` carried a
+  foreign key with `ON DELETE SET NULL`, so deleting any stop ran an UPDATE on
+  the closed table — and a STATEMENT-level trigger fires even when that update
+  touches nothing. The demo-clear tests failed on the pre-commit hook. The
+  fix is two independent defences: the foreign key is dropped (`stop_id` was
+  provenance, never a join key), and the trigger is row-level, so it fires
+  only for a row really being written. A test deletes a load with stops
+  under the closed table; restoring the first draft fails six tests.
+
+### The clean slate
+
+The demo clear (§12.67) ran against production after the verdict: 27 demo
+loads removed, and every independent count — DEMO- numbers, noted stops,
+loads reachable from noted stops, any "demo" text anywhere — at zero. Four
+loads survived it correctly, carrying neither marker: hand-entered test loads
+on trucks 122, 135, 137 and 139, with real street addresses and three without
+a load number (a real state, §12.21). They were deleted on instruction in one
+transaction that aborted unless exactly those four loads and four stops
+matched. Production then held **0 loads and 0 stops**, trucks, drivers and
+positions untouched, and the worker went from watching 17 stops to 3 to none
+without an error.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

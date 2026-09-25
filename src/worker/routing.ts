@@ -1,13 +1,12 @@
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { routeSamples, routeShadow, routingBudget, stopRoutes } from '@/db/schema';
+import { routeSamples, routingBudget, stopRoutes } from '@/db/schema';
 import { haversineMiles } from '@/lib/status';
 import {
   ROUTING_DEFAULTS,
   budgetMonth,
   budgetStatus,
   needsRecompute,
-  shadowObservation,
   type BudgetStatus,
   type CachedRoute,
   type RoutingConfig,
@@ -100,12 +99,6 @@ export interface RoutingSweep {
   /** Provider refusals, by their own reason. */
   failures: Record<string, number>;
   /**
-   * §12.61. Shadow observations written this sweep. Counted so a silently
-   * failing write shows up as a number that stops moving rather than as an
-   * empty table discovered days later.
-   */
-  shadowRows: number;
-  /**
    * The lanes worth naming: everything whose outcome was not `routed` or
    * `route-current`.
    *
@@ -164,7 +157,6 @@ export async function sweepRouting(
     outcomes: {} as Record<RouteOutcome, number>,
     routedBecause: {},
     failures: {},
-    shadowRows: 0,
     blocked: [],
   };
 
@@ -355,12 +347,6 @@ export async function sweepRouting(
         fromLng: c.truck_lng,
         straightAtRouteMiles: straight,
         laneRatio,
-        /**
-         * §12.61. The ratio being replaced, so the NEXT call can name the
-         * lane's previous-but-one measurement exactly. Read by nothing in
-         * the routing path.
-         */
-        prevLaneRatio: cached?.laneRatio ?? null,
         stopLat: c.stop_lat,
         stopLng: c.stop_lng,
         snapFromM: outcome.snapFromMeters,
@@ -394,47 +380,6 @@ export async function sweepRouting(
         provider: provider.name,
       });
     });
-
-    /**
-     * §12.61. AFTER the commit, never inside it: this is an observation about
-     * a decision nobody has taken, and it must not be able to roll back the
-     * route that dispatch is actually using. A failure is logged and the
-     * sweep continues — the gate's evidence is worth less than the board.
-     *
-     * Only when there was a cached route to have kept showing. On a
-     * `no-route` or `provider-changed` call there is nothing a gate could
-     * have skipped, so there is nothing to observe.
-     */
-    if (cached !== null) {
-      const shadow = shadowObservation({
-        straightMiles: straight,
-        ratioPrev: cachedRow?.prevLaneRatio ?? null,
-        ratioCached: cached.laneRatio,
-        ratioNow: laneRatio,
-      });
-      try {
-        await db.insert(routeShadow).values({
-          stopId: c.stop_id,
-          destLat: c.stop_lat,
-          destLng: c.stop_lng,
-          destCity: c.dest_city,
-          destState: c.dest_state,
-          reason,
-          straightMiles: shadow.straightMiles,
-          ratioPrev: shadow.ratioPrev,
-          ratioCached: shadow.ratioCached,
-          ratioNow: shadow.ratioNow,
-          errorMiles: shadow.errorMiles,
-          provider: provider.name,
-        });
-        sweep.shadowRows += 1;
-      } catch (error) {
-        logger.info('shadow observation not written', {
-          truck: c.truck_number,
-          detail: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
 
     record('routed', lane);
     sweep.routedBecause[reason] = (sweep.routedBecause[reason] ?? 0) + 1;

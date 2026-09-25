@@ -36,7 +36,6 @@
     "samsara:probe": "tsx scripts/samsara-probe.mts",
     "seed:demo": "tsx scripts/seed-demo.mts",
     "shadow:analyse": "tsx scripts/shadow-analyse.mts",
-    "shadow:status": "tsx scripts/shadow-status.mts",
     "start": "next start",
     "test": "npm run test:db:up --silent && vitest run",
     "test:db:down": "scripts/test-db.sh down",

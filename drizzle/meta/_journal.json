@@ -134,6 +134,13 @@
       "when": 1790468369664,
       "tag": "0018_route_shadow",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790554769664,
+      "tag": "0019_close_route_shadow",
+      "breakpoints": true
     }
   ]
 }
