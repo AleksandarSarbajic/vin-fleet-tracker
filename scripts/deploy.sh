@@ -72,27 +72,12 @@ ssh "$HOST" "systemctl start $SERVICE && sleep 12 && systemctl is-active $SERVIC
 # 4. Prove it, rather than assume it.
 # ---------------------------------------------------------------------------
 say "verifying"
-ssh "$HOST" "set -e
-  cd $APP_DIR
-  echo \"running commit: \$(sudo -u vinfleet git rev-parse HEAD)\"
-  echo \"restarts since start: \$(systemctl show -p NRestarts --value $SERVICE)\"
-  echo '--- the singleton guard must refuse a second instance ---'
-  if sudo -u vinfleet env \$(grep -v '^#' $ENV_FILE | xargs) \\
-       ./node_modules/.bin/tsx src/worker/index.ts > /tmp/second.log 2>&1; then
-    echo 'THE SECOND INSTANCE STARTED. The guard is not holding.' >&2
-    rm -f /tmp/second.log
-    exit 1
-  fi
-  head -1 /tmp/second.log; rm -f /tmp/second.log
-  # tail, NOT `grep -m1`. The first version printed the FIRST poll in the
-  # entire journal -- a line from a previous deploy -- under the heading
-  # "last poll", which reads exactly like a worker that has not polled
-  # since. A verification step that can show stale evidence is worse than
-  # one that shows none.
-  echo '--- most recent poll ---'
-  RECENT=\$(journalctl -u $SERVICE --no-pager -o cat --since '-3 min' | grep 'poll: ingested' | tail -1)
-  if [ -n "\$RECENT" ]; then echo "\$RECENT" | cut -c1-160;
-  else echo '(no poll in the last 3 minutes -- watch journalctl -u $SERVICE -f)'; fi"
+# The remote half is a FILE sent on stdin, not a double-quoted string: in a
+# string every character is expanded by this laptop's shell before the droplet
+# sees it, and a comment with backticks and quotes in it once turned this
+# check into a false "no poll" (§12.74). Arguments carry no spaces.
+ssh "$HOST" bash -s -- "$APP_DIR" "$SERVICE" "$ENV_FILE" \
+  < "$(dirname "$0")/deploy-verify.remote.sh"
 
 say "deployed ${SHA:0:12}"
 echo "journalctl -u $SERVICE -f   # to watch it"

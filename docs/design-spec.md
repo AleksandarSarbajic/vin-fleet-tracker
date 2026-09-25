@@ -5874,6 +5874,29 @@ matched. Production then held **0 loads and 0 stops**, trucks, drivers and
 positions untouched, and the worker went from watching 17 stops to 3 to none
 without an error.
 
+## 12.74 The deploy check broke on its own explanation
+
+The deploy's "most recent poll" line printed `(no poll in the last 3 minutes)`
+on 2026-09-25 while the worker had polled seconds earlier, preceded by a macOS
+`grep` usage message and `binary operator expected`. The cause was the comment
+that explained the PREVIOUS fix (the `grep -m1` one): the remote script was a
+double-quoted string inside deploy.sh, and that comment put `grep -m1` in
+backticks, which the laptop's shell ran as a command, and "last poll" in
+double quotes, which closed the string early and inverted every quote after
+it. The droplet received `[ -n $RECENT ]` unquoted; a JSON poll line split
+into words; `[` failed; the else branch said there was no poll. The same
+false reading the comment was written to prevent.
+
+Deleting the backticks would have fixed the instance and kept the trap. The
+remote half is now `scripts/deploy-verify.remote.sh`, sent to `bash -s` on
+stdin, so nothing in it is expanded before the droplet runs it and comments
+can say anything. `src/test/deploy-verify.test.ts` runs the real script
+against stub `sudo` / `systemctl` / `journalctl` with realistic JSON poll
+lines; reintroducing the unquoted test, `grep -m1`, a missing `|| true` under
+pipefail, or the old string in deploy.sh each fails it. The transport itself
+was probed on the droplet with a harmless script. It takes effect on the next
+real deploy.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
