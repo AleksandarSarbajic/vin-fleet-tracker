@@ -6,3 +6,4 @@ design
 
 # Shell scripts — prettier has no parser for these.
 *.sh
+.next-e2e

@@ -2,6 +2,17 @@ import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {
+  /**
+   * `.next` unless told otherwise, and the e2e suite tells it otherwise
+   * (playwright.config.ts, `E2E_DIST_DIR`).
+   *
+   * A shared build directory was a real bug, not a tidiness point: the suite
+   * runs `next build` + `next start`, and a `next dev` running at the same time
+   * writes its dev chunks into the SAME `.next`. Each overwrote the other —
+   * every e2e run left the dev server serving 500s (`Cannot find module
+   * './vendor-chunks/…'`), silently, until someone restarted it (§12.72).
+   */
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
   typescript: { ignoreBuildErrors: false },
   eslint: { ignoreDuringBuilds: false },

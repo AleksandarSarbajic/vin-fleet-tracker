@@ -19,6 +19,8 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ path: '.env.local' });
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
+/** The e2e build's own directory — never `.next`, which `next dev` owns. */
+export const E2E_DIST_DIR = '.next-e2e';
 const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
@@ -83,12 +85,18 @@ export default defineConfig({
      * failure mode a deploy gate must not have.
      */
     command: `npm run build && npx next start -p ${PORT}`,
+    /*
+     * The build goes to its own directory (see `env` below). Sharing `.next`
+     * with a running `next dev` broke that dev server on every run (§12.72).
+     */
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: false,
     timeout: 240_000,
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
+      /** Read by next.config.ts for BOTH halves — the build and the start. */
+      NEXT_DIST_DIR: E2E_DIST_DIR,
       /**
        * DATA is local and disposable; AUTH is the real hosted Supabase.
        *

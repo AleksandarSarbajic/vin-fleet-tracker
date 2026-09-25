@@ -725,8 +725,10 @@ Grid: `auto 1px minmax(280px, 420px) 1fr auto` — mark+wordmark · divider ·
 search · filter chips · status cluster. At 60 trucks the search shrinks to
 `minmax(280px, 380px)` to give the chip row more room (`3d`).
 
-- **Mark**: `mark-knockout.svg` at 30px tall + `Fleet Tracker` in Header type
-  (cond 600 15/1, `.14em`, uppercase).
+- **Mark**: `monogram.svg` at 30×30 + `Fleet Tracker` in Header type
+  (cond 600 15/1, `.14em`, uppercase). *(Drawn with `mark-knockout.svg` at
+  30px; changed because the lockup's script fails §10's 24px legibility rule
+  at 1x — §12.71.)*
 - **Divider**: 1px × 24px `line.hair`.
 - **Search** (`2a`): 34px tall, `surface.base` fill, `line.hair` border,
   search icon, placeholder `Truck, driver, city, load…` in `text.muted`,
@@ -1234,9 +1236,10 @@ expiry presets), 22px (`Clear now`, sort segment).
 - Footer strip above a `line.soft` rule: `Vin Logistics Inc · dispatch` and
   `v0.1 · build YYYY.MM.DD` in Micro-step 10.5 `text.muted`, tabular
 
-**The cyan appears in exactly two places in the whole product — the mark
-itself and this login card.** Everywhere else the interactive colour is steel
-`#94bce3`.
+**The cyan appears only in the brand marks** — the monogram in the header,
+the favicon and the app icons. The login card's lockup is single-colour white
+per §10, so the card itself carries none (§12.71). Everywhere else the
+interactive colour is steel `#94bce3`.
 
 ## 9.13 Phone (`2f`) — 390 × 844
 
@@ -5775,17 +5778,38 @@ at one device pixel each.
 on `surface.base`. Maskable: the same, and its half-diagonal (170px) sits
 inside the 80% safe circle (205px).
 
-**What the artwork cannot do.** 5a asks that the lockup "stay legible at 24px
-tall". At 30px on a 1x display — the header — the wordmark is ~9px tall with
-sub-pixel strokes and renders as grey fuzz, and the swoosh above it is ~16px.
-At 2x it is clean. This is the design of the lockup (a thin script stacked
-under the mark), not the raster: a vector of it has the same strokes. Raised,
-not resolved.
+**What the artwork cannot do — resolved by moving it.** 5a asks that the
+lockup "stay legible at 24px tall". At 30px on a 1x display — the header — the
+wordmark is ~9px tall with sub-pixel strokes and renders as grey fuzz, and the
+swoosh above it is ~16px. At 2x it is clean. This is the design of the lockup
+(a thin script stacked under the mark), not the raster: a vector of it has the
+same strokes. **Ruled:** the header carries the monogram at 30×30 beside
+`Fleet Tracker`; the lockup stays on the login card at 54px, where it reads.
+§9.1 is amended.
 
-**One statement this leaves inconsistent.** §9.12 says the cyan appears in
-"the mark itself and this login card". The knockout lockup is single-colour
-white, as §10 specifies, so on the login card the cyan now appears nowhere;
-it survives in the monogram, the favicon and the icons.
+**Where the cyan lives — resolved in favour of §10.** §9.12 said the cyan
+appears in "the mark itself and this login card". §10 makes the lockup
+single-colour `#ffffff`, and §10 is the built asset spec, so it wins: the
+login card carries no cyan, and that is correct rather than a loss. The cyan
+survives in the monogram, the favicon and the app icons. §9.12 is amended.
+
+## 12.72 The e2e build and `next dev` shared a directory
+
+The suite's web server runs `next build && next start`, and both write and
+read `.next` — the directory a running `next dev` also owns. Every e2e run
+therefore replaced the dev server's output with a production build, and the
+dev server then wrote its own chunks back over that. Neither survived: the dev
+server answered `/login` with a 500 (`Cannot find module
+'./vendor-chunks/@opentelemetry.js'`), silently, until someone restarted it.
+It happened on every e2e run of 2026-09-24 and -25, and was only noticed when
+a screenshot of the dev server was wanted.
+
+`next.config.ts` now takes `distDir` from `NEXT_DIST_DIR` (default `.next`),
+and the Playwright web server sets it to `.next-e2e` for both the build and
+the start. `.next-e2e` is ignored by git, ESLint and Prettier, and its
+generated types are pre-listed in `tsconfig.json` so a build never rewrites
+that file. `src/test/build-dirs.test.ts` holds both halves; removing either
+fails it.
 
 # 13. Still open
 

@@ -3,3 +3,4 @@ node_modules
 drizzle
 design
 next-env.d.ts
+.next-e2e

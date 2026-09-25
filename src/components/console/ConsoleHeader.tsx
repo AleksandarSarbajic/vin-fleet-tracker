@@ -130,16 +130,20 @@ export function ConsoleHeader({
   return (
     <header className="grid h-14 shrink-0 grid-cols-[auto_1px_minmax(280px,420px)_1fr_auto] items-center gap-x-[18px] border-b border-line-hair bg-surface-raised px-[18px]">
       <div className="flex items-center gap-3">
-        {/* §9.1: the knockout lockup at 30px tall. `unoptimized` because it is
-            an SVG — there is nothing for the image optimiser to resize. */}
+        {/* The MONOGRAM, not the lockup (§12.71). At 30px on a 1x screen the
+            lockup's script is ~9px tall with sub-pixel strokes — it fails 5a's
+            own 24px legibility rule, and no re-export can fix artwork. The
+            words beside it say what the product is; the login card carries
+            the full lockup at 54px, where it reads. `unoptimized` because it
+            is an SVG: there is nothing for the image optimiser to resize. */}
         <Image
-          src={BRAND.markKnockout.src}
-          width={BRAND.markKnockout.width}
-          height={BRAND.markKnockout.height}
+          src={BRAND.monogram.src}
+          width={BRAND.monogram.width}
+          height={BRAND.monogram.height}
           alt={BRAND.alt}
           unoptimized
           priority
-          className="h-[30px] w-auto"
+          className="h-[30px] w-[30px]"
         />
         <span className="font-cond text-header font-semibold uppercase text-text">
           Fleet Tracker

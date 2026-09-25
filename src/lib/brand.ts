@@ -13,11 +13,11 @@
  * reserve the right box before the file arrives.
  */
 export const BRAND = {
-  /** Full lockup, #ffffff, outlined — header (30px) and login (54px). */
+  /** Full lockup, #ffffff, outlined — the login card (54px). Not the header: §12.71. */
   markKnockout: { src: '/brand/mark-knockout.svg', width: 504, height: 268 },
   /** Same geometry in brand navy, for light grounds and print. */
   markNavy: { src: '/brand/mark-navy.svg', width: 504, height: 268 },
-  /** The mark alone, navy knocked out to white and the cyan kept. */
+  /** The mark alone, navy knocked out to white and the cyan kept — the header (30px). */
   monogram: { src: '/brand/monogram.svg', width: 64, height: 64 },
   favicon: { svg: '/brand/favicon.svg', ico: '/favicon.ico' },
   appleTouchIcon: '/brand/apple-touch-icon.png',

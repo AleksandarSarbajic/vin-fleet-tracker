@@ -23,3 +23,4 @@ next-env.d.ts
 # a source for a 16px tile — see §14.6.
 logo.png
 e2e/.auth/
+.next-e2e
