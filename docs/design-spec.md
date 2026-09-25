@@ -5745,6 +5745,48 @@ the map's control is disabled — carried the first two as plain text and
 omitted the third. All four are links now, from a list in `lib/basemap.ts`
 that a test holds to the terms.
 
+## 12.71 The brand set, from the source that was already here
+
+§14 feature 13 was held for "a better source". What arrived,
+`design/logo-Photoroom.png`, is **the same artwork**: a 500×302 raster, now
+RGBA with the background removed. Not a vector. It was enough for most of the
+set and not for the smallest item, and the split is the finding.
+
+**Traced, not redrawn — the lockup and the monogram.** 4x Lanczos upsample,
+alpha threshold, potrace; the swoosh's navy and cyan traced separately by hue.
+Against the source the trace overlaps **96.6%** of ink pixels; what it loses
+is the faint, partly transparent tips of the tapered strokes, which end a hair
+shorter. Every product size SHRINKS the source (the lockup is 266px of ink
+shown at 30–54px), so resolution was never the limit for these.
+`mark-knockout.svg` / `mark-navy.svg` are one outlined path each, no raster, no
+clip-path, a 2px padded viewBox. `monogram.svg` is the mark alone with the navy
+knocked out to white and the cyan kept — every consumer of it sits on a dark
+ground, where navy measures 1.3:1.
+
+**Redrawn — the favicon.** Traced faithfully, the 16px mark is a one-pixel
+cyan sliver: its navy strokes vanish into a navy tile and the swooshes are
+hairlines at any size under ~48px. `favicon.svg` is therefore a new drawing
+on 5a's navy tile with its 1px cyan edge: two strokes at one weight (2px at
+16), the crescent in white and the S in cyan. The bowl was tried and dropped —
+at 16px it turned the pair into a "G". The .ico frames (16/32/48) keep the edge
+at one device pixel each.
+
+**Icons.** Touch icon and the PWA pair: the traced monogram at 60% of the box
+on `surface.base`. Maskable: the same, and its half-diagonal (170px) sits
+inside the 80% safe circle (205px).
+
+**What the artwork cannot do.** 5a asks that the lockup "stay legible at 24px
+tall". At 30px on a 1x display — the header — the wordmark is ~9px tall with
+sub-pixel strokes and renders as grey fuzz, and the swoosh above it is ~16px.
+At 2x it is clean. This is the design of the lockup (a thin script stacked
+under the mark), not the raster: a vector of it has the same strokes. Raised,
+not resolved.
+
+**One statement this leaves inconsistent.** §9.12 says the cyan appears in
+"the mark itself and this login card". The knockout lockup is single-colour
+white, as §10 specifies, so on the login card the cyan now appears nowhere;
+it survives in the monogram, the favicon and the icons.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
@@ -6396,13 +6438,14 @@ row geometry being settled; and **saved views before the palette**, because
 | 10 | command palette (⌘K) | 5 | **approved** (5b, 5c) |
 | 15 | per-truck timeline | 6 | interpretation |
 | 12 | onboarding tour | 6 | interpretation |
-| 13 | favicon / branding | 6 | **held** — see below |
+| 13 | favicon / branding | 6 | **built** — §12.71 |
 
-**§13 is held.** The only asset in the repo is a 500×302 JPEG named
-`logo.png`, which is too weak a source for a 16px tile, and the `SmallLogo.png`
-derivatives the brief says to drop do not exist here. 5a's requirement — a 1px
-cyan edge at 16/32px, because the navy tile reads 1.34:1 on a dark tab bar —
-stands and is waiting on a better source.
+**§13 was held**, and is now built — §12.71. The only asset in the repo was a
+500×302 JPEG named `logo.png`, too weak a source for a 16px tile, and the
+`SmallLogo.png` derivatives the brief says to drop never existed here. The
+source that unblocked it is the same artwork with its background removed:
+enough to trace the lockup and the monogram, not enough for 16px, where the
+favicon is a redraw on 5a's navy tile with its 1px cyan edge.
 
 **The strip's one boundary.** "Stops done today, on time vs late" is not on
 the fleet row, so §8 derives it in a separate read-only query. It does not

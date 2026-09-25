@@ -1,7 +1,9 @@
 'use client';
 
+import Image from 'next/image';
 import { useActionState } from 'react';
 import { signIn, type LoginState } from './actions';
+import { BRAND } from '@/lib/brand';
 
 const initial: LoginState = { error: null };
 
@@ -14,6 +16,16 @@ export default function LoginPage() {
         action={action}
         className="w-[420px] max-w-full border border-line-hair bg-surface-base p-8"
       >
+        {/* §9.12 / 3f: the knockout lockup at 54px tall, 22px above the title. */}
+        <Image
+          src={BRAND.markKnockout.src}
+          width={BRAND.markKnockout.width}
+          height={BRAND.markKnockout.height}
+          alt={BRAND.alt}
+          unoptimized
+          priority
+          className="mb-[22px] h-[54px] w-auto"
+        />
         <h1 className="font-cond text-display uppercase">Fleet Tracker</h1>
         <p className="mb-6 mt-1.5 text-body text-text-secondary">
           Dispatch console. Authorised users only.

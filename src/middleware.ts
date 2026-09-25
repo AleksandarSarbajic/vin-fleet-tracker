@@ -53,5 +53,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|ico)$).*)'],
+  // `manifest.webmanifest` is fetched WITHOUT cookies (the HTML spec's default for
+  // manifests), so behind the auth redirect it would always come back as the
+  // login page and the PWA icons would never be read.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|ico)$).*)'],
 };

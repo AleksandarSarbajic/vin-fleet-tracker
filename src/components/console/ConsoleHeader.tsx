@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
 import { SearchField } from './SearchField';
@@ -8,6 +9,7 @@ import { FilterChips, type FilterKey } from './FilterChips';
 import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
 import { SavedViews } from './SavedViews';
+import { BRAND } from '@/lib/brand';
 import type { SavedView } from '@/lib/views';
 
 /** design-spec §9.1. 56px, raised ground, hairline bottom. */
@@ -128,11 +130,17 @@ export function ConsoleHeader({
   return (
     <header className="grid h-14 shrink-0 grid-cols-[auto_1px_minmax(280px,420px)_1fr_auto] items-center gap-x-[18px] border-b border-line-hair bg-surface-raised px-[18px]">
       <div className="flex items-center gap-3">
-        {/* TODO: mark-knockout.svg replaces this when the real asset lands —
-            one reference, so swapping it moves no layout (design-spec §10). */}
-        <span className="flex h-[30px] w-[30px] items-center justify-center border border-line-hair font-cond text-[13px] font-semibold text-brand-cyan">
-          VL
-        </span>
+        {/* §9.1: the knockout lockup at 30px tall. `unoptimized` because it is
+            an SVG — there is nothing for the image optimiser to resize. */}
+        <Image
+          src={BRAND.markKnockout.src}
+          width={BRAND.markKnockout.width}
+          height={BRAND.markKnockout.height}
+          alt={BRAND.alt}
+          unoptimized
+          priority
+          className="h-[30px] w-auto"
+        />
         <span className="font-cond text-header font-semibold uppercase text-text">
           Fleet Tracker
         </span>
