@@ -83,11 +83,17 @@ export function zoneAbbreviation(instant: Date, timeZone: string): string {
 /**
  * Wall-clock time in a given IANA zone, with its abbreviation, computed at
  * render time from the instant plus the zone.
+ *
+ * `zone: false` drops the abbreviation, for the one caller whose zone is
+ * already printed beside it (§12.80): the header's stale-sync label, which is
+ * always dispatch time and sits next to the clock that reads `CDT · DISPATCH`.
+ * Every other time on screen keeps it — a list carries CST, MST and PST at
+ * once (§7.1).
  */
 export function timeInZone(
   instant: Date,
   timeZone: string,
-  opts: { weekday?: boolean } = {},
+  opts: { weekday?: boolean; zone?: boolean } = {},
 ): string {
   const clock = new Intl.DateTimeFormat('en-GB', {
     timeZone,
@@ -96,7 +102,7 @@ export function timeInZone(
     hour12: false,
     ...(opts.weekday ? { weekday: 'short' } : {}),
   }).format(instant);
-  return `${clock} ${zoneAbbreviation(instant, timeZone)}`;
+  return opts.zone === false ? clock : `${clock} ${zoneAbbreviation(instant, timeZone)}`;
 }
 
 /** Speed for the popup. One decimal is noise on a truck. */

@@ -47,6 +47,11 @@ describe('timeInZone', () => {
   const september = new Date('2026-09-17T09:30:00Z');
   const january = new Date('2026-01-17T09:30:00Z');
 
+  it('drops the abbreviation only when asked, and keeps the zone-correct time', () => {
+    expect(timeInZone(september, 'America/Chicago', { zone: false })).toBe('04:30');
+    expect(timeInZone(september, 'America/Chicago')).toBe('04:30 CDT');
+  });
+
   it('prints CDT in September and CST in January for the dispatch zone', () => {
     expect(timeInZone(september, 'America/Chicago')).toContain('CDT');
     expect(timeInZone(january, 'America/Chicago')).toContain('CST');

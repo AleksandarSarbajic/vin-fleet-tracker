@@ -6096,11 +6096,30 @@ on the row (.05) made the browser distribute only 5% of the overflow and
 paint the rest OVER "Synced 12s ago" with nothing scrolling; a 100:1 ratio
 still gave the row its share and scrolled 5px.
 
-**Known limit:** with the feed DOWN the sync label becomes `Last sync 17:40
-CDT · 25m ago` and at 1440 the track scrolls 49px (fits at 1680). The red
-feed banner is up in that state.
+With the feed DOWN the sync label was the header's longest text and scrolled
+the track 49px at 1440 — closed by §12.80.
 
 The divider before Drivers only also had no `shrink-0` and measured 0px wide.
+
+## 12.80 The feed-down sync label, as the spec wrote it, stacked
+
+§9.1 specifies `Last sync 06:41 · 9m ago`. The code printed
+`Last sync 17:40 CDT · 25m ago` — a zone suffix the dispatch clock beside it
+already says — and at 1440px that label scrolled the header 49px.
+
+1. **The suffix is gone** (`timeInZone(…, { zone: false })`, used by this
+   label only; every other on-screen time keeps its abbreviation, §7.1).
+   That closed 24px of the 49, not all of it.
+2. **The label stacks when the feed is down**: `Last sync 17:40` over
+   `25m ago`, the way the two clocks beside it stack time over label. A
+   screen-reader-only ` · ` keeps the spec's exact phrase as the accessible
+   text. The healthy `Synced 12s ago` stays on one line.
+
+Squeezing gaps or dropping `ago` would each have fit this label at this width
+with no margin; stacking leaves real room. Measured with 33 trucks, feed
+down: 1440 fits with 27px spare, 1680 181px, 1920 300px.
+`e2e/header.spec.ts` runs the same no-scroll + no-overlap check at all three
+widths in BOTH feed states, and asserts the two lines' wording.
 
 # 13. Still open
 

@@ -239,25 +239,50 @@ export function ConsoleHeader({
          * `status.late.fg` when the feed is down, and the label changes with
          * it: `Last sync 06:41 · 9m ago`, naming the instant rather than only
          * the age, because the instant is what gets said down a phone.
+         *
+         * No zone suffix, as the spec wrote it (§12.80). The code had added
+         * one (`17:40 CDT`), which the dispatch clock beside it already says,
+         * and at 1440px those four characters were what pushed a DOWN feed's
+         * header into a 49px scroll.
          */}
         <div className="flex items-center gap-[7px]">
           <span
-            className={`h-[7px] w-[7px] ${feedStale ? 'bg-status-late-fg' : 'bg-status-ontime-fg'}`}
+            className={`h-[7px] w-[7px] shrink-0 ${feedStale ? 'bg-status-late-fg' : 'bg-status-ontime-fg'}`}
             aria-hidden="true"
           />
-          <span
-            className={`font-sans text-[12px] tabular-nums ${feedStale ? 'text-status-late-fg' : 'text-text-secondary'}`}
-          >
-            {feedStale
-              ? feedNewestAt
-                ? `Last sync ${timeInZone(new Date(feedNewestAt), dispatchTz)}${
-                    feedAge ? ` · ${feedAge} ago` : ''
-                  }`
-                : 'No positions yet'
-              : age
-                ? `Synced ${age} ago`
-                : 'Syncing…'}
-          </span>
+          {feedStale && feedNewestAt ? (
+            /*
+             * §12.80. Stacked when the feed is down — the instant over the
+             * age, the way the two clocks beside it stack time over label.
+             * On one line this was the header's longest text and, at 1440px,
+             * the thing that pushed the chip row into a scroll. Stacked, it
+             * is as wide as `Last sync 17:40` and the spec's words are intact:
+             * the hidden separator keeps "Last sync 17:40 · 25m ago" as the
+             * accessible text.
+             */
+            <span
+              data-sync-label=""
+              className="flex flex-col font-sans text-[12px] leading-[1.15] tabular-nums text-status-late-fg"
+            >
+              <span>
+                Last sync{' '}
+                {timeInZone(new Date(feedNewestAt), dispatchTz, { zone: false })}
+              </span>
+              {feedAge ? (
+                <span>
+                  <span className="sr-only"> · </span>
+                  {feedAge} ago
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span
+              data-sync-label=""
+              className={`font-sans text-[12px] tabular-nums ${feedStale ? 'text-status-late-fg' : 'text-text-secondary'}`}
+            >
+              {feedStale ? 'No positions yet' : age ? `Synced ${age} ago` : 'Syncing…'}
+            </span>
+          )}
         </div>
 
         <div className="flex items-baseline gap-[9px] border-l border-line-hair pl-4">
