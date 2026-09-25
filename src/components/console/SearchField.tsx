@@ -28,7 +28,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
   const active = value.trim().length > 0;
 
   return (
-    <label className="flex h-[34px] items-center gap-2 border border-line-hair bg-surface-base px-[10px] focus-within:border-accent">
+    <label className="flex h-[34px] w-full items-center gap-2 border border-line-hair bg-surface-base px-[10px] focus-within:border-accent">
       <svg
         width="14"
         height="14"
@@ -85,7 +85,13 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
          * that filters also names the box that jumps — which is the only
          * place a dispatcher will find out the second one exists.
          */
-        <span className="flex shrink-0 items-center gap-1">
+        /*
+         * §12.79. Below 1680px the box shrinks toward 120px and the hints
+         * would take the text's room, so they move rather than go: the list
+         * header reads `/ to filter · ⌘K to jump` at every width, which keeps
+         * the second box discoverable where §14.5 needs it to be.
+         */
+        <span className="hidden shrink-0 items-center gap-1 min-[1680px]:flex">
           <Cap>/</Cap>
           <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
             filter

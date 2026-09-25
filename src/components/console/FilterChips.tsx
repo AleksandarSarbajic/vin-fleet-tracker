@@ -56,6 +56,12 @@ const LABEL: Record<FilterKey, string> = {
   drivers: 'Drivers only',
 };
 
+/**
+ * Below 1680px (§12.79). `Data` is the spec's own abbreviation for a crowded
+ * row (§9.1, `3d`); the full label stays the accessible name.
+ */
+const SHORT: Partial<Record<FilterKey, string>> = { data: 'Data' };
+
 /** The chip's ink when selected. Tokens, never a colour value. */
 const INK: Record<FilterKey, string> = {
   late: 'text-status-late-fg border-status-late-bd',
@@ -163,7 +169,7 @@ export function FilterChips({
   }, [onToggle, onReset]);
 
   return (
-    <div className="flex items-center gap-1.5" role="group" aria-label="Filter by status">
+    <div className="flex shrink-0 items-center gap-[5px]" role="group" aria-label="Filter by status">
       <Chip
         label="All"
         count={rows.filter((r) => r.active).length}
@@ -175,6 +181,7 @@ export function FilterChips({
         <Chip
           key={key}
           label={LABEL[key]}
+          short={SHORT[key]}
           count={counts[key]}
           selected={selected.has(key)}
           ink={INK[key]}
@@ -182,7 +189,7 @@ export function FilterChips({
         />
       ))}
       {/* §12.78: a different axis from status, so it stands apart. */}
-      <span aria-hidden="true" data-chip-divider="" className="mx-1 h-4 w-px bg-line-hair" />
+      <span aria-hidden="true" data-chip-divider="" className="mx-1 h-4 w-px shrink-0 bg-line-hair" />
       <Chip
         label={LABEL.drivers}
         count={counts.drivers}
@@ -196,12 +203,14 @@ export function FilterChips({
 
 function Chip({
   label,
+  short,
   count,
   selected,
   ink,
   onClick,
 }: {
   label: string;
+  short?: string | undefined;
   count: number;
   selected: boolean;
   ink: string;
@@ -212,11 +221,19 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
+      aria-label={short ? `${label} ${count}` : undefined}
       className={`flex h-[26px] shrink-0 items-center gap-1.5 border px-2 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground ${
         selected ? `bg-surface-overlay ${ink}` : 'border-line-soft text-text-muted hover:bg-row-hover'
       }`}
     >
-      {label}
+      {short ? (
+        <>
+          <span className="min-[1680px]:hidden">{short}</span>
+          <span className="hidden min-[1680px]:inline">{label}</span>
+        </>
+      ) : (
+        label
+      )}
       <span className="tabular-nums opacity-80">{count}</span>
     </button>
   );

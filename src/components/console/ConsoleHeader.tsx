@@ -128,7 +128,7 @@ export function ConsoleHeader({
   const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
-    <header className="grid h-14 shrink-0 grid-cols-[auto_1px_minmax(280px,420px)_1fr_auto] items-center gap-x-[18px] border-b border-line-hair bg-surface-raised px-[18px]">
+    <header className="grid h-14 shrink-0 grid-cols-[auto_1px_minmax(0,1fr)_auto] items-center gap-x-[14px] border-b border-line-hair bg-surface-raised px-[18px]">
       <div className="flex items-center gap-3">
         {/* The MONOGRAM, not the lockup (§12.71). At 30px on a 1x screen the
             lockup's script is ~9px tall with sub-pixel strokes — it fails 5a's
@@ -152,34 +152,85 @@ export function ConsoleHeader({
 
       <div className="h-6 bg-line-hair" />
 
-      <SearchField
-        value={query}
-        onChange={onQueryChange}
-        matchCount={matchCount}
-        totalCount={totalCount}
-      />
+      {/*
+        The search box and the chip row share ONE flexible track, and the
+        search gives way first (§12.79).
 
+        This was a grid of `minmax(280px,420px) 1fr`, and grid grows a capped
+        track to its cap BEFORE a flexible one gets anything — so the search
+        held 420px at every width and the chips took the remainder. At 1440
+        that remainder was 463px for a 765px row: Data issues, Inactive and
+        Assignments were behind a horizontal scroll, and every chip added made
+        it worse.
+
+        Now the search is the ONLY thing that shrinks, from 420 down to a
+        120px floor; the chip row never does. Below that floor this whole
+        track scrolls — a fallback under ~1400px, not the layout. Two
+        attempts that looked right and were not, both measured:
+          - a small shrink factor on the row (.05) — when the factors of the
+            items still shrinking sum below 1, the browser distributes only
+            that FRACTION of the overflow and paints the rest over the next
+            column: the row drew over "Synced 12s ago";
+          - a large factor on the search (100:1) — the row still took its
+            ~2% share and scrolled by 5px at 1440.
+        `e2e/header.spec.ts` holds the real property: nothing scrolls and the
+        row ends before the status cluster starts.
+
+        Below 1680px three things compact, all measured against a 34-truck
+        fleet with two-digit counts: the search drops its key hints (the list
+        header carries `/` and `⌘K` instead), `Data issues` reads `Data` — the
+        abbreviation the spec already names for a crowded row (§9.1, `3d`) —
+        and Assignments is its icon. At 1680 and up nothing changes.
+      */}
       <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
-        <SavedViews
-          views={views.saved}
-          active={views.active}
-          onApply={views.onApply}
-          onSave={views.onSave}
-          onRemove={views.onRemove}
-          canSaveCurrent={views.canSaveCurrent}
-        />
-        <FilterChips
-          rows={rows}
-          selected={chips}
-          onToggle={onToggleChip}
-          onReset={onResetChips}
-        />
-        <Link
-          href="/assignments"
-          className="shrink-0 border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
-        >
-          Assignments
-        </Link>
+        <div className="min-w-[120px] max-w-[420px] flex-[1_1_420px]">
+          <SearchField
+            value={query}
+            onChange={onQueryChange}
+            matchCount={matchCount}
+            totalCount={totalCount}
+          />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <SavedViews
+            views={views.saved}
+            active={views.active}
+            onApply={views.onApply}
+            onSave={views.onSave}
+            onRemove={views.onRemove}
+            canSaveCurrent={views.canSaveCurrent}
+          />
+          <FilterChips
+            rows={rows}
+            selected={chips}
+            onToggle={onToggleChip}
+            onReset={onResetChips}
+          />
+          <Link
+            href="/assignments"
+            aria-label="Assignments"
+            title="Assignments — who drives which truck"
+            className="flex h-[26px] shrink-0 items-center border border-line-hair px-2 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover min-[1680px]:px-3"
+          >
+            {/* Two people: the board pairs drivers with trucks. */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+              className="min-[1680px]:hidden"
+            >
+              <circle cx="9" cy="8" r="3.5" />
+              <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+              <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.5A6.5 6.5 0 0 1 21.5 20" />
+            </svg>
+            <span className="hidden min-[1680px]:inline">Assignments</span>
+          </Link>
+        </div>
       </div>
 
       <div className="flex items-center gap-4">

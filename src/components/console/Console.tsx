@@ -632,7 +632,9 @@ export function Console({
                 </>
               ) : (
                 <>
-                  <span className="text-accent">/</span> to search
+                  {/* §12.79: the search box's own hints hide below 1680px; these do not. */}
+                  <span className="text-accent">/</span> to filter ·{' '}
+                  <span className="text-accent">⌘K</span> to jump
                 </>
               )}
             </span>

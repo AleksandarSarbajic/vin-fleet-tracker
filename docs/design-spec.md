@@ -724,6 +724,8 @@ Skeletons have no shimmer, so reduced-motion changes nothing about them.
 Grid: `auto 1px minmax(280px, 420px) 1fr auto` — mark+wordmark · divider ·
 search · filter chips · status cluster. At 60 trucks the search shrinks to
 `minmax(280px, 380px)` to give the chip row more room (`3d`).
+*(Superseded by §12.79: search and chips share one flexible track, the
+search is the only thing that shrinks, and below 1680px the row compacts.)*
 
 - **Mark**: `monogram.svg` at 30×30 + `Fleet Tracker` in Header type
   (cond 600 15/1, `.14em`, uppercase). *(Drawn with `mark-knockout.svg` at
@@ -6054,11 +6056,51 @@ and nothing waiting on one**. Key `8`.
   exist. Off by default; a view saved before it existed reads as off.
 - **The map follows the list**, as it does for every chip.
 
-**Known limit, not introduced here:** the header's chip row scrolls
-horizontally, and at 1440 px it already hid Data issues, Inactive and
-Assignments; it now overflows by 302 px there (62 px at 1680, none at 1920).
-The chip is reachable by `8`, by scrolling the row, and from the header note
-once on.
+The header row it joined was already overflowing at 1440px; §12.79 fixes
+that.
+
+## 12.79 The chip row fits at 1440
+
+At 1440px the header's chip row had 463px for 765px of content — Data
+issues, Inactive, Assignments, and then Drivers only (§12.78), were behind a
+horizontal scroll. The cause was the grid: `minmax(280px,420px) 1fr` grows the
+capped search track to its cap BEFORE the flexible track gets anything, so the
+search held 420px at every width.
+
+**Now:** search and chips share one flexible track, and the **search is the
+only thing that shrinks** — 420px down to a 120px floor. The chip row never
+shrinks; below the floor the whole track scrolls, a fallback under ~1400px.
+Below 1680px three things compact:
+
+| | ≥ 1680px | < 1680px |
+|---|---|---|
+| search hints | `/ filter ⌘K jump` in the box | moved to the list header: `/ to filter · ⌘K to jump` (every width) |
+| data chip | `Data issues` | `Data` — §9.1's own `3d` abbreviation; full label stays the accessible name |
+| assignments | `Assignments` | its icon, with the name as label and tooltip |
+
+⌘K's hint moves rather than goes because §14.5 needs the second box to be
+discoverable from the screen.
+
+**Measured** against 33 trucks, so counts are two digits as production's are:
+
+| width | before | after | headroom |
+|---|---|---|---|
+| 1440 | scrolls 313px | fits | 33px |
+| 1680 | scrolls 73px | fits | 187px |
+| 1920 | fits | fits | 300px |
+
+`e2e/header.spec.ts` holds it at all three: nothing scrolls, the row ends
+before the status cluster starts, and every chip is fully in view. Both
+halves matter — two attempts on the way failed one each. A fractional shrink
+on the row (.05) made the browser distribute only 5% of the overflow and
+paint the rest OVER "Synced 12s ago" with nothing scrolling; a 100:1 ratio
+still gave the row its share and scrolled 5px.
+
+**Known limit:** with the feed DOWN the sync label becomes `Last sync 17:40
+CDT · 25m ago` and at 1440 the track scrolls 49px (fits at 1680). The red
+feed banner is up in that state.
+
+The divider before Drivers only also had no `shrink-0` and measured 0px wide.
 
 # 13. Still open
 
