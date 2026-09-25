@@ -511,6 +511,12 @@ export const geocodeCache = pgTable(
     confidence: text('confidence'),
     /** What the provider says it matched, verbatim. */
     matchedAddress: text('matched_address'),
+    /**
+     * §12.76. On a fallback hit only: what Census matched and the street
+     * guard refused. Kept so a cache hit still produces the edit form's
+     * "only matched loosely" warning.
+     */
+    refusedMatch: text('refused_match'),
     /** Why a miss was a miss, for the modal warning and for debugging. */
     missReason: text('miss_reason'),
     provider: text('provider').notNull().default('mapbox-v6'),
@@ -529,6 +535,8 @@ export const geocodeCache = pgTable(
       sql`(lat is null and precision is null and miss_reason is not null)
           or (lat is not null and precision is not null and miss_reason is null)`,
     ),
+    /** §12.76. A refusal is recorded only on the fallback hit it led to. */
+    check('geocode_cache_refusal_on_hit', sql`refused_match is null or lat is not null`),
   ],
 );
 

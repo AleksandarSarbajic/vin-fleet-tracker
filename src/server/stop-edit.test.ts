@@ -902,7 +902,12 @@ withDb('the forward geocode (§12.24)', () => {
         edit: edit({
           truckId: t[0]!.id,
           stopId: created.stopId,
-          addressLine: '2100 South Columbia Road',
+          // A new number on the SAME street. This was `2100 South Columbia
+          // Road`, answered by a mock that only knows Vitest Fixture St — a
+          // wrong-street match, which used to stop in one call and since
+          // §12.76 correctly goes on to probe and fall back. The test is
+          // about when a call is spent, so the answer must be a plausible one.
+          addressLine: '1810 Vitest Fixture Street',
         }),
         fetchImpl,
       });
@@ -969,6 +974,56 @@ withDb('the forward geocode (§12.24)', () => {
     expect(saved.stop?.precision).toBeNull();
     expect(saved.warnings).toHaveLength(1);
     expect(saved.warnings[0]?.message).toMatch(/could not be located/i);
+  });
+
+  /**
+   * §12.76. Right town, wrong street: the stop is located — at the nearest
+   * block on the street as typed — and the dispatcher is still told it only
+   * matched loosely, and what Census found instead.
+   */
+  it('locates a street-only refusal at block level and still warns', async () => {
+    const census = vi.fn(async (url: string | URL | Request) => {
+      const number = (new URL(String(url)).searchParams.get('street') ?? '').split(' ')[0];
+      const matchedAddress =
+        number === '1804'
+          ? '1804 VITEST FIXTURE AVE, GRAND FORKS, ND, 58203'
+          : `${number} VITEST FIXTURE ST, GRAND FORKS, ND, 58203`;
+      return new Response(
+        JSON.stringify({
+          result: {
+            addressMatches: [
+              {
+                matchedAddress,
+                coordinates: { x: GRAND_FORKS.lng, y: GRAND_FORKS.lat },
+                addressComponents: { city: 'GRAND FORKS', state: 'ND', zip: '58203' },
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      );
+    });
+    const saved = await rolledBack(async (tx) => {
+      const { trucks: t } = await fixtures(tx);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: edit({ truckId: t[0]!.id }),
+        fetchImpl: census,
+      });
+      const [stop] = await tx
+        .select({ lat: stops.lat, precision: stops.geocodePrecision })
+        .from(stops)
+        .where(eq(stops.id, result.stopId));
+      return { stop, warnings: result.warnings };
+    });
+
+    expect(saved.stop?.lat).not.toBeNull();
+    expect(saved.stop?.precision).toBe('block');
+    expect(saved.warnings).toHaveLength(1);
+    expect(saved.warnings[0]?.field).toBe('addressLine');
+    expect(saved.warnings[0]?.message).toMatch(/only matched loosely/);
+    expect(saved.warnings[0]?.message).toContain('1804 VITEST FIXTURE AVE');
   });
 
   /**

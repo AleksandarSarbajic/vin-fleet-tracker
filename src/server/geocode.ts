@@ -85,8 +85,13 @@ export const CACHE_TTL_DAYS = { hit: 30, miss: 7 } as const;
  * pairing now, and without a bump the cache would keep serving the answer the
  * guard exists to reject — for thirty days, on exactly the addresses most
  * likely to be wrong.
+ *
+ * Bumped to v8 for §12.76: a refusal on the street ALONE now continues down
+ * the chain. Every v7 `low-confidence` row is a candidate for a different
+ * answer — truck 138's `2300 20th Ave SE, Minot` among them — and without the
+ * bump each would keep missing for up to seven days.
  */
-export const CHAIN_VERSION = 'census-v7+street-guard';
+export const CHAIN_VERSION = 'census-v8+street-fallthrough';
 
 /**
  * Two matches this far apart are different places and the top one is a guess.
@@ -137,6 +142,17 @@ export type GeocodeMiss =
   | 'provider-error'
   | 'timeout';
 
+/**
+ * A match refused on the street and nothing else (§12.76): state, city and
+ * ZIP all agreed, the street name, type or direction did not.
+ */
+export interface StreetRefusal {
+  /** What Census matched instead, verbatim — the dispatcher's typo check. */
+  matchedAddress: string;
+  /** The street parts that disagreed, in the words the warning uses. */
+  unmatched: string[];
+}
+
 export interface GeocodeHit {
   ok: true;
   lat: number;
@@ -164,6 +180,11 @@ export interface GeocodeHit {
    */
   confidence: string;
   matchedAddress: string;
+  /**
+   * Present when this is a FALLBACK from a street-only refusal (§12.76). The
+   * point is not the address as typed, and the edit form still says so.
+   */
+  streetRefusal?: StreetRefusal;
 }
 
 export interface GeocodeFailure {
@@ -172,6 +193,11 @@ export interface GeocodeFailure {
   /** Which components disagreed — named in the warning. */
   unmatched: string[];
   detail: string | null;
+  /**
+   * Set only on a `low-confidence` refusal where the street was the ONLY
+   * disagreement. The one refusal that may continue down the chain.
+   */
+  streetRefusal: StreetRefusal | null;
 }
 
 export type GeocodeOutcome = GeocodeHit | GeocodeFailure;
@@ -180,7 +206,7 @@ const fail = (
   reason: GeocodeMiss,
   unmatched: string[] = [],
   detail: string | null = null,
-): GeocodeFailure => ({ ok: false, reason, unmatched, detail });
+): GeocodeFailure => ({ ok: false, reason, unmatched, detail, streetRefusal: null });
 
 /** What the modal shows. Never an error — a stop with no coordinates is valid. */
 export const MISS_MESSAGE: Record<GeocodeMiss, string> = {
@@ -194,6 +220,29 @@ export const MISS_MESSAGE: Record<GeocodeMiss, string> = {
   'provider-error': 'The address lookup failed, so this stop has no ETA yet.',
   timeout: 'The address lookup timed out, so this stop has no ETA yet.',
 };
+
+/**
+ * The edit form's warning for a fallback from a street-only refusal (§12.76),
+ * null for every other hit.
+ *
+ * It opens with the same words as the `low-confidence` miss, on purpose: a
+ * dispatcher who has learned what "only matched loosely" means should not have
+ * to learn a second sentence for the same event. What changed is the ending —
+ * there IS an ETA now, and they are told how coarse its point is — and what
+ * Census matched instead is named, because that is how a genuine typo is seen.
+ */
+export function fallbackWarning(hit: GeocodeHit): string | null {
+  if (!hit.streetRefusal) return null;
+  const where =
+    hit.precision === 'zip'
+      ? `the ZIP code's centre${hit.accuracyMiles !== undefined ? ` (±${hit.accuracyMiles.toFixed(1)} mi)` : ''}`
+      : 'the nearest block on the street as typed';
+  return (
+    `This address only matched loosely, so the ETA is from ${where}, not the address. ` +
+    `Could not match ${hit.streetRefusal.unmatched.join(' or ')}: ` +
+    `Census found ${hit.streetRefusal.matchedAddress}.`
+  );
+}
 
 /* ----------------------------- provider parsing -------------------------- */
 
@@ -317,15 +366,24 @@ export function outcomeFor(matches: CensusMatch[], typed: AddressParts): Geocode
    * against `4801 S CALIFORNIA AVE`. Absence is never evidence; disagreement
    * is. See `streetDisagreement`.
    */
+  const placeDiffers = unmatched.length > 0;
   const streetDiffers = streetDisagreement(typed.addressLine, top.matchedAddress ?? null);
   if (streetDiffers !== null) unmatched.push(streetDiffers);
 
   if (unmatched.length > 0) {
-    return fail(
+    const refused = fail(
       'low-confidence',
       unmatched,
       `matched ${top.matchedAddress ?? 'something else'} instead`,
     );
+    /**
+     * §12.76. The right town, the wrong street: say so, so the chain can
+     * decide. A refusal that ALSO disagrees on the place never carries this,
+     * however the street compares.
+     */
+    return placeDiffers
+      ? refused
+      : { ...refused, streetRefusal: { matchedAddress: top.matchedAddress ?? '', unmatched } };
   }
 
   const lat = top.coordinates.y;
@@ -468,19 +526,34 @@ export async function geocodeOnce(
     ? await geocodeExact(parts, options)
     : fail('no-street', ['the street']);
 
-  // Only `no-results` falls through. A LOW-CONFIDENCE or AMBIGUOUS match
-  // means Census found something and we refused it — falling back would be
-  // answering a question the cutoff already answered, and the dispatcher
-  // needs to see that their state or city is wrong (§12.24), not a centroid
-  // quietly standing in for it.
-  if (exact.ok || (exact.reason !== 'no-results' && exact.reason !== 'no-street')) {
+  /**
+   * `no-results` falls through, and so does ONE kind of refusal: the street
+   * alone (§12.76). Everything else stops here.
+   *
+   * A wrong STATE or CITY stops the chain, as it always has: the dispatcher
+   * needs to see that error (§12.24, the Moorhead ND/MN typo), and a centroid
+   * in the typed ZIP would quietly stand in for it at the wrong end of a
+   * state line. AMBIGUOUS stops too: two places, and no way to pick.
+   *
+   * A wrong STREET inside an agreeing state, city and ZIP is different in
+   * kind. `2300 20th Ave SE, Minot ND 58701` came back as `2300 20TH ST SE` —
+   * a gap in TIGER's naming on that block, not a typo — and stopping left a
+   * real Minot delivery with no ETA at all. Here the fallback is placed on
+   * the TYPED street (every probe passes the same street guard) or in the
+   * typed ZIP, both of which the refusal just confirmed. The warning is kept:
+   * the hit carries the refusal, and the edit form still says "only matched
+   * loosely", so a genuine typo is still seen before it is relied on.
+   */
+  const streetOnly = !exact.ok && exact.reason === 'low-confidence' ? exact.streetRefusal : null;
+  if (exact.ok || (exact.reason !== 'no-results' && exact.reason !== 'no-street' && !streetOnly)) {
     return exact;
   }
+  const carry = streetOnly ? { streetRefusal: streetOnly } : {};
 
   // 2. Is the street there at all? Four numbers, in parallel, one round trip.
   if (hasStreetLine(parts)) {
     const block = await probeStreet(parts, options);
-    if (block) return block;
+    if (block) return { ...block, ...carry };
   }
 
   // 3. The ZIP centroid. No network: a vendored static file, so the last
@@ -495,6 +568,7 @@ export async function geocodeOnce(
       accuracyMiles: centroid.radiusMiles,
       confidence: `census:zcta-centroid-${ZIP_CENTROID_VINTAGE}`,
       matchedAddress: `ZIP ${parts.zip} centroid (±${centroid.radiusMiles.toFixed(1)} mi)`,
+      ...carry,
     };
   }
 
@@ -605,6 +679,22 @@ export async function geocodeAddress(
           ...(cached.accuracyMiles !== null ? { accuracyMiles: cached.accuracyMiles } : {}),
           confidence: cached.confidence ?? 'cached',
           matchedAddress: cached.matchedAddress ?? '',
+          /**
+           * §12.76. A cached fallback still warns. Without this the SECOND
+           * stop saved at the same address — next week's load to the same
+           * customer, typed by someone else — would get a coarse point and
+           * no "only matched loosely" at all.
+           */
+          ...(cached.refusedMatch !== null
+            ? {
+                streetRefusal: {
+                  matchedAddress: cached.refusedMatch,
+                  unmatched: [
+                    streetDisagreement(parts.addressLine, cached.refusedMatch) ?? 'the street',
+                  ],
+                },
+              }
+            : {}),
         };
       }
       return fail((cached.missReason ?? 'no-results') as GeocodeMiss, [], 'from cache');
@@ -635,6 +725,7 @@ export async function geocodeAddress(
         accuracyMiles: fresh.accuracyMiles ?? null,
         confidence: fresh.confidence,
         matchedAddress: fresh.matchedAddress,
+        refusedMatch: fresh.streetRefusal?.matchedAddress ?? null,
         missReason: null,
         provider: CHAIN_VERSION,
         fetchedAt: now,
@@ -647,6 +738,7 @@ export async function geocodeAddress(
         accuracyMiles: null,
         confidence: null,
         matchedAddress: null,
+        refusedMatch: null,
         missReason: fresh.reason,
         provider: CHAIN_VERSION,
         fetchedAt: now,

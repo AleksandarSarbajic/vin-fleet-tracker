@@ -4,7 +4,7 @@ import { normalizeAddress, type AddressParts } from '@/lib/address';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
 import { writeAudit, type AuditEntry, type Db } from './audit';
-import { geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
+import { fallbackWarning, geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
 import { clearOverride, setOverride } from './override';
 import { applyReassignment, type ReassignPreview } from './reassign';
 
@@ -111,6 +111,9 @@ export async function saveStopEdit(
         message: `${MISS_MESSAGE[geocode.reason]}${named}`,
       });
     }
+    // §12.76. Located, but not at the address typed — still said out loud.
+    const loosely = geocode.ok ? fallbackWarning(geocode) : null;
+    if (loosely) warnings.push({ field: 'addressLine', message: loosely });
   }
 
   return db.transaction(async (tx) => {
@@ -537,6 +540,7 @@ export async function saveStopEdit(
                 accuracyMiles: geocode.accuracyMiles ?? null,
                 confidence: geocode.confidence,
                 matched: geocode.matchedAddress,
+                ...(geocode.streetRefusal ? { streetRefused: geocode.streetRefusal } : {}),
               }
             : { missed: geocode.reason, unmatched: geocode.unmatched }
           : 'address unchanged — not re-geocoded',

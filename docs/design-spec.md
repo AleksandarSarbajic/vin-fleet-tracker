@@ -2388,7 +2388,8 @@ because it reads as a case someone handled.**
 Only `no-results` falls through. A **refused** match — wrong state, wrong city
 — stops the chain, because the dispatcher needs to see that error, not have a
 centroid quietly stand in for it. That is how the Moorhead ND/MN typo was
-caught, and it stays caught.
+caught, and it stays caught. **Amended by §12.76:** a refusal on the street
+*alone* — state, city and ZIP all agreeing — now falls through too.
 
 ### Why the probe numbers are those four
 
@@ -5937,6 +5938,85 @@ in a route, fails them.
 `NEXT_PUBLIC_MAPBOX_TOKEN`, optionally `NEXT_PUBLIC_SENTRY_DSN` and
 `DISPATCH_TZ`, and — build-time only, for source maps — `SENTRY_AUTH_TOKEN`,
 `SENTRY_ORG`, `SENTRY_PROJECT`. Nothing else.
+
+## 12.76 A wrong street in the right town falls through the chain
+
+Truck 138's delivery, `2300 20th Ave SE, Minot ND 58701`, showed "no ETA ·
+address not located". The address is correct and 58701 is Minot's ZIP — it
+is in the vendored gazetteer, and Census puts every block of 20th Ave SE in
+it. What happened, measured against the live service:
+
+```
+2300 20th Ave SE  ->  2300 20TH ST SE, MINOT, ND, 58701   (state, city, ZIP agree)
+ 200 / 500 / 1500 / 2000 / 4000 20th Ave SE  ->  20TH AVE SE, each on its own block
+```
+
+TIGER has no range for 2300 under "20th Ave SE"; it has one on a segment
+named 20TH ST SE, and that segment sits on the avenue's latitude. §12.55's
+street guard refused the pairing (AVE vs ST), correctly by its own rule — and
+§12.30 stopped the chain on ANY refusal, so neither the probes nor the ZIP
+centroid ran. The two rules were each right and their composition was not:
+§12.30's "a refusal stops the chain" was written for a wrong **state or
+city** (the Moorhead ND/MN typo), where a centroid in the typed ZIP would sit
+at the wrong end of a state line. §12.55 came later and its refusals
+inherited the stop without anyone deciding they should.
+
+### The rule now
+
+| refusal | chain |
+|---|---|
+| state differs (with or without the street) | **stops**, one call — unchanged |
+| city and ZIP both differ | **stops**, one call — unchanged |
+| ambiguous (two places > 1 mi apart) | **stops** — unchanged |
+| street name, type or direction only | **continues**: probes, then ZIP centroid |
+
+The fallback lands on the **typed** street — every probe passes the same
+street guard, so Census's `1000 20TH AVE SW` answer to a `1000 20th Ave SE`
+probe is refused exactly as the address was — or in the typed ZIP, which the
+refusal just confirmed. Arrival stays `street`-only (§12.30); a street-only
+refusal can never produce `street`.
+
+### The warning survives the fallback
+
+The hit carries the refusal (`streetRefusal`), and the edit form says:
+
+> This address only matched loosely, so the ETA is from the nearest block on
+> the street as typed, not the address. Could not match the street type
+> (AVE vs ST): Census found 2300 20TH ST SE, MINOT, ND, 58701.
+
+It opens with the `low-confidence` miss's own words, and names what Census
+found, which is how a genuine typo is still seen before it is relied on. The
+refusal is also **cached** (`geocode_cache.refused_match`, migration 0020):
+without it, the second stop saved at the same address — next week's load to
+the same customer — would be served a coarse point in silence. A check
+constraint allows it on hits only.
+
+`CHAIN_VERSION` is `census-v8+street-fallthrough`, so every v7
+`low-confidence` row is recomputed on its next use rather than missing for up
+to seven more days.
+
+### What it cost, said plainly
+
+- **A real typo in the street now gets a coarse ETA instead of none.** It is
+  labelled `nearest block` or `ZIP centre ±N mi`, it cannot conclude arrival,
+  a ZIP point cannot raise AT_RISK, and the form warns. That is the trade
+  accepted.
+- **The block's ±0.8 mi is optimistic here.** The probes are {200, 500, 1000,
+  4000}; 1000 was refused (SW), so 2300 took 4000 — 1.3 mi east of Census's
+  own point for 2300. `accuracyMiles` is "half the gap to the next probe" and
+  does not know the typed number was 1,700 away from the nearest probe. Not
+  changed here; worth re-deriving if a block stop ever comes within minutes.
+- Truck 138 went from no ETA to LATE at 12:20 CT: the FCFS window closes at
+  14:00 and the projection says 15:21. That is the feature working — the
+  clock alone would have said nothing until 14:00.
+
+### Also found
+
+`4551 37th St N, Fargo ND 58102` (two stops, not written) is a street-only
+refusal too: Census answers `4551 37TH AVE N`, and no block of 37th St N
+exists in TIGER, so under this rule it lands on the ZIP centre (±3.2 mi). In
+Fargo, 37th Street and 37th Avenue North are different roads, so this one
+may be a real typo — exactly the case the warning is for.
 
 # 13. Still open
 

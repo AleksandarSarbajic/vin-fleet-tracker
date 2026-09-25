@@ -9,6 +9,7 @@ import {
   geocodeAddress,
   geocodeExact,
   geocodeOnce,
+  fallbackWarning,
   outcomeFor,
   type CensusMatch,
 } from './geocode';
@@ -584,5 +585,218 @@ describe('the fallback chain', () => {
       { fetchImpl },
     );
     expect(out.ok).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.76 — a refusal on the street alone continues down the chain
+ * ---------------------------------------------------------------------- */
+
+describe('a street-only refusal', () => {
+  /**
+   * Truck 138, measured against the live service: every other block of 20th
+   * Ave SE is in TIGER under its own name, but 2300 comes back on a segment
+   * named 20TH ST SE — same town, same ZIP, a different street type.
+   */
+  const MINOT: AddressParts = {
+    addressLine: '2300 20th Ave SE',
+    city: 'Minot',
+    state: 'ND',
+    zip: '58701',
+  };
+
+  const minotMatch = (matchedAddress: string, lng: number): CensusMatch =>
+    match({
+      matchedAddress,
+      lat: 48.211,
+      lng,
+      city: 'MINOT',
+      state: 'ND',
+      zip: '58701',
+    });
+
+  /**
+   * Shaped on the live answers. 1000 is the trap: Census answers it with
+   * 20TH AVE **SW**, and it is nearer 2300 than 4000 is — so a probe that
+   * skipped the street guard would win and put the stop across town.
+   */
+  const minotCensus = (probesLand = true) =>
+    vi.fn(async (url: string | URL | Request) => {
+      const street = new URL(String(url)).searchParams.get('street') ?? '';
+      const number = street.split(' ')[0];
+      const matches: CensusMatch[] =
+        number === '2300'
+          ? [minotMatch('2300 20TH ST SE, MINOT, ND, 58701', -101.26359)]
+          : !probesLand
+            ? []
+            : number === '1000'
+              ? [minotMatch('1000 20TH AVE SW, MINOT, ND, 58701', -101.31162)]
+              : [minotMatch(`${number} 20TH AVE SE, MINOT, ND, 58701`, -101.3 + Number(number) / 30000)];
+      return new Response(JSON.stringify({ result: { addressMatches: matches } }), { status: 200 });
+    });
+
+  it('is marked as street-only when state, city and ZIP all agree', () => {
+    const out = outcomeFor([minotMatch('2300 20TH ST SE, MINOT, ND, 58701', -101.26)], MINOT);
+    expect(!out.ok && out.reason).toBe('low-confidence');
+    expect(!out.ok && out.streetRefusal).toEqual({
+      matchedAddress: '2300 20TH ST SE, MINOT, ND, 58701',
+      unmatched: ['the street type (AVE vs ST)'],
+    });
+  });
+
+  it('is NOT street-only when the place disagrees as well', () => {
+    const wrongState = outcomeFor(
+      [match({ state: 'MN', matchedAddress: '1804 OTHER ST, GRAND FORKS, MN, 58203' })],
+      address,
+    );
+    expect(!wrongState.ok && wrongState.unmatched).toContain('the state');
+    expect(!wrongState.ok && wrongState.streetRefusal).toBeNull();
+
+    const wrongCity = outcomeFor(
+      [match({ city: 'WEST CHICAGO', zip: '60185', matchedAddress: '200 CENTRE AVE, WEST CHICAGO, IL, 60185' })],
+      { addressLine: '200 Center Street', city: 'Chicago', state: 'IL', zip: null },
+    );
+    expect(!wrongCity.ok && wrongCity.unmatched).toContain('the city');
+    expect(!wrongCity.ok && wrongCity.streetRefusal).toBeNull();
+  });
+
+  it('falls to the nearest block on the TYPED street, and says why', async () => {
+    const fetchImpl = minotCensus();
+    const out = await geocodeOnce(MINOT, { fetchImpl });
+
+    expect(out.ok && out.precision).toBe('block');
+    // 4000, not 1000: the 1000 probe matched 20TH AVE SW and the guard
+    // refused it, exactly as it refused the address itself.
+    expect(out.ok && out.confidence).toBe('census:block-4000');
+    expect(out.ok && out.matchedAddress).toContain('20TH AVE SE');
+    expect(out.ok && out.streetRefusal?.matchedAddress).toBe('2300 20TH ST SE, MINOT, ND, 58701');
+    // 1 exact + 4 probes.
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+
+    const warning = out.ok ? fallbackWarning(out) : null;
+    expect(warning).toMatch(/only matched loosely/);
+    expect(warning).toContain('nearest block');
+    expect(warning).toContain('the street type (AVE vs ST)');
+    expect(warning).toContain('2300 20TH ST SE');
+  });
+
+  it('falls on to the ZIP centre when no block on the typed street exists', async () => {
+    const out = await geocodeOnce(MINOT, { fetchImpl: minotCensus(false) });
+    expect(out.ok && out.precision).toBe('zip');
+    expect(out.ok && out.streetRefusal?.unmatched).toEqual(['the street type (AVE vs ST)']);
+    expect(out.ok ? fallbackWarning(out) : null).toMatch(/only matched loosely.*ZIP code's centre \(±8\.7 mi\)/);
+  });
+
+  it('gives an ordinary hit no warning at all', () => {
+    const out = outcomeFor([match({})], address);
+    expect(out.ok ? fallbackWarning(out) : 'miss').toBeNull();
+  });
+
+  /**
+   * The Moorhead ND/MN typo. Moorhead is in Minnesota; Census ignores the
+   * typed ND and answers with the MN address. That refusal must stop the
+   * chain in ONE call — no probes, no centroid — however the street compares.
+   */
+  describe('the Moorhead rule is unchanged', () => {
+    const MOORHEAD_ND: AddressParts = {
+      addressLine: '2500 N 11th St',
+      city: 'Moorhead',
+      state: 'ND',
+      zip: '56560',
+    };
+    const answers = (matchedAddress: string) =>
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              result: {
+                addressMatches: [
+                  match({ matchedAddress, city: 'MOORHEAD', state: 'MN', zip: '56560', lat: 46.9, lng: -96.77 }),
+                ],
+              },
+            }),
+            { status: 200 },
+          ),
+      );
+
+    it('refuses a wrong state immediately, with no fallback', async () => {
+      const fetchImpl = answers('2500 11TH ST N, MOORHEAD, MN, 56560');
+      const out = await geocodeOnce(MOORHEAD_ND, { fetchImpl });
+      expect(out.ok).toBe(false);
+      expect(!out.ok && out.reason).toBe('low-confidence');
+      expect(!out.ok && out.unmatched).toContain('the state');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('still refuses immediately when the street ALSO differs', async () => {
+      const fetchImpl = answers('2500 11TH AVE N, MOORHEAD, MN, 56560');
+      const out = await geocodeOnce(MOORHEAD_ND, { fetchImpl });
+      expect(out.ok).toBe(false);
+      expect(!out.ok && out.unmatched).toEqual(
+        expect.arrayContaining(['the state', expect.stringMatching(/street type/)]),
+      );
+      expect(!out.ok && out.streetRefusal).toBeNull();
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * The second stop at the same address is served from the cache, and must
+   * warn exactly as the first did — or next week's load to the same customer
+   * gets a coarse point in silence.
+   */
+  withDb('through the cache', () => {
+    const FIXTURE: AddressParts = {
+      addressLine: '2300 Vitest Fixture Ave SE',
+      city: 'Minot',
+      state: 'ND',
+      zip: '58701',
+    };
+    const fixtureCensus = () =>
+      vi.fn(async (url: string | URL | Request) => {
+        const number = (new URL(String(url)).searchParams.get('street') ?? '').split(' ')[0];
+        const matched =
+          number === '2300'
+            ? minotMatch('2300 VITEST FIXTURE ST SE, MINOT, ND, 58701', -101.26)
+            : minotMatch(`${number} VITEST FIXTURE AVE SE, MINOT, ND, 58701`, -101.25);
+        return new Response(JSON.stringify({ result: { addressMatches: [matched] } }), {
+          status: 200,
+        });
+      });
+
+    it('keeps the refusal, so a cached fallback still warns', async () => {
+      const result = await rolledBack(async (tx) => {
+        const fetchImpl = fixtureCensus();
+        const first = await geocodeAddress(tx as never, FIXTURE, { fetchImpl });
+        const second = await geocodeAddress(tx as never, FIXTURE, { fetchImpl });
+        const [row] = await tx
+          .select()
+          .from(geocodeCache)
+          .where(eq(geocodeCache.normalizedAddress, normalizeAddress(FIXTURE)));
+        return { first, second, row, calls: fetchImpl.mock.calls.length };
+      });
+
+      expect(result.calls).toBe(5);
+      expect(result.row?.precision).toBe('block');
+      expect(result.row?.refusedMatch).toBe('2300 VITEST FIXTURE ST SE, MINOT, ND, 58701');
+      expect(result.second).toEqual(result.first);
+      expect(result.second.ok ? fallbackWarning(result.second) : null).toMatch(
+        /only matched loosely.*street type \(AVE vs ST\)/,
+      );
+    });
+
+    it('is refused by the database on a miss row', async () => {
+      const error: unknown = await rolledBack(async (tx) => {
+        await tx.insert(geocodeCache).values({
+          normalizedAddress: 'VITEST|REFUSAL|ON|MISS',
+          missReason: 'low-confidence',
+          refusedMatch: '1 SOMEWHERE ST',
+          provider: 'vitest',
+        });
+        return 'inserted';
+      }).catch((e: unknown) => e);
+      // Drizzle wraps the Postgres error; the constraint name is on the cause.
+      expect(String((error as { cause?: unknown }).cause)).toContain('geocode_cache_refusal_on_hit');
+    });
   });
 });
