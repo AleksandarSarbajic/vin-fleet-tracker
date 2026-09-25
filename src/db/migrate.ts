@@ -1,6 +1,6 @@
 import { config as loadEnv } from 'dotenv';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { ServerEnv, report } from '@/env/schema';
+import { MigrateEnv, report } from '@/env/schema';
 import { createDirectDb } from './connection';
 
 /**
@@ -11,7 +11,7 @@ import { createDirectDb } from './connection';
  */
 loadEnv({ path: '.env.local' });
 
-const parsed = ServerEnv.safeParse(process.env);
+const parsed = MigrateEnv.safeParse(process.env);
 if (!parsed.success) throw new Error(report('server', parsed.error));
 
 async function main() {

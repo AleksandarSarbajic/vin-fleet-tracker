@@ -6,7 +6,8 @@ import { clientEnv } from '@/env/client';
 /**
  * Request-scoped client carrying the signed-in user's session. Uses the
  * PUBLISHABLE key on purpose: it acts as that user, not as the service.
- * For service-level access use `createAdminClient`.
+ * The app holds no service-level key at all (§12.75): anything that needs one
+ * is a new decision about a new credential, not a missing import.
  */
 export async function createClient() {
   const store = await cookies();

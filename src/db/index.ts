@@ -1,14 +1,15 @@
 import 'server-only';
 import type postgres from 'postgres';
 import { serverEnv } from '@/env/server';
-import { createDirectDb, createPooledDb, schema } from './connection';
+import { createPooledDb, schema } from './connection';
 
 /**
- * The app's database handle. Two connections exist and using the wrong one
- * produces intermittent failures under load that look like application bugs:
+ * The app's database handle: DATABASE_URL, the transaction pooler (6543).
  *
- *   db        DATABASE_URL — transaction pooler, 6543. Route handlers.
- *   openDirect DIRECT_URL  — session pooler, 5432. Migrations, worker.
+ * The session pooler (5432, DIRECT_URL) is not the app's to hold. Migrations
+ * reach it through `db/migrate.ts` and the worker through `createDirectDb`;
+ * the `openDirect()` that used to sit here was never called, and was the only
+ * reason the app demanded DIRECT_URL at all (§12.75).
  */
 
 declare global {
@@ -24,10 +25,5 @@ const pooled = globalThis.__ftPooled ?? createPooledDb(serverEnv.DATABASE_URL);
 if (serverEnv.NODE_ENV !== 'production') globalThis.__ftPooled = pooled;
 
 export const db = pooled.db;
-
-/** One-shot session-pooler connection. Caller must close `client`. */
-export function openDirect(max = 1) {
-  return createDirectDb(serverEnv.DIRECT_URL, max);
-}
 
 export { schema };

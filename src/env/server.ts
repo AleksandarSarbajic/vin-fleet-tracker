@@ -1,5 +1,5 @@
 import 'server-only';
-import { ServerEnv, report } from './schema';
+import { AppEnv, report } from './schema';
 
 /**
  * Server-only configuration. The `server-only` import makes reaching this
@@ -7,7 +7,7 @@ import { ServerEnv, report } from './schema';
  * import is the guardrail, not a convention. Never re-export these values
  * from a module a client component can reach.
  */
-const result = ServerEnv.safeParse(process.env);
+const result = AppEnv.safeParse(process.env);
 if (!result.success) throw new Error(report('server', result.error));
 
 export const serverEnv = result.data;

@@ -5897,6 +5897,47 @@ pipefail, or the old string in deploy.sh each fails it. The transport itself
 was probed on the droplet with a harmless script. It takes effect on the next
 real deploy.
 
+## 12.75 The app demanded the worker's secrets, and read none of them
+
+Setting up the Vercel project raised the question of which variables the app
+needs. Checked against the code rather than the names, the answer was worse
+than "a few too many": the app validated against the full server schema, so
+it would **refuse to boot** without `DIRECT_URL`, `SAMSARA_API_TOKEN`,
+`SAMSARA_ORG_ID` and `WORKER_SUPABASE_SECRET_KEY` — and no live app code read
+any of them. `DIRECT_URL`'s one app reader was `openDirect()`, never called;
+both Supabase secret keys' only reader was `createAdminClient()`, never
+imported. Deleting the worker's secrets from Vercel, the obviously right
+move, would have taken the site down.
+
+Phase 6 split the worker off onto `WorkerEnv` for exactly this reason. This is
+the other half:
+
+- **`AppEnv`** — `DATABASE_URL` (transaction pooler, `:6543`), `DISPATCH_TZ`,
+  `NODE_ENV`. With `ClientEnv`'s public values, that is everything the app
+  validates.
+- **`MigrateEnv`** — `DIRECT_URL` alone, for `npm run db:migrate` from a
+  developer's machine.
+- **`WorkerEnv`** — unchanged.
+- **Deleted:** the full `ServerEnv`, `openDirect()`, `lib/supabase/admin.ts`,
+  and both secret keys from the schema. The app holds no service-level
+  Supabase key at all. `SUPABASE_SECRET_KEY` survives only in `.env.local`,
+  for `scripts/e2e-user.mts`; `WORKER_SUPABASE_SECRET_KEY` has no consumer
+  anywhere and is gone.
+
+`src/env/app-env.test.ts` loads the real `@/env/server` in an environment
+holding only the transaction pooler string and confirms it starts, that it
+carries none of the worker's variables even when they are set, and that it
+still refuses a missing or session-pooler `DATABASE_URL`. A second test
+searches app code for any read of a worker credential or a secret key.
+Re-adding `DIRECT_URL` to `AppEnv`, or a bare `process.env.SAMSARA_API_TOKEN`
+in a route, fails them.
+
+**The Vercel project therefore holds:** `DATABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+`NEXT_PUBLIC_MAPBOX_TOKEN`, optionally `NEXT_PUBLIC_SENTRY_DSN` and
+`DISPATCH_TZ`, and — build-time only, for source maps — `SENTRY_AUTH_TOKEN`,
+`SENTRY_ORG`, `SENTRY_PROJECT`. Nothing else.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

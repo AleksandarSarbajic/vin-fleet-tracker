@@ -75,15 +75,6 @@ export const ClientEnv = z.object({
   NEXT_PUBLIC_SENTRY_DSN: blankIsAbsent(sentryDsn('NEXT_PUBLIC_SENTRY_DSN').optional()),
 });
 
-const secretKey = (which: string) =>
-  z
-    .string()
-    .startsWith(
-      'sb_secret_',
-      `${which} must be a secret key (sb_secret_…). The legacy service_role ` +
-        `JWT is deprecated and newer projects do not have one.`,
-    );
-
 /**
  * Hosts that cannot be anybody's production database.
  *
@@ -149,9 +140,6 @@ const serverShape = z.object({
           'DIRECT_URL must be the SESSION pooler (…pooler.supabase.com:5432), ' +
           'or a loopback test cluster.',
       }),
-
-    SUPABASE_SECRET_KEY: secretKey('SUPABASE_SECRET_KEY'),
-    WORKER_SUPABASE_SECRET_KEY: secretKey('WORKER_SUPABASE_SECRET_KEY'),
 
     /**
      * HERE Routing v8, truck profile (§12.59). SERVER ONLY.
@@ -244,7 +232,7 @@ const serverShape = z.object({
  * two projects exist to provide is silently gone, which is discovered weeks
  * later while looking for something else.
  *
- * Shared by both schemas below, because both runtimes can get it wrong.
+ * Checked where both values are visible: the worker's host.
  */
 const sentryProjectsDiffer = (e: { SENTRY_WORKER_DSN?: string | undefined }): boolean => {
   const app = process.env['NEXT_PUBLIC_SENTRY_DSN']?.trim();
@@ -287,37 +275,44 @@ const HERE_KEY_IS_NOT_PUBLIC = {
 };
 
 /**
- * What the NEXT APP needs. Everything.
+ * What the NEXT APP needs, and nothing else (§12.75).
+ *
+ * The app used to be validated against every server variable at once, which
+ * made it refuse to boot without DIRECT_URL, SAMSARA_API_TOKEN, SAMSARA_ORG_ID
+ * and WORKER_SUPABASE_SECRET_KEY — none of which any live app code read. The
+ * one reference to DIRECT_URL was `openDirect()`, which nothing called; the
+ * only reader of either Supabase secret key was `createAdminClient()`, which
+ * nothing imported. Both are deleted, and so are the two keys: a secret with no
+ * code path using it is a credential with nothing to show for its risk.
+ *
+ * So a Vercel project holds the transaction pooler string and the public
+ * browser values (`ClientEnv`), and no worker credential at all. The worker
+ * got the same treatment in phase 6 (`WorkerEnv`, below); this is the other
+ * half of that split.
+ *
+ * `src/env/app-env.test.ts` holds it: the app's schema accepts an environment
+ * with none of the worker's variables in it.
  */
-export const ServerEnv = serverShape
-  .refine((e) => e.SUPABASE_SECRET_KEY !== e.WORKER_SUPABASE_SECRET_KEY, {
-    path: ['WORKER_SUPABASE_SECRET_KEY'],
-    message:
-      'SUPABASE_SECRET_KEY and WORKER_SUPABASE_SECRET_KEY are identical. ' +
-      'Issue a separate key per service so either can be rotated alone.',
-  })
-  .refine(sentryProjectsDiffer, SENTRY_PROJECTS_DIFFER)
-  .refine(hereKeyIsNotPublic, HERE_KEY_IS_NOT_PUBLIC);
+export const AppEnv = serverShape.pick({
+  DATABASE_URL: true,
+  DISPATCH_TZ: true,
+  NODE_ENV: true,
+});
 
 /**
- * What the WORKER needs, which is strictly less (phase 6, item 2).
+ * What `npm run db:migrate` needs: the session pooler and nothing else.
+ * Migrations run from a developer's machine, never from the app or the worker.
+ */
+export const MigrateEnv = serverShape.pick({ DIRECT_URL: true });
+
+/**
+ * What the WORKER needs (phase 6, item 2).
  *
- * The worker's only database credential is `DIRECT_URL`. It holds NO Supabase
- * API key and no transaction-pooler string, because it uses neither: its data
- * access is `createDirectDb`, and `lib/supabase/admin.ts` — the only consumer
- * of either secret key — imports `server-only` and is therefore unreachable
- * from a standalone Node process by construction.
- *
- * Validating the worker against the full `ServerEnv` is what forced the
- * question. It demanded `SUPABASE_SECRET_KEY` — the APP's key — before the
- * worker would boot, so deploying the worker to its own host meant copying the
- * app's credential onto a machine that cannot use it. That is precisely the
- * coupling the two-key split exists to prevent (§ the `.refine` above: "so
- * either can be rotated alone"), reintroduced by a validation rule rather than
- * by any code that reads the value.
- *
- * So the worker host now holds four secrets, not seven, and rotating the app's
- * Supabase key does not involve it at all.
+ * The worker's only database credential is `DIRECT_URL`, and it holds no
+ * Supabase API key: its data access is `createDirectDb`. Validating it against
+ * the app's requirements once demanded the app's secret key before the worker
+ * would boot, which meant copying a credential onto a machine that could not
+ * use it. `AppEnv` above is the same fix applied the other way round.
  */
 export const WorkerEnv = serverShape
   .pick({

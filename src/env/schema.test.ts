@@ -1,18 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { ClientEnv, ServerEnv, WorkerEnv, isIanaZone } from './schema';
+import { AppEnv, ClientEnv, MigrateEnv, WorkerEnv, isIanaZone } from './schema';
 
 const REF = 'ywfotpjljshxrgxlgcdp';
 const POOLER = 'aws-1-eu-west-1.pooler.supabase.com';
 
-const validServer = {
-  DATABASE_URL: `postgresql://postgres.${REF}:pw@${POOLER}:6543/postgres`,
-  DIRECT_URL: `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`,
-  SUPABASE_SECRET_KEY: 'sb_secret_web',
-  WORKER_SUPABASE_SECRET_KEY: 'sb_secret_worker',
-  SAMSARA_API_TOKEN: 'samsara_api_x',
-  SAMSARA_ORG_ID: '45975',
+const TRANSACTION = `postgresql://postgres.${REF}:pw@${POOLER}:6543/postgres`;
+const SESSION = `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`;
+const IPV6_DIRECT = `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`;
+
+/** What a Vercel project holds, server side (§12.75). */
+const validApp = {
+  DATABASE_URL: TRANSACTION,
   DISPATCH_TZ: 'America/Chicago',
   NODE_ENV: 'test',
+};
+
+/** Exactly what the droplet's systemd EnvironmentFile carries. */
+const validWorker = {
+  DIRECT_URL: SESSION,
+  SAMSARA_API_TOKEN: 'samsara_api_x',
+  SAMSARA_ORG_ID: '45975',
+  NODE_ENV: 'production',
 };
 
 const validClient = {
@@ -29,76 +37,67 @@ function errorOn(result: { success: boolean; error?: unknown }, field: string): 
   return issues.find((i) => i.path[0] === field)?.message ?? '';
 }
 
-describe('ServerEnv', () => {
-  it('accepts a correctly split pooler pair', () => {
-    const r = ServerEnv.safeParse(validServer);
-    expect(r.success).toBe(true);
+describe('AppEnv', () => {
+  it('accepts the transaction pooler and nothing else', () => {
+    expect(AppEnv.safeParse(validApp).success).toBe(true);
   });
 
-  it('rejects the IPv6-only direct host', () => {
-    // Verified 2026-09-17: db.<ref>.supabase.co has an AAAA record and no A
-    // record. Most worker hosts have no outbound IPv6, so this string simply
-    // cannot connect from them.
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      DIRECT_URL: `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
-    });
+  it('rejects the session pooler as DATABASE_URL', () => {
+    const r = AppEnv.safeParse({ ...validApp, DATABASE_URL: SESSION });
     expect(r.success).toBe(false);
-    expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
+    expect(errorOn(r, 'DATABASE_URL')).toMatch(/TRANSACTION pooler/);
   });
 
-  it('rejects the pooler ports being swapped', () => {
-    const swapped = ServerEnv.safeParse({
-      ...validServer,
-      DATABASE_URL: validServer.DIRECT_URL,
-      DIRECT_URL: validServer.DATABASE_URL,
-    });
-    expect(swapped.success).toBe(false);
-    expect(errorOn(swapped, 'DATABASE_URL')).toMatch(/TRANSACTION pooler/);
-    expect(errorOn(swapped, 'DIRECT_URL')).toMatch(/SESSION pooler/);
-  });
-
-  it('rejects a publishable key in a secret slot', () => {
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      SUPABASE_SECRET_KEY: 'sb_publishable_oops',
-    });
-    expect(r.success).toBe(false);
-    expect(errorOn(r, 'SUPABASE_SECRET_KEY')).toMatch(/sb_secret_/);
-  });
-
-  it('rejects the legacy service_role JWT', () => {
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      SUPABASE_SECRET_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.x.y',
-    });
-    expect(r.success).toBe(false);
-  });
-
-  it('rejects one secret key reused for both services', () => {
-    // They exist separately so either can be rotated without downing the
-    // other. Equal keys defeat the point.
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      WORKER_SUPABASE_SECRET_KEY: validServer.SUPABASE_SECRET_KEY,
-    });
-    expect(r.success).toBe(false);
-  });
-
-  it('rejects a non-numeric Samsara org id', () => {
-    const r = ServerEnv.safeParse({ ...validServer, SAMSARA_ORG_ID: 'org-45975' });
-    expect(r.success).toBe(false);
+  it('rejects the direct host as DATABASE_URL', () => {
+    const r = AppEnv.safeParse({ ...validApp, DATABASE_URL: IPV6_DIRECT });
+    expect(errorOn(r, 'DATABASE_URL')).toMatch(/TRANSACTION pooler/);
   });
 
   it('rejects a bogus dispatch timezone', () => {
-    const r = ServerEnv.safeParse({ ...validServer, DISPATCH_TZ: 'America/Chicago/' });
+    const r = AppEnv.safeParse({ ...validApp, DISPATCH_TZ: 'America/Chicago/' });
     expect(r.success).toBe(false);
   });
 
   it('defaults the dispatch timezone to America/Chicago', () => {
-    const { DISPATCH_TZ: _omitted, ...withoutTz } = validServer;
-    const r = ServerEnv.safeParse(withoutTz);
+    const { DISPATCH_TZ: _omitted, ...withoutTz } = validApp;
+    const r = AppEnv.safeParse(withoutTz);
     expect(r.success && r.data.DISPATCH_TZ).toBe('America/Chicago');
+  });
+});
+
+describe('the pooler pair, each half on the side that uses it', () => {
+  /**
+   * The swap this rule was written for: 5432 where 6543 belongs and the other
+   * way round. The two strings now live in different schemas, so each side
+   * refuses the other's.
+   */
+  it('refuses the ports swapped, from both sides', () => {
+    expect(errorOn(AppEnv.safeParse({ ...validApp, DATABASE_URL: SESSION }), 'DATABASE_URL')).toMatch(
+      /TRANSACTION pooler/,
+    );
+    expect(
+      errorOn(WorkerEnv.safeParse({ ...validWorker, DIRECT_URL: TRANSACTION }), 'DIRECT_URL'),
+    ).toMatch(/SESSION pooler/);
+  });
+
+  it('rejects the IPv6-only direct host for the worker', () => {
+    // Verified 2026-09-17: db.<ref>.supabase.co has an AAAA record and no A
+    // record. Most worker hosts have no outbound IPv6, so this string simply
+    // cannot connect from them.
+    const r = WorkerEnv.safeParse({ ...validWorker, DIRECT_URL: IPV6_DIRECT });
+    expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
+  });
+
+  it('migrations take the session pooler, and only that', () => {
+    expect(MigrateEnv.safeParse({ DIRECT_URL: SESSION }).success).toBe(true);
+    expect(errorOn(MigrateEnv.safeParse({ DIRECT_URL: TRANSACTION }), 'DIRECT_URL')).toMatch(
+      /SESSION pooler/,
+    );
+  });
+
+  it('rejects a non-numeric Samsara org id', () => {
+    const r = WorkerEnv.safeParse({ ...validWorker, SAMSARA_ORG_ID: 'org-45975' });
+    expect(r.success).toBe(false);
   });
 });
 
@@ -160,7 +159,7 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
 
   it('accepts a key that is nowhere in the client bundle', () => {
     const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.abc' }, () =>
-      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'here-secret' }),
+      WorkerEnv.safeParse({ ...validWorker, HERE_API_KEY: 'here-secret' }),
     );
     expect(r.success).toBe(true);
   });
@@ -172,7 +171,7 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
      * public variable walked straight past it.
      */
     const r = withPublic({ NEXT_PUBLIC_HERE_API_KEY: 'here-secret' }, () =>
-      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'here-secret' }),
+      WorkerEnv.safeParse({ ...validWorker, HERE_API_KEY: 'here-secret' }),
     );
     expect(r.success).toBe(false);
     expect(errorOn(r, 'HERE_API_KEY')).toContain('ships to every browser');
@@ -180,7 +179,7 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
 
   it('refuses it whichever public variable happens to hold it', () => {
     const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'shared-value' }, () =>
-      ServerEnv.safeParse({ ...validServer, HERE_API_KEY: 'shared-value' }),
+      WorkerEnv.safeParse({ ...validWorker, HERE_API_KEY: 'shared-value' }),
     );
     expect(r.success).toBe(false);
   });
@@ -189,13 +188,13 @@ describe('the HERE routing key stays server-side (§12.59)', () => {
     // Absent, every lane falls back to the lane estimate or the straight
     // line. Refusing to start would take the whole console off the air over
     // an enrichment it already knows how to live without.
-    const r = ServerEnv.safeParse(validServer);
+    const r = WorkerEnv.safeParse(validWorker);
     expect(r.success).toBe(true);
     expect(r.success && r.data.HERE_API_KEY).toBeUndefined();
   });
 
   it("caps the month at HERE's free allowance, never above it", () => {
-    const r = ServerEnv.safeParse(validServer);
+    const r = WorkerEnv.safeParse(validWorker);
     /**
      * 5,000 (§12.61). The measured rule costs ~5,800/month, so no ceiling it
      * fits inside exists — and a ceiling ABOVE the free tier cannot guard
@@ -217,9 +216,9 @@ describe('the loopback exception for the e2e suite', () => {
    * and the only alternatives are pointing e2e at production data or not
    * testing the app at all.
    */
-  it('accepts a loopback cluster for both connections', () => {
-    const r = ServerEnv.safeParse({ ...validServer, DATABASE_URL: LOCAL, DIRECT_URL: LOCAL });
-    expect(r.success).toBe(true);
+  it('accepts a loopback cluster on both sides', () => {
+    expect(AppEnv.safeParse({ ...validApp, DATABASE_URL: LOCAL }).success).toBe(true);
+    expect(WorkerEnv.safeParse({ ...validWorker, DIRECT_URL: LOCAL }).success).toBe(true);
   });
 
   /**
@@ -229,70 +228,42 @@ describe('the loopback exception for the e2e suite', () => {
    * is.
    */
   it('still refuses the session pooler as DATABASE_URL', () => {
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      DATABASE_URL: `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`,
-    });
+    const r = AppEnv.safeParse({ ...validApp, DATABASE_URL: SESSION });
     expect(errorOn(r, 'DATABASE_URL')).toMatch(/TRANSACTION pooler/);
   });
 
   it('still refuses the IPv6-only host, which loopback must not excuse', () => {
-    const r = ServerEnv.safeParse({
-      ...validServer,
-      DIRECT_URL: `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
-    });
+    const r = WorkerEnv.safeParse({ ...validWorker, DIRECT_URL: IPV6_DIRECT });
     expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
   });
 });
 
-describe('WorkerEnv holds strictly less than the app does', () => {
-  /** Exactly what the droplet's systemd EnvironmentFile carries. */
-  const validWorker = {
-    DIRECT_URL: `postgresql://postgres.${REF}:pw@${POOLER}:5432/postgres`,
-    SAMSARA_API_TOKEN: 'samsara_api_x',
-    SAMSARA_ORG_ID: '45975',
-    NODE_ENV: 'production',
-  };
-
+describe('the app and the worker share no credential (§12.75)', () => {
   /**
-   * THE POINT OF THE SPLIT. Validating the worker against `ServerEnv` demanded
-   * SUPABASE_SECRET_KEY — the APP's key — before the worker would start, so
-   * giving the worker its own host meant copying the app's credential onto a
-   * machine that cannot use it: `lib/supabase/admin.ts` is the only consumer
-   * of either key and imports `server-only`, which a standalone Node process
-   * can never satisfy.
-   *
-   * That is the two-key rotation split being undone by a validation rule
-   * rather than by anything that reads the value.
+   * THE POINT OF BOTH SPLITS. Each runtime once had to hold the other's
+   * secrets to boot: the worker needed the app's Supabase key (fixed in phase
+   * 6), and the app needed DIRECT_URL, both Samsara values and the worker's
+   * key (fixed in §12.75). Neither read what it demanded; the validation rule
+   * alone undid the separation the two hosts exist for.
    */
-  it('starts with no Supabase API key and no transaction pooler string', () => {
-    const r = WorkerEnv.safeParse(validWorker);
-    expect(r.success).toBe(true);
+  it('the worker starts with no Supabase API key and no transaction pooler string', () => {
+    expect(WorkerEnv.safeParse(validWorker).success).toBe(true);
   });
 
-  it('is what ServerEnv would have refused, which is why it exists', () => {
-    // The same environment, judged by the app's schema: three missing secrets.
-    const asApp = ServerEnv.safeParse(validWorker);
-    expect(asApp.success).toBe(false);
-    for (const field of ['DATABASE_URL', 'SUPABASE_SECRET_KEY', 'WORKER_SUPABASE_SECRET_KEY']) {
-      expect(errorOn(asApp, field), `${field} should be required of the app`).not.toBe('');
+  it('the app starts with none of the worker\'s variables', () => {
+    expect(AppEnv.safeParse(validApp).success).toBe(true);
+    const r = AppEnv.safeParse({ ...validApp, ...validWorker, DATABASE_URL: TRANSACTION });
+    expect(r.success && Object.keys(r.data).sort()).toEqual(['DATABASE_URL', 'DISPATCH_TZ', 'NODE_ENV']);
+  });
+
+  it('and each refuses to stand in for the other', () => {
+    // The worker's environment judged by the app's schema: no transaction
+    // pooler. The app's judged by the worker's: no session pooler, no Samsara.
+    expect(errorOn(AppEnv.safeParse(validWorker), 'DATABASE_URL')).not.toBe('');
+    const asWorker = WorkerEnv.safeParse(validApp);
+    for (const field of ['DIRECT_URL', 'SAMSARA_API_TOKEN', 'SAMSARA_ORG_ID']) {
+      expect(errorOn(asWorker, field), `${field} should be required of the worker`).not.toBe('');
     }
-  });
-
-  it('still insists on the session pooler — the mistake already made once', () => {
-    const r = WorkerEnv.safeParse({
-      ...validWorker,
-      DIRECT_URL: `postgresql://postgres.${REF}:pw@${POOLER}:6543/postgres`,
-    });
-    expect(errorOn(r, 'DIRECT_URL')).toMatch(/SESSION pooler/);
-  });
-
-  it('still refuses the IPv6-only direct host', () => {
-    const r = WorkerEnv.safeParse({
-      ...validWorker,
-      DIRECT_URL: `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
-    });
-    expect(errorOn(r, 'DIRECT_URL')).toMatch(/IPv6-only/);
   });
 
   it('keeps the routing ceiling default, so the guard exists without being set', () => {
@@ -323,7 +294,7 @@ describe('the two Sentry projects', () => {
 
   it('accepts two different DSNs', () => {
     const r = withPublicDsn(APP, () =>
-      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: WORKER }),
+      WorkerEnv.safeParse({ ...validWorker, SENTRY_WORKER_DSN: WORKER }),
     );
     expect(r.success).toBe(true);
   });
@@ -336,7 +307,7 @@ describe('the two Sentry projects', () => {
    */
   it('refuses one DSN used for both runtimes', () => {
     const r = withPublicDsn(APP, () =>
-      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: APP }),
+      WorkerEnv.safeParse({ ...validWorker, SENTRY_WORKER_DSN: APP }),
     );
     expect(r.success).toBe(false);
     expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/separate Sentry projects/);
@@ -345,14 +316,14 @@ describe('the two Sentry projects', () => {
   it('treats both as optional — reporting must not gate the worker starting', () => {
     // The same ruling as HERE_API_KEY (§12.31): an enrichment that can refuse
     // to boot the ingestion worker is a worse outage than the one it reports.
-    const r = withPublicDsn(undefined, () => ServerEnv.safeParse(validServer));
+    const r = withPublicDsn(undefined, () => WorkerEnv.safeParse(validWorker));
     expect(r.success).toBe(true);
     expect(r.success && r.data.SENTRY_WORKER_DSN).toBeUndefined();
   });
 
   it('rejects a DSN that is not a URL', () => {
     const r = withPublicDsn(undefined, () =>
-      ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: 'not-a-dsn' }),
+      WorkerEnv.safeParse({ ...validWorker, SENTRY_WORKER_DSN: 'not-a-dsn' }),
     );
     expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/must be a Sentry DSN URL/);
   });
@@ -386,8 +357,8 @@ describe('a blank optional variable is an absent one', () => {
    * which passes empty strings to switch Sentry off.
    */
   it('accepts the environment produced by copying .env.example', () => {
-    const r = ServerEnv.safeParse({
-      ...validServer,
+    const r = WorkerEnv.safeParse({
+      ...validWorker,
       SENTRY_WORKER_DSN: '',
       SENTRY_RELEASE: '',
       HERE_API_KEY: '',
@@ -401,7 +372,7 @@ describe('a blank optional variable is an absent one', () => {
     const before = process.env['NEXT_PUBLIC_SENTRY_DSN'];
     process.env['NEXT_PUBLIC_SENTRY_DSN'] = '';
     try {
-      const r = ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: '' });
+      const r = WorkerEnv.safeParse({ ...validWorker, SENTRY_WORKER_DSN: '' });
       expect(errorOn(r, 'SENTRY_WORKER_DSN')).toBe('');
     } finally {
       if (before === undefined) delete process.env['NEXT_PUBLIC_SENTRY_DSN'];
@@ -410,7 +381,7 @@ describe('a blank optional variable is an absent one', () => {
   });
 
   it('still rejects a non-blank value that is not a DSN', () => {
-    const r = ServerEnv.safeParse({ ...validServer, SENTRY_WORKER_DSN: 'nonsense' });
+    const r = WorkerEnv.safeParse({ ...validWorker, SENTRY_WORKER_DSN: 'nonsense' });
     expect(errorOn(r, 'SENTRY_WORKER_DSN')).toMatch(/must be a Sentry DSN URL/);
   });
 

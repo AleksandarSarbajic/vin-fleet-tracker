@@ -33,11 +33,11 @@ this whole phase exists to remove, in the deploy mechanism itself.
 
 ## What the host holds, and what it deliberately does not
 
-The worker validates against `WorkerEnv`, not `ServerEnv` — see
-`src/env/schema.ts`. Its only database credential is `DIRECT_URL`, the
-**session pooler** on port 5432. It holds no Supabase API key, because
-`lib/supabase/admin.ts` is the only consumer of either and imports
-`server-only`, which a standalone Node process can never satisfy.
+The worker validates against `WorkerEnv` — see `src/env/schema.ts`. Its only
+database credential is `DIRECT_URL`, the **session pooler** on port 5432. It
+holds no Supabase API key: nothing in the worker uses one, and since §12.75
+nothing in the app does either (the app validates against `AppEnv`, which
+holds no worker credential at all).
 
     DIRECT_URL              session pooler, :5432   (NOT :6543, NOT db.<ref>…)
     SAMSARA_API_TOKEN
