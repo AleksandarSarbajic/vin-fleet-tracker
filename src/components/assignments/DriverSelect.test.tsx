@@ -80,10 +80,55 @@ function type(text: string) {
   });
 }
 
+const list = () => container!.querySelector('[role="listbox"]');
+
+/**
+ * The list appeared by itself whenever anything else put focus on the input
+ * — the edit modal's opening focus on an empty truck did exactly that. Focus
+ * alone keeps it shut; a click, typing, an arrow key or a Tab in opens it.
+ */
+describe('when the list opens', () => {
+  it('stays closed when focus is put there programmatically', () => {
+    render({ autoFocus: true });
+    act(() => input().focus());
+    expect(document.activeElement).toBe(input());
+    expect(list()).toBeNull();
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens on a click', () => {
+    render();
+    act(() => input().click());
+    expect(list()).not.toBeNull();
+  });
+
+  it('opens when tabbed into — the Tab keyup lands on the input', () => {
+    render();
+    act(() => {
+      input().focus();
+      input().dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', bubbles: true }));
+    });
+    expect(list()).not.toBeNull();
+  });
+
+  it('opens on ArrowDown and on typing', () => {
+    render();
+    act(() => {
+      input().focus();
+      input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    });
+    expect(list()).not.toBeNull();
+    act(() => input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(list()).toBeNull();
+    type('Sam');
+    expect(list()).not.toBeNull();
+  });
+});
+
 describe('the picker shows which drivers have an ELD', () => {
   it('tags the app-created driver in the open list, and not the Samsara one', () => {
     render();
-    act(() => input().focus());
+    act(() => input().click());
     const tags = container!.querySelectorAll('[title*="not in Samsara"]');
     expect(tags.length).toBe(1);
     expect(container!.innerHTML).toContain('Hand Entered Hal');
@@ -94,7 +139,8 @@ describe('the picker shows which drivers have an ELD', () => {
 describe('"+ Add driver" appears when the search runs out', () => {
   it('is NOT offered before anything is typed', () => {
     render({ onDriverCreated: vi.fn() });
-    act(() => input().focus());
+    act(() => input().click());
+    expect(list()).not.toBeNull();
     // The control belongs to the moment of not finding someone, not to an
     // unfiltered list of everybody.
     expect(container!.innerHTML).not.toContain('as a new driver');

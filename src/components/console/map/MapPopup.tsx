@@ -155,6 +155,15 @@ export function MapPopup({
       offset={18}
       closeButton={false}
       closeOnClick={false}
+      /**
+       * Mapbox defaults this to true: on open, the popup focuses its first
+       * button. Selecting a truck opens the popup, and opening the edit modal
+       * selects the truck — so ~100 ms after the modal put focus on its first
+       * field, the popup BEHIND the scrim took it ("Timeline"), and typing
+       * went nowhere. The popup is a passive readout; focus belongs to
+       * whatever the dispatcher is using.
+       */
+      focusAfterOpen={false}
       onClose={onClose}
       maxWidth="288px"
       className="ft-popup"

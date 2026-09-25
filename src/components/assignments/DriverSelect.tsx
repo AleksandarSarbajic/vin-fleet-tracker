@@ -27,7 +27,10 @@ interface Props {
   truckLabel: string;
   disabled: boolean;
   disabledReason?: string | undefined;
-  /** Marks this as the modal's opening focus target (see useFocusTrap). */
+  /**
+   * Marks this as the modal's opening focus target (see useFocusTrap). The
+   * caret lands here; the list does NOT open — see `onFocus` below.
+   */
   autoFocus?: boolean;
   onChange: (driverId: string | null) => void;
   /**
@@ -133,7 +136,24 @@ export function DriverSelect({
         title={disabled ? disabledReason : undefined}
         value={open ? typed : (selected?.name ?? '')}
         placeholder={selected ? '' : 'Unassigned'}
-        onFocus={() => setOpen(true)}
+        /**
+         * Opens on a click, on typing, on the arrow keys, and on TABBING in —
+         * never on focus as such.
+         *
+         * It used to open on any focus, which made the list appear by itself
+         * whenever something ELSE put focus here: the edit modal's initial
+         * focus on an empty truck, and useFocusTrap's first-focusable
+         * fallback when no appointment field is showing. A programmatic
+         * focus is not a request to see forty drivers.
+         *
+         * Tab is told apart by its keyup: the keydown fires on the element
+         * being left, the keyup on the one arrived at. A programmatic focus
+         * has no key at all.
+         */
+        onClick={() => setOpen(true)}
+        onKeyUp={(e) => {
+          if (e.key === 'Tab') setOpen(true);
+        }}
         onChange={(e) => {
           setTyped(e.target.value);
           setCursor(0);

@@ -33,7 +33,13 @@ export function useReturnFocus(active: boolean): void {
  * simply the first control in the DOM, this focused it, and its `onFocus`
  * opened the list. The dropdown was not opening on mount — it was being
  * pointed at. A modal that knows which field the dispatcher came to change
- * should say so, rather than every picker learning not to trust focus.
+ * should say so.
+ *
+ * That was not enough on its own, and the picker now does not open on focus
+ * at all (DriverSelect's `onFocus` note). An empty truck names the picker as
+ * its target ON PURPOSE, so the list opened there by design, every time —
+ * and this fallback still lands on the picker whenever no appointment field
+ * is showing. Focus is where the caret goes; opening a list is a request.
  *
  * Esc is deliberately NOT handled here: it raises the discard confirm rather
  * than closing, and only the modal knows whether anything is dirty.
