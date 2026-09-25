@@ -23,11 +23,20 @@ export const FILTER_KEYS = [
   'tomorrow',
   'data',
   'inactive',
+  /**
+   * §12.78. Last, so the digits 1–7 keep their meaning and it takes `8`.
+   * A chip key rather than a separate switch so the URL, saved views, `0`
+   * and the empty states carry it through the paths the chips already use.
+   */
+  'drivers',
 ] as const;
 export type FilterKey = (typeof FILTER_KEYS)[number];
 
+/** The chips that select by status. `inactive` and `drivers` are other axes. */
+type StatusKey = Exclude<FilterKey, 'inactive' | 'drivers'>;
+
 /** `Data issues` is the combined bucket for the three neutral states (§9.1). */
-const STATUSES_IN: Record<Exclude<FilterKey, 'inactive'>, Status[]> = {
+const STATUSES_IN: Record<StatusKey, Status[]> = {
   late: ['LATE'],
   risk: ['AT_RISK'],
   ontime: ['ON_TIME'],
@@ -44,6 +53,7 @@ const LABEL: Record<FilterKey, string> = {
   tomorrow: 'Tomorrow',
   data: 'Data issues',
   inactive: 'Inactive',
+  drivers: 'Drivers only',
 };
 
 /** The chip's ink when selected. Tokens, never a colour value. */
@@ -55,7 +65,24 @@ const INK: Record<FilterKey, string> = {
   tomorrow: 'text-status-tomorrow-fg border-status-tomorrow-bd',
   data: 'text-status-neutral-fg border-status-neutral-bd',
   inactive: 'text-text-muted border-line-hair',
+  drivers: 'text-text border-line-soft',
 };
+
+/**
+ * Whether Drivers only hides this row (§12.78): no driver, AND nothing is
+ * waiting on one.
+ *
+ * An UNASSIGNED truck — no driver and a live appointment — is never hidden.
+ * It sorts third, after Late and Stale GPS, because it is a load that needs a
+ * driver before its deadline, and a view that made it disappear would hide
+ * the one driverless truck that matters. `computed` as well as `status`, so a
+ * forced status on such a truck does not smuggle it out of view.
+ */
+export function hiddenAsDriverless(
+  row: Pick<FleetRow, 'driverName' | 'status' | 'computed'>,
+): boolean {
+  return row.driverName === null && row.status !== 'UNASSIGNED' && row.computed !== 'UNASSIGNED';
+}
 
 /**
  * Whether a row passes the current selection.
@@ -65,16 +92,18 @@ const INK: Record<FilterKey, string> = {
  * because `trucks.active` is a different axis from status (§13.1).
  */
 export function passesFilters(row: FleetRow, selected: Set<FilterKey>): boolean {
-  if (selected.size === 0) return row.active;
+  // Drivers only is an AND over whatever the other chips chose (§12.78).
+  if (selected.has('drivers') && hiddenAsDriverless(row)) return false;
 
-  const wantsInactive = selected.has('inactive');
+  const narrowing = [...selected].filter((k) => k !== 'drivers');
+  if (narrowing.length === 0) return row.active;
+
+  const wantsInactive = narrowing.includes('inactive');
   if (!row.active) return wantsInactive;
 
-  const statusKeys = [...selected].filter((k) => k !== 'inactive');
+  const statusKeys = narrowing.filter((k): k is StatusKey => k !== 'inactive');
   if (statusKeys.length === 0) return wantsInactive ? false : true;
-  return statusKeys.some((key) =>
-    STATUSES_IN[key as Exclude<FilterKey, 'inactive'>].includes(row.status),
-  );
+  return statusKeys.some((key) => STATUSES_IN[key].includes(row.status));
 }
 
 /** Fleet-wide counts, computed over every row in the payload (§12.8). */
@@ -88,8 +117,10 @@ export function chipCounts(rows: FleetRow[]): Record<FilterKey, number> {
       counts.inactive += 1;
       continue;
     }
+    // What Drivers only alone would list — the same promise every chip makes.
+    if (!hiddenAsDriverless(row)) counts.drivers += 1;
     for (const key of FILTER_KEYS) {
-      if (key === 'inactive') continue;
+      if (key === 'inactive' || key === 'drivers') continue;
       if (STATUSES_IN[key].includes(row.status)) counts[key] += 1;
     }
   }
@@ -109,7 +140,7 @@ export function FilterChips({
 }) {
   const counts = chipCounts(rows);
 
-  /** §8.1: 1–7 toggle, 0 resets to All. */
+  /** §8.1: 1–7 toggle, 0 resets to All; 8 is Drivers only (§12.78). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return;
@@ -140,7 +171,7 @@ export function FilterChips({
         ink="text-text-secondary border-line-hair"
         onClick={onReset}
       />
-      {FILTER_KEYS.map((key) => (
+      {FILTER_KEYS.filter((key) => key !== 'drivers').map((key) => (
         <Chip
           key={key}
           label={LABEL[key]}
@@ -150,6 +181,15 @@ export function FilterChips({
           onClick={() => onToggle(key)}
         />
       ))}
+      {/* §12.78: a different axis from status, so it stands apart. */}
+      <span aria-hidden="true" data-chip-divider="" className="mx-1 h-4 w-px bg-line-hair" />
+      <Chip
+        label={LABEL.drivers}
+        count={counts.drivers}
+        selected={selected.has('drivers')}
+        ink={INK.drivers}
+        onClick={() => onToggle('drivers')}
+      />
     </div>
   );
 }

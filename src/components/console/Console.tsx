@@ -139,6 +139,17 @@ export function Console({
     [all, chips],
   );
 
+  /**
+   * §12.78. How many trucks Drivers only is hiding RIGHT NOW: the rows the
+   * other chips let through that it then took out. Said in the list header,
+   * so a hidden truck is never hidden silently.
+   */
+  const hiddenDriverless = useMemo(() => {
+    if (!chips.has('drivers')) return 0;
+    const without = new Set([...chips].filter((k) => k !== 'drivers'));
+    return all.filter((row) => passesFilters(row, without)).length - rows.length;
+  }, [all, chips, rows.length]);
+
   /* --------------------------- status toasts (§12.50) -------------------- */
 
   const [toasts, setToasts] = useState<StatusToast[]>([]);
@@ -600,6 +611,19 @@ export function Console({
           <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line-soft px-4">
             <span className="font-cond text-[12px] font-semibold uppercase tracking-[.1em] text-text-secondary">
               Fleet — {rows.length} trucks · sorted by urgency
+              {chips.has('drivers') ? (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => toggleChip('drivers')}
+                    title="Drivers only is on. Trucks with no driver AND no live appointment are hidden; an Unassigned truck is always shown. Click to show them."
+                    className="uppercase tracking-[.1em] text-accent hover:underline"
+                  >
+                    {hiddenDriverless} without a driver hidden
+                  </button>
+                </>
+              ) : null}
             </span>
             <span className="font-sans text-small text-text-muted">
               {selectedId ? (

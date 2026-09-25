@@ -6018,6 +6018,48 @@ exists in TIGER, so under this rule it lands on the ZIP centre (±3.2 mi). In
 Fargo, 37th Street and 37th Avenue North are different roads, so this one
 may be a real typo — exactly the case the warning is for.
 
+## 12.77 A second open load is flagged, number or not
+
+§12.13 shows the load number beside the next-stop city only when the truck
+holds more than one open load — the number says which load drives the status.
+On 2026-09-25 that rule caught a real fault: truck 124 showed
+`Elwood, IL · 871671` because a departed Moorhead delivery on the same number
+had been left `AT_SHIPPER` while a new 871671 load was opened. The stale load
+was closed (`DELIVERED`, audit `source: operator-data-fix`).
+
+The catch depended on the next stop's load having a number, and §12.21 makes
+numbers optional. So the cell now carries a `+1 load` tag (`+2 loads`, …)
+whenever `open_load_count > 1`, independent of the number. It borrows the
+No-ELD tag's neutral style — provenance, not status — and sits OUTSIDE the
+truncating text, so a long city name cannot push it into the ellipsis. The
+tooltip names it too. The number rule itself is unchanged.
+
+## 12.78 Drivers only
+
+A chip after Inactive, behind a divider, that hides trucks with **no driver
+and nothing waiting on one**. Key `8`.
+
+- **UNASSIGNED is never hidden.** That status means no driver AND a live
+  appointment — a load that needs a driver before its deadline, sorted third.
+  The test is on `computed` as well as `status`, so a forced status on such a
+  truck does not take it out of view.
+- **AND with the other chips.** `Late + Drivers only` is late trucks that have
+  a driver, plus any Unassigned one.
+- **Never silent.** While on, the list header reads `N without a driver
+  hidden`, and clicking it turns the chip off.
+- **Counts stay fleet-wide** (§12.8). The chip's own count is what it alone
+  would list, the promise every chip makes.
+- **One more chip key**, not a separate switch, so the URL (`chips=drivers`),
+  saved views, `0` and the empty states carry it through paths that already
+  exist. Off by default; a view saved before it existed reads as off.
+- **The map follows the list**, as it does for every chip.
+
+**Known limit, not introduced here:** the header's chip row scrolls
+horizontally, and at 1440 px it already hid Data issues, Inactive and
+Assignments; it now overflows by 302 px there (62 px at 1680, none at 1920).
+The chip is reachable by `8`, by scrolling the row, and from the header note
+once on.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

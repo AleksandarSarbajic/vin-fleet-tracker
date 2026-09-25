@@ -132,6 +132,31 @@ function nextStopText(row: FleetRow): string {
     : place;
 }
 
+/**
+ * How many OTHER open loads the truck holds, for the `+1 load` tag (§12.77).
+ *
+ * The load number above is shown only when it disambiguates which load drives
+ * the status, and a load can have no number at all (§12.21) — so without this
+ * a truck holding two loads could look exactly like a truck holding one.
+ * Truck 124's second, stale 871671 load was caught by the number appearing;
+ * this makes that catch not depend on a number having been typed.
+ */
+export function otherOpenLoads(row: Pick<FleetRow, 'openLoadCount'>): number {
+  return Math.max(0, row.openLoadCount - 1);
+}
+
+function MoreLoadsTag({ count }: { count: number }) {
+  const label = `+${count} load${count === 1 ? '' : 's'}`;
+  return (
+    <span
+      title={`This truck holds ${count + 1} open loads. The next stop shown is the earliest deadline across all of them.`}
+      className="shrink-0 border border-line-hair px-1 font-cond text-micro uppercase leading-[1.4] tracking-[.08em] text-text-muted"
+    >
+      {label}
+    </span>
+  );
+}
+
 /** Everything the cell had to drop, plus the stop-local time (§6.2). */
 function stopTitle(row: FleetRow): string | null {
   const stop = row.nextStop;
@@ -141,6 +166,9 @@ function stopTitle(row: FleetRow): string | null {
     stop.addressLine,
     [stop.city, stop.state, stop.zip].filter(Boolean).join(', '),
     stop.loadNumber ? `Load ${stop.loadNumber}` : 'No load number yet',
+    otherOpenLoads(row) > 0
+      ? `${otherOpenLoads(row)} more open load${otherOpenLoads(row) === 1 ? '' : 's'} on this truck`
+      : null,
     apptTitle(row) ?? 'no appointment',
   ]
     .filter(Boolean)
@@ -643,9 +671,19 @@ function TruckRowImpl({
       */}
       <div
         title={stopTitle(row) ?? undefined}
-        className={`relative truncate text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
+        className={`relative flex min-w-0 items-baseline gap-1.5 text-body ${row.nextStop ? 'text-text-secondary' : 'text-text-muted'}`}
       >
-        {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
+        {/*
+          The text truncates and the tag does not: in a 191px column the tag
+          is the part that must survive, and a long city name would otherwise
+          push it into the ellipsis.
+        */}
+        <span className="min-w-0 truncate">
+          {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
+        </span>
+        {row.nextStop && otherOpenLoads(row) > 0 ? (
+          <MoreLoadsTag count={otherOpenLoads(row)} />
+        ) : null}
         <CopyButton
           value={loadText(row)}
           label="Copy load info"

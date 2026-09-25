@@ -97,6 +97,7 @@ export const KEYMAP: readonly Binding[] = [
     group: 'filters',
     owner: 'FilterChips',
   },
+  { keys: ['8'], label: 'Drivers only — hide trucks with no driver and nothing waiting', group: 'filters', owner: 'FilterChips' },
   { keys: ['0'], label: 'Reset to All', group: 'filters', owner: 'FilterChips' },
   {
     keys: ['/'],

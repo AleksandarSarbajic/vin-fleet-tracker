@@ -45,8 +45,14 @@ describe('the registry describes what the console actually binds', () => {
   it('covers the number keys the chips actually have', () => {
     // §8.1 is "1–7 toggle, 0 resets". If a chip is added or removed, the
     // sheet's range is wrong and this is what says so.
+    //
+    // §12.78: Drivers only is the LAST key and has a row of its own, so the
+    // range stops one short of it and its own digit is the chip count.
     const toggle = KEYMAP.find((b) => b.label === 'Toggle a status filter');
-    expect(toggle?.keys).toEqual(['1', '–', String(FILTER_KEYS.length)]);
+    expect(FILTER_KEYS.at(-1)).toBe('drivers');
+    expect(toggle?.keys).toEqual(['1', '–', String(FILTER_KEYS.length - 1)]);
+    const drivers = KEYMAP.find((b) => b.label.startsWith('Drivers only'));
+    expect(drivers?.keys).toEqual([String(FILTER_KEYS.length)]);
   });
 
   it('gives every binding a group that is rendered and an owner to find', () => {
