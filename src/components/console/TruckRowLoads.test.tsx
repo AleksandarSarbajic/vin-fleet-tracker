@@ -39,7 +39,9 @@ const mount = (row: FleetRow) => {
 };
 
 const tag = () =>
-  [...container.querySelectorAll('span')].find((s) => /^\+\d+ loads?$/.test(s.textContent ?? ''));
+  [...container.querySelectorAll('span')].find((s) =>
+    /^\+\d+ loads?$/.test(s.textContent ?? ''),
+  );
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -65,7 +67,12 @@ describe('the +N load tag', () => {
   });
 
   it('sits beside the number when there is one — the number rule is unchanged', () => {
-    mount(fleetRow({ openLoadCount: 2, nextStop: { city: 'Elwood', state: 'IL', loadNumber: '871671' } }));
+    mount(
+      fleetRow({
+        openLoadCount: 2,
+        nextStop: { city: 'Elwood', state: 'IL', loadNumber: '871671' },
+      }),
+    );
     expect(container.textContent).toContain('Elwood, IL · 871671');
     expect(tag()?.textContent).toBe('+1 load');
   });
@@ -76,7 +83,12 @@ describe('the +N load tag', () => {
   });
 
   it('is outside the truncating text, so a long city cannot push it into the ellipsis', () => {
-    mount(fleetRow({ openLoadCount: 2, nextStop: { city: 'A Very Long Industrial Park Name' } }));
+    mount(
+      fleetRow({
+        openLoadCount: 2,
+        nextStop: { city: 'A Very Long Industrial Park Name' },
+      }),
+    );
     const truncating = tag()?.parentElement?.querySelector('.truncate');
     expect(truncating).not.toBeNull();
     expect(truncating?.contains(tag()!)).toBe(false);
@@ -86,5 +98,35 @@ describe('the +N load tag', () => {
     mount(fleetRow({ openLoadCount: 2 }));
     const cell = tag()?.parentElement;
     expect(cell?.getAttribute('title')).toContain('1 more open load on this truck');
+  });
+});
+
+/** §12.82. The chip names the day; the bucket's own name is "Upcoming". */
+describe('an upcoming row’s chip', () => {
+  const chipText = () =>
+    [...container.querySelectorAll('span')].find((s) =>
+      s.className.includes('border-status-tomorrow-bd'),
+    )?.textContent;
+
+  it('reads Tomorrow when it is', () => {
+    mount(
+      fleetRow({
+        status: 'TOMORROW',
+        computed: 'TOMORROW',
+        upcoming: { day: '2026-09-26', tomorrow: true },
+      }),
+    );
+    expect(chipText()).toBe('Tomorrow');
+  });
+
+  it('reads the day when it is later', () => {
+    mount(
+      fleetRow({
+        status: 'TOMORROW',
+        computed: 'TOMORROW',
+        upcoming: { day: '2026-09-28', tomorrow: false },
+      }),
+    );
+    expect(chipText()).toBe('Mon 9/28');
   });
 });

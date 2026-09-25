@@ -8,7 +8,7 @@ import { basisShort, etaCaution, etaDetails, milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
-import { STATUS_LABEL } from '@/lib/status';
+import { STATUS_LABEL, upcomingLabel } from '@/lib/status';
 
 /**
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
@@ -180,7 +180,16 @@ export function MapPopup({
           }) ? (
             <NoEldTag />
           ) : null}
-          <StatusChip status={row.status} forced={row.override !== null} />
+          <StatusChip
+            status={row.status}
+            forced={row.override !== null}
+            // §12.82: which later day, not the bucket's name.
+            label={
+              row.status === 'TOMORROW' && row.upcoming
+                ? upcomingLabel(row.upcoming)
+                : undefined
+            }
+          />
         </div>
 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[5px] px-[10px] py-[9px] text-[12px]">

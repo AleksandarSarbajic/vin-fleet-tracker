@@ -11,7 +11,7 @@ import {
 } from '@/lib/eta-basis';
 import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
-import type { Status } from '@/lib/status';
+import { upcomingLabel, type Status } from '@/lib/status';
 import { elapsed, timeInZone } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { ChipFlip } from './ChipFlip';
@@ -763,7 +763,14 @@ function TruckRowImpl({
         <ChipFlip
           status={feedStale ? 'STALE_GPS' : row.status}
           forced={!feedStale && row.override !== null}
-          label={stale ? (elapsed(row.recordedAt, reference) ?? undefined) : undefined}
+          label={
+            stale
+              ? (elapsed(row.recordedAt, reference) ?? undefined)
+              : // §12.82: the row says WHICH later day; the bucket is "Upcoming".
+                !feedStale && row.status === 'TOMORROW' && row.upcoming
+                ? upcomingLabel(row.upcoming)
+                : undefined
+          }
           reducedMotion={reducedMotion}
         />
         {/*

@@ -18,6 +18,7 @@ import {
   type OverrideFacts,
   type Status,
   type StatusConfig,
+  type UpcomingDay,
 } from '@/lib/status';
 import { LOAD_STATUSES, type LoadStatus } from '@/lib/loads';
 import { NEXT_STOP_ORDER } from './next-stop';
@@ -88,6 +89,8 @@ export interface FleetRow {
   /** UNASSIGNED suppresses the ETA and keeps it here, struck through (§5.8). */
   lastComputedEtaUtc: string | null;
   deadlineUtc: string | null;
+  /** §12.82. Which later day, when the row is in the upcoming bucket. */
+  upcoming: UpcomingDay | null;
 
   /**
    * The next stop, by §12.13: the earliest undeparted stop across every OPEN
@@ -435,6 +438,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
+    upcoming: null,
     nextStop:
       raw.stop_id && raw.load_id && raw.load_status && raw.stop_type
         ? {
@@ -609,6 +613,7 @@ export function applyStatus(
       etaAbsence: result.etaAbsence,
       lastComputedEtaUtc: result.lastComputedEtaUtc,
       deadlineUtc: result.deadlineUtc,
+      upcoming: result.upcoming,
     };
   });
 }

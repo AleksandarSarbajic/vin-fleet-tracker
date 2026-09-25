@@ -614,7 +614,23 @@ export function Console({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line-soft px-4">
             <span className="font-cond text-[12px] font-semibold uppercase tracking-[.1em] text-text-secondary">
-              Fleet — {rows.length} trucks · sorted by urgency
+              Fleet —{' '}
+              {/* §12.83: the view by name, at every width — the header can only
+                  afford its full name at 1680px and up. */}
+              {savedViews.active ? (
+                <>
+                  view:{' '}
+                  <span
+                    data-view-title=""
+                    title={savedViews.active.name}
+                    className="inline-block max-w-[280px] truncate align-bottom normal-case tracking-normal text-accent"
+                  >
+                    {savedViews.active.name}
+                  </span>{' '}
+                  ·{' '}
+                </>
+              ) : null}
+              {rows.length} trucks · sorted by urgency
               {chips.has('drivers') ? (
                 <>
                   {' · '}

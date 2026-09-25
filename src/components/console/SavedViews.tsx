@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
+import { chipLabel } from './FilterChips';
 
 /**
  * §14 feature 11 — saved filter views. **Interpretation**: turn 5 listed the
@@ -47,6 +48,20 @@ export function SavedViews({
   canSaveCurrent: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  /**
+   * §12.83. Where the menu is drawn — FIXED, in viewport coordinates, from the
+   * trigger's box at the moment it opens.
+   *
+   * It was `absolute` under the trigger, and the trigger lives in the
+   * header's scrolling track (`overflow-x: auto`, which forces the other axis
+   * to clip too). The track is 34px tall; the menu hung below it and was
+   * clipped to nothing. It opened — aria-expanded, items in the DOM, every
+   * happy-dom test green — and no one could see it. A fixed box is not
+   * clipped by an ancestor's overflow. It closes on resize and on scroll
+   * rather than drifting away from the button it belongs to.
+   */
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -81,11 +96,18 @@ export function SavedViews({
         if (box.current && !box.current.contains(document.activeElement)) setOpen(false);
       }, 0);
     };
+    // A fixed menu would stay put while its button moved; close instead.
+    const onMove = () => setOpen(false);
+    window.addEventListener('resize', onMove);
+    const track = box.current?.closest('[data-header-track]');
+    track?.addEventListener('scroll', onMove);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     const node = box.current;
     node?.addEventListener('focusout', onFocusOut);
     return () => {
+      window.removeEventListener('resize', onMove);
+      track?.removeEventListener('scroll', onMove);
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
       node?.removeEventListener('focusout', onFocusOut);
@@ -115,7 +137,19 @@ export function SavedViews({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
+        aria-label={active ? `Views: ${active.name}` : undefined}
+        title={active ? `Views: ${active.name}` : undefined}
+        ref={trigger}
         onClick={() => {
+          const box = trigger.current?.getBoundingClientRect();
+          if (box) {
+            const MENU_WIDTH = 280;
+            setAnchor({
+              top: box.bottom + 4,
+              // Kept on screen when the trigger sits near the right edge.
+              left: Math.max(8, Math.min(box.left, window.innerWidth - MENU_WIDTH - 8)),
+            });
+          }
           setOpen((was) => !was);
           setNaming(false);
           setRenaming(null);
@@ -127,9 +161,29 @@ export function SavedViews({
             : 'border-line-hair text-text-secondary hover:bg-row-hover'
         }`}
       >
-        {/* The active view's name IS the label when one is showing, so the
-            header says what the board is, not just what the control does. */}
-        <span className="max-w-[140px] truncate">{active ? active.name : 'Views'}</span>
+        {/*
+          §12.83. With a view active the control says which: `Views: Late
+          today` at 1680px and up. Below that there is no room for a name
+          in the header — measured at 1440, "Views: Chicago lanes" scrolled
+          the chip row 41px — so the control keeps its width and shows an
+          accent mark, and the list title directly beneath carries the name
+          at every width. The full name is always the accessible name.
+        */}
+        {active ? (
+          <>
+            <span className="hidden max-w-[180px] truncate min-[1680px]:inline">
+              Views: {active.name}
+            </span>
+            <span className="min-[1680px]:hidden">Views</span>
+            <span
+              aria-hidden="true"
+              data-view-mark=""
+              className="h-[6px] w-[6px] shrink-0 bg-accent min-[1680px]:hidden"
+            />
+          </>
+        ) : (
+          <span>Views</span>
+        )}
         <span aria-hidden="true" className="text-[8px] leading-none">
           ▼
         </span>
@@ -140,7 +194,9 @@ export function SavedViews({
           id={menuId}
           role="menu"
           aria-label="Saved views"
-          className="absolute left-0 top-[30px] z-30 w-[280px] border border-line-hair bg-surface-raised py-1 text-left"
+          data-views-menu=""
+          style={anchor ? { top: anchor.top, left: anchor.left } : undefined}
+          className="fixed z-30 w-[280px] border border-line-hair bg-surface-raised py-1 text-left"
         >
           {views.length === 0 ? (
             <p className="px-3 py-2 text-body text-text-mutedOnSelected">
@@ -284,7 +340,8 @@ export function SavedViews({
  */
 function describe(view: SavedView): string {
   const parts: string[] = [];
-  if (view.chips.length > 0) parts.push(view.chips.join(', '));
+  // The chips' printed names — "Upcoming", "At risk" — not their URL keys.
+  if (view.chips.length > 0) parts.push(view.chips.map(chipLabel).join(', '));
   if (view.query) parts.push(`“${view.query}”`);
   return parts.length === 0 ? 'The whole active fleet' : parts.join(' · ');
 }

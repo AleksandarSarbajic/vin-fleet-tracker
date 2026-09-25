@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   STATUS_DEFAULTS,
+  STATUS_LABEL,
   calendarDayInZone,
   evaluate,
+  nextCalendarDay,
+  upcomingLabel,
   haversineMiles,
   isFeedStale,
   projectEta,
@@ -234,6 +237,95 @@ describe('TOMORROW is a calendar question in the DISPATCH zone', () => {
       calendarDayInZone(beforeFlip, DISPATCH_TZ),
     );
     expect(evaluate(facts, config, beforeFlip).status).toBe('TOMORROW');
+  });
+});
+
+/**
+ * §12.82. The bucket is "any later day"; the row says WHICH. Tomorrow is the
+ * next CALENDAR day in dispatch time — not "within 24 hours" — so these probe
+ * the edges where the two differ, with every boundary derived, not pasted.
+ */
+describe('which later day an upcoming row names', () => {
+  /** Local midnight in the dispatch zone on the day after `from`. */
+  const midnightAfter = (from: Date): Date => {
+    const today = calendarDayInZone(from, DISPATCH_TZ);
+    let probe = from.getTime();
+    while (calendarDayInZone(new Date(probe), DISPATCH_TZ) === today) probe += 60_000;
+    return new Date(probe);
+  };
+  const HOUR = 3_600_000;
+  const upcomingAt = (now: Date, appt: Date) =>
+    evaluate(
+      truck({
+        recordedAtUtc: new Date(now.getTime() - 60_000).toISOString(),
+        stop: stop({ apptStartUtc: appt.toISOString() }),
+      }),
+      config,
+      now,
+    );
+
+  it('names the bucket "Upcoming", not "Tomorrow"', () => {
+    expect(STATUS_LABEL.TOMORROW).toBe('Upcoming');
+  });
+
+  it('says tomorrow for an appointment on the next dispatch day', () => {
+    const appt = new Date(midnightAfter(NOW).getTime() + 10 * HOUR);
+    const result = upcomingAt(NOW, appt);
+    expect(result.status).toBe('TOMORROW');
+    expect(result.upcoming).toEqual({ day: calendarDayInZone(appt, DISPATCH_TZ), tomorrow: true });
+    expect(upcomingLabel(result.upcoming!)).toBe('Tomorrow');
+  });
+
+  it('dates an appointment two days out, weekday and month/day in dispatch time', () => {
+    const appt = new Date(midnightAfter(midnightAfter(NOW)).getTime() + 10 * HOUR);
+    const result = upcomingAt(NOW, appt);
+    expect(result.status).toBe('TOMORROW');
+    expect(result.upcoming?.tomorrow).toBe(false);
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: DISPATCH_TZ,
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(appt);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value;
+    expect(upcomingLabel(result.upcoming!)).toBe(`${part('weekday')} ${part('month')}/${part('day')}`);
+  });
+
+  it('is a calendar question: 23:30 tonight, an appointment 25 hours out is still tomorrow', () => {
+    const flip = midnightAfter(NOW);
+    const now = new Date(flip.getTime() - 30 * 60_000);
+    // 23:59 tomorrow evening — more than 24 hours away, still tomorrow.
+    const lateTomorrow = new Date(midnightAfter(flip).getTime() - 60_000);
+    expect(lateTomorrow.getTime() - now.getTime()).toBeGreaterThan(24 * HOUR);
+    expect(upcomingAt(now, lateTomorrow).upcoming?.tomorrow).toBe(true);
+    // And one minute past that midnight it is the day after.
+    const dayAfter = midnightAfter(flip);
+    expect(upcomingAt(now, new Date(dayAfter.getTime() + 60_000)).upcoming?.tomorrow).toBe(false);
+  });
+
+  it('holds across the fall-back day, whose 25 hours a 24-hour rule would miss', () => {
+    // Find the 25-hour dispatch day after NOW rather than pasting its date.
+    let midnight = midnightAfter(NOW);
+    for (let i = 0; i < 400; i += 1) {
+      const next = midnightAfter(midnight);
+      if (next.getTime() - midnight.getTime() === 25 * HOUR) break;
+      midnight = next;
+    }
+    const nextMidnight = midnightAfter(midnight);
+    expect(nextMidnight.getTime() - midnight.getTime()).toBe(25 * HOUR);
+    const now = new Date(midnight.getTime() + 30 * 60_000); // 00:30 on the long day
+    const lateTomorrow = new Date(midnightAfter(nextMidnight).getTime() - 60_000);
+    expect(upcomingAt(now, lateTomorrow).upcoming?.tomorrow).toBe(true);
+  });
+
+  it('is null for anything not in the upcoming bucket', () => {
+    expect(upcomingAt(NOW, new Date(NOW.getTime() + 4 * HOUR)).upcoming).toBeNull();
+  });
+
+  it('steps calendar days across a month, a year and a leap day', () => {
+    expect(nextCalendarDay('2026-09-30')).toBe('2026-10-01');
+    expect(nextCalendarDay('2026-12-31')).toBe('2027-01-01');
+    expect(nextCalendarDay('2028-02-28')).toBe('2028-02-29');
   });
 });
 

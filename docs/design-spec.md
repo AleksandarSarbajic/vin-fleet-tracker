@@ -681,7 +681,7 @@ the **dispatch** zone.
 | `↑` `↓` | Move row selection, map follows |
 | `Enter` | **Open the edit modal.** Selection already shows the detail panel, so binding `Enter` to "detail" was redundant (§12.10). |
 | `E` | Open edit (same as `Enter`) |
-| `1`–`7` | Toggle the filter chips, in drawn order: `1` Late · `2` At risk · `3` On time · `4` Arrived · `5` Tomorrow · `6` Data issues · `7` Inactive. Chips are **multi-select** (§12.9). |
+| `1`–`7` | Toggle the filter chips, in drawn order: `1` Late · `2` At risk · `3` On time · `4` Arrived · `5` Upcoming *(was Tomorrow, §12.82)* · `6` Data issues · `7` Inactive; `8` Drivers only (§12.78). Chips are **multi-select** (§12.9). |
 | `0` | Reset filters to All |
 | `Cmd/Ctrl` + `Enter` | Save (edit modal) |
 | `←` `→` | Move the split handle in 2% steps (when the handle has focus) |
@@ -6139,6 +6139,54 @@ under a name (duplicate and empty names refused), delete. Two gaps:
 
 A view is the chip set and the search term. There is no user-selectable sort
 (the list is always by urgency, §12.4), so there is no sort state to save.
+
+## 12.82 "Tomorrow" was a bucket for every later day
+
+`TOMORROW` has always meant *a later calendar day than today, in dispatch
+time* — a deliberate catch-all, correct as logic and wrong as a word. On
+2026-09-25 ten trucks read `Tomorrow`; four were due tomorrow, one Sunday and
+five Monday.
+
+- **The bucket is named `Upcoming`** wherever it means the group: the filter
+  chip (`5`), the map key, the status pop-ups, the modal's computed status.
+  The enum stays `TOMORROW` — renaming it would touch storage, tokens and
+  every test for no change in behaviour.
+- **The row and map-popup chip name the day**: `Tomorrow` when the
+  appointment is on the next dispatch calendar day, otherwise `Mon 9/28` —
+  the weekday to scan, the date so a load two weeks out is not this Monday's.
+- **Decided in the engine** (`StatusResult.upcoming`), from the same instant
+  and zone as the bucket, so label and status cannot disagree at midnight.
+  "Tomorrow" is the next CALENDAR day — 23:30 tonight, a load at 23:59
+  tomorrow is 24.5 hours out and still tomorrow; the fall-back day's 25 hours
+  do not move it. Tests derive both boundaries rather than pasting them.
+- **Unchanged:** sort (lowest band, earliest appointment first), marker,
+  colour, rail, and the bucket rule itself.
+
+Edge, accepted: the day is dispatch time (as the bucket is), while the APPT
+column is stop-local — a Denver stop at 23:30 MDT Sunday reads `Mon` on the
+chip and `Sun 23:30 MDT` in its tooltip.
+
+## 12.83 Views says which, and the menu can be seen
+
+**The menu was invisible.** It opened — `aria-expanded`, items in the DOM,
+every component test green — but it hung below the header's scrolling track
+(`overflow-x: auto` clips the other axis too; the track is 34px tall) and was
+clipped to nothing. That container predates §12.79. The menu is now `fixed`,
+anchored to the trigger when it opens, and closes on resize or on a scroll of
+the track rather than drifting. `e2e/header.spec.ts` asks the browser what is
+painted inside the open menu at 1440 and 1680; with the old `absolute` menu
+both fail.
+
+**The active view by name.** `Views: Late today ▾` at 1680px and up. Below
+that a name does not fit — measured at 1440, `Views: Chicago lanes` scrolled
+the chip row 41px, and the old name-only label already scrolled it 8px — so
+the trigger keeps its width with an accent mark, and the **list title names
+the view at every width** (`Fleet — view: Late today · 9 trucks · …`). The
+full name is the trigger's accessible name and tooltip. The header test runs
+a 40-character active view at all three widths in both feed states.
+
+View descriptions in the menu use the chips' printed names (`Late, At risk`,
+`Upcoming`), not their URL keys.
 
 # 13. Still open
 

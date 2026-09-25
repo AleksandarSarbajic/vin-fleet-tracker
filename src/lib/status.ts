@@ -66,8 +66,48 @@ export const STATUS_LABEL: Record<Status, string> = {
   NO_APPT: 'No appt',
   ARRIVED: 'Arrived',
   ON_TIME: 'On time',
-  TOMORROW: 'Tomorrow',
+  /**
+   * §12.82. The BUCKET's name. `TOMORROW` has always meant "a later calendar
+   * day than today, in dispatch time" — a catch-all, not tomorrow — and the
+   * board said `Tomorrow` over loads due on Monday. The enum keeps its name
+   * (renaming it would touch storage, tokens and every test for no change in
+   * behaviour); what a person reads is `Upcoming`. The row and popup chip say
+   * which day instead — see `upcomingLabel`.
+   */
+  TOMORROW: 'Upcoming',
 };
+
+/**
+ * §12.82. Which later day, for a row in the upcoming bucket: the appointment's
+ * calendar day in DISPATCH time, and whether that day is tomorrow. Decided in
+ * the engine, from the same instant and zone as the bucket itself, so the
+ * label and the status cannot disagree across midnight.
+ */
+export interface UpcomingDay {
+  /** `YYYY-MM-DD`, dispatch zone. */
+  day: string;
+  tomorrow: boolean;
+}
+
+/** The calendar day after a `YYYY-MM-DD`. Date arithmetic, not 24 hours — DST-proof. */
+export function nextCalendarDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/**
+ * What the row and popup chip print for an upcoming load: `Tomorrow` when it
+ * is, otherwise the day — `Mon 9/28`. The weekday for scanning, the date so a
+ * load two weeks out is not mistaken for this Monday's.
+ */
+export function upcomingLabel(upcoming: UpcomingDay): string {
+  if (upcoming.tomorrow) return 'Tomorrow';
+  const [y, m, d] = upcoming.day.split('-').map(Number) as [number, number, number];
+  const weekday = WEEKDAY[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${weekday} ${m}/${d}`;
+}
 
 /* ------------------------------ the engine ------------------------------ */
 
@@ -262,6 +302,8 @@ export interface StatusResult {
   lastComputedEtaUtc: string | null;
   /** `appointment_end_utc ?? appointment_start_utc` (§12.1). */
   deadlineUtc: string | null;
+  /** §12.82. Set exactly when the COMPUTED status is TOMORROW (the upcoming bucket). */
+  upcoming: UpcomingDay | null;
 }
 
 /** Coordinate error and snap error, added — see the note at the call site. */
@@ -449,6 +491,14 @@ export function evaluate(
     snapMeters: stop?.route?.snapToM ?? null,
     lastComputedEtaUtc: suppressed ? etaUtc : null,
     deadlineUtc,
+    upcoming:
+      computed === 'TOMORROW' && stop?.apptStartUtc
+        ? (() => {
+            const day = calendarDayInZone(new Date(stop.apptStartUtc), config.dispatchTz);
+            const today = calendarDayInZone(now, config.dispatchTz);
+            return { day, tomorrow: day === nextCalendarDay(today) };
+          })()
+        : null,
   };
 }
 

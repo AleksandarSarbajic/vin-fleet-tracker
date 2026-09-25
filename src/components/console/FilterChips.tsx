@@ -50,11 +50,17 @@ const LABEL: Record<FilterKey, string> = {
   risk: 'At risk',
   ontime: 'On time',
   arrived: 'Arrived',
-  tomorrow: 'Tomorrow',
+  // §12.82: the bucket is any later day. The row chip says which one.
+  tomorrow: 'Upcoming',
   data: 'Data issues',
   inactive: 'Inactive',
   drivers: 'Drivers only',
 };
+
+/** The chip's printed name for a key, for anything that describes a chip set. */
+export function chipLabel(key: string): string {
+  return (LABEL as Record<string, string>)[key] ?? key;
+}
 
 /**
  * Below 1680px (§12.79). `Data` is the spec's own abbreviation for a crowded

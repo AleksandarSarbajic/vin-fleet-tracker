@@ -183,7 +183,7 @@ export function ConsoleHeader({
         abbreviation the spec already names for a crowded row (§9.1, `3d`) —
         and Assignments is its icon. At 1680 and up nothing changes.
       */}
-      <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+      <div data-header-track="" className="flex min-w-0 items-center gap-3 overflow-x-auto">
         <div className="min-w-[120px] max-w-[420px] flex-[1_1_420px]">
           <SearchField
             value={query}

@@ -66,6 +66,7 @@ export function fleetRow(over: FleetRowOver = {}): FleetRow {
     etaAbsence: 'no-appointment',
     lastComputedEtaUtc: null,
     deadlineUtc: null,
+    upcoming: null,
     openLoadCount: 1,
     apptAt: null,
     ...rest,

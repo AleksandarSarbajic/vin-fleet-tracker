@@ -39,7 +39,8 @@ describe('the marker key', () => {
       'At risk',
       'On time',
       'Arrived',
-      'Tomorrow',
+      // §12.82: the bucket's name. The marker is unchanged.
+      'Upcoming',
       'Stale GPS',
       'Unassigned',
       'No appt',
@@ -84,6 +85,6 @@ describe('the marker key', () => {
     const slash = rowFor('Unassigned')?.querySelector('path');
     expect(slash?.getAttribute('d')).toBe('M7.91 7.91 18.09 18.09');
     expect(rowFor('Unassigned')?.querySelector('circle')).not.toBeNull();
-    expect(rowFor('Tomorrow')?.querySelector('path')).toBeNull();
+    expect(rowFor('Upcoming')?.querySelector('path')).toBeNull();
   });
 });

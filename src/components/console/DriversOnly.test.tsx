@@ -94,6 +94,9 @@ describe('the chip', () => {
   it('comes last, after Inactive, behind a divider', () => {
     render([]);
     const labels = buttons().map((b) => b.textContent ?? '');
+    // §12.82: the future-day bucket is named for what it holds.
+    expect(labels.some((l) => l.startsWith('Upcoming'))).toBe(true);
+    expect(labels.some((l) => l.startsWith('Tomorrow'))).toBe(false);
     expect(labels.at(-2)).toContain('Inactive');
     expect(labels.at(-1)).toContain('Drivers only');
     const divider = container.querySelector('[data-chip-divider]');
