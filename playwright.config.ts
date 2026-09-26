@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
+import { RESULTS_ROOT, newRunId } from './e2e/results';
 
 /**
  * The browser suite (phase 6, item 5).
@@ -25,6 +26,15 @@ const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
 
+/**
+ * §12.84. This run's results folder: `test-results/<run id>`, never a shared
+ * one a later run would empty. Set ONCE, in the environment, because the
+ * config is also loaded by every worker process — a timestamp taken per
+ * import would put one run's traces in several folders. Workers inherit the
+ * runner's environment, so they all read the id the runner minted.
+ */
+export const E2E_RUN_ID = (process.env['E2E_RUN_ID'] ??= newRunId());
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -37,7 +47,12 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
+  /**
+   * None, on purpose. A retry turns a flake into a pass and the evidence into
+   * nothing; a per-run folder (below) keeps the trace instead (§12.84).
+   */
   retries: 0,
+  outputDir: `${RESULTS_ROOT}/${E2E_RUN_ID}`,
   reporter: process.env.CI ? [['github'], ['list']] : [['list']],
   timeout: 45_000,
   expect: { timeout: 10_000 },

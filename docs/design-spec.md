@@ -6188,6 +6188,29 @@ a 40-character active view at all three widths in both feed states.
 View descriptions in the menu use the chips' printed names (`Late, At risk`,
 `Upcoming`), not their URL keys.
 
+## 12.84 Every e2e run keeps its own results
+
+One e2e failure in seventeen runs could not be named: every run wrote to the
+one shared `test-results/`, which Playwright empties when a run starts, so the
+failure's trace lasted exactly until the next run — the one anyone
+investigating makes first. Sixteen clean passes followed, including every
+test three times over, the original check-then-e2e ordering twice, and a run
+with all ten cores saturated. CPU timing and test isolation look ruled out;
+the best read is an external round trip (the middleware's per-request
+Supabase `getUser`, or Mapbox style/tiles) exceeding an assertion's 10s.
+
+- Each run writes to `test-results/<run id>/` (`playwright.config.ts`
+  `outputDir`). The id is set once in the environment, because workers load
+  the config too and inherit the runner's environment; a timestamp per import
+  would scatter one run across folders.
+- Global setup prints the folder at the start of every run, and prunes to the
+  newest 20 run folders — only folders named like a run id.
+- **No retries**, deliberately: a retry turns a flake into a pass and the
+  evidence into nothing.
+
+Verified by a run that failed on purpose followed by one that passed: the
+first run's `trace.zip` and screenshot were still in its own folder.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

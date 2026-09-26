@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { config as loadEnv } from 'dotenv';
 import { connect, TEST_DATABASE_URL } from './fixtures';
+import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
 
 /**
  * Runs once, before the web server is started.
@@ -43,6 +44,10 @@ export default async function globalSetup(): Promise<void> {
       throw new Error('The test cluster has no tables after migrating.');
     }
     console.info(`e2e: ${row!.n} tables in the disposable cluster at ${host}`);
+    // §12.84. Said up front, so a failure's trace is findable after the fact.
+    console.info(`e2e: results for this run → ${RESULTS_ROOT}/${process.env['E2E_RUN_ID'] ?? '?'}`);
+    const pruned = pruneRuns(RESULTS_ROOT, RUNS_KEPT);
+    if (pruned.length > 0) console.info(`e2e: pruned ${pruned.length} old run folder(s), kept ${RUNS_KEPT}`);
   } finally {
     await sql.end({ timeout: 5 });
   }
