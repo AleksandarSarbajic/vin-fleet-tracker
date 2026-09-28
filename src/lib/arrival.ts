@@ -1,4 +1,4 @@
-import { haversineMiles } from './status';
+import { haversineMiles, type ArrivalSource } from './status';
 
 /**
  * Arrival and departure detection. Pure — no I/O, no database, no clock.
@@ -147,8 +147,13 @@ export const ARRIVAL_DEFAULTS: ArrivalConfig = {
 };
 
 export interface StopGeo {
-  lat: number;
-  lng: number;
+  /**
+   * Null when the address was never located. Such a stop cannot be ARRIVED
+   * at by the sweep, but a dispatcher can mark it, and with an anchor it can
+   * still be LEFT (§12.85).
+   */
+  lat: number | null;
+  lng: number | null;
   /**
    * §12.30. Arrival detection runs on `street` and NOTHING ELSE.
    *
@@ -165,6 +170,32 @@ export interface StopGeo {
   /** Already arrived. Never re-detected, never unset by the worker. */
   arrivedAt: string | null;
   departedAt: string | null;
+  /**
+   * §12.57. Who made the arrival claim. Optional so the rules that do not
+   * care — arrival, explainNearest — can be called without it; absent reads
+   * as "not a dispatcher".
+   */
+  arrivedSource?: ArrivalSource | null;
+  /** §12.85. Where the truck was when a dispatcher marked it arrived. */
+  anchor?: ArrivalAnchor | null;
+}
+
+/**
+ * §12.85. The truck's own position at the moment a dispatcher marked the
+ * stop arrived — the point a departure is measured from.
+ *
+ * Not the stop's coordinate. The stops a dispatcher has to mark by hand are
+ * mostly the ones the sweep CANNOT decide: a ZIP centroid (a median 2.14 mi
+ * from the address) or a block (0.16–0.78 mi). A 0.35 mi circle around either
+ * is noise — the truck could be parked outside it, or drive out of the real
+ * yard without ever leaving it. Where the truck actually stood is the one
+ * point known to be at the stop.
+ */
+export interface ArrivalAnchor {
+  lat: number;
+  lng: number;
+  /** The fix's own instant, not the moment the dispatcher pressed Save. */
+  recordedAtUtc: string;
 }
 
 export interface Fix {
@@ -248,16 +279,121 @@ export function detectArrival(
   if (stop.arrivedAt !== null) return null;
   // Coarse coordinates cannot be arrived at, however close the truck gets.
   if (stop.precision !== 'street') return null;
+  const { lat, lng } = stop;
+  if (lat === null || lng === null) return null;
 
   const run = confirmedRun(
     fixes,
     config,
     (fix) =>
       isStopped(fix, config) &&
-      haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: stop.lat, lng: stop.lng }) <=
-        config.radiusMiles,
+      haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat, lng }) <= config.radiusMiles,
   );
   return run ? run[run.length - 1]!.recordedAtUtc : null;
+}
+
+/**
+ * §12.85. How old the truck's newest fix may be and still say where it is
+ * NOW, when a dispatcher marks the stop arrived.
+ *
+ * Not the 5–8 s a moving truck reports at. A PARKED truck with the ignition
+ * off reports once an hour: over 24 h of real data, gaps between consecutive
+ * fixes of a stopped truck were p50 6 s, p99 3,601 s, max 3,685 s — and a
+ * moving truck's max was 92 s. So a stopped fix up to an hour old is a truck
+ * that has not moved since, because the moment it rolls the gateway is back
+ * to every six seconds. 70 minutes clears the measured maximum; a fix older
+ * than that is a gap in the feed, not a heartbeat.
+ */
+export const ANCHOR_MAX_AGE_MINUTES = 70;
+
+/** Why a dispatcher's arrival got no anchor — each one printed in the modal. */
+export type AnchorRefusal = 'no-position' | 'stale' | 'moving' | 'away';
+
+export type AnchorDecision =
+  | { anchor: ArrivalAnchor }
+  | { anchor: null; refused: AnchorRefusal; miles: number | null };
+
+/**
+ * §12.85. Whether the truck is at the stop at the moment a dispatcher marks
+ * it arrived — and if so, the anchor its departure will be measured from.
+ *
+ * "At the stop" is: a fix recent enough to be now, at a walking pace or less,
+ * and inside the stop's own uncertainty plus the arrival radius. The stop's
+ * uncertainty, not a flat radius, because a ZIP centroid ±4.6 mi says the
+ * address is SOMEWHERE in that circle; a truck parked 3 mi from the centroid
+ * can be at the dock. An unlocated stop has no circle, so only the first two
+ * tests apply — the dispatcher's claim is the only evidence of place there
+ * is, and a stopped truck is consistent with it.
+ *
+ * Refusing is not an error. The arrival still saves; it just cannot end by
+ * itself, which is how every hand-marked arrival behaved before this.
+ */
+export function anchorAtTick(
+  stop: {
+    lat: number | null;
+    lng: number | null;
+    accuracyMiles: number | null;
+  },
+  newest: Fix | null,
+  now: Date,
+  config: ArrivalConfig = ARRIVAL_DEFAULTS,
+): AnchorDecision {
+  if (newest === null) return { anchor: null, refused: 'no-position', miles: null };
+  const ageMs = now.getTime() - new Date(newest.recordedAtUtc).getTime();
+  if (ageMs > ANCHOR_MAX_AGE_MINUTES * 60_000) {
+    return { anchor: null, refused: 'stale', miles: null };
+  }
+  const miles =
+    stop.lat === null || stop.lng === null
+      ? null
+      : haversineMiles({ lat: newest.lat, lng: newest.lng }, { lat: stop.lat, lng: stop.lng });
+  if (!isStopped(newest, config)) return { anchor: null, refused: 'moving', miles };
+  if (miles !== null && miles > config.radiusMiles + (stop.accuracyMiles ?? 0)) {
+    return { anchor: null, refused: 'away', miles };
+  }
+  return {
+    anchor: { lat: newest.lat, lng: newest.lng, recordedAtUtc: newest.recordedAtUtc },
+  };
+}
+
+/**
+ * Which point a departure is measured from, and since when (§12.85).
+ *
+ *  - `anchor`: a dispatcher marked the arrival while the truck was at the
+ *    stop, so the truck's own position then is the centre. Any precision,
+ *    including none — this is the rule that lets a ZIP-centre stop end.
+ *  - `stop`: everything else, exactly as §12.27 had it. A detected arrival
+ *    (street only, and proven inside 0.35 mi of this very coordinate), or a
+ *    dispatcher arrival on a street stop marked while the truck was away.
+ *  - null: nothing to measure from. A dispatcher arrival on a coarse or
+ *    unlocated stop with no anchor stays until someone unticks it — the
+ *    modal says so when it is saved.
+ */
+export type DepartureRule = 'anchor' | 'stop';
+
+export function departureCentre(
+  stop: StopGeo,
+): { rule: DepartureRule; lat: number; lng: number; since: string } | null {
+  if (stop.arrivedAt === null) return null;
+  if (stop.arrivedSource === 'dispatcher' && stop.anchor) {
+    const { anchor } = stop;
+    return {
+      rule: 'anchor',
+      lat: anchor.lat,
+      lng: anchor.lng,
+      // Whichever is later. The anchor fix can predate the arrival typed —
+      // a parked truck reports hourly — and a fix before either is not
+      // evidence of leaving.
+      since:
+        new Date(anchor.recordedAtUtc) > new Date(stop.arrivedAt)
+          ? anchor.recordedAtUtc
+          : stop.arrivedAt,
+    };
+  }
+  // Symmetric with arrival: a coarse coordinate cannot be left either, and
+  // an arrival it could not have produced is a dispatcher's to undo.
+  if (stop.precision !== 'street' || stop.lat === null || stop.lng === null) return null;
+  return { rule: 'stop', lat: stop.lat, lng: stop.lng, since: stop.arrivedAt };
 }
 
 /**
@@ -278,10 +414,24 @@ export function detectDeparture(
   config: ArrivalConfig = ARRIVAL_DEFAULTS,
 ): string | null {
   if (stop.arrivedAt === null || stop.departedAt !== null) return null;
-  // Symmetric with arrival: a coarse coordinate cannot be left either, and
-  // an arrival it could not have produced is a dispatcher's to undo.
-  if (stop.precision !== 'street') return null;
-  if (fixes.length === 0) return null;
+  const centre = departureCentre(stop);
+  if (centre === null) return null;
+
+  /**
+   * §12.85. Only fixes AFTER the arrival can be evidence of leaving it.
+   *
+   * This used to scan the whole 30-minute window, and `confirmedRun` keeps
+   * the LONGEST qualifying run. The truck's own approach — ten minutes of
+   * fixes outside the radius on the way in — is such a run, so it won, its
+   * oldest fix failed the "not before it arrived" test below, and the
+   * departure returned null until the real one had grown longer than the
+   * approach or the approach aged out of the window. Delayed, never lost —
+   * but for an anchor set the moment a dispatcher ticks, the approach is
+   * nearly always in the window.
+   */
+  const since = new Date(centre.since).getTime();
+  const after = fixes.filter((fix) => new Date(fix.recordedAtUtc).getTime() > since);
+  if (after.length === 0) return null;
   /**
    * §12.56. The complement of `isStopped`, not `> 0`.
    *
@@ -290,13 +440,13 @@ export function detectDeparture(
    * a truck creeping at 2 mph neither stopped nor moving — able to satisfy
    * the departure test while still in the yard.
    */
-  if (isStopped(fixes[0]!, config)) return null;
+  if (isStopped(after[0]!, config)) return null;
 
   const run = confirmedRun(
-    fixes,
+    after,
     config,
     (fix) =>
-      haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: stop.lat, lng: stop.lng }) >
+      haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: centre.lat, lng: centre.lng }) >
       config.radiusMiles,
   );
   if (!run) return null;
@@ -344,14 +494,14 @@ export function explainNearest(
   config: ArrivalConfig = ARRIVAL_DEFAULTS,
 ): { miles: number; speedMph: number | null; blockedBy: ArrivalBlock } | null {
   if (fixes.length === 0) return null;
+  const { lat, lng } = stop;
+  // An unlocated stop has no distance to explain.
+  if (lat === null || lng === null) return null;
 
   let closest = fixes[0]!;
-  let miles = haversineMiles(
-    { lat: closest.lat, lng: closest.lng },
-    { lat: stop.lat, lng: stop.lng },
-  );
+  let miles = haversineMiles({ lat: closest.lat, lng: closest.lng }, { lat, lng });
   for (const fix of fixes) {
-    const d = haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat: stop.lat, lng: stop.lng });
+    const d = haversineMiles({ lat: fix.lat, lng: fix.lng }, { lat, lng });
     if (d < miles) {
       miles = d;
       closest = fix;

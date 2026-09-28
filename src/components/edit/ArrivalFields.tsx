@@ -46,6 +46,7 @@ export function ArrivalFields({
   /** The stop's zone — whatever the appointment block currently holds. */
   zone,
   storedSource,
+  addressChanged = false,
   disabled,
   error,
 }: {
@@ -54,6 +55,8 @@ export function ArrivalFields({
   zone: string;
   /** What is in the database now, or null when the truck has not arrived. */
   storedSource: ArrivalSource | null;
+  /** §12.85. The address fields differ from what is stored. */
+  addressChanged?: boolean;
   disabled: boolean;
   error?: string | undefined;
 }) {
@@ -148,6 +151,20 @@ export function ArrivalFields({
       ) : storedSource !== null ? (
         <p className="mt-2 text-small text-status-late-fg">
           Saving now will clear the recorded arrival for this stop.
+        </p>
+      ) : null}
+
+      {/**
+       * §12.85. Said BEFORE Save, because the server does it without asking:
+       * a new address is a new place, and an arrival — with the truck
+       * position its departure is measured from — belonged to the old one.
+       * Only when there is an arrival to lose and the box is still ticked;
+       * unticked, the line above already says it.
+       */}
+      {addressChanged && storedSource !== null && draft.marked ? (
+        <p className="mt-2 text-small text-status-late-fg" data-arrival-address-note="">
+          Changing the address clears this arrival when you save. If the truck is at
+          the new address, mark it arrived again afterwards.
         </p>
       ) : null}
 

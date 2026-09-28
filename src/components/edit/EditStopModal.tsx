@@ -21,6 +21,7 @@ import {
   type AppointmentDraft,
 } from './AppointmentFields';
 import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
+import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { useFocusTrap } from './useModalChrome';
 
@@ -739,6 +740,20 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               onChange={(next) => set('arrival', next)}
               zone={form.appointment.tz}
               storedSource={stop?.arrivedSource ?? null}
+              addressChanged={
+                normalizeAddress({
+                  addressLine: edit.addressLine,
+                  city: edit.city,
+                  state: edit.state,
+                  zip: edit.zip,
+                }) !==
+                normalizeAddress({
+                  addressLine: initialEdit.addressLine,
+                  city: initialEdit.city,
+                  state: initialEdit.state,
+                  zip: initialEdit.zip,
+                })
+              }
               disabled={!mayEdit || !stop}
               error={
                 errorFor('arrivedAt.time') ??

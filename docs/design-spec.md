@@ -6211,6 +6211,68 @@ Supabase `getUser`, or Mapbox style/tiles) exceeding an assertion's 10s.
 Verified by a run that failed on purpose followed by one that passed: the
 first run's `trace.zip` and screenshot were still in its own folder.
 
+## 12.85 A hand-marked arrival ends when the truck leaves
+
+A dispatcher's arrival on a ZIP-centre or block stop never ended. The
+departure rule measured from the stop's coordinate and refused anything
+coarser than `street` (symmetric with §12.30), so the truck read ARRIVED
+after it had driven away. Those are the stops that can ONLY be marked by
+hand — on 2026-09-28 trucks 128 and 143 were parked 2.6 mi from the Elwood
+60421 centroid (±4.4 mi), which the sweep can never arrive.
+
+**The anchor.** When a save writes a dispatcher arrival, it records the
+truck's newest fix — lat, lng and the fix's own `recorded_at` — on the stop
+(`arrival_anchor_*`). A departure is then measured from THAT point: more than
+0.35 mi from it, newest fix moving (above `STOPPED_BELOW_MPH`), for the same
+120 s / two-fix confirmation the §12.27 rule uses. The audit entry's source is
+`departure-after-manual-arrival`, with `measuredFrom: anchor`.
+
+**"At the stop" when it is ticked** (`anchorAtTick`), else no anchor:
+
+- a fix no older than **70 minutes** — not seconds: a parked truck with the
+  ignition off reports hourly (24 h measured: stopped-truck gaps p99 3,601 s,
+  max 3,685 s; moving max 92 s);
+- at or below the stopped tolerance;
+- inside the stop's own uncertainty plus the radius (`accuracy + 0.35` —
+  4.75 mi for Elwood, 0.35 for a street stop). An unlocated stop has no area
+  to be outside of, so a fresh, stopped truck anchors there.
+
+**No anchor, no auto-clear, said at save.** On a coarse or unlocated stop the
+save succeeds and returns a warning naming why (moving / last position over
+70 min old / N mi from the ZIP area / no position): *this arrival will not
+clear by itself when the truck leaves.* A street stop gets no warning — with no
+anchor it still has §12.27's rule, measured from its own coordinate.
+
+**Detected arrivals keep the stop coordinate.** Asked and answered: they are
+street-only and the arrival itself proved the truck was within 0.35 mi of
+that exact coordinate; 17 departures have been recorded that way with none
+stuck. An anchor would be the dwell's first fix — often the gate, not the
+dock — and changes a measured rule with no failure to fix. A detected arrival
+with an anchor is refused by the database.
+
+**A second defect, older, fixed at the shared layer.** `confirmedRun` keeps
+the longest qualifying run in the 30-minute window, and the truck's own
+approach — outside the radius and moving, before it arrived — is such a run.
+It won, failed "not before it arrived", and the real departure returned null
+until it outgrew the approach or the approach aged out: with ten minutes of
+approach in the window, a truck three minutes gone had no departure. Departure
+now considers only fixes after `max(arrived_at, anchor fix)`, for both rules.
+
+**Wipes.** Unticking the arrival clears `arrived_at`, `arrived_source`,
+`departed_at` and the anchor. An **address change** clears all four too, even
+if the same save re-sent the arrival (the modal re-sends it on every save, so
+a ticked box is not intent); the modal says so before Save, and the audit
+entry carries `arrivalWipedBy: address-changed`. There is no separate "Clear
+stop" control — unticking is it.
+
+Constraints: the anchor is three columns or none; it exists only with
+`arrived_source is not distinct from 'dispatcher'` — `=` evaluated to NULL on
+an unarrived stop, and a CHECK that is NULL passes.
+
+After the last stop of an open load departs, the row has no next stop and
+reads `NO APPT` until the load is closed — unchanged, and the same as after a
+detected departure.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

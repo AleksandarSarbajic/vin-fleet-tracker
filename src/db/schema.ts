@@ -417,6 +417,17 @@ export const stops = pgTable(
      */
     arrivedSource: arrivalSource('arrived_source'),
     departedAt: timestamp('departed_at', { withTimezone: true }),
+    /**
+     * §12.85. Where the TRUCK was when a dispatcher marked this stop arrived,
+     * and that fix's instant — the point its departure is measured from.
+     * Written only by the edit modal's save, only with a dispatcher arrival,
+     * and only when the truck was demonstrably there (lib/arrival.ts
+     * `anchorAtTick`). Null on every detected arrival: those are measured
+     * from the stop, which the arrival itself proved was close.
+     */
+    arrivalAnchorLat: doublePrecision('arrival_anchor_lat'),
+    arrivalAnchorLng: doublePrecision('arrival_anchor_lng'),
+    arrivalAnchorAt: timestamp('arrival_anchor_at', { withTimezone: true }),
 
     dispatcherNote: text('dispatcher_note'),
     noteBy: uuid('note_by').references(() => profiles.id, { onDelete: 'set null' }),
@@ -475,6 +486,26 @@ export const stops = pgTable(
     check(
       'stops_arrived_source_paired',
       sql`(arrived_at is null) = (arrived_source is null)`,
+    ),
+    /** §12.85. An anchor is three columns or none — half a point is no point. */
+    check(
+      'stops_arrival_anchor_whole',
+      sql`(arrival_anchor_lat is null) = (arrival_anchor_lng is null)
+          and (arrival_anchor_lat is null) = (arrival_anchor_at is null)`,
+    ),
+    /**
+     * §12.85. Only a dispatcher's arrival carries one. This is also what makes
+     * clearing an arrival clear its anchor: `arrived_source` goes null, and a
+     * write that forgot the anchor fails here instead of leaving a point for
+     * a departure that can no longer happen.
+     *
+     * `is not distinct from`, not `=`: with no arrival at all the source is
+     * NULL, `NULL = 'dispatcher'` is NULL, and a CHECK that evaluates to NULL
+     * passes. The `=` version accepted an anchor on an unarrived stop.
+     */
+    check(
+      'stops_arrival_anchor_dispatcher',
+      sql`arrival_anchor_lat is null or arrived_source is not distinct from 'dispatcher'`,
     ),
   ],
 );

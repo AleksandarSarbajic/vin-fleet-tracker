@@ -344,4 +344,31 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
     // or every unrelated save would mark the truck arrived.
     expect('arrivedAt' in body).toBe(false);
   });
+  /**
+   * §12.85. The server wipes the arrival on an address change without asking,
+   * so the modal says so BEFORE Save — and only while there is an arrival to
+   * lose and the address actually differs.
+   */
+  it('warns before Save that changing the address clears the arrival', async () => {
+    await render(ARRIVED);
+    const note = () => container!.querySelector('[data-arrival-address-note]');
+    expect(note()).toBeNull();
+    await act(async () => {
+      setValue(fieldLabelled('City'), 'Joliet');
+    });
+    expect(note()?.textContent).toMatch(/Changing the address clears this arrival/);
+    // Retyped back, differently cased: the same address, so no warning.
+    await act(async () => {
+      setValue(fieldLabelled('City'), ARRIVED.nextStop!.city!.toUpperCase());
+    });
+    expect(note()).toBeNull();
+  });
+
+  it('does not warn about an arrival there is none of', async () => {
+    await render();
+    await act(async () => {
+      setValue(fieldLabelled('City'), 'Joliet');
+    });
+    expect(container!.querySelector('[data-arrival-address-note]')).toBeNull();
+  });
 });

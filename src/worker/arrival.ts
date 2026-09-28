@@ -4,6 +4,7 @@ import { positions as positionsTable, stops } from '@/db/schema';
 import {
   ARRIVAL_DEFAULTS,
   detectArrival,
+  departureCentre,
   detectDeparture,
   explainNearest,
   type ArrivalConfig,
@@ -12,6 +13,7 @@ import {
 } from '@/lib/arrival';
 import { writeAudit, type Db } from '@/server/audit';
 import { NEXT_STOP_ORDER } from '@/server/next-stop';
+import { ARRIVAL_SOURCES } from '@/lib/status';
 
 /**
  * Arrival and departure detection, run once per poll (§12.27).
@@ -45,11 +47,16 @@ const CandidateRow = z.object({
   stop_id: z.string().uuid(),
   truck_id: z.string().uuid(),
   truck_number: z.number().int().nullable(),
-  lat: z.number(),
-  lng: z.number(),
+  /** Null only when the stop is unlocated but carries an anchor (§12.85). */
+  lat: z.number().nullable(),
+  lng: z.number().nullable(),
   precision: z.enum(['street', 'block', 'zip']).nullable(),
   arrived_at: z.string().nullable(),
+  arrived_source: z.enum(ARRIVAL_SOURCES).nullable(),
   departed_at: z.string().nullable(),
+  anchor_lat: z.number().nullable(),
+  anchor_lng: z.number().nullable(),
+  anchor_at: z.string().nullable(),
 });
 
 export interface ArrivalSweep {
@@ -98,19 +105,28 @@ export async function sweepArrivals(
   const candidateResult = await db.execute(sql`
     select
       ns.stop_id, t.id::text as truck_id, t.truck_number,
-      ns.lat, ns.lng, ns.precision, ns.arrived_at, ns.departed_at
+      ns.lat, ns.lng, ns.precision, ns.arrived_at, ns.arrived_source, ns.departed_at,
+      ns.anchor_lat, ns.anchor_lng, ns.anchor_at
     from trucks t
     join lateral (
       select s.id::text as stop_id, s.lat, s.lng,
              s.geocode_precision::text as precision,
              to_char(s.arrived_at  at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as arrived_at,
-             to_char(s.departed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as departed_at
+             to_char(s.departed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as departed_at,
+             s.arrived_source::text as arrived_source,
+             s.arrival_anchor_lat as anchor_lat, s.arrival_anchor_lng as anchor_lng,
+             to_char(s.arrival_anchor_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as anchor_at
       from loads l
       join stops s on s.load_id = l.id
       where l.truck_id = t.id
         and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
         and s.departed_at is null
-        and s.lat is not null and s.lng is not null
+        /*
+         * §12.85. Coordinates OR an anchor. An unlocated stop a dispatcher
+         * marked with the truck standing there can still be LEFT, and the
+         * anchor is all that needs.
+         */
+        and ((s.lat is not null and s.lng is not null) or s.arrival_anchor_lat is not null)
         /*
          * §12.56. The "and s.geocode_precision = street" filter USED to sit
          * here, and it is why the gate was invisible.
@@ -186,6 +202,15 @@ export async function sweepArrivals(
       precision: candidate.precision,
       arrivedAt: candidate.arrived_at,
       departedAt: candidate.departed_at,
+      arrivedSource: candidate.arrived_source,
+      anchor:
+        candidate.anchor_lat !== null && candidate.anchor_lng !== null && candidate.anchor_at
+          ? {
+              lat: candidate.anchor_lat,
+              lng: candidate.anchor_lng,
+              recordedAtUtc: candidate.anchor_at,
+            }
+          : null,
     };
 
     const explained = explainNearest(stopGeo, fixes, config);
@@ -240,12 +265,16 @@ export async function sweepArrivals(
 
     const departedAt = detectDeparture(stopGeo, fixes, config);
     if (departedAt !== null) {
-      await write(db, candidate, { departedAt }, config);
+      // Non-null whenever a departure was found: it is what found it.
+      const rule = departureCentre(stopGeo)!;
+      await write(db, candidate, { departedAt, rule }, config);
       departed += 1;
       logger.info('departure detected', {
         truck: candidate.truck_number,
         stopId: candidate.stop_id,
         departedAt,
+        from: rule.rule,
+        arrivedSource: candidate.arrived_source,
       });
     }
   }
@@ -296,10 +325,21 @@ export async function sweepArrivals(
 async function write(
   db: Db,
   candidate: z.infer<typeof CandidateRow>,
-  change: { arrivedAt: string } | { departedAt: string },
+  change:
+    | { arrivedAt: string }
+    | { departedAt: string; rule: NonNullable<ReturnType<typeof departureCentre>> },
   config: ArrivalConfig,
 ): Promise<void> {
   const isArrival = 'arrivedAt' in change;
+  /**
+   * §12.85. A departure that ends a DISPATCHER's arrival says so in its
+   * source. The machine closed something a person opened, and "worker" alone
+   * would read, in history, as though the worker had made both claims.
+   */
+  const source =
+    !isArrival && candidate.arrived_source === 'dispatcher'
+      ? 'departure-after-manual-arrival'
+      : 'worker';
   await db.transaction(async (tx) => {
     await tx
       .update(stops)
@@ -325,11 +365,16 @@ async function write(
       entityId: candidate.stop_id,
       before: isArrival
         ? { arrivedAt: null, arrivedSource: null }
-        : { arrivedAt: candidate.arrived_at, departedAt: null },
+        : {
+            arrivedAt: candidate.arrived_at,
+            arrivedSource: candidate.arrived_source,
+            departedAt: null,
+          },
       after: {
-        ...change,
-        ...(isArrival ? { arrivedSource: 'detected' } : {}),
-        source: 'worker',
+        ...(isArrival
+          ? { arrivedAt: change.arrivedAt, arrivedSource: 'detected' }
+          : { departedAt: change.departedAt }),
+        source,
         /** What convinced it, so the threshold is arguable after the fact. */
         detection: {
           rule: isArrival ? 'arrival' : 'departure',
@@ -337,6 +382,21 @@ async function write(
           confirmSeconds: config.confirmSeconds,
           stopLat: candidate.lat,
           stopLng: candidate.lng,
+          /**
+           * §12.85. Which point the truck was measured leaving. `anchor` is
+           * where it stood when the dispatcher marked it; `stop` is the
+           * geocoded coordinate.
+           */
+          ...(isArrival
+            ? {}
+            : {
+                measuredFrom: change.rule.rule,
+                fromLat: change.rule.lat,
+                fromLng: change.rule.lng,
+                ...(change.rule.rule === 'anchor'
+                  ? { anchorRecordedAt: candidate.anchor_at }
+                  : {}),
+              }),
         },
       },
     });

@@ -1,6 +1,7 @@
-import { eq, sql, type SQL } from 'drizzle-orm';
-import { loads, stopRoutes, stops, trucks } from '@/db/schema';
+import { desc, eq, sql, type SQL } from 'drizzle-orm';
+import { loads, positions, stopRoutes, stops, trucks } from '@/db/schema';
 import { normalizeAddress, type AddressParts } from '@/lib/address';
+import { ANCHOR_MAX_AGE_MINUTES, anchorAtTick, type AnchorDecision } from '@/lib/arrival';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
 import { writeAudit, type AuditEntry, type Db } from './audit';
@@ -197,6 +198,11 @@ export async function saveStopEdit(
               arrivedAt: stops.arrivedAt,
               arrivedSource: stops.arrivedSource,
               departedAt: stops.departedAt,
+              lat: stops.lat,
+              lng: stops.lng,
+              geocodePrecision: stops.geocodePrecision,
+              geocodeAccuracyMiles: stops.geocodeAccuracyMiles,
+              arrivalAnchorAt: stops.arrivalAnchorAt,
             })
             .from(stops)
             .innerJoin(loads, eq(loads.id, stops.loadId))
@@ -313,18 +319,62 @@ export async function saveStopEdit(
      *    between measured and asserted is the whole point. Compared to the
      *    minute because a minute is all the control can express.
      */
+    /**
+     * §12.85. Clearing an arrival clears everything that hangs off it: the
+     * departure (a truck cannot have left somewhere it never reached) and the
+     * anchor (the constraint `stops_arrival_anchor_dispatcher` refuses an
+     * anchor with no dispatcher arrival, so forgetting it fails the save).
+     */
+    const CLEARED = {
+      arrivedAt: null,
+      arrivedSource: null,
+      departedAt: null,
+      arrivalAnchorLat: null,
+      arrivalAnchorLng: null,
+      arrivalAnchorAt: null,
+    } as const;
+
     let arrivalColumns:
       | Record<string, never>
-      | { arrivedAt: null; arrivedSource: null }
-      | { arrivedAt: SQL; arrivedSource: 'dispatcher' } = {};
+      | typeof CLEARED
+      | {
+          arrivedAt: SQL;
+          arrivedSource: 'dispatcher';
+          arrivalAnchorLat: number | null;
+          arrivalAnchorLng: number | null;
+          arrivalAnchorAt: SQL | null;
+        } = {};
     /** What to log: undefined = untouched, null = cleared, string = written. */
     let arrivalWritten: string | null | undefined;
+    /** §12.85. Why this save cleared an arrival nobody unticked. */
+    let arrivalWipedBy: 'address-changed' | undefined;
+    /** §12.85. The anchor decision for an arrival this save wrote. */
+    let anchor: AnchorDecision | undefined;
 
-    if (edit.arrivedAt === null) {
+    /**
+     * §12.85. A new address is a new place. The arrival, its departure and its
+     * anchor all described the OLD one — an anchor there would clear the
+     * arrival the moment the truck drove to the corrected address. So an
+     * address change wipes all three, whatever the arrival fields in the same
+     * save say: the modal re-sends a stored arrival on every save, so a
+     * ticked box is not evidence the dispatcher meant to keep it, and one
+     * rule the modal can state in advance beats one it has to hedge. Marking
+     * the truck arrived at the new address is the next save's job.
+     */
+    const wipedByAddress =
+      existing !== undefined &&
+      addressChanged &&
+      (existing.arrivedAt !== null || existing.departedAt !== null);
+
+    if (wipedByAddress) {
+      arrivalColumns = CLEARED;
+      arrivalWritten = null;
+      arrivalWipedBy = 'address-changed';
+    } else if (edit.arrivedAt === null) {
       // Clearing nothing is not a change, and must not write an audit row
       // saying an arrival was removed.
       if (existing?.arrivedAt) {
-        arrivalColumns = { arrivedAt: null, arrivedSource: null };
+        arrivalColumns = CLEARED;
         arrivalWritten = null;
       }
     } else if (edit.arrivedAt !== undefined) {
@@ -355,11 +405,73 @@ export async function saveStopEdit(
       const minute = (value: Date | null) =>
         value === null ? null : Math.floor(value.getTime() / 60_000);
       if (minute(existing?.arrivedAt ?? null) !== minute(new Date(arrival.utc))) {
+        /**
+         * §12.85. Where the truck is NOW — the newest fix, read inside this
+         * transaction — measured against the stop as it will be after this
+         * save: the new geocode when the address changed, else the stored one.
+         */
+        const [newest] = await tx
+          .select({
+            lat: positions.lat,
+            lng: positions.lng,
+            speedMph: positions.speedMph,
+            recordedAt: positions.recordedAt,
+          })
+          .from(positions)
+          .where(eq(positions.truckId, edit.truckId))
+          .orderBy(desc(positions.recordedAt))
+          .limit(1);
+        // A changed address reaches here only when there was no arrival to
+        // wipe — a first arrival marked in the same save as the correction —
+        // and then the new geocode is the place it has to be measured at.
+        const place = addressChanged
+          ? geocode?.ok
+            ? {
+                lat: geocode.lat,
+                lng: geocode.lng,
+                precision: geocode.precision,
+                accuracyMiles: geocode.accuracyMiles ?? null,
+              }
+            : { lat: null, lng: null, precision: null, accuracyMiles: null }
+          : {
+              lat: existing?.lat ?? null,
+              lng: existing?.lng ?? null,
+              precision: existing?.geocodePrecision ?? null,
+              accuracyMiles: existing?.geocodeAccuracyMiles ?? null,
+            };
+        anchor = anchorAtTick(
+          place,
+          newest
+            ? {
+                lat: newest.lat,
+                lng: newest.lng,
+                speedMph: newest.speedMph,
+                recordedAtUtc: newest.recordedAt.toISOString(),
+              }
+            : null,
+          new Date(),
+        );
         arrivalColumns = {
           arrivedAt: sql`${arrival.utc}::timestamptz`,
           arrivedSource: 'dispatcher',
+          arrivalAnchorLat: anchor.anchor?.lat ?? null,
+          arrivalAnchorLng: anchor.anchor?.lng ?? null,
+          arrivalAnchorAt: anchor.anchor
+            ? sql`${anchor.anchor.recordedAtUtc}::timestamptz`
+            : null,
         };
         arrivalWritten = arrival.utc;
+
+        /**
+         * Said in the modal only where it changes what happens next. A street
+         * stop with no anchor still has the §12.27 rule, measured from its own
+         * coordinate; a coarse or unlocated one has nothing, and the arrival
+         * will sit there until someone unticks it — which is how every
+         * hand-marked arrival behaved before this, and worth knowing at 4am.
+         */
+        if (anchor.anchor === null && place.precision !== 'street') {
+          warnings.push({ field: 'arrivedAt', message: noAnchorWarning(anchor, place.precision) });
+        }
       }
     }
 
@@ -510,6 +622,8 @@ export async function saveStopEdit(
             dispatcherNote: existing.dispatcherNote,
             arrivedAt: existing.arrivedAt?.toISOString() ?? null,
             arrivedSource: existing.arrivedSource,
+            departedAt: existing.departedAt?.toISOString() ?? null,
+            arrivalAnchorAt: existing.arrivalAnchorAt?.toISOString() ?? null,
           }
         : null,
       after: {
@@ -558,6 +672,14 @@ export async function saveStopEdit(
           ? {
               arrivedAt: arrivalWritten,
               arrivedSource: arrivalWritten === null ? null : 'dispatcher',
+              // §12.85. Where the truck stood, or why nothing was recorded.
+              ...(anchor
+                ? anchor.anchor
+                  ? { arrivalAnchor: anchor.anchor }
+                  : { arrivalAnchor: null, anchorRefused: anchor.refused, anchorMiles: anchor.miles }
+                : {}),
+              ...(arrivalWritten === null ? { departedAt: null } : {}),
+              ...(arrivalWipedBy ? { arrivalWipedBy } : {}),
             }
           : {}),
         source: 'edit-modal',
@@ -567,6 +689,36 @@ export async function saveStopEdit(
 
     return { stopId, loadId, appointment, reassignment, warnings };
   });
+}
+
+/**
+ * §12.85. The modal's sentence for a hand-marked arrival that cannot end by
+ * itself. Names the reason, because "the truck is not there" is only true of
+ * one of the four and a dispatcher who knows the truck IS there needs to
+ * know it was the feed that could not say so.
+ */
+export function noAnchorWarning(
+  decision: Extract<AnchorDecision, { anchor: null }>,
+  precision: 'street' | 'block' | 'zip' | null,
+): string {
+  const area =
+    precision === 'zip'
+      ? "this stop's ZIP area"
+      : precision === 'block'
+        ? "this stop's block"
+        : 'this stop';
+  const why =
+    decision.refused === 'no-position'
+      ? 'there is no position for this truck'
+      : decision.refused === 'stale'
+        ? `this truck's last position is more than ${ANCHOR_MAX_AGE_MINUTES} minutes old`
+        : decision.refused === 'moving'
+          ? 'the truck is moving right now'
+          : `the truck is ${decision.miles?.toFixed(1) ?? '?'} mi from ${area}`;
+  return (
+    `Arrival saved, but ${why}, so there is no position to measure leaving from. ` +
+    'This arrival will not clear by itself when the truck leaves.'
+  );
 }
 
 /** The address as stored, for the "did it actually change?" test. */

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { GRAND_FORKS_STOP, TRUCK_143_ARRIVING } from './__fixtures__/truck-143-arrival';
 import {
+  ANCHOR_MAX_AGE_MINUTES,
   ARRIVAL_DEFAULTS,
+  anchorAtTick,
+  departureCentre,
   detectArrival,
   detectDeparture,
   type Fix,
@@ -373,5 +376,203 @@ describe('a facility where trucks park further out (§12.54)', () => {
   it('still needs the two minutes — the radius never held off the red light', () => {
     // In range, stopped, but only ~54 seconds of evidence.
     expect(detectArrival(hazleton(), parkedInYard(10), ARRIVAL_DEFAULTS)).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.85 — the anchor: where the truck stood when a dispatcher marked it
+ * ---------------------------------------------------------------------- */
+
+describe('anchorAtTick', () => {
+  // The real Elwood case: ZIP centroid ±4.4 mi, trucks parked 2.6 mi off it.
+  const zip = { lat: 41.4142, lng: -88.0835, accuracyMiles: 4.4 };
+  const parkedAt = { lat: 41.404141, lng: -88.131737 };
+  const NOW = new Date(T0);
+  const fix = (over: Partial<Fix> = {}): Fix => ({
+    ...parkedAt,
+    speedMph: 0,
+    recordedAtUtc: at(-60),
+    ...over,
+  });
+
+  it('anchors to the truck, not the centroid, when it is parked inside the ZIP area', () => {
+    const decision = anchorAtTick(zip, fix(), NOW);
+    expect(decision.anchor).toEqual({ ...parkedAt, recordedAtUtc: at(-60) });
+  });
+
+  it('accepts a parked truck’s hourly heartbeat, and refuses a gap longer than it', () => {
+    // Measured: a stopped truck's fixes are up to 3,685 s apart.
+    expect(anchorAtTick(zip, fix({ recordedAtUtc: at(-62 * 60) }), NOW).anchor).not.toBeNull();
+    expect(anchorAtTick(zip, fix({ recordedAtUtc: at(-(ANCHOR_MAX_AGE_MINUTES + 1) * 60) }), NOW))
+      .toMatchObject({ anchor: null, refused: 'stale' });
+  });
+
+  it('refuses a truck that is moving — it is not at the stop now, whatever it was', () => {
+    expect(anchorAtTick(zip, fix({ speedMph: 55 }), NOW)).toMatchObject({
+      anchor: null,
+      refused: 'moving',
+    });
+  });
+
+  it('refuses a truck parked outside the stop’s own uncertainty', () => {
+    // 0.2° of latitude is ~13.8 mi — well past 4.4 + 0.35.
+    const decision = anchorAtTick(zip, fix({ lat: zip.lat + 0.2, lng: zip.lng }), NOW);
+    expect(decision).toMatchObject({ anchor: null, refused: 'away' });
+    expect(decision.anchor === null && decision.miles).toBeGreaterThan(13);
+  });
+
+  it('holds a street stop to the arrival radius, which is all the slack it has', () => {
+    const street = { ...STOP, accuracyMiles: null };
+    const halfMile = { lat: STOP.lat + 0.5 / 69, lng: STOP.lng };
+    expect(anchorAtTick(street, fix(halfMile), NOW)).toMatchObject({ refused: 'away' });
+    expect(anchorAtTick(street, fix({ lat: STOP.lat + 0.0019, lng: STOP.lng }), NOW).anchor)
+      .not.toBeNull();
+  });
+
+  it('anchors on an unlocated stop, where there is no area to be outside of', () => {
+    const decision = anchorAtTick({ lat: null, lng: null, accuracyMiles: null }, fix(), NOW);
+    expect(decision.anchor).not.toBeNull();
+  });
+
+  it('refuses when there is no position at all', () => {
+    expect(anchorAtTick(zip, null, NOW)).toMatchObject({ refused: 'no-position' });
+  });
+});
+
+describe('detectDeparture from an anchor (§12.85)', () => {
+  const zipCentre = { lat: 41.4142, lng: -88.0835 };
+  const parkedAt = { lat: 41.404141, lng: -88.131737 };
+  const anchor = { ...parkedAt, recordedAtUtc: at(-600) };
+  const marked = (over: Partial<StopGeo> = {}): StopGeo => ({
+    ...zipCentre,
+    precision: 'zip',
+    arrivedAt: at(-1800),
+    departedAt: null,
+    arrivedSource: 'dispatcher',
+    anchor,
+    ...over,
+  });
+  /** Newest first: `count` fixes driving south from the anchor at 50 mph. */
+  const drivingOff = (count: number): Fix[] =>
+    Array.from({ length: count }, (_, i) => ({
+      lat: parkedAt.lat - ((count - i) * (50 / 3600) * 6) / 69,
+      lng: parkedAt.lng,
+      speedMph: 50,
+      recordedAtUtc: at(-i * 6),
+    }));
+  const parkedFixes = (fromSeconds: number, toSeconds: number): Fix[] => {
+    const out: Fix[] = [];
+    for (let s = toSeconds; s <= fromSeconds; s += 30) {
+      out.push({ ...parkedAt, speedMph: 0, recordedAtUtc: at(-s) });
+    }
+    return out;
+  };
+
+  it('ends a ZIP-centre arrival the stop-coordinate rule could never end', () => {
+    const fixes = [...drivingOff(30), ...parkedFixes(1500, 200)];
+    const left = detectDeparture(marked(), fixes);
+    expect(left).not.toBeNull();
+    // Without the anchor it is the pre-§12.85 behaviour: coarse, never.
+    expect(detectDeparture(marked({ anchor: null }), fixes)).toBeNull();
+    expect(departureCentre(marked())?.rule).toBe('anchor');
+  });
+
+  it('measures from where the truck stood, not from the centroid 2.6 mi away', () => {
+    // Driving TOWARD the centroid still leaves the anchor behind.
+    const toward: Fix[] = Array.from({ length: 30 }, (_, i) => ({
+      lat: parkedAt.lat,
+      lng: parkedAt.lng + ((30 - i) * (50 / 3600) * 6) / 52,
+      speedMph: 50,
+      recordedAtUtc: at(-i * 6),
+    }));
+    expect(detectDeparture(marked(), toward)).not.toBeNull();
+  });
+
+  /**
+   * The two-poll confirmation, broken on purpose: each of these is one piece
+   * of evidence of leaving without the corroboration that makes it true.
+   */
+  describe('does not clear on a GPS jump', () => {
+    const jump = (s: number, speedMph = 62): Fix => ({
+      lat: parkedAt.lat,
+      lng: parkedAt.lng + 6 / 52,
+      speedMph,
+      recordedAtUtc: at(-s),
+    });
+
+    it('a single fix six miles off at highway speed, newest in the window', () => {
+      expect(detectDeparture(marked(), [jump(0), ...parkedFixes(590, 30)])).toBeNull();
+    });
+
+    it('a jump that came back — the newest fix is parked again', () => {
+      expect(
+        detectDeparture(marked(), [...parkedFixes(60, 0), jump(90), ...parkedFixes(590, 120)]),
+      ).toBeNull();
+    });
+
+    it('a burst of fifteen jumped fixes spanning 84 s, under the 120 s confirmation', () => {
+      expect(detectDeparture(marked(), [...drivingOff(15), ...parkedFixes(590, 100)])).toBeNull();
+    });
+  });
+
+  it('ignores everything before the anchor — the approach is not a departure', () => {
+    // Fixes BEFORE the anchor, far away and moving: the drive in.
+    const approach: Fix[] = Array.from({ length: 60 }, (_, i) => ({
+      lat: parkedAt.lat + 0.1,
+      lng: parkedAt.lng,
+      speedMph: 55,
+      recordedAtUtc: at(-700 - i * 6),
+    }));
+    const onlyApproach = [{ ...parkedAt, speedMph: 50, recordedAtUtc: at(0) }, ...approach];
+    expect(detectDeparture(marked(), onlyApproach)).toBeNull();
+  });
+
+  it('never reports leaving before the anchor fix, even when the arrival typed is earlier', () => {
+    const left = detectDeparture(marked(), [...drivingOff(40), ...parkedFixes(590, 250)]);
+    expect(new Date(left!).getTime()).toBeGreaterThan(new Date(anchor.recordedAtUtc).getTime());
+  });
+
+  it('keeps §12.27’s stop rule for a detected arrival, and for an unanchored street one', () => {
+    expect(departureCentre({ ...stop(), arrivedAt: at(-60) })?.rule).toBe('stop');
+    expect(
+      departureCentre({ ...stop(), arrivedAt: at(-60), arrivedSource: 'dispatcher', anchor: null })
+        ?.rule,
+    ).toBe('stop');
+    // A detected arrival never uses an anchor, even if one were present.
+    expect(
+      departureCentre({ ...stop(), arrivedAt: at(-60), arrivedSource: 'detected', anchor })?.rule,
+    ).toBe('stop');
+  });
+});
+
+/**
+ * §12.85, and a defect older than it. `confirmedRun` keeps the LONGEST run in
+ * the window, and the truck's own approach — far away and moving, before it
+ * arrived — is a run. It won, failed the "not before it arrived" test, and
+ * the real departure was reported null until it outgrew the approach.
+ */
+describe('a detected departure is not masked by the approach', () => {
+  it('fires three minutes after leaving, with ten minutes of approach in the window', () => {
+    const approach: Fix[] = Array.from({ length: 100 }, (_, i) => ({
+      lat: STOP.lat + 0.05,
+      lng: STOP.lng,
+      speedMph: 55,
+      recordedAtUtc: at(-1200 - i * 6),
+    }));
+    const dwell: Fix[] = Array.from({ length: 30 }, (_, i) => ({
+      lat: STOP.lat + 0.0019,
+      lng: STOP.lng,
+      speedMph: 0,
+      recordedAtUtc: at(-240 - i * 30),
+    }));
+    const leaving: Fix[] = Array.from({ length: 30 }, (_, i) => ({
+      lat: STOP.lat + 0.05,
+      lng: STOP.lng,
+      speedMph: 45,
+      recordedAtUtc: at(-i * 6),
+    }));
+    const arrivedAt = at(-240 - 29 * 30);
+    const left = detectDeparture(stop({ arrivedAt }), [...leaving, ...dwell, ...approach]);
+    expect(left).toBe(at(-29 * 6));
   });
 });

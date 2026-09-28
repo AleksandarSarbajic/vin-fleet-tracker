@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { assignments, loads, overrides, stopRoutes, stops, auditLog } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
-import { makeDispatcher, makeDriver, makeTruck } from '@/test/fleet';
+import { makeDispatcher, makeDriver, makePosition, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
@@ -1682,5 +1682,322 @@ withDb('the hand-marked arrival (§12.57)', () => {
     // One save moved it; the other said nothing about it. A history that
     // showed it being re-set every time would bury the entry that matters.
     expect(seen.filter((v) => v !== undefined)).toHaveLength(1);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * §12.85 — the anchor a hand-marked arrival is measured from
+ * ---------------------------------------------------------------------- */
+
+withDb('the arrival anchor (§12.85)', () => {
+  // Elwood, IL: the 60421 ZIP centroid, and where trucks 128/143 really parked.
+  const ZIP = { lat: 41.4142, lng: -88.0835, accuracyMiles: 4.4 };
+  const PARKED = { lat: 41.404141, lng: -88.131737 };
+
+  const editFor = (truckId: string, over: Record<string, unknown>) =>
+    StopEdit.parse({
+      stopId: null,
+      truckId,
+      loadNumber: 'ANCHOR-1',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: '26634 S Walton Dr',
+      city: 'Elwood',
+      state: 'IL',
+      zip: '60421',
+      appointment: null,
+      dispatcherNote: null,
+      ...over,
+    });
+
+  /** A wall time an hour ago in the stop's zone, derived rather than pasted. */
+  const anHourAgo = () => {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Chicago',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hourCycle: 'h23',
+      })
+        .formatToParts(new Date(Date.now() - 3_600_000))
+        .map((x) => [x.type, x.value]),
+    );
+    return {
+      date: { y: Number(p['year']), m: Number(p['month']), d: Number(p['day']) },
+      time: { h: Number(p['hour']), min: Number(p['minute']) },
+      tz: 'America/Chicago',
+    };
+  };
+
+  /** A ZIP-centre stop, and the truck's newest fix as `fix` describes it. */
+  const setUp = async (
+    tx: Tx,
+    fix: { lat: number; lng: number; speedMph: number; minutesOld: number } | null,
+    place: { lat: number | null; lng: number | null; precision: 'street' | 'block' | 'zip' | null; accuracy: number | null } = {
+      ...ZIP,
+      precision: 'zip',
+      accuracy: ZIP.accuracyMiles,
+    },
+  ) => {
+    const truck = await makeTruck(tx);
+    const [load] = await tx
+      .insert(loads)
+      .values({ truckId: truck.id, loadNumber: 'ANCHOR-1', status: 'DISPATCHED' })
+      .returning({ id: loads.id });
+    const [stop] = await tx
+      .insert(stops)
+      .values({
+        loadId: load!.id,
+        type: 'DEL',
+        sequence: 1,
+        addressLine: '26634 S Walton Dr',
+        city: 'Elwood',
+        state: 'IL',
+        zip: '60421',
+        lat: place.lat,
+        lng: place.lng,
+        geocodePrecision: place.precision,
+        geocodeAccuracyMiles: place.accuracy,
+        geocodedAt: place.lat === null ? null : new Date(),
+      })
+      .returning({ id: stops.id });
+    if (fix) {
+      await makePosition(tx, truck.id, {
+        lat: fix.lat,
+        lng: fix.lng,
+        speedMph: fix.speedMph,
+        recordedAt: new Date(Date.now() - fix.minutesOld * 60_000),
+      });
+    }
+    return { truckId: truck.id, stopId: stop!.id };
+  };
+
+  const mark = (tx: Tx, truckId: string, stopId: string, over: Record<string, unknown> = {}) =>
+    saveStopEdit(tx as never, {
+      actorUserId: null,
+      dispatchTz: DISPATCH_TZ,
+      edit: editFor(truckId, { stopId, arrivedAt: anHourAgo(), ...over }),
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
+      ),
+    });
+
+  const read = async (tx: Tx, stopId: string) =>
+    (
+      await tx
+        .select({
+          arrivedAt: stops.arrivedAt,
+          arrivedSource: stops.arrivedSource,
+          departedAt: stops.departedAt,
+          lat: stops.arrivalAnchorLat,
+          lng: stops.arrivalAnchorLng,
+          at: stops.arrivalAnchorAt,
+        })
+        .from(stops)
+        .where(eq(stops.id, stopId))
+    )[0]!;
+
+  it('records where the truck stood, and that fix’s own instant', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 3 });
+      const result = await mark(tx, truckId, stopId);
+      return { result, stop: await read(tx, stopId) };
+    });
+    expect(seen.stop.lat).toBeCloseTo(PARKED.lat, 6);
+    expect(seen.stop.lng).toBeCloseTo(PARKED.lng, 6);
+    const ageMin = (Date.now() - seen.stop.at!.getTime()) / 60_000;
+    expect(ageMin).toBeGreaterThan(2.5);
+    expect(ageMin).toBeLessThan(3.5);
+    expect(seen.result.warnings).toEqual([]);
+  });
+
+  it('anchors on a parked truck’s hourly heartbeat', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 55 });
+      await mark(tx, truckId, stopId);
+      return read(tx, stopId);
+    });
+    expect(seen.lat).not.toBeNull();
+  });
+
+  it.each([
+    ['moving', { ...PARKED, speedMph: 55, minutesOld: 1 }, /the truck is moving right now/],
+    ['stale', { ...PARKED, speedMph: 0, minutesOld: 90 }, /more than 70 minutes old/],
+    ['away', { lat: ZIP.lat + 0.2, lng: ZIP.lng, speedMph: 0, minutesOld: 1 }, /1\d\.\d mi from this stop's ZIP area/],
+    ['no position', null, /there is no position for this truck/],
+  ] as const)('saves without an anchor when the truck is %s, and says so', async (_label, fix, reason) => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, fix);
+      const result = await mark(tx, truckId, stopId);
+      return { result, stop: await read(tx, stopId) };
+    });
+    // The arrival itself is saved — refusing the anchor is not refusing the save.
+    expect(seen.stop.arrivedSource).toBe('dispatcher');
+    expect(seen.stop.lat).toBeNull();
+    expect(seen.result.warnings).toHaveLength(1);
+    expect(seen.result.warnings[0]!.field).toBe('arrivedAt');
+    expect(seen.result.warnings[0]!.message).toMatch(reason);
+    expect(seen.result.warnings[0]!.message).toMatch(/will not clear by itself when the truck leaves/);
+  });
+
+  it('does not warn on a street stop, where §12.27’s own rule still ends it', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(
+        tx,
+        { ...PARKED, speedMph: 55, minutesOld: 1 },
+        { ...ZIP, precision: 'street', accuracy: null },
+      );
+      return mark(tx, truckId, stopId);
+    });
+    expect(seen.warnings).toEqual([]);
+  });
+
+  it('writes the anchor, or why there is none, into the audit entry', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const a = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await mark(tx, a.truckId, a.stopId);
+      const b = await setUp(tx, { ...PARKED, speedMph: 55, minutesOld: 1 });
+      await mark(tx, b.truckId, b.stopId);
+      const after = async (id: string) =>
+        (await tx.select({ after: auditLog.after }).from(auditLog).where(eq(auditLog.entityId, id)))
+          .map((r) => r.after as Record<string, unknown>)
+          .find((x) => 'arrivedAt' in x)!;
+      return { a: await after(a.stopId), b: await after(b.stopId) };
+    });
+    expect(seen.a['arrivalAnchor']).toMatchObject({ lat: PARKED.lat, lng: PARKED.lng });
+    expect(seen.b).toMatchObject({ arrivalAnchor: null, anchorRefused: 'moving' });
+  });
+
+  it('is cleared with the arrival — departure and anchor go too', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await mark(tx, truckId, stopId);
+      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
+      await mark(tx, truckId, stopId, { arrivedAt: null });
+      return read(tx, stopId);
+    });
+    expect(seen).toEqual({
+      arrivedAt: null,
+      arrivedSource: null,
+      departedAt: null,
+      lat: null,
+      lng: null,
+      at: null,
+    });
+  });
+
+  it('is wiped by an address change, with the arrival and the departure', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await mark(tx, truckId, stopId);
+      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
+      const before = await read(tx, stopId);
+      // The modal re-sends the stored arrival; the address is what changed.
+      const [{ at }] = (await tx.execute(
+        sql`select arrived_at as at from stops where id = ${stopId}::uuid`,
+      )) as unknown as [{ at: string }];
+      void at;
+      await mark(tx, truckId, stopId, { addressLine: '26700 S Walton Dr' });
+      const audit = (
+        await tx.select({ after: auditLog.after }).from(auditLog).where(eq(auditLog.entityId, stopId))
+      )
+        .map((r) => r.after as Record<string, unknown>)
+        .find((x) => x['arrivalWipedBy'] !== undefined);
+      return { before, after: await read(tx, stopId), audit };
+    });
+    expect(seen.before.lat).not.toBeNull();
+    expect(seen.before.departedAt).not.toBeNull();
+    expect(seen.after).toEqual({
+      arrivedAt: null,
+      arrivedSource: null,
+      departedAt: null,
+      lat: null,
+      lng: null,
+      at: null,
+    });
+    expect(seen.audit).toMatchObject({ arrivedAt: null, departedAt: null, arrivalWipedBy: 'address-changed' });
+  });
+
+  it('wipes a DETECTED arrival on an address change too', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await tx
+        .update(stops)
+        .set({ arrivedAt: new Date(Date.now() - 3_600_000), arrivedSource: 'detected' })
+        .where(eq(stops.id, stopId));
+      const { arrivedAt: _omit, ...noArrival } = editFor(truckId, {
+        stopId,
+        addressLine: '26700 S Walton Dr',
+      });
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: StopEdit.parse(noArrival),
+        fetchImpl: vi.fn(
+          async () =>
+            new Response(JSON.stringify({ result: { addressMatches: [] } }), { status: 200 }),
+        ),
+      });
+      return read(tx, stopId);
+    });
+    expect(seen.arrivedAt).toBeNull();
+    expect(seen.arrivedSource).toBeNull();
+  });
+
+  it('leaves the arrival alone when the address did not change', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await mark(tx, truckId, stopId);
+      // Same address retyped differently, and an unrelated field changed.
+      await mark(tx, truckId, stopId, { addressLine: '26634 s walton dr', loadStatus: 'LOADED' });
+      return read(tx, stopId);
+    });
+    expect(seen.arrivedSource).toBe('dispatcher');
+    expect(seen.lat).not.toBeNull();
+  });
+
+  describe('the database refuses a half-written anchor', () => {
+    const attempt = (set: Record<string, unknown>) =>
+      rolledBack(async (tx) => {
+        const { stopId } = await setUp(tx, null);
+        try {
+          await tx.update(stops).set(set).where(eq(stops.id, stopId));
+          return 'accepted';
+        } catch (error) {
+          return error instanceof Error ? `${error.message} ${String((error as { cause?: unknown }).cause ?? '')}` : String(error);
+        }
+      });
+
+    it('with part of the point missing', async () => {
+      expect(
+        await attempt({
+          arrivedAt: new Date(),
+          arrivedSource: 'dispatcher',
+          arrivalAnchorLat: 41.4,
+        }),
+      ).toContain('stops_arrival_anchor_whole');
+    });
+
+    it('on a detected arrival', async () => {
+      expect(
+        await attempt({
+          arrivedAt: new Date(),
+          arrivedSource: 'detected',
+          arrivalAnchorLat: 41.4,
+          arrivalAnchorLng: -88.1,
+          arrivalAnchorAt: new Date(),
+        }),
+      ).toContain('stops_arrival_anchor_dispatcher');
+    });
+
+    it('on a stop with no arrival at all', async () => {
+      expect(
+        await attempt({ arrivalAnchorLat: 41.4, arrivalAnchorLng: -88.1, arrivalAnchorAt: new Date() }),
+      ).toContain('stops_arrival_anchor_dispatcher');
+    });
   });
 });
