@@ -46,7 +46,7 @@ import { useFleetHealth } from '@/hooks/useFleetHealth';
 import type { FleetHealth } from '@/server/health';
 import { flashView, type RowFlashView } from '@/lib/flash';
 import { can } from '@/lib/roles';
-import { scopeToList, type TruckList } from '@/lib/truck-lists';
+import { outsideList, outsideListText, scopeToList, type TruckList } from '@/lib/truck-lists';
 import { useTruckLists } from '@/hooks/useTruckLists';
 import { TruckListEditor, type EditorMode } from './TruckListEditor';
 import { AddToListModal } from './AddToListModal';
@@ -179,13 +179,17 @@ export function Console({
 
   /**
    * The list scopes the board FIRST; the chips and the search then narrow it
-   * (list AND chips AND search). The chip counts are still taken over `all`,
-   * so they stay fleet-wide.
+   * (list AND chips AND search). The chip counts are taken over `scoped` too
+   * (§12.8), so a chip reading N shows N rows with the list on; what the
+   * list leaves out that matters is said in the header (`outside`).
    */
-  const scoped = useMemo(
-    () => scopeToList(all, activeList ? new Set(activeList.truckIds) : null),
-    [all, activeList],
+  const members = useMemo(
+    () => (activeList ? new Set(activeList.truckIds) : null),
+    [activeList],
   );
+  const scoped = useMemo(() => scopeToList(all, members), [all, members]);
+  /** §12.8. Late and Unassigned trucks the list is not showing, or null. */
+  const outside = useMemo(() => outsideList(all, members), [all, members]);
 
   /**
    * Nothing selected means "active trucks, any status" (§12.9). The filter
@@ -614,7 +618,7 @@ export function Console({
       */}
       <div className="flex h-dvh flex-col overflow-hidden bg-surface-base">
         <ConsoleHeader
-          rows={all}
+          rows={scoped}
           chips={chips}
           onToggleChip={toggleChip}
           onResetChips={resetChips}
@@ -776,6 +780,20 @@ export function Console({
                         className="uppercase tracking-[.1em] text-accent hover:underline"
                       >
                         {listInactiveHidden} inactive hidden
+                      </button>
+                    </>
+                  ) : null}
+                  {outside ? (
+                    <>
+                      {' · '}
+                      <button
+                        type="button"
+                        data-outside-list=""
+                        onClick={() => applyList(null)}
+                        title="The chips count this list only. Click to show the full fleet."
+                        className="uppercase tracking-[.1em] text-text-muted hover:text-text hover:underline"
+                      >
+                        {outsideListText(outside)}
                       </button>
                     </>
                   ) : null}

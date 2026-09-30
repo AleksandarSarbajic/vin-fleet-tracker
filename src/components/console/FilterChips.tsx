@@ -9,10 +9,12 @@ import { isTypingTarget } from '@/lib/keymap';
  * design-spec §9.1, §12.8, §12.9.
  *
  * Multi-select — each chip toggles independently, `0` resets to All, and the
- * digits 1–7 toggle them in the order drawn (§8.1). Counts are FLEET-WIDE,
- * not search-scoped: with a search narrowing the list to 3 of 23, every chip
- * still reads its full count, because what a chip promises is what you would
- * get if you cleared the search.
+ * digits 1–7 toggle them in the order drawn (§8.1). Counts are taken over the
+ * rows in SCOPE — the whole fleet, or the active shared list's trucks
+ * (§12.90) — and are not search-scoped: with a search narrowing the list to
+ * 3 of 23, every chip still reads its full count, because what a chip
+ * promises is what you would get if you cleared the search. A chip's count is
+ * the number of rows it shows when it is the only chip on (§12.8).
  */
 
 export const FILTER_KEYS = [
@@ -118,7 +120,11 @@ export function passesFilters(row: FleetRow, selected: Set<FilterKey>): boolean 
   return statusKeys.some((key) => STATUSES_IN[key].includes(row.status));
 }
 
-/** Fleet-wide counts, computed over every row in the payload (§12.8). */
+/**
+ * The counts over every row in scope (§12.8): the fleet, or the active list's
+ * trucks. Each is what that chip alone would list, so the rows given here must
+ * be the same rows the chips then filter.
+ */
 export function chipCounts(rows: FleetRow[]): Record<FilterKey, number> {
   const counts = Object.fromEntries(FILTER_KEYS.map((k) => [k, 0])) as Record<
     FilterKey,

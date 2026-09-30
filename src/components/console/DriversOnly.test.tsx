@@ -58,7 +58,7 @@ describe('it combines with the other chips by AND', () => {
   });
 });
 
-describe('the counts stay fleet-wide', () => {
+describe('the counts do not follow the other chips', () => {
   it('reads every chip the same whether or not Drivers only is on', () => {
     const counts = chipCounts(ROWS);
     expect(counts.data).toBe(2);

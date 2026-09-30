@@ -766,10 +766,11 @@ checkbox in the edit modal. No separate admin screen.
 **Chips are multi-select** — each toggles independently, `0` resets to All
 (§12.9).
 
-**Counts are fleet-wide, not search-scoped** (§12.8). With a search narrowing
-the list to 3 of 20, every chip still reads its full-fleet count. They show
-what you would get if you cleared the search, which is the point of leaving
-them visible.
+**Counts follow the scope, not the search** (§12.8). They are counted over
+the whole fleet, or over the active shared list's trucks (§12.90). With a
+search narrowing the list to 3 of 20, every chip still reads its unsearched
+count. They show what you would get if you cleared the search, which is the
+point of leaving them visible.
 
 ## 9.2 List panel
 
@@ -1430,11 +1431,51 @@ highlight on the query `kan` correct.
 Driver names still match on **surname only**, in search and in the modal's
 driver picker.
 
-## 12.8 Filter chip counts are fleet-wide
+## 12.8 Filter chip counts follow the active list
 
 Not search-scoped. With a search narrowing the list to 3 of 20, every chip
-still reads its full-fleet count. **They show what you would get if you
+still reads its unsearched count. **They show what you would get if you
 cleared the search**, which is the point of leaving them visible.
+
+**With a shared list active (§12.90), every count is taken over the list's
+trucks.** That covers All, Late, At risk, On time, Arrived, Upcoming, Data
+issues, Inactive and Drivers only. With no list, they are fleet-wide as
+before.
+
+- **The rule: a chip's number is the number of rows it shows when it is the
+  only chip on.** Clearing the search does not clear the list, so a
+  fleet-wide count broke that promise. With "Bob's trucks" (12 active)
+  showing 12 rows, the chips read All 22, Data issues 22, Inactive 12:
+  numbers for trucks that clicking the chip would not show. A dispatcher
+  reads the chip row as "what is in front of me".
+- **Inactive** counts the list's inactive trucks, which is what the chip
+  shows with the list on. It is 0 for a list of active trucks. The header's
+  "N inactive hidden" is the same number.
+- **Drivers only** keeps the Unassigned exemption (§12.78): the count is the
+  list's active trucks that have a driver or are Unassigned.
+- **The counts do not react to the other chips**, as before: with Late on,
+  At risk still reads what At risk alone would show.
+- **Nothing outside the list goes unsaid.** When active trucks outside the
+  list are Late or Unassigned, the list header reads "Outside this list:
+  2 late, 1 unassigned", naming only the parts that are not zero. It is a
+  button that shows the full fleet, keeping the chips. It is absent when
+  there is nothing to report, and it is not shown with no list.
+- **Unchanged:** the search, the keys `0`–`8`, saved views (a view is still
+  chips and a search, not a list), the URL and the map. The Today strip is
+  fleet-wide; it is not a chip.
+
+**Tests:**
+
+- Unit tests hold every count to the rows its chip alone lets through, over
+  the fleet and over a list with inactive, driverless and Unassigned trucks.
+- A whole-console test clicks each chip in turn, with and without a list,
+  and checks that the number of rows (and the footer's "of N") equals the
+  chip's count. It also clicks the outside-list note.
+- An e2e test does the same against the real app on a 22-truck board with
+  12 inactive, where "Bob's trucks" reads All 12, and checks the note.
+- Handing the chips the whole fleet again (`rows={all}`) fails the
+  console test and the e2e test. The e2e then reads All 22, Late 2, Data
+  issues 20, Inactive 12 and Drivers only 11 with the list on.
 
 ## 12.9 Filter chips are multi-select
 
@@ -6049,8 +6090,8 @@ and nothing waiting on one**. Key `8`.
   a driver, plus any Unassigned one.
 - **Never silent.** While on, the list header reads `N without a driver
   hidden`, and clicking it turns the chip off.
-- **Counts stay fleet-wide** (§12.8). The chip's own count is what it alone
-  would list, the promise every chip makes.
+- **Counts follow the scope** (§12.8): the fleet, or the active list. The
+  chip's own count is what it alone would list, the promise every chip makes.
 - **One more chip key**, not a separate switch, so the URL (`chips=drivers`),
   saved views, `0` and the empty states carry it through paths that already
   exist. Off by default; a view saved before it existed reads as off.
@@ -6538,7 +6579,8 @@ A list is a named set of trucks that every dispatcher sees and uses ("Bob's
 trucks"). A personal view (§14 feature 11) is a chip set and a search term
 kept in one browser. The two combine: **the list decides which trucks are in
 scope, then the chips and the search narrow it** (list AND chips AND search).
-The chip counts stay fleet-wide.
+The chip counts follow the list (§12.8), and late or unassigned trucks outside
+it are named in the header.
 
 **Storage** (migration 0022):
 

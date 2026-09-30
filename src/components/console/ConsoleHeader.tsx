@@ -48,7 +48,7 @@ function Clock({
 }
 
 interface Props {
-  /** Every truck, so the chip counts stay fleet-wide (§12.8). */
+  /** Every truck in scope — the fleet, or the active list's — for the chip counts (§12.8). */
   rows: FleetRow[];
   chips: Set<FilterKey>;
   onToggleChip: (key: FilterKey) => void;

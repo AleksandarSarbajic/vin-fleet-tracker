@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { VIEW_NAME_MAX } from '@/lib/views';
+import type { Status } from '@/lib/status';
 
 /**
  * §12.90 — shared truck lists: the rules, pure, so each can be argued with in
@@ -111,6 +112,41 @@ export function scopeToList<T extends { id: string }>(
 ): T[] {
   if (memberIds === null) return [...rows];
   return rows.filter((row) => memberIds.has(row.id));
+}
+
+export interface OutsideList {
+  late: number;
+  unassigned: number;
+}
+
+/**
+ * §12.8. With a list active the chips count only its trucks, so a late or
+ * unassigned truck OUTSIDE it would otherwise be invisible from the board.
+ * These two are counted, over active trucks by status, the way their chips
+ * count them. `null` when there is nothing to say: no list, or nothing late
+ * or unassigned outside it.
+ */
+export function outsideList(
+  rows: readonly { id: string; active: boolean; status: Status }[],
+  memberIds: ReadonlySet<string> | null,
+): OutsideList | null {
+  if (memberIds === null) return null;
+  const outside = { late: 0, unassigned: 0 };
+  for (const row of rows) {
+    if (memberIds.has(row.id) || !row.active) continue;
+    if (row.status === 'LATE') outside.late += 1;
+    if (row.status === 'UNASSIGNED') outside.unassigned += 1;
+  }
+  return outside.late + outside.unassigned === 0 ? null : outside;
+}
+
+/** "Outside this list: 2 late, 1 unassigned" — only the parts that are not zero. */
+export function outsideListText(outside: OutsideList): string {
+  const parts = [
+    outside.late > 0 ? `${outside.late} late` : null,
+    outside.unassigned > 0 ? `${outside.unassigned} unassigned` : null,
+  ].filter((p): p is string => p !== null);
+  return `Outside this list: ${parts.join(', ')}`;
 }
 
 /* ------------------------------- the wire ------------------------------- */
