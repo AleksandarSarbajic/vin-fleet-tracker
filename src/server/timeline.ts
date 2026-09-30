@@ -1,4 +1,11 @@
 import { sql } from 'drizzle-orm';
+import type { LoadStatus } from '@/lib/loads';
+import {
+  groupByLoad,
+  showsOnTimeline,
+  TIMELINE_KEEP_HOURS,
+  timelineStay,
+} from '@/lib/timeline';
 import type { Db, Tx } from './audit';
 
 /**
@@ -32,6 +39,12 @@ import type { Db, Tx } from './audit';
  * 101 done today and what is left" means both halves, and a timeline that
  * dropped the morning's delivery the moment it was marked DELIVERED would
  * answer only the second.
+ *
+ * §12.88. "In the last 24 hours" is `timelineStay` in lib/timeline.ts, and it
+ * is decided THERE, not in this SQL. Clear stop's confirm step tells the
+ * dispatcher what closing a load will do to its place here, with that same
+ * function; a second copy of the rule in SQL is how the sentence and the
+ * screen would come to disagree.
  */
 
 export interface TimelineOverride {
@@ -48,7 +61,7 @@ export interface TimelineStop {
   stopId: string;
   loadId: string;
   loadNumber: string | null;
-  loadStatus: string;
+  loadStatus: LoadStatus;
   loadCreatedAt: string;
   sequence: number;
   type: 'PU' | 'DEL';
@@ -76,7 +89,15 @@ export async function loadTruckTimeline(
   truckId: string,
   now = new Date(),
 ): Promise<TimelineStop[]> {
-  const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+  /**
+   * A PREFILTER, deliberately looser than the rule: twice the window. It only
+   * keeps a truck's years of finished loads out of the result; which of the
+   * survivors show is `timelineStay`'s call, below. Any bound at or above the
+   * window is correct, so this one cannot drift into being the rule.
+   */
+  const candidatesSince = new Date(
+    now.getTime() - 2 * TIMELINE_KEEP_HOURS * 3_600_000,
+  ).toISOString();
 
   const rows = (await db.execute(sql`
     with relevant as (
@@ -88,10 +109,7 @@ export async function loadTruckTimeline(
           or exists (
             select 1 from stops s
             where s.load_id = l.id
-              and greatest(
-                coalesce(s.departed_at, 'epoch'::timestamptz),
-                coalesce(s.arrived_at, 'epoch'::timestamptz)
-              ) >= ${since}
+              and (s.arrived_at >= ${candidatesSince} or s.departed_at >= ${candidatesSince})
           )
         )
     )
@@ -134,11 +152,11 @@ export async function loadTruckTimeline(
   const iso = (value: unknown): string | null =>
     value instanceof Date ? value.toISOString() : ((value as string | null) ?? null);
 
-  return rows.map((r) => ({
+  const stops: TimelineStop[] = rows.map((r) => ({
     stopId: r['stop_id'] as string,
     loadId: r['load_id'] as string,
     loadNumber: (r['load_number'] as string | null) ?? null,
-    loadStatus: r['load_status'] as string,
+    loadStatus: r['load_status'] as LoadStatus,
     loadCreatedAt: iso(r['load_created_at']) ?? '',
     sequence: Number(r['sequence']),
     type: r['type'] as 'PU' | 'DEL',
@@ -162,4 +180,15 @@ export async function loadTruckTimeline(
       clearedAt: iso(o.clearedAt),
     })),
   }));
+
+  const keep = new Set(
+    groupByLoad(stops)
+      .filter((load) =>
+        showsOnTimeline(
+          timelineStay({ status: load.loadStatus, stops: load.stops }, now.getTime()),
+        ),
+      )
+      .map((load) => load.loadId),
+  );
+  return stops.filter((stop) => keep.has(stop.loadId));
 }

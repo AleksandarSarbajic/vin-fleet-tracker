@@ -47,10 +47,19 @@ interface Leg {
   departedAt?: Date | null;
 }
 
-async function addLoad(tx: Tx, truckId: string, legs: Leg[]) {
+async function addLoad(
+  tx: Tx,
+  truckId: string,
+  legs: Leg[],
+  status: 'AVAILABLE' | 'DELIVERED' | 'TONU' | 'CANCELLED' = 'AVAILABLE',
+) {
   const [load] = await tx
     .insert(loads)
-    .values({ truckId, loadNumber: `H-${Math.random().toString(36).slice(2, 9)}` })
+    .values({
+      truckId,
+      loadNumber: `H-${Math.random().toString(36).slice(2, 9)}`,
+      status,
+    })
     .returning({ id: loads.id });
   for (const leg of legs) {
     await tx.insert(stops).values({
@@ -178,6 +187,46 @@ describeDb('the day’s outcome (§14 feature 8)', () => {
         { seq: 1, apptStart: todayAt(9), arrivedAt: todayAt(9), departedAt: todayAt(10) },
       ]);
       expect((await health(tx)).remaining).toBe(0);
+    });
+  });
+
+  /**
+   * §12.88. A closed load is not due anywhere. Before this, a load cancelled
+   * at 06:00 with a stop due at 17:00 sat in "remaining" all day — and so did
+   * one closed through the Status field, which had the same bug long before
+   * Clear stop made closing a one-step act.
+   */
+  it.each(['DELIVERED', 'TONU', 'CANCELLED'] as const)(
+    'does not count a %s load’s unvisited stop as remaining',
+    async (status) => {
+      await rolledBack(async (tx) => {
+        const truck = await makeTruck(tx);
+        await addLoad(tx, truck.id, [{ seq: 1, apptStart: todayAt(17) }], status);
+        await addLoad(tx, truck.id, [{ seq: 1, apptStart: todayAt(18) }]);
+        // The open load's stop, and only that one.
+        expect((await health(tx)).remaining).toBe(1);
+      });
+    },
+  );
+
+  /**
+   * The other half, unchanged on purpose: the truck DID get there today.
+   * Clear stop keeps `arrived_at` for exactly this — wiping it would have
+   * taken the delivery out of the day's count.
+   */
+  it('still counts an arrival today on a load closed since', async () => {
+    await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await addLoad(
+        tx,
+        truck.id,
+        [
+          { seq: 1, apptStart: todayAt(8), arrivedAt: todayAt(7, 40) },
+          { seq: 2, apptStart: todayAt(11), arrivedAt: todayAt(11, 30) },
+        ],
+        'DELIVERED',
+      );
+      expect(await health(tx)).toMatchObject({ onTime: 1, late: 1, remaining: 0 });
     });
   });
 

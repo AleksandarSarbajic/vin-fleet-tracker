@@ -7,6 +7,7 @@ import { timeInZone } from '@/lib/format';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL, type OverrideReason, type Status } from '@/lib/status';
 import {
+  closedLoadLabel,
   currentStopId,
   groupByLoad,
   minutesLate,
@@ -51,12 +52,18 @@ const STATE_DOT: Record<StopState, string> = {
   here: 'bg-accent',
   // Hollow: nothing has happened here yet, and a filled dot would say it had.
   ahead: 'border border-status-neutral-bd',
+  // §12.88. Filled — the truck was here — but grey: the load is over, and
+  // neither the live accent nor the on-time green is a claim it can make.
+  closed: 'bg-status-neutral-fg',
+  unvisited: 'border border-dashed border-status-neutral-bd',
 };
 
 const STATE_WORD: Record<StopState, string> = {
   done: 'Departed',
   here: 'On site',
   ahead: 'Ahead',
+  closed: 'Closed',
+  unvisited: 'Not visited',
 };
 
 export function TruckTimeline({
@@ -262,6 +269,18 @@ function StopCard({
           {state === 'ahead' && !stop.dispatcherNote && stop.overrides.length === 0 ? (
             <Line label="Status">
               <span className="text-text-mutedOnOverlay">{STATE_WORD[state]}</span>
+            </Line>
+          ) : null}
+
+          {/* §12.88. Always said on a closed load, note or no note: it is the
+              one line that stops the times above reading as live. */}
+          {state === 'closed' || state === 'unvisited' ? (
+            <Line label="Status">
+              <span className="text-text-mutedOnOverlay" data-closed-stop>
+                {state === 'closed'
+                  ? (closedLoadLabel(stop.loadStatus) ?? STATE_WORD.closed)
+                  : STATE_WORD.unvisited}
+              </span>
             </Line>
           ) : null}
         </dl>

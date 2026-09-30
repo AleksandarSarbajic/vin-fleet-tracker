@@ -189,9 +189,9 @@ describe('the Active checkbox actually flips the flag (§12.14, §12.53)', () =>
   };
 
   const posted = (url: string) =>
-    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.filter(
-      ([called]) => called === url,
-    );
+    (
+      globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }
+    ).mock.calls.filter(([called]) => called === url);
 
   it('starts from the truck, not from `true`', async () => {
     /**
@@ -276,9 +276,9 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
   };
 
   const posted = (url: string) =>
-    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.filter(
-      ([called]) => called === url,
-    );
+    (
+      globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }
+    ).mock.calls.filter(([called]) => called === url);
 
   it('opens with the stored arrival, not with an empty box', async () => {
     await render(ARRIVED);
@@ -370,5 +370,227 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
       setValue(fieldLabelled('City'), 'Joliet');
     });
     expect(container!.querySelector('[data-arrival-address-note]')).toBeNull();
+  });
+});
+
+/**
+ * §12.88 — Clear stop, through the modal's own markup and keyboard handling.
+ * The server half is `server/clear-stop.test.ts`; this is the part a
+ * dispatcher touches: where the button is, what it refuses, where focus goes,
+ * and what Enter and Esc do.
+ */
+describe('Clear stop (§12.88)', () => {
+  const TRUCK = ROW.id;
+  const LOAD_A = '33333333-3333-4333-8333-333333333333';
+  const LOAD_B = '33333333-3333-4333-8333-3333333333bb';
+
+  const timelineStop = (over: Record<string, unknown>) => ({
+    stopId: '22222222-2222-4222-8222-222222222222',
+    loadId: LOAD_A,
+    loadNumber: 'LD-4417',
+    loadStatus: 'DISPATCHED',
+    loadCreatedAt: '2026-09-18T06:00:00.000Z',
+    sequence: 1,
+    type: 'DEL',
+    addressLine: '1 Broadway',
+    city: 'Chicago',
+    state: 'IL',
+    zip: '60601',
+    apptStartUtc: null,
+    apptEndUtc: null,
+    apptTz: 'America/Chicago',
+    apptType: 'APPT',
+    arrivedAt: null,
+    arrivedSource: null,
+    departedAt: null,
+    dispatcherNote: null,
+    noteAt: null,
+    overrides: [],
+    ...over,
+  });
+
+  /** Routes the two requests the confirm step makes. */
+  const serve = (timeline: unknown[]) => {
+    globalThis.fetch = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        String(url).startsWith('/api/timeline') ? { stops: timeline } : { ok: true },
+    })) as unknown as typeof fetch;
+  };
+
+  const clears = () =>
+    (
+      globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }
+    ).mock.calls
+      .filter(([url]) => url === '/api/stops/clear')
+      .map(([, init]) => JSON.parse(String(init.body)) as Record<string, string>);
+
+  const renderWith = async (row = ROW, onClose = vi.fn()) => {
+    await act(async () => {
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(EditStopModal, {
+            row,
+            drivers: [],
+            role: 'admin' as const,
+            dispatchTz: 'America/Chicago',
+            onClose,
+          }),
+        ),
+      );
+    });
+    return onClose;
+  };
+
+  const open = async () => {
+    await act(async () => {
+      buttonLabelled('Clear stop').click();
+    });
+    // The fresh timeline read resolves.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  };
+
+  const press = async (key: string, target: EventTarget = document) => {
+    await act(async () => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  };
+
+  const confirmStep = () =>
+    container!.querySelector('[role="dialog"][aria-label="Confirm clear stop"]');
+
+  it('sits bottom-left, before Cancel and Save, and opens nothing on a truck with no open load', async () => {
+    serve([]);
+    await renderWith(fleetRow({ openLoadCount: 0 }));
+    const clear = buttonLabelled('Clear stop');
+    expect(clear.disabled).toBe(true);
+    expect(clear.title).toBe('This truck has no open load to close.');
+    const footerButtons = Array.from(
+      clear.closest('.border-t')!.querySelectorAll('button'),
+    ).map((b) => b.textContent?.trim());
+    expect(footerButtons).toEqual(['Clear stop', 'Cancel', 'Save']);
+  });
+
+  it('opens a confirm step with focus on the confirm button, not a field', async () => {
+    serve([timelineStop({})]);
+    await renderWith();
+    await open();
+    expect(confirmStep()).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('Close load');
+    expect(confirmStep()!.textContent).toContain('Load LD-4417 is closed as Delivered.');
+    expect(confirmStep()!.textContent).toContain(
+      'The arrival and departure times are kept as the record.',
+    );
+  });
+
+  it('Esc backs out of the confirm step without closing the modal', async () => {
+    serve([timelineStop({})]);
+    const onClose = await renderWith();
+    await open();
+    await press('Escape');
+    expect(confirmStep()).toBeNull();
+    expect(
+      container!.querySelector('[aria-label^="Edit stop for truck"]'),
+    ).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(clears()).toEqual([]);
+  });
+
+  it('Enter confirms: closes that load as Delivered and closes the modal', async () => {
+    serve([timelineStop({})]);
+    const onClose = await renderWith();
+    await open();
+    await press('Enter');
+    expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_A, status: 'DELIVERED' }]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('on a "+1 load" truck, closes nothing until a load is chosen', async () => {
+    serve([
+      timelineStop({}),
+      timelineStop({
+        stopId: '22222222-2222-4222-8222-2222222222bb',
+        loadId: LOAD_B,
+        loadNumber: 'LD-9001',
+        city: 'Fargo',
+        state: 'ND',
+      }),
+    ]);
+    const onClose = await renderWith(fleetRow({ openLoadCount: 2 }));
+    await open();
+
+    const radios = Array.from(
+      confirmStep()!.querySelectorAll<HTMLInputElement>('input[name="clear-load"]'),
+    );
+    expect(radios).toHaveLength(2);
+    expect(radios.some((r) => r.checked)).toBe(false);
+    expect(confirmStep()!.textContent).toContain('LD-9001· next stop Fargo, ND');
+
+    // Enter with nothing chosen: nothing is sent, and it says why.
+    await press('Enter');
+    expect(clears()).toEqual([]);
+    expect(confirmStep()!.querySelector('[role="alert"]')?.textContent).toBe(
+      'Choose which load to close.',
+    );
+
+    await act(async () => {
+      radios[1]!.click();
+    });
+    await press('Enter', radios[1]!);
+    expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_B, status: 'DELIVERED' }]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Found by the e2e run: reopened, the step re-reads the truck's loads, and
+   * an Enter pressed in that moment was dropped without a word. It must close
+   * nothing — the dispatcher has not seen what closing does yet — and say so.
+   */
+  it('says so when Enter comes before the loads are read, and closes nothing', async () => {
+    let land: (value: unknown) => void = () => {};
+    globalThis.fetch = vi.fn(async (url: string) =>
+      String(url).startsWith('/api/timeline')
+        ? new Promise((resolve) => {
+            land = resolve;
+          })
+        : { ok: true, status: 200, json: async () => ({ ok: true }) },
+    ) as unknown as typeof fetch;
+    const onClose = await renderWith();
+    await open();
+    await press('Enter');
+    expect(clears()).toEqual([]);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(confirmStep()!.querySelector('[role="alert"]')?.textContent).toBe(
+      "Still reading this truck's loads. Nothing was closed.",
+    );
+
+    await act(async () => {
+      land({ ok: true, status: 200, json: async () => ({ stops: [timelineStop({})] }) });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(confirmStep()!.querySelector('[role="alert"]')).toBeNull();
+    await press('Enter');
+    expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_A, status: 'DELIVERED' }]);
+  });
+
+  it('sends Cancelled when that is chosen', async () => {
+    serve([timelineStop({})]);
+    await renderWith();
+    await open();
+    const cancelled = Array.from(
+      confirmStep()!.querySelectorAll<HTMLInputElement>('input[name="clear-status"]'),
+    ).find((r) => r.value === 'CANCELLED')!;
+    await act(async () => {
+      cancelled.click();
+    });
+    expect(confirmStep()!.textContent).toContain('Load LD-4417 is closed as Cancelled.');
+    await press('Enter', cancelled);
+    expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_A, status: 'CANCELLED' }]);
   });
 });

@@ -23,6 +23,7 @@ import {
 import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
+import { ClearStopConfirm } from './ClearStopConfirm';
 import { useFocusTrap } from './useModalChrome';
 
 /**
@@ -198,6 +199,8 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  /** §12.88. Clear stop's confirm step is open. */
+  const [clearing, setClearing] = useState(false);
 
   const toEdit = useCallback(
     (f: typeof initialForm) => {
@@ -566,6 +569,9 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   /** Esc raises the discard confirm; it never closes silently (§9.9). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // §12.88. The confirm step owns Enter and Esc while it is open: Esc
+      // backs out of it, never out of this modal.
+      if (clearing) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -579,7 +585,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [dirty.length, onClose, preview, save]);
+  }, [clearing, dirty.length, onClose, preview, save]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -590,6 +596,19 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   }, [drivers]);
 
   const truckName = row.truckNumber === null ? row.samsaraName : String(row.truckNumber);
+
+  /**
+   * §12.88. Keyed off the COUNT, not off `stop`: a truck whose only open load
+   * has every stop departed opens this modal in its new-load state and still
+   * has a load to close — nine of the eighteen open loads looked like that
+   * when this was written.
+   */
+  const canClear = mayEdit && row.openLoadCount > 0 && !saving;
+  const clearTitle = !mayEdit
+    ? lockedReason
+    : row.openLoadCount === 0
+      ? 'This truck has no open load to close.'
+      : 'Close a finished load in one step.';
   const currentDriverName = drivers.find((d) => d.id === initialDriverId)?.name ?? null;
 
   return (
@@ -887,15 +906,28 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             ) : null}
           </div>
 
-          <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-            <span className="text-[11.5px] font-medium text-status-risk-fg">
-              {driverChanged
-                ? `Reassigns truck ${truckName} from ${currentDriverName ?? 'Unassigned'} to ${
-                    drivers.find((d) => d.id === driverId)?.name ?? 'Unassigned'
-                  }.`
-                : ''}
-            </span>
-            <div className="flex gap-2.5">
+          <div className="flex items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              {/* §12.88. Bottom-left, away from Save and Cancel. */}
+              <button
+                type="button"
+                data-clear-stop
+                disabled={!canClear}
+                title={clearTitle}
+                onClick={() => setClearing(true)}
+                className="h-10 shrink-0 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45 disabled:hover:bg-transparent"
+              >
+                Clear stop
+              </button>
+              <span className="text-[11.5px] font-medium text-status-risk-fg">
+                {driverChanged
+                  ? `Reassigns truck ${truckName} from ${currentDriverName ?? 'Unassigned'} to ${
+                      drivers.find((d) => d.id === driverId)?.name ?? 'Unassigned'
+                    }.`
+                  : ''}
+              </span>
+            </div>
+            <div className="flex shrink-0 gap-2.5">
               <button
                 type="button"
                 onClick={() => (dirty.length > 0 ? setDiscarding(true) : onClose())}
@@ -923,6 +955,17 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           busy={saving}
           onCancel={() => setPreview(null)}
           onConfirm={() => void send(preview.token)}
+        />
+      ) : null}
+
+      {clearing ? (
+        <ClearStopConfirm
+          truckId={row.id}
+          truckName={truckName}
+          dispatchTz={dispatchTz}
+          unsaved={dirty}
+          onBack={() => setClearing(false)}
+          onCleared={onClose}
         />
       ) : null}
 

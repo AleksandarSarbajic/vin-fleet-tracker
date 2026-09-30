@@ -13,7 +13,15 @@ import type { TimelineStop } from '@/server/timeline';
  * in the middle of reading, for a change that arrives every twenty minutes at
  * best.
  */
-export function useTruckTimeline(truckId: string | null) {
+export function useTruckTimeline(
+  truckId: string | null,
+  /**
+   * §12.88. Clear stop's confirm step states what closing a load does, from
+   * these rows. A minute-old answer could name a load someone else already
+   * closed, so it asks for its own read on open rather than reusing the cache.
+   */
+  options: { fresh?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['timeline', truckId],
     queryFn: async (): Promise<TimelineStop[]> => {
@@ -26,6 +34,7 @@ export function useTruckTimeline(truckId: string | null) {
     enabled: truckId !== null,
     // Long enough that reopening the same truck in one sitting is instant,
     // short enough that it is not yesterday's answer.
-    staleTime: 60_000,
+    staleTime: options.fresh ? 0 : 60_000,
+    refetchOnMount: options.fresh ? 'always' : true,
   });
 }

@@ -90,8 +90,11 @@ export async function loadFleetHealth(
             then 'on_time'
           else 'late'
         end
+        -- §12.88. A closed load is not due anywhere. Only "remaining" asks:
+        -- an arrival on a load closed since is still something done today.
         when s.arrived_at is null
              and s.departed_at is null
+             and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
              and s.appointment_start_utc is not null
              and (s.appointment_start_utc at time zone ${dispatchTz})::date = (select d from day)
         then 'remaining'

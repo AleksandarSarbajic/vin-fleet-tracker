@@ -4,6 +4,7 @@ import { normalizeAddress, type AddressParts } from '@/lib/address';
 import { ANCHOR_MAX_AGE_MINUTES, anchorAtTick, type AnchorDecision } from '@/lib/arrival';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
+import { ARRIVAL_CLEARED } from './arrival-columns';
 import { writeAudit, type AuditEntry, type Db } from './audit';
 import { fallbackWarning, geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
 import { clearOverride, setOverride } from './override';
@@ -321,18 +322,10 @@ export async function saveStopEdit(
      */
     /**
      * §12.85. Clearing an arrival clears everything that hangs off it: the
-     * departure (a truck cannot have left somewhere it never reached) and the
-     * anchor (the constraint `stops_arrival_anchor_dispatcher` refuses an
-     * anchor with no dispatcher arrival, so forgetting it fails the save).
+     * departure and the anchor. The set is shared (§12.88) — see
+     * `arrival-columns.ts`.
      */
-    const CLEARED = {
-      arrivedAt: null,
-      arrivedSource: null,
-      departedAt: null,
-      arrivalAnchorLat: null,
-      arrivalAnchorLng: null,
-      arrivalAnchorAt: null,
-    } as const;
+    const CLEARED = ARRIVAL_CLEARED;
 
     let arrivalColumns:
       | Record<string, never>

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  closedLoadLabel,
   currentStopId,
   groupByLoad,
   minutesLate,
   overrideState,
   stopPlace,
   stopState,
+  timelineStay,
+  TIMELINE_KEEP_HOURS,
 } from './timeline';
 import type { TimelineOverride, TimelineStop } from '@/server/timeline';
 
@@ -68,16 +71,58 @@ describe('where a stop is in its own life', () => {
   });
 
   /**
-   * Read off the timestamps, never off `loads.status`. A load marked
+   * Read off the timestamps, never off an OPEN `loads.status`. A load marked
    * AT_RECEIVER can still have its second of three stops ahead of it.
    */
-  it('ignores the load status', () => {
+  it('ignores the status of an open load', () => {
     expect(stopState(stop({ loadStatus: 'AT_RECEIVER' }))).toBe('ahead');
     expect(
       stopState(
         stop({ loadStatus: 'AVAILABLE', departedAt: '2026-09-23T15:00:00.000Z' }),
       ),
     ).toBe('done');
+  });
+});
+
+/**
+ * §12.88. A closed load — Delivered, TONU, Cancelled — is the exception: the
+ * work is over, and the timestamps alone made a delivered stop still at the
+ * dock read `here`, with the live dot.
+ */
+describe('a stop on a closed load', () => {
+  const arrived = '2026-09-23T13:50:00.000Z';
+
+  it('is never on site: arrived and not departed on a delivered load is closed', () => {
+    expect(stopState(stop({ loadStatus: 'DELIVERED', arrivedAt: arrived }))).toBe(
+      'closed',
+    );
+  });
+
+  it('is closed after a departure too, and on every closed status', () => {
+    for (const loadStatus of ['DELIVERED', 'TONU', 'CANCELLED'] as const) {
+      expect(stopState(stop({ loadStatus, arrivedAt: arrived }))).toBe('closed');
+      expect(
+        stopState(
+          stop({
+            loadStatus,
+            arrivedAt: arrived,
+            departedAt: '2026-09-23T15:00:00.000Z',
+          }),
+        ),
+      ).toBe('closed');
+    }
+  });
+
+  it('is not visited when the truck never got there, rather than ahead', () => {
+    expect(stopState(stop({ loadStatus: 'CANCELLED' }))).toBe('unvisited');
+    expect(stopState(stop({ loadStatus: 'DELIVERED' }))).toBe('unvisited');
+  });
+
+  it('carries the load’s own word, TONU included', () => {
+    expect(closedLoadLabel('DELIVERED')).toBe('Load delivered');
+    expect(closedLoadLabel('CANCELLED')).toBe('Load cancelled');
+    expect(closedLoadLabel('TONU')).toBe('Load TONU');
+    expect(closedLoadLabel('AT_RECEIVER')).toBeNull();
   });
 });
 
@@ -189,6 +234,30 @@ describe('the now line', () => {
     ).toBe('b');
   });
 
+  /**
+   * §12.88. The "+1 load" truck: the load closed first was also created
+   * first, so its undeparted receiver stop came first in the list and took the
+   * line — pointing away from the load the truck is actually running.
+   */
+  it('lands only on an open load, never on a closed one listed before it', () => {
+    expect(
+      currentStopId([
+        stop({
+          stopId: 'closed',
+          loadId: 'l1',
+          loadStatus: 'DELIVERED',
+          arrivedAt: '2026-09-23T13:50:00.000Z',
+        }),
+        stop({ stopId: 'unvisited', loadId: 'l1', loadStatus: 'DELIVERED', sequence: 2 }),
+        stop({ stopId: 'open', loadId: 'l2', loadStatus: 'DISPATCHED' }),
+      ]),
+    ).toBe('open');
+  });
+
+  it('is not drawn when the only undeparted stops are on closed loads', () => {
+    expect(currentStopId([stop({ stopId: 'a', loadStatus: 'CANCELLED' })])).toBeNull();
+  });
+
   /** Drawing one under the last row would suggest something is still due. */
   it('is not drawn at all when everything is done', () => {
     expect(
@@ -210,5 +279,77 @@ describe('naming the place', () => {
     expect(stopPlace(stop({ city: null, state: null, addressLine: null }))).toBe(
       'Address not given yet',
     );
+  });
+});
+
+/**
+ * §12.88. The ONE rule for how long a load stays on the timeline — the query
+ * filters with it and Clear stop's confirm step words its sentence from it.
+ */
+describe('how long a load stays on the timeline', () => {
+  const NOW = Date.parse('2026-09-23T18:00:00.000Z');
+  const ago = (hours: number) => new Date(NOW - hours * 3_600_000).toISOString();
+  const leg = (arrivedAt: string | null, departedAt: string | null = null) => ({
+    arrivedAt,
+    departedAt,
+  });
+
+  it('keeps an open load whatever its times', () => {
+    expect(timelineStay({ status: 'DISPATCHED', stops: [leg(ago(90))] }, NOW)).toEqual({
+      kind: 'open',
+    });
+  });
+
+  it('keeps a closed load until 24 hours after its last arrival', () => {
+    expect(timelineStay({ status: 'DELIVERED', stops: [leg(ago(2))] }, NOW)).toEqual({
+      kind: 'until',
+      untilUtc: new Date(NOW + (TIMELINE_KEEP_HOURS - 2) * 3_600_000).toISOString(),
+      after: 'arrival',
+    });
+  });
+
+  it('measures from the latest event on any stop, a departure included', () => {
+    const stay = timelineStay(
+      { status: 'DELIVERED', stops: [leg(ago(30), ago(29)), leg(ago(5), ago(3))] },
+      NOW,
+    );
+    expect(stay).toEqual({
+      kind: 'until',
+      untilUtc: new Date(NOW + (TIMELINE_KEEP_HOURS - 3) * 3_600_000).toISOString(),
+      after: 'departure',
+    });
+  });
+
+  it('drops a load whose last arrival was 30 hours ago', () => {
+    expect(timelineStay({ status: 'DELIVERED', stops: [leg(ago(30))] }, NOW)).toEqual({
+      kind: 'gone',
+      reason: 'stale',
+      lastUtc: ago(30),
+      after: 'arrival',
+    });
+  });
+
+  it('drops a closed load none of whose stops was reached', () => {
+    expect(
+      timelineStay({ status: 'CANCELLED', stops: [leg(null), leg(null)] }, NOW),
+    ).toEqual({
+      kind: 'gone',
+      reason: 'never-reached',
+    });
+  });
+
+  it('still shows it at exactly 24 hours, as the query did with >=', () => {
+    expect(timelineStay({ status: 'DELIVERED', stops: [leg(ago(24))] }, NOW).kind).toBe(
+      'until',
+    );
+    expect(
+      timelineStay(
+        {
+          status: 'DELIVERED',
+          stops: [leg(new Date(NOW - 24 * 3_600_000 - 1).toISOString())],
+        },
+        NOW,
+      ).kind,
+    ).toBe('gone');
   });
 });

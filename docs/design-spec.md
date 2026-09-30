@@ -6334,6 +6334,141 @@ and flushed after 5 s (`SpanBuffer`), so a trace can arrive in pieces; on
 Vercel the question is whether the function's final flush always happens.
 The 24-hour production data answers it.
 
+## 12.88 Clear stop closes a finished load in one act
+
+The Edit Stop modal has a **Clear stop** button, bottom-left and away from
+Save and Cancel, disabled when the truck has no open load. The count decides
+that, not whether the modal shows a stop. A load whose stops have all departed
+opens the modal in its new-load state and still needs closing: 9 of the 18
+open loads in production looked like that on 2026-09-30.
+
+**The confirm step** (`ClearStopConfirm.tsx`) reads the truck's timeline
+fresh on open, because those rows carry every stop of every open load and the
+fleet row carries one:
+
+- **One open load.** It is named and selected.
+- **Several open loads (the "+1 load" case).** Each is listed by load number
+  and next-stop city, and **none is selected**. The request schema requires a
+  `loadId`, so the server cannot pick one either. Enter with nothing chosen
+  says "Choose which load to close." and sends nothing.
+- **Status.** Delivered (the default) or Cancelled. TONU stays in the Status
+  field.
+- **What it says** (`confirmLines`, pure and tested):
+  - the load and its status;
+  - that all its stops close with it, when it has more than one;
+  - that the arrival and departure times are kept as the record;
+  - the timeline outcome (below);
+  - what the row shows afterwards (no next stop, or the other open load
+    named);
+  - what is not changed;
+  - any unsaved edits in the form that closing discards.
+- **Keyboard.** Focus starts on **Close load**. It is `aria-disabled`, never
+  `disabled`, so it can hold focus before a choice is made. Enter confirms.
+  Esc backs out to the modal and never closes the modal.
+- **Enter before the fresh read lands.** Found by the e2e run on a reopened
+  step: Enter was dropped silently. It now says "Still reading this truck's
+  loads. Nothing was closed."
+
+**The write** (`server/clear-stop.ts`, `POST /api/stops/clear`,
+dispatcher-only) is one transaction:
+
+1. Lock the load, and refuse if it is gone, on another truck, or already
+   closed.
+2. Set the chosen status.
+3. Clear the **anchor only** on its stops (§12.85).
+4. Write one `audit_log` row on the load. It carries
+   `source: "operator-clear-stop"`, the chosen status, the anchors cleared,
+   and the before state of every stop: sequence, type, place, arrival, source,
+   departure and anchor.
+
+It does not touch:
+
+- `arrived_at`, `departed_at` or `arrived_source`: they are the delivery
+  record, shown by the timeline and counted by "done today";
+- the address, the coordinates or `geocode_cache`: nothing is re-geocoded,
+  and §12.76's refusal for `4551 37th St N` stays cached as it was;
+- the driver assignment, `trucks.active`, or earlier audit rows.
+
+The row reads "no load" because of the status alone: every next-stop query
+skips a closed load.
+
+**One copy of the clearing columns.** `server/arrival-columns.ts` holds
+`ANCHOR_CLEARED` (used by Clear stop) and `ARRIVAL_CLEARED` (used by the
+untick and address-change paths in `stop-edit.ts`). A test fails if any other
+app file writes an anchor column to null.
+
+**Three readers were wrong for a closed load that keeps its times.** Each is
+fixed here, and **each fix applies equally to a load closed through the
+Status field**, which had the same bugs before Clear stop existed:
+
+- **"Remaining" in the health strip counted a closed load's unvisited stop.**
+  A load cancelled with a stop due today stayed "due" all day. Only
+  `remaining` now skips Delivered, TONU and Cancelled. On-time and late are
+  unchanged: an arrival today on a load closed since still counts as done.
+- **The timeline showed a delivered stop still at the dock as "here", with the
+  live dot.** It showed an unvisited stop on a cancelled load as "ahead".
+  - On a closed load, a stop the truck reached is now `closed`: a grey filled
+    dot and "Load delivered", "Load cancelled" or "Load TONU".
+  - A stop it never reached is `unvisited` ("Not visited").
+  - Only the three closed statuses do this. "At receiver" and the rest keep
+    the timestamp-only rule.
+- **"← now" went on the first undeparted stop of any load.** On a "+1 load"
+  truck that could be the closed load, created first. It now goes only on
+  open loads.
+
+**How long a closed load stays on the timeline is one function.**
+`timelineStay` (lib/timeline.ts) decides it:
+
+- an open load always shows;
+- a closed load shows until 24 hours after the latest arrival or departure on
+  any of its stops, inclusive at exactly 24 hours;
+- a closed load nobody reached does not show.
+
+The timeline query used to hold this rule in SQL. It now fetches with a
+deliberately looser prefilter (48 hours) and filters with `timelineStay`.
+
+The confirm step words its sentence from the same function, evaluated for the
+load as it will be once closed:
+
+- "It stays on the timeline until Thu 08:24 CDT, 24 hours after its last
+  arrival."
+- "It leaves the timeline now: its last arrival was more than 24 hours ago."
+- "It leaves the timeline now: none of its stops was reached."
+
+The window runs from what the truck did, not from when someone closed the
+load. Nothing records the closing instant, and the migration that would was
+declined.
+
+**Tests:**
+
+- **Unit.** The rules, including the multi-load choice and each sentence;
+  every stop state; the "← now" rule; `timelineStay` at its boundaries.
+- **Database.** The single-stop, multi-stop and "+1 load" clears; the
+  refusals; the audit row's source and before state.
+- **Agreement.** The confirm sentence against the real timeline query, before
+  and after a real clear, for loads reached 2 h ago, reached 30 h ago and
+  never reached.
+- **The ZIP-centre case.** A hand-marked arrival on a ZIP-centre stop is
+  anchored, departed by the sweep, then cleared: the anchor goes, and the
+  arrival and departure stay.
+- **Broken on purpose.** A trigger raises after the load has closed. The
+  exception carries the load's status as the failing statement saw it
+  ("DELIVERED"), so the order is proven rather than assumed. It was run on
+  the anchor update and on the audit insert: the load, its stops and its
+  arrival are unchanged, and no audit row exists. With `db.transaction`
+  removed, the test fails with "the failure escaped clearStop and aborted its
+  caller".
+- **Component.** Placement, focus, Esc, Enter, the "+1" choice, Cancelled,
+  and Enter before the read lands.
+- **End to end** (`e2e/clear-stop.spec.ts`). The real modal: the clear, the
+  row, a reload, the timeline, and the counter.
+- **Each fix mutated.** Reverting the counter, stop-state and "← now" fixes
+  each turns its test red. So does making the timeline keep its own rule.
+
+Seen along the way, not changed: a truck that was already selected before a
+reload does not fly the map to itself when its row is clicked again. Its popup
+can then open clipped at the map's edge, under the basemap switcher.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
