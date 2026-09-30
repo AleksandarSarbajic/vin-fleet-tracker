@@ -4,8 +4,8 @@ import { IDS, connect, resetWorld } from './fixtures';
 /**
  * The satellite toggle (§12.70).
  *
- * One truck, so the map fits to it and its marker sits at the centre of the
- * canvas. "Is the marker drawn?" is then asked BEHAVIOURALLY — click the
+ * One truck, so the map fits to it and its marker starts at the centre of
+ * the canvas (and stays within a nudge of it — see `markerAt`). "Is the marker drawn?" is then asked BEHAVIOURALLY — click the
  * centre, and see whether that truck becomes the selection — rather than by
  * guessing at pixel colours under a city label. A symbol whose image is
  * missing is not placed, and a symbol that is not placed cannot be clicked,
@@ -24,21 +24,58 @@ async function soloTruck(): Promise<void> {
 
 const row = (page: Page) => page.locator(`[data-row-id="${IDS.truckAtZipStop}"]`);
 
-async function clickMapCentre(page: Page): Promise<void> {
-  const box = (await page.locator('canvas.mapboxgl-canvas').boundingBox())!;
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+/**
+ * Where the truck's marker is on screen. The map's centre at first — the fit
+ * puts a lone truck there — and after that wherever the popup's tip says.
+ *
+ * Since §12.89 selecting a truck can move the map a little to keep its popup
+ * inside the map and off the controls. This one's popup is taller than the
+ * room above the centre, so selecting it nudges the map ~48px down, and a
+ * click on the old centre then lands beside the marker. The tip sits 18px
+ * (the popup's offset) above the marker it points at.
+ */
+let markerAt: { x: number; y: number } | null = null;
+
+async function clickMarker(page: Page): Promise<void> {
+  if (!markerAt) {
+    const box = (await page.locator('canvas.mapboxgl-canvas').boundingBox())!;
+    markerAt = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  }
+  await page.mouse.click(markerAt.x, markerAt.y);
+}
+
+/** Where the tip settles once any nudge has finished. */
+async function recordMarker(page: Page): Promise<void> {
+  const tip = page.locator('.ft-popup .mapboxgl-popup-tip');
+  let last = '';
+  await expect
+    .poll(
+      async () => {
+        const box = await tip.boundingBox();
+        const now = box ? `${Math.round(box.x + box.width / 2)},${Math.round(box.y + box.height)}` : '';
+        const settled = now !== '' && now === last;
+        last = now;
+        return settled;
+      },
+      { intervals: [250], timeout: 10_000 },
+    )
+    .toBe(true);
+  const [x, y] = last.split(',').map(Number);
+  markerAt = { x: x!, y: y! + 18 };
 }
 
 /** Retries, because a style load is asynchronous and markers return with it. */
-async function expectMarkerAtCentre(page: Page): Promise<void> {
+async function expectMarkerClickable(page: Page): Promise<void> {
   await expect(async () => {
     await page.keyboard.press('Escape');
-    await clickMapCentre(page);
+    await clickMarker(page);
     await expect(row(page)).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
   }).toPass({ timeout: 20_000 });
+  await recordMarker(page);
 }
 
 test('switching to satellite keeps every marker drawn and clickable', async ({ page }) => {
+  markerAt = null;
   const missing: string[] = [];
   page.on('console', (m) => {
     const hit = /Image "([^"]+)" could not be loaded/.exec(m.text());
@@ -60,7 +97,7 @@ test('switching to satellite keeps every marker drawn and clickable', async ({ p
   await page.goto('/');
   const canvas = page.locator('canvas.mapboxgl-canvas');
   await expect(canvas).toBeVisible({ timeout: 20_000 });
-  await expectMarkerAtCentre(page);
+  await expectMarkerClickable(page);
 
   const before = await canvas.elementHandle();
   await page.keyboard.press('Escape');
@@ -72,12 +109,12 @@ test('switching to satellite keeps every marker drawn and clickable', async ({ p
    * react-map-gl restores the layers but not the images, and the fleet
    * disappears from the map while the list keeps showing it.
    */
-  await expectMarkerAtCentre(page);
+  await expectMarkerClickable(page);
 
   // Switch back and forth, then count what was billed.
   await page.getByRole('button', { name: 'Map' }).click();
   await page.getByRole('button', { name: 'Satellite' }).click();
-  await expectMarkerAtCentre(page);
+  await expectMarkerClickable(page);
 
   /**
    * One billed map load for the page, however many times the basemap moves.

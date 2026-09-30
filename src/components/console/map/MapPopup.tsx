@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
@@ -126,6 +126,7 @@ export function MapPopup({
   onEdit,
   onTimeline,
   onClose,
+  onResize,
 }: {
   row: FleetRow;
   fetchedAt: string | null;
@@ -138,7 +139,29 @@ export function MapPopup({
    */
   onTimeline: (id: string) => void;
   onClose: () => void;
+  /**
+   * Called whenever the popup's size settles or changes — first render, web
+   * fonts arriving, "How this was measured" opened. The map uses it to keep
+   * the whole popup inside the map and off its controls (§12.89) when it
+   * grows after it was placed. Size only, never position, so a dispatcher's
+   * own drag is never fought.
+   */
+  onResize?: () => void;
 }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const onResizeRef = useRef(onResize);
+  useEffect(() => {
+    onResizeRef.current = onResize;
+  }, [onResize]);
+  const located = row.lat !== null && row.lng !== null;
+  useEffect(() => {
+    const el = box.current;
+    if (!el || !located) return;
+    const observer = new ResizeObserver(() => onResizeRef.current?.());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [located]);
+
   if (row.lat === null || row.lng === null) return null;
 
   const speed = mph(row.speedMph);
@@ -168,7 +191,7 @@ export function MapPopup({
       maxWidth="288px"
       className="ft-popup"
     >
-      <div className="w-[288px] border border-accent bg-surface-raised">
+      <div ref={box} className="w-[288px] border border-accent bg-surface-raised">
         <div className="flex items-center justify-between gap-2 border-b border-line-hair px-[10px] py-2">
           <span className="font-sans text-[15px] font-bold tabular-nums text-text">
             {row.truckNumber ?? row.samsaraName}

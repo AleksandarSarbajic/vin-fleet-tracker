@@ -65,16 +65,6 @@ async function openModal(page: Page, truckId: string, truck: number) {
   await expect(editModal(page, truck)).toBeVisible();
 }
 
-/**
- * The popup's Timeline button, pressed directly. A truck already selected
- * before a reload does not fly the map to itself, so its popup can open
- * clipped at the map's edge under the basemap switcher — a map-placement
- * matter this spec is not about.
- */
-async function openTimeline(page: Page) {
-  await page.getByRole('button', { name: 'Timeline' }).dispatchEvent('click');
-}
-
 async function health(page: Page) {
   const response = await page.request.get('/api/health');
   expect(response.ok()).toBe(true);
@@ -165,7 +155,7 @@ test('a single-load truck: the modal, the confirm step, the clear, and a reload'
 
   // As the confirm step said: reached 30 h ago, so it has left the timeline.
   await row.click();
-  await openTimeline(page);
+  await page.getByRole('button', { name: 'Timeline' }).click();
   const timeline = page.getByRole('dialog', {
     name: `Timeline for truck ${TRUCK_NUMBERS.chicago}`,
   });
@@ -227,7 +217,7 @@ test('a "+1 load" truck: choose, close, and the timeline and counter follow', as
   // The timeline: one closed load, one open, and "now" on the open one.
   await page.reload();
   await row.click();
-  await openTimeline(page);
+  await page.getByRole('button', { name: 'Timeline' }).click();
   const timeline = page.getByRole('dialog', {
     name: `Timeline for truck ${TRUCK_NUMBERS.dallas}`,
   });

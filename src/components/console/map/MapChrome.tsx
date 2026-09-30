@@ -177,7 +177,7 @@ export function ZoomControl({
   onZoom: (direction: 1 | -1) => void;
 }) {
   return (
-    <div className="absolute right-4 top-[14px] z-10 flex flex-col border border-line-hair">
+    <div data-map-control className="absolute right-4 top-[14px] z-10 flex flex-col border border-line-hair">
       {([1, -1] as const).map((d) => (
         <button
           key={d}
@@ -223,6 +223,7 @@ export function BasemapToggle({
     <div
       role="group"
       aria-label="Basemap"
+      data-map-control
       className="absolute right-[56px] top-[14px] z-10 flex border border-line-hair bg-surface-raised"
     >
       {BASEMAPS.map((option, index) => {
@@ -251,7 +252,10 @@ export function BasemapToggle({
 
 export function MarkerKey() {
   return (
-    <div className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px]">
+    <div
+      data-map-control
+      className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px]"
+    >
       <span className="mb-0.5 font-cond text-micro uppercase text-text-muted">
         Marker key
       </span>

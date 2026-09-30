@@ -237,6 +237,12 @@ export function Console({
    * dispatcher can read off the screen, verify, and say down a phone.
    */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Counts selections, so the map can pan when the SAME truck is selected
+   * again — clicking the row of the already-selected truck is a request to
+   * see it, and the id alone does not change to say so.
+   */
+  const [panRequest, setPanRequest] = useState(0);
   /** §12.10: Enter opens the edit modal on the selected row. */
   const [editingId, setEditingId] = useState<string | null>(null);
   /** §14 feature 15. Read-only, so it needs no dirty state and no confirm. */
@@ -268,6 +274,7 @@ export function Console({
   const select = useCallback(
     (id: string | null) => {
       setSelectedId(id);
+      if (id !== null) setPanRequest((n) => n + 1);
       setMissingTruck(null);
       const row = rows.find((r) => r.id === id);
       const number = row?.truckNumber;
@@ -722,6 +729,7 @@ export function Console({
                   fetchedAt={data?.fetchedAt ?? null}
                   feedStale={data?.feedStale ?? false}
                   selectedId={selectedId}
+                  panRequest={panRequest}
                   onSelect={select}
                   onEdit={setEditingId}
                   onTimeline={setTimelineId}

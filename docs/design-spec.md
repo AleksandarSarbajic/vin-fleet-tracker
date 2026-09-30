@@ -6467,7 +6467,70 @@ declined.
 
 Seen along the way, not changed: a truck that was already selected before a
 reload does not fly the map to itself when its row is clicked again. Its popup
-can then open clipped at the map's edge, under the basemap switcher.
+can then open clipped at the map's edge, under the basemap switcher. Fixed in
+§12.89.
+
+## 12.89 The map popup stays inside the map and off its controls
+
+Found by §12.88's e2e run. After a reload with a truck selected (`?truck=`),
+the fleet fit can leave that truck in a corner. Clicking its row did not move
+the map: the pan ran on a change of `selectedId`, and re-selecting the same
+truck changes nothing. Its popup then opened half above the map, under the
+Map/Satellite switcher.
+
+**Re-selecting pans.** `Console` counts selections (`panRequest`), and the
+map's pan runs on that counter as well as the id. Clicking the row of the
+selected truck therefore pans to it exactly as selecting another truck does.
+
+**The popup is kept clear** (`map/clearance.ts`, pure). The controls — zoom,
+Map/Satellite, marker key — are DOM elements laid over the map
+(`data-map-control`). Mapbox cannot see them, and the popup is anchored
+`bottom`, so it cannot flip away from an edge. Changing the anchor would not
+have been enough on its own: a truck can sit *under* a control, or in a
+corner where no anchor fits.
+
+So once a popup is placed, its box is measured against the map pane and the
+controls. `popupClearance` returns the smallest shift that puts all of it
+inside the map, 8 px in from the edge, and 8 px off every control, and the map
+pans by that shift. It runs:
+
+- after a selection's pan lands;
+- after the first fit on load, which covers a reload with a truck selected;
+- after the split pane is resized;
+- whenever the popup's own size changes (a `ResizeObserver` on its content),
+  for example as fonts arrive or "How this was measured" opens.
+
+It never runs on the dispatcher's own drags. Two details from tracing it:
+
+- **The pan listens for `moveend` after `easeTo`, never before.** Starting an
+  ease stops the one in flight, and Mapbox fires `moveend` for that: a
+  listener already waiting would take it and cut the new pan short.
+- **A pixel pan is not exact below zoom about 6,** where Mapbox v3 draws the
+  globe. Asked for (−189, +332), a pan moved (−162, +313), and the popup
+  stayed 11 px past the top. The check runs again when its own pan lands, at
+  most three rounds.
+
+**One visible consequence.** A popup taller than the room above the map's
+centre now nudges the map a little when its truck is selected. Before, the top
+of the popup was cut off. `e2e/basemap.spec.ts` found its lone truck by
+clicking the map's centre, and missed it after that nudge. It now clicks where
+the popup's tip says the marker is.
+
+**Tests:**
+
+- `clearance.test.ts` covers each edge, both control corners, the smallest
+  way out, a popup taller than the map, and a sweep of every 12 px across the
+  pane that must always end legal.
+- `e2e/map-popup.spec.ts` reloads with a truck selected and clicks its row,
+  checking that the map went to it and the popup is inside the map and off
+  every control. It also checks a truck at the top-right corner, each edge
+  and the bottom-right corner on reload, on the dark and satellite styles.
+- Against the code before this change, 12 of those 14 fail, each naming what
+  is wrong ("123px past the top edge", "under the Map/Satellite switcher",
+  "under the marker key"). Only "bottom" passed, because there the popup opens
+  upwards into open map.
+- The Clear stop e2e now opens the timeline by clicking the row and the
+  popup's Timeline button, as a dispatcher does.
 
 # 13. Still open
 

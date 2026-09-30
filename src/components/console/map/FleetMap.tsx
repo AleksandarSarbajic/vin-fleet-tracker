@@ -35,6 +35,7 @@ import {
   trailCollection,
 } from './geo';
 import { MapPopup } from './MapPopup';
+import { popupClearance, rectOf } from './clearance';
 import { useTrail } from '@/hooks/useTrail';
 import { trailDots } from '@/lib/trail';
 import { BasemapToggle, MapFooter, MarkerKey, ZoomControl } from './MapChrome';
@@ -68,6 +69,11 @@ interface Props {
    */
   feedStale: boolean;
   selectedId: string | null;
+  /**
+   * Bumped by every selection, including re-selecting the truck that is
+   * already selected — which changes no id, and so used to move nothing.
+   */
+  panRequest: number;
   onSelect: (id: string | null) => void;
   /** §12.10's Enter, reachable from the map too. */
   onEdit: (id: string) => void;
@@ -83,6 +89,7 @@ export function FleetMap({
   fetchedAt,
   feedStale,
   selectedId,
+  panRequest,
   onSelect,
   onEdit,
   onTimeline,
@@ -90,6 +97,8 @@ export function FleetMap({
   reducedMotion,
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
+  /** The map pane: the map fills it, and the controls sit on top of it. */
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const didFit = useRef(false);
 
   const { problem, clustered } = useMemo(
@@ -180,6 +189,44 @@ export function FleetMap({
     [registerImages],
   );
 
+  /**
+   * Moves the map just enough that the selected truck's popup is inside the
+   * map and off every control (clearance.ts). Run when a popup has just been
+   * placed — after a selection's pan, after the first fit, after a resize —
+   * and never on the dispatcher's own drags, which it would fight.
+   */
+  const keepPopupClear = useCallback(function clear(round = 1): void {
+    const map = mapRef.current?.getMap();
+    const frame = frameRef.current;
+    const popup = frame?.querySelector('.ft-popup');
+    if (!map || !frame || !popup) return;
+    const { dx, dy } = popupClearance(
+      rectOf(popup),
+      rectOf(frame),
+      [...frame.querySelectorAll('[data-map-control]')].map(rectOf),
+    );
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    // The content moves opposite to the pan.
+    map.panBy([-dx, -dy], { duration: reducedMotion ? 0 : PAN_MS });
+    /**
+     * Measured again once the pan lands, because a pixel pan is not exact:
+     * below zoom ~6 Mapbox v3 draws the globe, where a pan of N pixels moves
+     * the screen by roughly N. Traced on a corner truck: asked for (-189,
+     * +332), got (-162, +313), and the popup stayed 11px past the top edge.
+     * Each round closes most of the remaining gap; three is the cap, so it
+     * can never chase anything.
+     */
+    if (round < 3) {
+      if (reducedMotion) requestAnimationFrame(() => clear(round + 1));
+      else map.once('moveend', () => requestAnimationFrame(() => clear(round + 1)));
+    }
+  }, [reducedMotion]);
+
+  /** After the frame that placed the popup, so there is a box to measure. */
+  const keepPopupClearSoon = useCallback(() => {
+    requestAnimationFrame(() => keepPopupClear(1));
+  }, [keepPopupClear]);
+
   const handleLoad = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (!map) return;
@@ -201,29 +248,47 @@ export function FleetMap({
         duration: 0,
       },
     );
-  }, [rows]);
+    // A truck selected before the map existed (a reload with ?truck=) opens
+    // its popup wherever the fit left it — often a corner.
+    keepPopupClearSoon();
+  }, [rows, keepPopupClearSoon]);
 
   /** Split drag-end only. During the drag Mapbox is simply not told. */
   useEffect(() => {
     if (resizeSignal === 0) return;
     mapRef.current?.getMap()?.resize();
-  }, [resizeSignal]);
+    // A narrower pane can leave the open popup over its edge.
+    keepPopupClearSoon();
+  }, [resizeSignal, keepPopupClearSoon]);
 
   /**
    * Pan when the SELECTION changes — never when positions update. Re-panning
    * on every poll would yank the viewport out from under the dispatcher every
    * 20 seconds.
+   *
+   * "Changes" includes re-selecting the same truck (`panRequest`). After a
+   * reload with a truck selected, the fleet fit can leave it in a corner, and
+   * clicking its row is how a dispatcher asks to see it — the id did not
+   * change, so this used to do nothing and the popup stayed clipped.
    */
   useEffect(() => {
     if (!selectedRow || selectedRow.lat === null || selectedRow.lng === null) return;
-    mapRef.current?.getMap()?.easeTo({
-      center: [selectedRow.lng, selectedRow.lat],
-      duration: reducedMotion ? 0 : PAN_MS,
-    });
-    // Only the id, so a position update for an already-selected truck moves
-    // the marker without moving the camera.
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const duration = reducedMotion ? 0 : PAN_MS;
+    map.easeTo({ center: [selectedRow.lng, selectedRow.lat], duration });
+    /**
+     * Listened for AFTER `easeTo`, never before: starting an ease stops the
+     * one in flight, and Mapbox fires `moveend` for that — a listener already
+     * waiting would take it, nudge mid-pan and cut this pan short. A
+     * zero-length ease has already ended by here, so it is called directly.
+     */
+    if (duration === 0) keepPopupClearSoon();
+    else map.once('moveend', keepPopupClearSoon);
+    // Only the id and the request, so a position update for an
+    // already-selected truck moves the marker without moving the camera.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [selectedId, panRequest]);
 
   const handleClick = useCallback(
     (event: MapMouseEvent) => {
@@ -292,7 +357,7 @@ export function FleetMap({
 
   return (
     <div className="relative flex h-full w-full flex-col bg-surface-sunken">
-      <div className="relative min-h-0 flex-1">
+      <div ref={frameRef} className="relative min-h-0 flex-1">
         <ZoomControl onZoom={zoom} />
         <BasemapToggle basemap={basemap} onChange={setBasemap} />
         <MarkerKey />
@@ -372,6 +437,7 @@ export function FleetMap({
               onEdit={onEdit}
               onTimeline={onTimeline}
               onClose={() => onSelect(null)}
+              onResize={keepPopupClearSoon}
             />
           ) : null}
         </Map>
