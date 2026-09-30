@@ -193,6 +193,12 @@ Observed variants of the scale in use:
 - Chip label: cond 600 **10.5**/1, `.08em` in rows; **11**/1, `.09em` in the
   `1a` reference chips; **11.5**/1, `.08em` in header filter chips
 
+**Exception: the header** (§12.91). Option 6a specifies exact sizes the scale
+does not have — 10 (kind tag), 11 (key caps), 11.5, 12 (sync, notes, chip
+counts), 12.5 (feed-down age), 13 (scope name, search) and 14 (wordmark). They
+are written as exact values in the header's components only. Nowhere else may
+use an off-scale size; the scale itself does not grow.
+
 ---
 
 # 3. Layout and breakpoints
@@ -719,6 +725,9 @@ Skeletons have no shimmer, so reduced-motion changes nothing about them.
 
 ## 9.1 Header (56px)
 
+*(Superseded by §12.91: two rows, 48 + 36px — a scope bar over a filter
+row. What follows is the original design, kept for its reasoning.)*
+
 `surface.raised` ground, `line.hair` bottom, `padding: 0 18px`, `gap: 0 18px`.
 
 Grid: `auto 1px minmax(280px, 420px) 1fr auto` — mark+wordmark · divider ·
@@ -776,7 +785,9 @@ point of leaving them visible.
 
 Grid rows: `34px` panel header · list body · `30px` footer bar.
 
-- **Panel header** (34px): `Fleet — N trucks · sorted by urgency` in cond 600
+- **Panel header** (34px) — *removed by §12.91: the scope button names the
+  list and view, the notes and `1 selected · Esc to clear` moved to the
+  header, and the sort label to the header's row 2.* Originally: `Fleet — N trucks · sorted by urgency` in cond 600
   12 `.1em` `text.secondary`, and on the right either the sort segment
   (`Urgency` / `Appt time` / `Truck no.`, active one on `surface.overlay`),
   or `1 selected · Esc to clear`, or at 60 trucks
@@ -6142,6 +6153,9 @@ the track 49px at 1440 — closed by §12.80.
 
 The divider before Drivers only also had no `shrink-0` and measured 0px wide.
 
+*(Superseded by §12.91: the header is two rows with fixed widths per
+breakpoint; nothing shrinks to a floor and nothing scrolls.)*
+
 ## 12.80 The feed-down sync label, as the spec wrote it, stacked
 
 §9.1 specifies `Last sync 06:41 · 9m ago`. The code printed
@@ -6228,6 +6242,10 @@ a 40-character active view at all three widths in both feed states.
 
 View descriptions in the menu use the chips' printed names (`Late, At risk`,
 `Upcoming`), not their URL keys.
+
+*(Superseded by §12.91: the Views trigger and the list title are one scope
+button that names the view at every width. The menu stays `fixed` and the
+header test still asks what is painted inside it.)*
 
 ## 12.84 Every e2e run keeps its own results
 
@@ -6671,6 +6689,111 @@ before it keeps working. It was applied to production and `db:verify` passed
 - Breaking the filter on purpose (`scopeToList` returning every row) fails
   three unit tests and the e2e run, which reads "16 trucks" where 12 were
   expected.
+
+## 12.91 The header: a scope bar over a filter row (option 6a)
+
+The header is two rows, **48 + 36 = 84px**; the 56px header and the 34px
+list-title row it replaces were 90. Row 1 answers "where am I and is the feed
+alive": brand, the **scope button**, search, spare room, the tools slot
+(Assignments), sync, clocks, account. Row 2 does one job, filtering: All,
+Late, At risk, On time, Arrived, Upcoming, Data issues, Inactive, a divider,
+Drivers only, spare room, the notes, and `SORTED BY URGENCY`.
+
+**The scope button** merges the Views menu and the list title. It shows a
+kind tag (`FLEET` / `LIST` / `VIEW`), the name, the truck count and a
+chevron.
+
+- **A list and a view at once** show `LIST` + name, then `VIEW` + name. The
+  two names share the room: each grows from zero at the same rate up to its
+  own length, so a long view cannot squeeze a short list to "Bob'…". Each
+  keeps at least 40px and an ellipsis; the full names are the tooltip.
+- **Active** (a list or a view): accent border, `surface.overlay` fill, and
+  a 28px × segment, "Show the full fleet". One click. A list's × keeps the
+  chips; a view's × resets the chips and the search (a view *is* a chip set
+  and a search, so clearing it means clearing those). Both on: both go.
+- **The count** is the scope's size: the fleet's active trucks, the list's,
+  or the rows the view shows. Never "4 of 12" — the chip counts and the
+  footer's "of N" carry the narrowing.
+- **Max width** 360 / 340 / 320 / 260 at 1920 / 1680 / 1440 / 1280. Below
+  1280 the name caps at 200px.
+- **The menu** (`V`, or a click) has "Find a list or view", then Fleet (All
+  trucks and its count), Shared lists, and Saved views · this browser, each
+  view with the count it would show. Its foot is `Sorted by urgency` — a
+  label, not a control; the list has one order — and "Save current view…".
+  Every function the Views menu had is kept: save, rename, delete, New list…,
+  Edit list (whose editor deletes, with its confirm), the 50-view and
+  50-list caps and their refusals. "Show the full fleet" is now Fleet → All
+  trucks, and the ×.
+- **`V`** was bound to nothing. It is in the keymap (so the `?` sheet lists
+  it), ignored while typing, and stands aside while a modal is open.
+
+**The notes** moved to row 2's right, Barlow 400 12, each still a button
+that undoes what it reports: `N inactive hidden` (turns Inactive on), the
+outside-list note in At-risk amber (shows the full fleet), and `N without a
+driver hidden` (turns Drivers only off). Below 1440 they take short forms:
+`Outside: 2 late · 1 unassigned`, `N no-driver hidden`.
+
+**`1 selected · Esc to clear` is kept.** The bulk bar shows the count of
+CHECKED rows and names Esc, and Esc still clears the checks first, then the
+search, then the selection — but the single selected truck is said nowhere
+else. It sits in row 2 at 1440 and up and in row 1 below. Measured: the
+worst case (three notes + the hint) does not fit row 2 at 1280 or 1440 with
+80px to spare, so two steps join the collapse order **while a truck is
+selected**: from 1440 to 1679 the sort label gives way to the hint and the
+notes stay short; below 1440 the hint moves to row 1, left of Assignments.
+
+**Sync.** Healthy: a 7px `status.ontime.fg` square and `Synced 3s ago`.
+Down: a block that never shortens — `feed.down` square, `LAST SYNC 17:49`
+over `25m ago` in `status.late.fg`, `status.late.bd` border on `feed.downBg`.
+It is **announced**: a `role="status"` `aria-live="polite"` region, always in
+the page, gains "Feed down. Last sync 17:49." when the feed goes down. The
+visible block is not the region, because its age changes every minute.
+
+**Collapse order below 1440:** the sort label; the wordmark; the local clock
+(its time moves to the dispatch clock's tooltip); `⌘K jump` → `⌘K` and the
+search to 220; Assignments → its icon; `Synced 3s ago` → `3s ago`; the notes
+to their short forms. Search is 420 / 340 / 260 / 220 at 1920 / 1680 / 1440 /
+1280, and 160 below, where its key caps go. **Never collapse:** a chip, a
+count, the kind tag, the red feed-down block. Every chip label is full at
+every width — `Data issues` included (the old `Data` abbreviation is gone):
+at 1280 row 2 keeps 481px in the default state.
+
+**Tokens.** Row 2 reuses `surface.bar` (`#1a2027`) rather than the design's
+`#1a1e22`. New: `line.rule` (.14), `line.control` (.16), `line.tag` (.2),
+`feed.down` (`#ff5a47`), `feed.downBg` (`rgba(255,138,122,.08)`). **Upcoming's
+chip text moves from `#858d94` (`status.tomorrow.fg`) to `#a9b0b6`
+(`text.secondary`)** — 4.87 → 7.48 on row 2; the row's own status chip is
+unchanged. Chips are always inked in their status colour; selected adds the
+overlay ground and an accent edge. The avatar is square. Every new text pair
+is in `contrast.test.ts`; the lowest is 5.82 (`#949ca4` on row 1). Focus is
+the global `:focus-visible` ring (2px accent, offset 2). Tab order is scope →
+search → Assignments → account → chips 1–8; sync is text, not a control.
+
+**Spare room, measured** (px, row 1 / row 2, 33 trucks so counts are two
+digits). F is the worst case: a list with an inactive member, a 40-character
+view, feed down, Drivers only, three notes and a selected truck.
+
+| State | 1280 | 1440 | 1680 | 1920 |
+|---|---|---|---|---|
+| A default | 544 / 481 | 373 / 531 | 533 / 771 | 693 / 1011 |
+| B list + outside note | 508 / 321 | 337 / 333 | 497 / 573 | 657 / 813 |
+| C 40-character view | 418 / 481 | 187 / 531 | 340 / 771 | 500 / 1011 |
+| D feed down | 479 / 481 | 348 / 531 | 508 / 771 | 668 / 1011 |
+| E Drivers only | 544 / 368 | 373 / 385 | 533 / 625 | 693 / 865 |
+| F worst case | 219 / 117 | 162 / 144 | 302 / 202 | 442 / 442 |
+
+**Tests.** `e2e/header.spec.ts` runs A–F at 1280, 1440, 1680 and 1920 and, in
+each: no sideways scroll in either row or the page, no overlaps (every item
+and every chip compared box to box), every chip whole and on screen (Late and
+At risk by name), the rows exactly 48 and 36px, at least 80px spare in both
+rows (the figures above are its output), and the scope name at least 40px and
+inside the button. It also opens the scope menu at 1280 and 1440 and asks
+what is painted inside it, runs `V` and both ×s, and saves, renames, finds and
+deletes a view through the menu; `truck-lists.spec.ts` creates, edits and
+deletes lists through it. `ConsoleHeader.test.tsx` holds the live region, the
+chip tooltips (`Late · key 1`) and `V`. Forcing the search to 420px at 1440
+fails C (27px spare) and F (2px). Below 1280 is not held to the numbers; one
+picture is taken at 1086.
 
 # 13. Still open
 

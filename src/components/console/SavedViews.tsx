@@ -1,29 +1,33 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
+import { isTypingTarget } from '@/lib/keymap';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
 import type { TruckList } from '@/lib/truck-lists';
 import { chipLabel } from './FilterChips';
 
 /**
- * §14 feature 11 — saved filter views. **Interpretation**: turn 5 listed the
- * feature and drew no screen for it.
+ * §12.91 — the scope button (header option 6a). It merges what were two
+ * things: the Views menu (§14 feature 11, §12.81, §12.83) and the list title
+ * row (§12.90). It names the scope the chip counts belong to — the whole
+ * fleet, a shared list, a saved view, or a list AND a view — and opens the one
+ * menu where all three are chosen.
  *
- * In the header beside the chips, because a view IS a chip set and a search
- * term (§9.6) and a control that applies them belongs where they live. Not in
- * the list toolbar: §14.5 put the health strip and density there because they
- * are read WITH the list, and a view is chosen before the list is read.
+ * Every function the Views menu had is here: save the current view, rename,
+ * delete, the shared lists above the personal views, New list…, Edit list
+ * (and its delete, with its confirm, in the list editor), and both 50 caps,
+ * which refuse with the same sentences as before.
  *
- * The menu follows `AccountMenu` rather than inventing a second dropdown —
- * same outside-click, same Esc, same "Tab out closes it", because a menu that
- * swallowed Tab would be a dialog wearing a menu's clothes.
+ * The menu follows `AccountMenu`: same outside-click, same Esc, same "Tab out
+ * closes it", because a menu that swallowed Tab would be a dialog wearing a
+ * menu's clothes. It is drawn FIXED from the button's box (§12.83), so no
+ * ancestor's overflow can clip it.
  *
- * No single-key binding. §14 proposed `? ⌘K P X D` and no more, and inventing
- * a sixth would be the kind of addition a cheat sheet cannot justify. ⌘K
- * reaches the views instead (§14.3: "⌘K is navigation plus view-only actions
- * — apply a saved view").
+ * `V` opens it (§12.91): the key was bound to nothing. Guarded like `P`, and
+ * it stands aside while a modal is up.
  */
+
 /**
  * §12.90. The shared lists, shown ABOVE the personal views in the same menu:
  * a list decides which trucks are in scope and a view then narrows them, so
@@ -39,7 +43,9 @@ export interface ListsMenu {
   onEdit: (id: string) => void;
 }
 
-export function SavedViews({
+const MENU_WIDTH = 360;
+
+export function ScopeMenu({
   views,
   active,
   onApply,
@@ -48,6 +54,10 @@ export function SavedViews({
   onRename,
   canSaveCurrent,
   lists,
+  scopeCount,
+  fleetCount,
+  viewCount,
+  onClear,
 }: {
   views: SavedView[];
   active: SavedView | null;
@@ -64,25 +74,21 @@ export function SavedViews({
    */
   canSaveCurrent: boolean;
   lists?: ListsMenu;
+  /** The trucks the scope holds: the fleet's active trucks, the list's, or the view's rows. */
+  scopeCount: number;
+  /** The whole fleet's active trucks, for "All trucks" in the menu. */
+  fleetCount: number;
+  /** How many rows a saved view would show in the current list scope. */
+  viewCount: (view: SavedView) => number;
+  /** Back to the full fleet: clears the list (keeping the chips) and the view (chips and search). */
+  onClear: () => void;
 }) {
   const activeList = lists?.items.find((l) => l.id === lists.activeId) ?? null;
-  /** What the trigger names: the view if one is active, else the list. */
-  const activeLabel = active ? active.name : activeList ? `List: ${activeList.name}` : null;
+  const scoped = activeList !== null || active !== null;
   const [open, setOpen] = useState(false);
-  /**
-   * §12.83. Where the menu is drawn — FIXED, in viewport coordinates, from the
-   * trigger's box at the moment it opens.
-   *
-   * It was `absolute` under the trigger, and the trigger lives in the
-   * header's scrolling track (`overflow-x: auto`, which forces the other axis
-   * to clip too). The track is 34px tall; the menu hung below it and was
-   * clipped to nothing. It opened — aria-expanded, items in the DOM, every
-   * happy-dom test green — and no one could see it. A fixed box is not
-   * clipped by an ancestor's overflow. It closes on resize and on scroll
-   * rather than drifting away from the button it belongs to.
-   */
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const [find, setFind] = useState('');
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -94,9 +100,47 @@ export function SavedViews({
   } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  /**
+   * Where focus goes when a name field closes. The field is removed, and a
+   * removed focused element leaves focus on <body> — which the "focus left
+   * the menu, so close it" rule below would read as Tab-ing out. Handing
+   * focus back to the menu first keeps one Esc undoing one thing.
+   */
+  const findField = useRef<HTMLInputElement>(null);
+  const refocus = () => findField.current?.focus();
   const menuId = useId();
 
   useReturnFocus(open);
+
+  const toggle = useCallback(() => {
+    const rect = trigger.current?.getBoundingClientRect();
+    if (rect) {
+      setAnchor({
+        top: rect.bottom + 4,
+        // Kept on screen when the button sits near the right edge.
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8)),
+      });
+    }
+    setOpen((was) => !was);
+    setFind('');
+    setNaming(false);
+    setRenaming(null);
+    setError(null);
+  }, []);
+
+  /** §12.91: `V` opens the menu. Nothing else in the console binds it. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'v' && event.key !== 'V') return;
+      if (isTypingTarget(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (open || document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, toggle]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,9 +152,13 @@ export function SavedViews({
       // Esc backs out of a name field first, and closes the menu second.
       // One press should undo one thing.
       event.stopPropagation();
-      if (renaming) setRenaming(null);
-      else if (naming) setNaming(false);
-      else setOpen(false);
+      if (renaming) {
+        refocus();
+        setRenaming(null);
+      } else if (naming) {
+        refocus();
+        setNaming(false);
+      } else setOpen(false);
     };
     const onFocusOut = () => {
       window.setTimeout(() => {
@@ -120,15 +168,12 @@ export function SavedViews({
     // A fixed menu would stay put while its button moved; close instead.
     const onMove = () => setOpen(false);
     window.addEventListener('resize', onMove);
-    const track = box.current?.closest('[data-header-track]');
-    track?.addEventListener('scroll', onMove);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     const node = box.current;
     node?.addEventListener('focusout', onFocusOut);
     return () => {
       window.removeEventListener('resize', onMove);
-      track?.removeEventListener('scroll', onMove);
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
       node?.removeEventListener('focusout', onFocusOut);
@@ -148,173 +193,274 @@ export function SavedViews({
     }
     setError(null);
     setName('');
+    refocus();
     setNaming(false);
   };
 
+  const needle = find.trim().toLowerCase();
+  const matches = (text: string) => needle === '' || text.toLowerCase().includes(needle);
+  const shownLists = lists?.items.filter((l) => matches(l.name)) ?? [];
+  const shownViews = views.filter((v) => matches(v.name));
+
+  /** Everything the button names, in full: its tooltip and accessible name. */
+  const fullName = [
+    activeList ? `List: ${activeList.name}` : null,
+    active ? `View: ${active.name}` : null,
+  ]
+    .filter((p): p is string => p !== null)
+    .join(' · ');
+  const described = fullName || 'Fleet: All trucks';
+
   return (
-    <div ref={box} className="relative shrink-0">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        aria-label={activeLabel ? `Views: ${activeLabel}` : undefined}
-        title={activeLabel ? `Views: ${activeLabel}` : undefined}
-        ref={trigger}
-        onClick={() => {
-          const box = trigger.current?.getBoundingClientRect();
-          if (box) {
-            const MENU_WIDTH = 280;
-            setAnchor({
-              top: box.bottom + 4,
-              // Kept on screen when the trigger sits near the right edge.
-              left: Math.max(8, Math.min(box.left, window.innerWidth - MENU_WIDTH - 8)),
-            });
-          }
-          setOpen((was) => !was);
-          setNaming(false);
-          setRenaming(null);
-          setError(null);
-        }}
-        className={`flex h-[26px] shrink-0 items-center gap-1.5 border px-3 font-cond text-micro uppercase tracking-[.09em] ${
-          activeLabel
-            ? 'border-accent text-accent'
-            : 'border-line-hair text-text-secondary hover:bg-row-hover'
+    <div ref={box} className="relative flex shrink-0">
+      <div
+        data-scope=""
+        className={`flex h-8 min-w-0 items-stretch border ${
+          scoped ? 'border-accent bg-surface-overlay' : 'border-line-control'
         }`}
       >
-        {/*
-          §12.83. With a view active the control says which: `Views: Late
-          today` at 1680px and up. Below that there is no room for a name
-          in the header — measured at 1440, "Views: Chicago lanes" scrolled
-          the chip row 41px — so the control keeps its width and shows an
-          accent mark, and the list title directly beneath carries the name
-          at every width. The full name is always the accessible name.
-        */}
-        {activeLabel ? (
-          <>
-            <span className="hidden max-w-[180px] truncate min-[1680px]:inline">
-              Views: {activeLabel}
-            </span>
-            <span className="min-[1680px]:hidden">Views</span>
-            <span
+        <button
+          type="button"
+          ref={trigger}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          aria-label={`Scope — ${described} · ${scopeCount} trucks`}
+          title={described}
+          onClick={toggle}
+          className={`flex min-w-0 items-center gap-2 px-[10px] ${
+            scoped ? '' : 'hover:bg-row-hover'
+          } min-[1280px]:max-w-[260px] min-[1440px]:max-w-[320px] min-[1680px]:max-w-[340px] min-[1920px]:max-w-[360px]`}
+        >
+          {activeList ? (
+            <>
+              <KindTag active>List</KindTag>
+              <ScopeName data-list-title="">{activeList.name}</ScopeName>
+            </>
+          ) : null}
+          {active ? (
+            <>
+              <KindTag active>View</KindTag>
+              <ScopeName data-view-title="">{active.name}</ScopeName>
+            </>
+          ) : null}
+          {!scoped ? (
+            <>
+              <KindTag>Fleet</KindTag>
+              <ScopeName>All trucks</ScopeName>
+            </>
+          ) : null}
+          <span
+            data-scope-count=""
+            className="shrink-0 font-sans text-[13px] font-medium leading-none tabular-nums text-text-secondary"
+          >
+            {scopeCount}
+          </span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            aria-hidden="true"
+            className="shrink-0 text-text-secondary"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+        {scoped ? (
+          <button
+            type="button"
+            data-scope-clear=""
+            aria-label="Show the full fleet"
+            title="Show the full fleet"
+            onClick={() => {
+              setOpen(false);
+              onClear();
+            }}
+            className="flex w-7 shrink-0 items-center justify-center border-l border-accent/40 text-text hover:bg-row-hover"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
               aria-hidden="true"
-              data-view-mark=""
-              className="h-[6px] w-[6px] shrink-0 bg-accent min-[1680px]:hidden"
-            />
-          </>
-        ) : (
-          <span>Views</span>
-        )}
-        <span aria-hidden="true" className="text-[8px] leading-none">
-          ▼
-        </span>
-      </button>
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        ) : null}
+      </div>
 
       {open ? (
         <div
           id={menuId}
           role="menu"
-          aria-label="Saved views"
+          aria-label="Lists and views"
           data-views-menu=""
-          style={anchor ? { top: anchor.top, left: anchor.left } : undefined}
-          className="fixed z-30 w-[280px] border border-line-hair bg-surface-raised py-1 text-left"
+          style={
+            anchor ? { top: anchor.top, left: anchor.left, width: MENU_WIDTH } : undefined
+          }
+          className="fixed z-30 w-[360px] border border-line-control bg-surface-raised text-left shadow-modal"
         >
+          <label className="flex h-9 items-center gap-2 border-b border-line-soft px-3">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              aria-hidden="true"
+              className="shrink-0 text-text-mutedOnOverlay"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m16.5 16.5 4 4" />
+            </svg>
+            <input
+              ref={findField}
+              autoFocus
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              placeholder="Find a list or view"
+              aria-label="Find a list or view"
+              className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay"
+            />
+          </label>
+
+          <Section title="Fleet">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                if (scoped) onClear();
+              }}
+              className={`flex h-8 w-full items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
+                scoped ? '' : 'bg-surface-overlay'
+              }`}
+            >
+              <KindTag>Fleet</KindTag>
+              <span className="flex-1 font-sans text-[13px] font-medium text-text">
+                All trucks
+              </span>
+              <Count>{fleetCount}</Count>
+            </button>
+          </Section>
+
           {lists ? (
             <ListsSection
               lists={lists}
+              shown={shownLists}
+              finding={needle !== ''}
               onDone={() => setOpen(false)}
             />
           ) : null}
-          {lists ? (
-            <p className="px-3 pb-1 pt-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
-              My views · this browser
-            </p>
-          ) : null}
-          {views.length === 0 ? (
-            <p className="px-3 py-2 text-body text-text-mutedOnSelected">
-              No saved views yet. Filter the board, then save it here.
-            </p>
-          ) : (
-            /*
-             * §12.81. The list scrolls inside a menu of fixed width and capped
-             * height, so views grow it DOWNWARD and never wider — the chip row
-             * at 1440px was the lesson in a header that grows sideways. The
-             * save row stays outside the scroll, always one reach away.
-             */
-            <div data-view-list="" className="max-h-[min(60vh,360px)] overflow-y-auto">
-              {views.map((view) =>
-                renaming?.id === view.id ? (
-                  <div key={view.id} className="px-3 py-1.5">
-                    <input
-                      autoFocus
-                      value={renaming.name}
-                      maxLength={VIEW_NAME_MAX}
-                      aria-label={`New name for ${view.name}`}
-                      onChange={(e) =>
-                        setRenaming({ ...renaming, name: e.target.value, error: null })
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter') return;
-                        e.preventDefault();
-                        const refusal = onRename(view.id, renaming.name);
-                        if (refusal === null) setRenaming(null);
-                        else setRenaming({ ...renaming, error: refusal });
-                      }}
-                      className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none"
-                    />
-                    {renaming.error ? (
-                      <p role="alert" className="mt-1 text-small text-status-risk-fg">
-                        {renaming.error}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-small text-text-muted">
-                        Enter to rename · Esc to cancel
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div key={view.id} className="group/view flex items-center">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        onApply(view);
-                        setOpen(false);
-                      }}
-                      className={`flex min-w-0 flex-1 flex-col items-start px-3 py-1.5 text-left hover:bg-row-hover ${
-                        view.id === active?.id ? 'text-accent' : 'text-text'
-                      }`}
-                    >
-                      <span className="w-full truncate text-body">{view.name}</span>
-                      <span className="w-full truncate font-sans text-small text-text-mutedOnSelected">
-                        {describe(view)}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Rename the view ${view.name}`}
-                      onClick={() =>
-                        setRenaming({ id: view.id, name: view.name, error: null })
-                      }
-                      className="shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Delete the view ${view.name}`}
-                      onClick={() => onRemove(view.id)}
-                      className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ),
-              )}
-            </div>
-          )}
 
-          <div className="mt-1 border-t border-line-hair pt-1">
+          <Section title="Saved views · this browser">
+            {views.length === 0 ? (
+              <p className="px-3 py-2 text-body text-text-mutedOnSelected">
+                No saved views yet. Filter the board, then save it here.
+              </p>
+            ) : shownViews.length === 0 ? (
+              <p className="px-3 py-2 text-body text-text-mutedOnSelected">
+                No view matches “{find.trim()}”.
+              </p>
+            ) : (
+              /*
+               * §12.81. The list scrolls inside a menu of fixed width and capped
+               * height, so views grow it DOWNWARD and never wider. The save row
+               * stays outside the scroll, always one reach away.
+               */
+              <div data-view-list="" className="max-h-[min(40vh,280px)] overflow-y-auto">
+                {shownViews.map((view) =>
+                  renaming?.id === view.id ? (
+                    <div key={view.id} className="px-3 py-1.5">
+                      <input
+                        autoFocus
+                        value={renaming.name}
+                        maxLength={VIEW_NAME_MAX}
+                        aria-label={`New name for ${view.name}`}
+                        onChange={(e) =>
+                          setRenaming({ ...renaming, name: e.target.value, error: null })
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          e.preventDefault();
+                          const refusal = onRename(view.id, renaming.name);
+                          if (refusal === null) {
+                            refocus();
+                            setRenaming(null);
+                          } else setRenaming({ ...renaming, error: refusal });
+                        }}
+                        className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none"
+                      />
+                      {renaming.error ? (
+                        <p role="alert" className="mt-1 text-small text-status-risk-fg">
+                          {renaming.error}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-small text-text-mutedOnSelected">
+                          Enter to rename · Esc to cancel
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div key={view.id} className="group/view flex items-center">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onApply(view);
+                          setOpen(false);
+                        }}
+                        className={`flex min-w-0 flex-1 items-center gap-[10px] px-3 py-1.5 text-left hover:bg-row-hover ${
+                          view.id === active?.id ? 'text-accent' : 'text-text'
+                        }`}
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate font-sans text-[13px]">
+                            {view.name}
+                          </span>
+                          <span className="truncate font-sans text-small text-text-mutedOnSelected">
+                            {describe(view)}
+                          </span>
+                        </span>
+                        <Count>{viewCount(view)}</Count>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Rename the view ${view.name}`}
+                        onClick={() =>
+                          setRenaming({ id: view.id, name: view.name, error: null })
+                        }
+                        className="shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete the view ${view.name}`}
+                        onClick={() => onRemove(view.id)}
+                        className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+          </Section>
+
+          <div className="mt-1 border-t border-line-soft">
             {naming ? (
               <div className="px-3 py-1.5">
                 <input
@@ -333,7 +479,7 @@ export function SavedViews({
                   }}
                   placeholder="Name this view"
                   aria-label="Name this view"
-                  className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none placeholder:text-text-muted"
+                  className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none placeholder:text-text-mutedOnSelected"
                 />
                 {error ? (
                   <p role="alert" className="mt-1 text-small text-status-risk-fg">
@@ -349,19 +495,79 @@ export function SavedViews({
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!canSaveCurrent}
-                onClick={() => setNaming(true)}
-                className="w-full px-3 py-1.5 text-left text-body text-accent hover:bg-row-hover disabled:text-text-muted disabled:hover:bg-transparent"
-              >
-                {canSaveCurrent ? 'Save current view…' : 'This view is already saved'}
-              </button>
+              <div className="flex h-[34px] items-center justify-between px-3">
+                {/* A label, not a control: the list has one order (§12.91). */}
+                <span className="font-sans text-[12px] text-text-secondary">
+                  Sorted by urgency
+                </span>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!canSaveCurrent}
+                  onClick={() => setNaming(true)}
+                  className="font-sans text-[12px] text-accent hover:underline disabled:text-text-mutedOnSelected disabled:no-underline"
+                >
+                  {canSaveCurrent ? 'Save current view…' : 'This view is already saved'}
+                </button>
+              </div>
             )}
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** FLEET / LIST / VIEW — never collapses (§12.91). */
+function KindTag({ children, active }: { children: string; active?: boolean }) {
+  return (
+    <span
+      data-kind-tag=""
+      className={`shrink-0 border px-[5px] py-[3px] font-cond text-[10px] font-semibold uppercase leading-none tracking-[.1em] ${
+        active ? 'border-accent text-accent' : 'border-line-tag text-text-secondary'
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The name, with an ellipsis when the button runs out of room; the full name
+ * is the button's tooltip. A list and a view side by side SHARE the room:
+ * each grows from zero at the same rate up to its own length, so a long view
+ * name cannot squeeze a short list name to "Bob'…". Never below 40px. Below
+ * 1280 it caps at 200px (§12.91, last resort).
+ */
+function ScopeName({
+  children,
+  ...data
+}: { children: string } & Record<`data-${string}`, string>) {
+  return (
+    <span
+      {...data}
+      className="min-w-[40px] max-w-[min(200px,max-content)] flex-[1_1_0] truncate font-sans text-[13px] font-medium leading-none text-text min-[1280px]:max-w-max"
+    >
+      {children}
+    </span>
+  );
+}
+
+function Count({ children }: { children: number }) {
+  return (
+    <span className="shrink-0 font-sans text-[12.5px] font-medium tabular-nums text-text-secondary">
+      {children}
+    </span>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="pb-1">
+      <p className="px-3 pb-1 pt-[10px] font-cond text-micro font-semibold uppercase tracking-[.1em] text-text-mutedOnOverlay">
+        {title}
+      </p>
+      {children}
     </div>
   );
 }
@@ -380,81 +586,84 @@ function describe(view: SavedView): string {
 
 /**
  * §12.90. The shared lists: each with its truck count, the active one marked,
- * a way back to the full fleet, and — for dispatchers and admins — new and
- * edit. Scrolls inside its own cap so fifty lists never push the personal
- * views off the menu.
+ * and — for dispatchers and admins — new and edit. Scrolls inside its own cap
+ * so fifty lists never push the personal views off the menu.
  */
-function ListsSection({ lists, onDone }: { lists: ListsMenu; onDone: () => void }) {
+function ListsSection({
+  lists,
+  shown,
+  finding,
+  onDone,
+}: {
+  lists: ListsMenu;
+  shown: TruckList[];
+  finding: boolean;
+  onDone: () => void;
+}) {
   return (
-    <div data-lists-section="" className="border-b border-line-hair pb-1">
-      <p className="px-3 pb-1 pt-1 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
-        Lists · shared with every dispatcher
-      </p>
-      {lists.items.length === 0 ? (
-        <p className="px-3 py-1.5 text-body text-text-mutedOnSelected">No shared lists yet.</p>
-      ) : (
-        <div data-list-items="" className="max-h-[min(40vh,240px)] overflow-y-auto">
-          {lists.items.map((list) => (
-            <div key={list.id} className="group/list flex items-center">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  lists.onApply(list.id);
-                  onDone();
-                }}
-                className={`flex min-w-0 flex-1 items-baseline gap-2 px-3 py-1.5 text-left hover:bg-row-hover ${
-                  list.id === lists.activeId ? 'text-accent' : 'text-text'
-                }`}
-              >
-                <span className="truncate text-body">{list.name}</span>
-                <span className="shrink-0 font-sans text-small tabular-nums text-text-mutedOnSelected">
-                  {list.truckIds.length} {list.truckIds.length === 1 ? 'truck' : 'trucks'}
-                </span>
-              </button>
-              {lists.canEdit ? (
+    <div data-lists-section="">
+      <Section title="Shared lists · every dispatcher">
+        {lists.items.length === 0 ? (
+          <p className="px-3 py-1.5 text-body text-text-mutedOnSelected">
+            No shared lists yet.
+          </p>
+        ) : shown.length === 0 && finding ? (
+          <p className="px-3 py-1.5 text-body text-text-mutedOnSelected">
+            No list matches.
+          </p>
+        ) : (
+          <div data-list-items="" className="max-h-[min(30vh,240px)] overflow-y-auto">
+            {shown.map((list) => (
+              <div key={list.id} className="group/list flex items-center">
                 <button
                   type="button"
-                  aria-label={`Edit the list ${list.name}`}
+                  role="menuitem"
                   onClick={() => {
-                    lists.onEdit(list.id);
+                    lists.onApply(list.id);
                     onDone();
                   }}
-                  className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-text focus-visible:opacity-100 group-hover/list:opacity-100"
+                  className={`flex h-8 min-w-0 flex-1 items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
+                    list.id === lists.activeId ? 'text-accent' : 'text-text'
+                  }`}
                 >
-                  Edit
+                  <span className="min-w-0 flex-1 truncate font-sans text-[13px]">
+                    {list.name}
+                  </span>
+                  <Count>{list.truckIds.length}</Count>
                 </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      )}
-      {lists.activeId !== null ? (
+                {lists.canEdit ? (
+                  <button
+                    type="button"
+                    aria-label={`Edit the list ${list.name}`}
+                    onClick={() => {
+                      lists.onEdit(list.id);
+                      onDone();
+                    }}
+                    className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/list:opacity-100"
+                  >
+                    Edit
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           role="menuitem"
+          disabled={!lists.canEdit}
+          title={
+            lists.canEdit ? undefined : 'Only dispatchers and admins can create lists.'
+          }
           onClick={() => {
-            lists.onApply(null);
+            lists.onNew();
             onDone();
           }}
-          className="w-full px-3 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover"
+          className="w-full px-3 py-1.5 text-left font-sans text-[13px] text-accent hover:bg-row-hover disabled:text-text-mutedOnSelected disabled:hover:bg-transparent"
         >
-          Show the full fleet
+          New list…
         </button>
-      ) : null}
-      <button
-        type="button"
-        role="menuitem"
-        disabled={!lists.canEdit}
-        title={lists.canEdit ? undefined : 'Only dispatchers and admins can create lists.'}
-        onClick={() => {
-          lists.onNew();
-          onDone();
-        }}
-        className="w-full px-3 py-1.5 text-left text-body text-accent hover:bg-row-hover disabled:text-text-muted disabled:hover:bg-transparent"
-      >
-        New list…
-      </button>
+      </Section>
     </div>
   );
 }

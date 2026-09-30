@@ -140,13 +140,21 @@ export function outsideList(
   return outside.late + outside.unassigned === 0 ? null : outside;
 }
 
-/** "Outside this list: 2 late, 1 unassigned" — only the parts that are not zero. */
-export function outsideListText(outside: OutsideList): string {
-  const parts = [
+function outsideParts(outside: OutsideList): string[] {
+  return [
     outside.late > 0 ? `${outside.late} late` : null,
     outside.unassigned > 0 ? `${outside.unassigned} unassigned` : null,
   ].filter((p): p is string => p !== null);
-  return `Outside this list: ${parts.join(', ')}`;
+}
+
+/** "Outside this list: 2 late, 1 unassigned" — only the parts that are not zero. */
+export function outsideListText(outside: OutsideList): string {
+  return `Outside this list: ${outsideParts(outside).join(', ')}`;
+}
+
+/** Below 1440 (§12.91): "Outside: 2 late · 1 unassigned". */
+export function outsideListShort(outside: OutsideList): string {
+  return `Outside: ${outsideParts(outside).join(' · ')}`;
 }
 
 /* ------------------------------- the wire ------------------------------- */

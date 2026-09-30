@@ -218,7 +218,10 @@ describe('chip counts and rows agree, chip by chip', () => {
 describe('what the list leaves out is said, never hidden', () => {
   it('names the late and unassigned trucks outside, and clicking it shows the full fleet', async () => {
     await render(LIST.id);
-    expect(outsideNote()?.textContent).toBe('Outside this list: 2 late, 1 unassigned');
+    // The full wording is the accessible name; below 1440 it shows a short form (§12.91).
+    expect(outsideNote()?.getAttribute('aria-label')).toBe(
+      'Outside this list: 2 late, 1 unassigned',
+    );
     await act(async () => outsideNote()!.click());
     expect(container!.querySelector('[data-list-title]')).toBeNull();
     expect(chipRow().All).toBe(12);

@@ -50,7 +50,6 @@ async function seed(): Promise<string> {
 
 const chipGroup = (page: Page) => page.getByRole('group', { name: 'Filter by status' });
 const chips = (page: Page) => chipGroup(page).getByRole('button');
-const listHeader = (page: Page) => page.locator('[data-list-size]').locator('xpath=..');
 const shot = (page: Page, info: TestInfo, name: string) =>
   page.screenshot({ path: info.outputPath(`${name}.png`) });
 
@@ -110,7 +109,8 @@ test('with "Bob\'s trucks" active the chips count the list; without it, the flee
 
   // The list: every chip counts its twelve.
   await page.goto(`/?list=${listId}`);
-  await expect(listHeader(page)).toContainText("list: Bob's trucks — 12 trucks");
+  await expect(page.locator('[data-scope] [data-list-title]')).toHaveText("Bob's trucks");
+  await expect(page.locator('[data-scope-count]')).toHaveText('12');
   expect(await chipRow(page)).toEqual([
     ['All', 12],
     ['Late', 0],
@@ -123,7 +123,9 @@ test('with "Bob\'s trucks" active the chips count the list; without it, the flee
     ['Drivers only', 8],
   ]);
   const note = page.locator('[data-outside-list]');
-  await expect(note).toHaveText('Outside this list: 2 late, 1 unassigned');
+  await expect(note).toHaveText('Outside this list: 2 late, 1 unassigned', {
+    useInnerText: true,
+  });
   await chipGroup(page).screenshot({
     path: info.outputPath('1-chips-bobs-trucks-all-12.png'),
   });

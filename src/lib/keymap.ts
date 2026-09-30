@@ -99,6 +99,8 @@ export const KEYMAP: readonly Binding[] = [
   },
   { keys: ['8'], label: 'Drivers only — hide trucks with no driver and nothing waiting', group: 'filters', owner: 'FilterChips' },
   { keys: ['0'], label: 'Reset to All', group: 'filters', owner: 'FilterChips' },
+  /** §12.91. Bound to nothing before; the scope button's menu. */
+  { keys: ['V'], label: 'Open the list and view menu', group: 'filters', owner: 'ScopeMenu' },
   {
     keys: ['/'],
     label: 'Filter the list in place',

@@ -65,22 +65,26 @@ export function chipLabel(key: string): string {
 }
 
 /**
- * Below 1680px (§12.79). `Data` is the spec's own abbreviation for a crowded
- * row (§9.1, `3d`); the full label stays the accessible name.
+ * The chip's ink (§12.91, header option 6a): always drawn, selected or not,
+ * so a count reads in its status colour at a glance. Selected adds the
+ * overlay ground and the accent edge. Tokens, never a colour value.
  */
-const SHORT: Partial<Record<FilterKey, string>> = { data: 'Data' };
-
-/** The chip's ink when selected. Tokens, never a colour value. */
 const INK: Record<FilterKey, string> = {
   late: 'text-status-late-fg border-status-late-bd',
   risk: 'text-status-risk-fg border-status-risk-bd',
   ontime: 'text-status-ontime-fg border-status-ontime-bd',
   arrived: 'text-status-arrived-fg border-status-arrived-bd',
-  tomorrow: 'text-status-tomorrow-fg border-status-tomorrow-bd',
-  data: 'text-status-neutral-fg border-status-neutral-bd',
-  inactive: 'text-text-muted border-line-hair',
-  drivers: 'text-text border-line-soft',
+  // §12.91: Upcoming is text.secondary here, not status.tomorrow.fg.
+  tomorrow: 'text-text-secondary border-line-control',
+  data: 'text-status-neutral-fg border-dashed border-status-neutral-bd',
+  inactive: 'text-text-secondary border-line-control',
+  drivers: 'text-text border-line-control',
 };
+
+/** The key that toggles each chip, for its tooltip: "Late · key 1". */
+const KEY_OF: Record<FilterKey, string> = Object.fromEntries(
+  FILTER_KEYS.map((k, i) => [k, String(i + 1)]),
+) as Record<FilterKey, string>;
 
 /**
  * Whether Drivers only hides this row (§12.78): no driver, AND nothing is
@@ -181,51 +185,65 @@ export function FilterChips({
   }, [onToggle, onReset]);
 
   return (
-    <div className="flex shrink-0 items-center gap-[5px]" role="group" aria-label="Filter by status">
+    <div className="flex shrink-0 items-center gap-[6px]" role="group" aria-label="Filter by status">
       <Chip
         label="All"
         count={rows.filter((r) => r.active).length}
         selected={selected.size === 0}
-        ink="text-text-secondary border-line-hair"
+        ink="text-text border-line-control"
+        countInk="text-accent"
+        keyName="0"
         onClick={onReset}
       />
       {FILTER_KEYS.filter((key) => key !== 'drivers').map((key) => (
         <Chip
           key={key}
           label={LABEL[key]}
-          short={SHORT[key]}
           count={counts[key]}
           selected={selected.has(key)}
           ink={INK[key]}
+          keyName={KEY_OF[key]}
           onClick={() => onToggle(key)}
         />
       ))}
       {/* §12.78: a different axis from status, so it stands apart. */}
-      <span aria-hidden="true" data-chip-divider="" className="mx-1 h-4 w-px shrink-0 bg-line-hair" />
+      <span
+        aria-hidden="true"
+        data-chip-divider=""
+        className="mx-[6px] h-5 w-px shrink-0 bg-line-rule"
+      />
       <Chip
         label={LABEL.drivers}
         count={counts.drivers}
         selected={selected.has('drivers')}
         ink={INK.drivers}
+        keyName={KEY_OF.drivers}
         onClick={() => onToggle('drivers')}
       />
     </div>
   );
 }
 
+/**
+ * §12.91. Every label in full at every width — a chip or its count never
+ * collapses. The header test holds the row to its measured room.
+ */
 function Chip({
   label,
-  short,
   count,
   selected,
   ink,
+  countInk,
+  keyName,
   onClick,
 }: {
   label: string;
-  short?: string | undefined;
   count: number;
   selected: boolean;
   ink: string;
+  /** The count's own ink where it differs from the label's (All). */
+  countInk?: string;
+  keyName: string;
   onClick: () => void;
 }) {
   return (
@@ -233,20 +251,17 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      aria-label={short ? `${label} ${count}` : undefined}
-      className={`flex h-[26px] shrink-0 items-center gap-1.5 border px-2 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground ${
-        selected ? `bg-surface-overlay ${ink}` : 'border-line-soft text-text-muted hover:bg-row-hover'
+      title={`${label} · key ${keyName}`}
+      className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${ink} ${
+        selected ? '!border-accent bg-surface-overlay' : 'hover:bg-row-hover'
       }`}
     >
-      {short ? (
-        <>
-          <span className="min-[1680px]:hidden">{short}</span>
-          <span className="hidden min-[1680px]:inline">{label}</span>
-        </>
-      ) : (
-        label
-      )}
-      <span className="tabular-nums opacity-80">{count}</span>
+      {label}
+      <span
+        className={`font-sans text-[12px] font-semibold leading-none tabular-nums ${countInk ?? ''}`}
+      >
+        {count}
+      </span>
     </button>
   );
 }

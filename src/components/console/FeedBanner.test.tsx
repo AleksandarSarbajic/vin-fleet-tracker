@@ -171,8 +171,12 @@ describe('the offline banner (§9.8)', () => {
 });
 
 describe('the header sync cluster (§9.1)', () => {
-  /** The dot is found by its token class, which is the thing that was wrong. */
-  const dot = () => container!.querySelector('.bg-status-ontime-fg, .bg-status-late-fg');
+  /**
+   * The dot is found by its token class, which is the thing that was wrong.
+   * §12.91: down, it is `feed.down` — a brighter red than `late.fg`.
+   */
+  const dot = () =>
+    container!.querySelector('header .bg-status-ontime-fg, header .bg-feed-down');
 
   it('is green and counts from the fetch while the feed is healthy', async () => {
     const el = await render(response());
@@ -186,7 +190,7 @@ describe('the header sync cluster (§9.1)', () => {
     );
 
     // The bug: this stayed `bg-status-ontime-fg` under a fully dimmed board.
-    expect(dot()?.className).toContain('bg-status-late-fg');
+    expect(dot()?.className).toContain('bg-feed-down');
     expect(el.textContent).toContain('Last sync');
     // And it must stop claiming a healthy sync, which is the misleading half.
     expect(el.textContent).not.toContain('Synced ');

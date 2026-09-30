@@ -242,10 +242,10 @@ describe('applying', () => {
     await openMenu();
     await saveAs('Late today');
 
-    // Clear the filters. The trigger stops naming the view, which is the
+    // Clear the filters. The scope button goes back to the fleet, which is the
     // cheapest proof the board really changed before the view is re-applied.
     await click(chip('All'));
-    expect(viewsTrigger()?.textContent).toContain('Views');
+    expect(viewsTrigger()?.textContent).toContain('All trucks');
 
     await openMenu();
     await click(menuItem('Late today'));
@@ -285,7 +285,7 @@ describe('applying', () => {
     await openMenu();
     await click(menuItem('Late today'));
     expect(
-      container!.querySelector('[role="menu"][aria-label="Saved views"]'),
+      container!.querySelector('[role="menu"][aria-label="Lists and views"]'),
     ).toBeNull();
   });
 });
@@ -314,9 +314,9 @@ describe('the trigger', () => {
     expect(viewsTrigger()?.textContent).toContain('Late today');
   });
 
-  it('says Views when the board is not showing a saved one', async () => {
+  it('says Fleet · All trucks when the board is not showing a saved one', async () => {
     await mount(['late']);
-    expect(viewsTrigger()?.textContent).toContain('Views');
+    expect(viewsTrigger()?.textContent).toContain('FleetAll trucks');
   });
 
   it('offers nothing to save when the board already is a saved view', async () => {
@@ -430,7 +430,7 @@ it('scrolls the list inside a fixed-width menu rather than growing it', async ()
   const list = container!.querySelector('[data-view-list]');
   expect(list?.className).toContain('overflow-y-auto');
   expect(list?.className).toMatch(/max-h-/);
-  expect(container!.querySelector('[role="menu"]')?.className).toContain('w-[280px]');
+  expect(container!.querySelector('[role="menu"]')?.className).toContain('w-[360px]');
   expect(list?.querySelectorAll('[role="menuitem"]')).toHaveLength(30);
 });
 

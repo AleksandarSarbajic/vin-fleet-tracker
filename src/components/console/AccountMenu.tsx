@@ -100,7 +100,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
         aria-controls={open ? menuId : undefined}
         aria-label={`Account: ${user.fullName}`}
         onClick={toggle}
-        className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-full border border-line-hair font-cond text-[11px] font-semibold text-text-secondary hover:bg-row-hover"
+        className="inline-flex h-[30px] w-[30px] items-center justify-center border border-line-control font-cond text-[11px] font-semibold text-text-secondary hover:bg-row-hover"
       >
         {initials(user.fullName)}
       </button>

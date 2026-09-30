@@ -2,7 +2,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { connect, resetWorld } from './fixtures';
 
 /**
- * §12.90 — shared truck lists through the real console: the Views menu, the
+ * §12.90 — shared truck lists through the real console: the scope menu (§12.91), the
  * create dialog, the bulk bar's "Add to list…", the header, the URL, and the
  * fall-back when a list disappears.
  */
@@ -37,8 +37,13 @@ async function shownNumbers(page: Page): Promise<number[]> {
     .sort((a, b) => a - b);
 }
 
-const views = (page: Page) => page.getByRole('button', { name: /^Views/ });
-const header = (page: Page) => page.locator('[data-list-title]').locator('xpath=..');
+/** §12.91: the scope button opens what was the Views menu. */
+const views = (page: Page) => page.getByRole('button', { name: /^Scope/ });
+/** The scope button names the active list and counts its trucks. */
+async function expectList(page: Page, name: string, trucks: number): Promise<void> {
+  await expect(page.locator('[data-scope] [data-list-title]')).toHaveText(name);
+  await expect(page.locator('[data-scope-count]')).toHaveText(String(trucks));
+}
 const shot = (page: Page, info: TestInfo, name: string) =>
   page.screenshot({ path: info.outputPath(`${name}.png`) });
 
@@ -79,13 +84,13 @@ test('create "Bob\'s trucks", reload, add one, remove one, delete it', async ({
   await editor.getByRole('button', { name: 'Create list' }).click();
   await expect(editor).toBeHidden();
 
-  await expect(header(page)).toContainText("list: Bob's trucks — 12 trucks");
+  await expectList(page, "Bob's trucks", 12);
   await expect(page).toHaveURL(/[?&]list=[0-9a-f-]{36}/);
   expect(await shownNumbers(page)).toEqual(BOBS);
 
   // Reload: the link carries the list.
   await page.reload();
-  await expect(header(page)).toContainText("list: Bob's trucks — 12 trucks");
+  await expectList(page, "Bob's trucks", 12);
   expect(await shownNumbers(page)).toEqual(BOBS);
   // Let the map finish its first fit — to the list's trucks — before the picture.
   await expect(page.locator('canvas.mapboxgl-canvas')).toBeVisible();
@@ -94,7 +99,7 @@ test('create "Bob\'s trucks", reload, add one, remove one, delete it', async ({
 
   // A second list, from checked rows, through the bulk bar.
   await views(page).click();
-  await page.getByRole('menuitem', { name: 'Show the full fleet' }).click();
+  await page.getByRole('menuitem', { name: /^Fleet\s*All trucks/ }).click();
   await expect(page.locator('[data-row-id]')).toHaveCount(3 + BOBS.length + 1);
   for (const n of [101, 102]) {
     await page.getByRole('checkbox', { name: `Select truck ${n}` }).check();
@@ -112,8 +117,8 @@ test('create "Bob\'s trucks", reload, add one, remove one, delete it', async ({
 
   await views(page).click();
   const menu = page.getByRole('menu');
-  await expect(menu.locator('[data-list-items]')).toContainText("Bob's trucks12 trucks");
-  await expect(menu.locator('[data-list-items]')).toContainText('Night shift2 trucks');
+  await expect(menu.locator('[data-list-items]')).toContainText("Bob's trucks12");
+  await expect(menu.locator('[data-list-items]')).toContainText('Night shift2');
   await shot(page, info, '4-views-menu-two-lists');
 
   // Edit: add the spare.
@@ -125,7 +130,7 @@ test('create "Bob\'s trucks", reload, add one, remove one, delete it', async ({
   await expect(edit.locator('[data-list-count]')).toHaveText('13 trucks');
   await edit.getByRole('button', { name: 'Save list' }).click();
   await expect(edit).toBeHidden();
-  await expect(header(page)).toContainText('13 trucks');
+  await expectList(page, "Bob's trucks", 13);
   expect(await shownNumbers(page)).toEqual([...BOBS, SPARE]);
 
   // Edit: remove 113.
@@ -136,7 +141,7 @@ test('create "Bob\'s trucks", reload, add one, remove one, delete it', async ({
   await expect(edit.locator('[data-list-count]')).toHaveText('12 trucks');
   await edit.getByRole('button', { name: 'Save list' }).click();
   await expect(edit).toBeHidden();
-  await expect(header(page)).toContainText('12 trucks');
+  await expectList(page, "Bob's trucks", 12);
   expect(await shownNumbers(page)).toEqual([...BOBS.filter((n) => n !== 113), SPARE]);
 
   // Delete, confirmed by name.
@@ -186,7 +191,7 @@ test('a list deleted by someone else falls back to the full fleet on the next re
   }
 
   await page.goto(`/?list=${listId}`);
-  await expect(header(page)).toContainText("list: Bob's trucks — 12 trucks");
+  await expectList(page, "Bob's trucks", 12);
   expect(await shownNumbers(page)).toEqual(BOBS);
 
   // Someone else deletes it.

@@ -8,43 +8,77 @@ import { SearchField } from './SearchField';
 import { FilterChips, type FilterKey } from './FilterChips';
 import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
-import { SavedViews, type ListsMenu } from './SavedViews';
+import { ScopeMenu, type ListsMenu } from './SavedViews';
 import { BRAND } from '@/lib/brand';
 import type { SavedView } from '@/lib/views';
 
-/** design-spec §9.1. 56px, raised ground, hairline bottom. */
+/**
+ * design-spec §12.91 — header option 6a, "scope bar + filter row".
+ *
+ * Row 1 (48px) answers "where am I, and is the feed alive": brand, the scope
+ * button, search, tools, sync, clocks, account. Row 2 (36px) does one job,
+ * filtering: the chips, Drivers only, the notes that say what is hidden, and
+ * the sort label. 84px in all — the 56px header and the 34px list-title row it
+ * replaces were 90.
+ *
+ * Every width is fixed per breakpoint rather than negotiated by flex, so the
+ * header test can hold each row to a measured spare room (never under 80px at
+ * 1280 and up). Below 1440 things collapse in the spec's order: the sort
+ * label, the wordmark, the local clock (its time moves to the dispatch
+ * clock's tooltip), `⌘K jump` to `⌘K`, Assignments to its icon, "Synced 3s
+ * ago" to "3s ago", and the notes to their short forms. A chip, a count, the
+ * scope's kind tag and the red feed-down block never collapse.
+ */
 
 function Clock({
   instant,
   zone,
   label,
   primary,
+  title,
 }: {
   instant: Date;
   zone: string;
   label: string;
   primary?: boolean;
+  title?: string;
 }) {
   const clock = timeInZone(instant, zone).split(' ')[0] ?? '';
   const abbrev = zoneAbbreviation(instant, zone);
   return (
-    <span className="flex flex-col items-end">
+    <span className="flex flex-col items-end gap-[3px]" title={title}>
       <span
         className={
           primary
-            ? 'font-sans text-[15px] font-semibold leading-[1.05] tabular-nums text-text'
-            : 'font-sans text-[13px] leading-[1.05] tabular-nums text-text-mutedOnSelected'
+            ? 'font-sans text-[15px] font-semibold leading-none tabular-nums text-text'
+            : 'font-sans text-[13px] leading-none tabular-nums text-text-secondary'
         }
       >
         {clock}
       </span>
       <span
-        className={`font-cond text-micro leading-none tracking-[.1em] ${primary ? 'font-semibold text-text-secondary' : 'text-text-muted'}`}
+        className={`whitespace-nowrap font-cond text-micro leading-none tracking-[.1em] ${primary ? 'font-semibold text-text-secondary' : 'text-text-mutedOnOverlay'}`}
       >
         {abbrev} · {label}
       </span>
     </span>
   );
+}
+
+/**
+ * One of the row-2 notes that keep a hidden truck from being hidden silently
+ * (§12.8, §12.78, §12.90). Each is a button that undoes what it reports.
+ */
+export interface HeaderNote {
+  id: 'inactive' | 'outside' | 'drivers';
+  /** At 1440 and up. */
+  text: string;
+  /** Below 1440 (§12.91). */
+  short: string;
+  /** `warn` is At-risk amber (the outside-list note); `quiet` is secondary ink. */
+  tone: 'warn' | 'quiet';
+  title: string;
+  onClick: () => void;
 }
 
 interface Props {
@@ -90,6 +124,20 @@ interface Props {
     /** §12.90. The shared truck lists, shown above the personal views. */
     lists?: ListsMenu;
   };
+  /** §12.91. The scope button's count, and the menu's. */
+  scope: {
+    count: number;
+    fleetCount: number;
+    viewCount: (view: SavedView) => number;
+    onClear: () => void;
+  };
+  /** §12.91. Row 2's right side, in order. */
+  notes: HeaderNote[];
+  /**
+   * A truck is selected. The one place that says so and names the key that
+   * clears it — the bulk bar speaks for CHECKED rows only.
+   */
+  selected: boolean;
 }
 
 export function ConsoleHeader({
@@ -107,6 +155,9 @@ export function ConsoleHeader({
   dispatchTz,
   user,
   views,
+  scope,
+  notes,
+  selected,
 }: Props) {
   /**
    * Seeded from the FETCH instant, not from the clock.
@@ -129,64 +180,56 @@ export function ConsoleHeader({
   const feedAge = elapsed(feedNewestAt, now);
   // The browser's own zone — "CET · YOU" for a dispatcher working from Europe.
   const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const lastSync = feedNewestAt
+    ? timeInZone(new Date(feedNewestAt), dispatchTz, { zone: false })
+    : null;
+  const localTime = `${timeInZone(now, viewerZone).split(' ')[0] ?? ''} ${zoneAbbreviation(now, viewerZone)} · you`;
 
   return (
-    <header className="grid h-14 shrink-0 grid-cols-[auto_1px_minmax(0,1fr)_auto] items-center gap-x-[14px] border-b border-line-hair bg-surface-raised px-[18px]">
-      <div className="flex items-center gap-3">
-        {/* The MONOGRAM, not the lockup (§12.71). At 30px on a 1x screen the
-            lockup's script is ~9px tall with sub-pixel strokes — it fails 5a's
-            own 24px legibility rule, and no re-export can fix artwork. The
-            words beside it say what the product is; the login card carries
-            the full lockup at 54px, where it reads. `unoptimized` because it
-            is an SVG: there is nothing for the image optimiser to resize. */}
-        <Image
-          src={BRAND.monogram.src}
-          width={BRAND.monogram.width}
-          height={BRAND.monogram.height}
-          alt={BRAND.alt}
-          unoptimized
-          priority
-          className="h-[30px] w-[30px]"
+    <header data-console-header="" className="shrink-0">
+      <div
+        data-header-row="1"
+        className="flex h-12 items-center gap-3 border-b border-line-soft bg-surface-raised px-4"
+      >
+        <div className="flex shrink-0 items-center gap-[10px]">
+          {/* The MONOGRAM, not the lockup (§12.71): at this size the lockup's
+              script fails 5a's own 24px legibility rule. 26px here (§12.91).
+              `unoptimized` because it is an SVG. */}
+          <Image
+            src={BRAND.monogram.src}
+            width={BRAND.monogram.width}
+            height={BRAND.monogram.height}
+            alt={BRAND.alt}
+            unoptimized
+            priority
+            className="h-[26px] w-[26px]"
+          />
+          <span className="hidden whitespace-nowrap font-cond text-[14px] font-semibold uppercase leading-none tracking-[.14em] text-text min-[1440px]:inline">
+            Fleet Tracker
+          </span>
+        </div>
+
+        <div aria-hidden="true" className="h-6 w-px shrink-0 bg-line-hair" />
+
+        <ScopeMenu
+          views={views.saved}
+          active={views.active}
+          onApply={views.onApply}
+          onSave={views.onSave}
+          onRemove={views.onRemove}
+          onRename={views.onRename}
+          canSaveCurrent={views.canSaveCurrent}
+          {...(views.lists ? { lists: views.lists } : {})}
+          scopeCount={scope.count}
+          fleetCount={scope.fleetCount}
+          viewCount={scope.viewCount}
+          onClear={scope.onClear}
         />
-        <span className="font-cond text-header font-semibold uppercase text-text">
-          Fleet Tracker
-        </span>
-      </div>
 
-      <div className="h-6 bg-line-hair" />
-
-      {/*
-        The search box and the chip row share ONE flexible track, and the
-        search gives way first (§12.79).
-
-        This was a grid of `minmax(280px,420px) 1fr`, and grid grows a capped
-        track to its cap BEFORE a flexible one gets anything — so the search
-        held 420px at every width and the chips took the remainder. At 1440
-        that remainder was 463px for a 765px row: Data issues, Inactive and
-        Assignments were behind a horizontal scroll, and every chip added made
-        it worse.
-
-        Now the search is the ONLY thing that shrinks, from 420 down to a
-        120px floor; the chip row never does. Below that floor this whole
-        track scrolls — a fallback under ~1400px, not the layout. Two
-        attempts that looked right and were not, both measured:
-          - a small shrink factor on the row (.05) — when the factors of the
-            items still shrinking sum below 1, the browser distributes only
-            that FRACTION of the overflow and paints the rest over the next
-            column: the row drew over "Synced 12s ago";
-          - a large factor on the search (100:1) — the row still took its
-            ~2% share and scrolled by 5px at 1440.
-        `e2e/header.spec.ts` holds the real property: nothing scrolls and the
-        row ends before the status cluster starts.
-
-        Below 1680px three things compact, all measured against a 34-truck
-        fleet with two-digit counts: the search drops its key hints (the list
-        header carries `/` and `⌘K` instead), `Data issues` reads `Data` — the
-        abbreviation the spec already names for a crowded row (§9.1, `3d`) —
-        and Assignments is its icon. At 1680 and up nothing changes.
-      */}
-      <div data-header-track="" className="flex min-w-0 items-center gap-3 overflow-x-auto">
-        <div className="min-w-[120px] max-w-[420px] flex-[1_1_420px]">
+        <div
+          data-header-search=""
+          className="w-[160px] shrink-0 min-[1280px]:w-[220px] min-[1440px]:w-[260px] min-[1680px]:w-[340px] min-[1920px]:w-[420px]"
+        >
           <SearchField
             value={query}
             onChange={onQueryChange}
@@ -195,108 +238,195 @@ export function ConsoleHeader({
           />
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <SavedViews
-            views={views.saved}
-            active={views.active}
-            onApply={views.onApply}
-            onSave={views.onSave}
-            onRemove={views.onRemove}
-            onRename={views.onRename}
-            canSaveCurrent={views.canSaveCurrent}
-            {...(views.lists ? { lists: views.lists } : {})}
-          />
-          <FilterChips
-            rows={rows}
-            selected={chips}
-            onToggle={onToggleChip}
-            onReset={onResetChips}
-          />
-          <Link
-            href="/assignments"
-            aria-label="Assignments"
-            title="Assignments — who drives which truck"
-            className="flex h-[26px] shrink-0 items-center border border-line-hair px-2 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover min-[1680px]:px-3"
-          >
-            {/* Two people: the board pairs drivers with trucks. */}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-              className="min-[1680px]:hidden"
-            >
-              <circle cx="9" cy="8" r="3.5" />
-              <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
-              <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.5A6.5 6.5 0 0 1 21.5 20" />
-            </svg>
-            <span className="hidden min-[1680px]:inline">Assignments</span>
-          </Link>
-        </div>
-      </div>
+        {/* The spare room. Never under 80px at 1280 and up (header.spec.ts). */}
+        <div data-spare="1" className="min-w-0 flex-1 self-stretch" />
 
-      <div className="flex items-center gap-4">
-        {/**
-         * §9.1. The dot is `status.ontime.fg` when healthy and
-         * `status.late.fg` when the feed is down, and the label changes with
-         * it: `Last sync 06:41 · 9m ago`, naming the instant rather than only
-         * the age, because the instant is what gets said down a phone.
-         *
-         * No zone suffix, as the spec wrote it (§12.80). The code had added
-         * one (`17:40 CDT`), which the dispatch clock beside it already says,
-         * and at 1440px those four characters were what pushed a DOWN feed's
-         * header into a 49px scroll.
-         */}
-        <div className="flex items-center gap-[7px]">
-          <span
-            className={`h-[7px] w-[7px] shrink-0 ${feedStale ? 'bg-status-late-fg' : 'bg-status-ontime-fg'}`}
+        {/* Below 1440 the selection hint lives here: row 2 has no room for it
+            beside three notes (§12.91, measured). */}
+        {selected ? <SelectionHint row={1} /> : null}
+
+        {/* The tools slot: new controls go here, right-aligned. */}
+        <Link
+          href="/assignments"
+          aria-label="Assignments"
+          title="Assignments — who drives which truck"
+          className="flex h-8 w-8 shrink-0 items-center justify-center gap-[7px] border border-line-control font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] text-text hover:bg-row-hover min-[1440px]:w-auto min-[1440px]:px-[10px]"
+        >
+          {/* Two people: the board pairs drivers with trucks. */}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
             aria-hidden="true"
-          />
-          {feedStale && feedNewestAt ? (
-            /*
-             * §12.80. Stacked when the feed is down — the instant over the
-             * age, the way the two clocks beside it stack time over label.
-             * On one line this was the header's longest text and, at 1440px,
-             * the thing that pushed the chip row into a scroll. Stacked, it
-             * is as wide as `Last sync 17:40` and the spec's words are intact:
-             * the hidden separator keeps "Last sync 17:40 · 25m ago" as the
-             * accessible text.
-             */
-            <span
-              data-sync-label=""
-              className="flex flex-col font-sans text-[12px] leading-[1.15] tabular-nums text-status-late-fg"
-            >
-              <span>
-                Last sync{' '}
-                {timeInZone(new Date(feedNewestAt), dispatchTz, { zone: false })}
-              </span>
-              {feedAge ? (
-                <span>
-                  <span className="sr-only"> · </span>
-                  {feedAge} ago
-                </span>
-              ) : null}
-            </span>
-          ) : (
-            <span
-              data-sync-label=""
-              className={`font-sans text-[12px] tabular-nums ${feedStale ? 'text-status-late-fg' : 'text-text-secondary'}`}
-            >
-              {feedStale ? 'No positions yet' : age ? `Synced ${age} ago` : 'Syncing…'}
-            </span>
-          )}
-        </div>
+            className="shrink-0"
+          >
+            <circle cx="9" cy="8" r="3.5" />
+            <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+            <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.5A6.5 6.5 0 0 1 21.5 20" />
+          </svg>
+          <span className="hidden min-[1440px]:inline">Assignments</span>
+        </Link>
 
-        <div className="flex items-baseline gap-[9px] border-l border-line-hair pl-4">
-          <Clock instant={now} zone={dispatchTz} label="DISPATCH" primary />
-          <Clock instant={now} zone={viewerZone} label="YOU" />
+        {/**
+         * §9.1 / §12.80 / §12.91. Healthy: a green square and "Synced 3s ago".
+         * Down: the red block, the instant over the age — "LAST SYNC 17:49 /
+         * 25m ago" — which never shortens. No zone suffix: the dispatch clock
+         * beside it names the zone.
+         *
+         * The visible block is not the live region: its age ticks every
+         * minute, and a screen reader would read "26m ago" each time. The
+         * region below is always in the DOM (a region inserted WITH its text
+         * is not announced) and changes once, when the feed goes down.
+         */}
+        <span role="status" aria-live="polite" data-feed-announce="" className="sr-only">
+          {feedStale
+            ? lastSync
+              ? `Feed down. Last sync ${lastSync}.`
+              : 'Feed down. No positions yet.'
+            : ''}
+        </span>
+        {feedStale ? (
+          <div
+            data-feed-down=""
+            className="flex h-9 shrink-0 items-center gap-2 border border-status-late-bd bg-feed-downBg px-[10px]"
+          >
+            <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 bg-feed-down" />
+            <span
+              data-sync-label=""
+              className="flex flex-col gap-[3px] whitespace-nowrap"
+            >
+              {lastSync ? (
+                <>
+                  <span className="font-cond text-micro font-semibold uppercase leading-none tracking-[.1em] text-status-late-fg">
+                    Last sync {lastSync}
+                  </span>
+                  {feedAge ? (
+                    <span className="font-sans text-[12.5px] font-semibold leading-none text-status-late-fg">
+                      <span className="sr-only"> · </span>
+                      {feedAge} ago
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="font-sans text-[12.5px] font-semibold leading-none text-status-late-fg">
+                  No positions yet
+                </span>
+              )}
+            </span>
+          </div>
+        ) : (
+          <div className="flex shrink-0 items-center gap-[7px] pl-1">
+            <span
+              aria-hidden="true"
+              className="h-[7px] w-[7px] shrink-0 bg-status-ontime-fg"
+            />
+            <span
+              data-sync-label=""
+              className="whitespace-nowrap font-sans text-[12px] text-text-secondary"
+            >
+              {age ? (
+                <>
+                  <span className="hidden min-[1440px]:inline">Synced </span>
+                  {age} ago
+                </>
+              ) : (
+                'Syncing…'
+              )}
+            </span>
+          </div>
+        )}
+
+        <div className="flex shrink-0 items-center gap-3 border-l border-line-hair pl-3">
+          <Clock
+            instant={now}
+            zone={dispatchTz}
+            label="DISPATCH"
+            primary
+            title={localTime}
+          />
+          <span className="hidden min-[1440px]:flex">
+            <Clock instant={now} zone={viewerZone} label="YOU" />
+          </span>
         </div>
 
         <AccountMenu user={user} />
       </div>
+
+      <div
+        data-header-row="2"
+        className="flex h-9 items-center gap-[6px] border-b border-line-hair bg-surface-bar px-4"
+      >
+        <FilterChips
+          rows={rows}
+          selected={chips}
+          onToggle={onToggleChip}
+          onReset={onResetChips}
+        />
+
+        <div data-spare="2" className="min-w-0 flex-1 self-stretch" />
+
+        {notes.map((note) => (
+          <button
+            key={note.id}
+            type="button"
+            data-note={note.id}
+            {...(note.id === 'outside' ? { 'data-outside-list': '' } : {})}
+            onClick={note.onClick}
+            title={note.title}
+            aria-label={note.text}
+            className={`ml-[6px] shrink-0 whitespace-nowrap font-sans text-[12px] hover:underline ${
+              note.tone === 'warn' ? 'text-status-risk-fg' : 'text-text-secondary'
+            }`}
+          >
+            {/* While a truck is selected the short forms hold to 1680, so the
+                hint fits beside three notes at 1440 (§12.91). */}
+            <span
+              data-note-text=""
+              className={
+                selected ? 'hidden min-[1680px]:inline' : 'hidden min-[1440px]:inline'
+              }
+            >
+              {note.text}
+            </span>
+            <span className={selected ? 'min-[1680px]:hidden' : 'min-[1440px]:hidden'}>
+              {note.short}
+            </span>
+          </button>
+        ))}
+
+        {selected ? <SelectionHint row={2} /> : null}
+
+        {/* Below 1440 it goes; below 1680 it gives way to the selection hint. */}
+        <span
+          className={`hidden shrink-0 whitespace-nowrap pl-[10px] font-cond text-micro font-semibold uppercase tracking-[.1em] text-text-mutedOnOverlay ${
+            selected ? 'min-[1680px]:inline' : 'min-[1440px]:inline'
+          }`}
+        >
+          Sorted by urgency
+        </span>
+      </div>
     </header>
+  );
+}
+
+/**
+ * "1 selected · Esc to clear" — the one place that says a truck is selected
+ * and names the key that clears it; the bulk bar speaks for CHECKED rows
+ * only. In row 2 at 1440 and up, in row 1 below, where there is room for it
+ * beside the worst case's three notes (§12.91).
+ */
+function SelectionHint({ row }: { row: 1 | 2 }) {
+  return (
+    <span
+      data-selection-hint={row}
+      className={`shrink-0 whitespace-nowrap font-sans text-[12px] text-text-secondary ${
+        row === 2 ? 'ml-[6px] hidden min-[1440px]:inline' : 'min-[1440px]:hidden'
+      }`}
+    >
+      1 selected · <span className="text-accent">Esc</span> to clear
+    </span>
   );
 }

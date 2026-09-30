@@ -31,6 +31,15 @@ export const palette = {
     soft: 'rgb(255 255 255 / .08)',
     /** The split handle's grip dots (§3.4). */
     grip: '#5d646b',
+    /**
+     * §12.91, the header's option 6a. Three steps between `hair` and a
+     * border that reads as a control: the search box and the chip-group
+     * divider (`rule`), buttons and the quiet chips (`control`), and the
+     * scope button's kind tag (`tag`).
+     */
+    rule: 'rgb(255 255 255 / .14)',
+    control: 'rgb(255 255 255 / .16)',
+    tag: 'rgb(255 255 255 / .2)',
   },
   text: {
     DEFAULT: '#e9ebed',
@@ -113,6 +122,15 @@ export const palette = {
     },
     arrived: { fg: '#9cc4e8', bg: '#1c2a38', bd: '#37516b' },
     neutral: { fg: '#b3bac0', bg: '#262a2f', bd: '#6e767d' },
+  },
+  /**
+   * §12.91. The header's feed-down block: a brighter square than `late.fg`,
+   * so it reads as a light rather than as text, on a late-tinted ground. Its
+   * text and border are `status.late.fg` and `status.late.bd`.
+   */
+  feed: {
+    down: '#ff5a47',
+    downBg: 'rgba(255,138,122,.08)',
   },
   /**
    * §14.4. The movement trail's dot colour — `accent.DEFAULT`, named for its

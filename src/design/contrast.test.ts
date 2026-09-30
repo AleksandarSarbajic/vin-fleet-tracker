@@ -124,3 +124,70 @@ describe('the ratios §14.4 measured are still the ratios', () => {
     expect(contrast(palette.brand.navy, palette.surface.sunken)).toBeLessThan(2);
   });
 });
+
+/**
+ * §12.91 — the header's option 6a. Every text pair it introduced, measured.
+ * Row 1 is `surface.raised`, row 2 reuses `surface.bar`, a selected chip or
+ * an active scope sits on `surface.overlay`, and the search box is
+ * `surface.base`. The design note quoted "#949ca4 on #1d2126 ≈ 5.6:1" as its
+ * lowest pair; measured, it is 5.82.
+ */
+describe('the header (§12.91)', () => {
+  /** An `rgba()` ground as it is painted: blended over what is under it. */
+  function over(rgb: [number, number, number], alpha: number, ground: string): string {
+    const h = ground.replace('#', '');
+    return `#${[0, 2, 4]
+      .map((i, n) => Math.round(rgb[n]! * alpha + parseInt(h.slice(i, i + 2), 16) * (1 - alpha)))
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('')}`;
+  }
+
+  it('the feed-down ground is late.fg at 8% over row 1, as the token says', () => {
+    expect(palette.feed.downBg).toBe('rgba(255,138,122,.08)');
+    expect(over([255, 138, 122], 0.08, palette.surface.raised)).toBe('#2f292d');
+  });
+
+  const { surface, text, accent, status } = palette;
+  const down = over([255, 138, 122], 0.08, surface.raised);
+  const measured: [string, string, string, number][] = [
+    // Row 1: brand, scope, sync, clocks.
+    ['wordmark, scope name', text.DEFAULT, surface.raised, 13.54],
+    ['scope count, kind tag, sync, clock labels', text.secondary, surface.raised, 7.38],
+    ['local clock label, menu section titles', text.mutedOnOverlay, surface.raised, 5.82],
+    ['active scope name', text.DEFAULT, surface.overlay, 12.1],
+    ['active scope count', text.secondary, surface.overlay, 6.59],
+    ['active kind tag', accent.DEFAULT, surface.overlay, 7.27],
+    ['search placeholder', text.mutedOnOverlay, surface.base, 6.41],
+    ['search key caps', text.secondary, surface.base, 8.12],
+    ['feed-down text', status.late.fg, down, 6.21],
+    // Row 2: chips unselected, the notes and the sort label.
+    ['Late chip', status.late.fg, surface.bar, 7.16],
+    ['At risk chip, outside-list note', status.risk.fg, surface.bar, 8.76],
+    ['On time chip', status.ontime.fg, surface.bar, 9.04],
+    ['Arrived chip', status.arrived.fg, surface.bar, 8.97],
+    ['Data issues chip', status.neutral.fg, surface.bar, 8.36],
+    ['Upcoming, Inactive, quiet notes', text.secondary, surface.bar, 7.48],
+    ['All, Drivers only', text.DEFAULT, surface.bar, 13.73],
+    ['All count', accent.DEFAULT, surface.bar, 8.25],
+    ['sort label', text.mutedOnOverlay, surface.bar, 5.9],
+    // A selected chip keeps its ink on the overlay ground.
+    ['Late chip, selected', status.late.fg, surface.overlay, 6.31],
+    ['At risk chip, selected', status.risk.fg, surface.overlay, 7.72],
+    ['On time chip, selected', status.ontime.fg, surface.overlay, 7.96],
+    ['Arrived chip, selected', status.arrived.fg, surface.overlay, 7.9],
+    ['Data issues chip, selected', status.neutral.fg, surface.overlay, 7.37],
+    ['All count, selected', accent.DEFAULT, surface.overlay, 7.27],
+  ];
+
+  for (const [what, fg, bg, expected] of measured) {
+    it(`${what}: ${expected}`, () => {
+      expect(contrast(fg, bg)).toBe(expected);
+      expect(contrast(fg, bg)).toBeGreaterThanOrEqual(FLOOR);
+    });
+  }
+
+  it('Upcoming moved from status.tomorrow.fg to text.secondary: 4.87 → 7.48', () => {
+    expect(contrast(status.tomorrow.fg, surface.bar)).toBe(4.87);
+    expect(contrast(text.secondary, surface.bar)).toBe(7.48);
+  });
+});

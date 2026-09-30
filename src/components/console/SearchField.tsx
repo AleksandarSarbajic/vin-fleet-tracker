@@ -28,7 +28,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
   const active = value.trim().length > 0;
 
   return (
-    <label className="flex h-[34px] w-full items-center gap-2 border border-line-hair bg-surface-base px-[10px] focus-within:border-accent">
+    <label className="flex h-8 w-full items-center gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
       <svg
         width="14"
         height="14"
@@ -36,7 +36,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
-        className="shrink-0 text-text-muted"
+        className="shrink-0 text-text-mutedOnOverlay"
         aria-hidden="true"
       >
         <circle cx="11" cy="11" r="7" />
@@ -62,7 +62,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
          */
         placeholder="Filter list…"
         aria-label="Search the fleet"
-        className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-muted"
+        className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay"
       />
 
       {active ? (
@@ -86,20 +86,16 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
          * place a dispatcher will find out the second one exists.
          */
         /*
-         * §12.79. Below 1680px the box shrinks toward 120px and the hints
-         * would take the text's room, so they move rather than go: the list
-         * header reads `/ to filter · ⌘K to jump` at every width, which keeps
-         * the second box discoverable where §14.5 needs it to be.
+         * §12.91. Two caps at every supported width — the list-title row
+         * that used to carry `/ to filter · ⌘K to jump` is gone, so this is
+         * again the only place the second box is named. `⌘K jump` shortens
+         * to `⌘K` below 1440; below 1280 the box is 160px and the caps go.
          */
-        <span className="hidden shrink-0 items-center gap-1 min-[1680px]:flex">
+        <span className="hidden shrink-0 items-center gap-1 min-[1280px]:flex">
           <Cap>/</Cap>
-          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
-            filter
-          </span>
-          <Cap>⌘K</Cap>
-          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-muted">
-            jump
-          </span>
+          <Cap>
+            ⌘K<span className="hidden min-[1440px]:inline"> jump</span>
+          </Cap>
         </span>
       )}
     </label>
@@ -108,7 +104,7 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
 
 function Cap({ children }: { children: React.ReactNode }) {
   return (
-    <span className="border border-line-hair px-[5px] py-px font-mono text-[11px] text-text-muted">
+    <span className="whitespace-nowrap border border-line-control px-[5px] py-px font-mono text-[11px] font-medium text-text-secondary">
       {children}
     </span>
   );

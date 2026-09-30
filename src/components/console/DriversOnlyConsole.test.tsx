@@ -112,7 +112,8 @@ describe('Drivers only, in the console', () => {
     });
     expect(listed()).toEqual(['101', '303']);
     expect(onMap()).toEqual(['101', '303']);
-    expect(hiddenNote()?.textContent).toBe('1 without a driver hidden');
+    // The full wording is the accessible name; below 1440 it shows a short form (§12.91).
+    expect(hiddenNote()?.getAttribute('aria-label')).toBe('1 without a driver hidden');
     expect(replace).toHaveBeenLastCalledWith('/?chips=drivers', { scroll: false });
   });
 

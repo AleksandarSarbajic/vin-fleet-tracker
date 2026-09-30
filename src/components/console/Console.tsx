@@ -10,7 +10,7 @@ import { passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
-import { ConsoleHeader } from './ConsoleHeader';
+import { ConsoleHeader, type HeaderNote } from './ConsoleHeader';
 import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
 import { Toasts } from './Toasts';
@@ -46,7 +46,13 @@ import { useFleetHealth } from '@/hooks/useFleetHealth';
 import type { FleetHealth } from '@/server/health';
 import { flashView, type RowFlashView } from '@/lib/flash';
 import { can } from '@/lib/roles';
-import { outsideList, outsideListText, scopeToList, type TruckList } from '@/lib/truck-lists';
+import {
+  outsideList,
+  outsideListShort,
+  outsideListText,
+  scopeToList,
+  type TruckList,
+} from '@/lib/truck-lists';
 import { useTruckLists } from '@/hooks/useTruckLists';
 import { TruckListEditor, type EditorMode } from './TruckListEditor';
 import { AddToListModal } from './AddToListModal';
@@ -588,6 +594,75 @@ export function Console({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [bulk, selectedId, editingId]);
 
+  /* ------------------------- the header's scope (§12.91) ---------------- */
+
+  const fleetCount = useMemo(() => all.filter((row) => row.active).length, [all]);
+  /**
+   * What the scope button counts: a view's rows when a view is on (within
+   * the list, if there is one), else the list's trucks, else the fleet's.
+   * Never "4 of 12" — the chips and the footer's "of N" carry the narrowing.
+   */
+  const scopeCount = savedViews.active
+    ? filtered.length
+    : activeList
+      ? listShown
+      : fleetCount;
+  const viewCount = useCallback(
+    (view: SavedView) => {
+      const set = new Set(viewChips(view));
+      return filterRows(
+        scoped.filter((row) => passesFilters(row, set)),
+        view.query,
+      ).length;
+    },
+    [scoped],
+  );
+  /** × on the scope button: a list keeps the chips; a view resets chips and search. */
+  const clearScope = useCallback(() => {
+    if (savedViews.active) {
+      resetChips();
+      setTyped('');
+    }
+    if (activeList) applyList(null);
+  }, [savedViews.active, activeList, resetChips, applyList]);
+
+  /** Row 2's notes (§12.91): nothing hidden without a word, each undoes itself. */
+  const headerNotes = useMemo((): HeaderNote[] => {
+    const notes: HeaderNote[] = [];
+    if (listInactiveHidden > 0) {
+      notes.push({
+        id: 'inactive',
+        text: `${listInactiveHidden} inactive hidden`,
+        short: `${listInactiveHidden} inactive hidden`,
+        tone: 'quiet',
+        title: 'Inactive trucks are hidden unless the Inactive chip is on. Click to show them.',
+        onClick: () => toggleChip('inactive'),
+      });
+    }
+    if (outside) {
+      notes.push({
+        id: 'outside',
+        text: outsideListText(outside),
+        short: outsideListShort(outside),
+        tone: 'warn',
+        title: 'The chips count this list only. Click to show the full fleet.',
+        onClick: () => applyList(null),
+      });
+    }
+    if (chips.has('drivers')) {
+      notes.push({
+        id: 'drivers',
+        text: `${hiddenDriverless} without a driver hidden`,
+        short: `${hiddenDriverless} no-driver hidden`,
+        tone: 'quiet',
+        title:
+          'Drivers only is on. Trucks with no driver AND no live appointment are hidden; an Unassigned truck is always shown. Click to show them.',
+        onClick: () => toggleChip('drivers'),
+      });
+    }
+    return notes;
+  }, [listInactiveHidden, outside, chips, hiddenDriverless, toggleChip, applyList]);
+
   /** Bumped on split drag-end; the map reflows then and only then. */
   const [resizeSignal, setResizeSignal] = useState(0);
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
@@ -631,6 +706,9 @@ export function Console({
           feedStale={feedStale}
           dispatchTz={dispatchTz}
           user={user}
+          scope={{ count: scopeCount, fleetCount, viewCount, onClear: clearScope }}
+          notes={headerNotes}
+          selected={selectedId !== null}
           views={{
             saved: savedViews.views,
             active: savedViews.active,
@@ -733,104 +811,12 @@ export function Console({
           </div>
         ) : null}
 
+        {/*
+          §12.91. The list-title row that sat here ("Fleet — list: Bob's
+          trucks — 4 of 12 trucks · …") is gone: the scope button names the
+          list and the view, and its notes moved to the header's row 2.
+        */}
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line-soft px-4">
-            <span className="font-cond text-[12px] font-semibold uppercase tracking-[.1em] text-text-secondary">
-              Fleet —{' '}
-              {/* §12.83: the view by name, at every width — the header can only
-                  afford its full name at 1680px and up. */}
-              {savedViews.active ? (
-                <>
-                  view:{' '}
-                  <span
-                    data-view-title=""
-                    title={savedViews.active.name}
-                    className="inline-block max-w-[280px] truncate align-bottom normal-case tracking-normal text-accent"
-                  >
-                    {savedViews.active.name}
-                  </span>{' '}
-                  ·{' '}
-                </>
-              ) : null}
-              {/* §12.90. The list by name, and its size — "4 of 12" once the
-                  chips or the search narrow it further. */}
-              {activeList ? (
-                <>
-                  list:{' '}
-                  <span
-                    data-list-title=""
-                    title={activeList.name}
-                    className="inline-block max-w-[280px] truncate align-bottom normal-case tracking-normal text-accent"
-                  >
-                    {activeList.name}
-                  </span>{' '}
-                  —{' '}
-                  <span data-list-size="">
-                    {filtered.length === listShown
-                      ? `${listShown} trucks`
-                      : `${filtered.length} of ${listShown} trucks`}
-                  </span>
-                  {listInactiveHidden > 0 ? (
-                    <>
-                      {' · '}
-                      <button
-                        type="button"
-                        onClick={() => toggleChip('inactive')}
-                        title="Inactive trucks are hidden unless the Inactive chip is on. Click to show them."
-                        className="uppercase tracking-[.1em] text-accent hover:underline"
-                      >
-                        {listInactiveHidden} inactive hidden
-                      </button>
-                    </>
-                  ) : null}
-                  {outside ? (
-                    <>
-                      {' · '}
-                      <button
-                        type="button"
-                        data-outside-list=""
-                        onClick={() => applyList(null)}
-                        title="The chips count this list only. Click to show the full fleet."
-                        className="uppercase tracking-[.1em] text-text-muted hover:text-text hover:underline"
-                      >
-                        {outsideListText(outside)}
-                      </button>
-                    </>
-                  ) : null}
-                  {' · sorted by urgency'}
-                </>
-              ) : (
-                <>{rows.length} trucks · sorted by urgency</>
-              )}
-              {chips.has('drivers') ? (
-                <>
-                  {' · '}
-                  <button
-                    type="button"
-                    onClick={() => toggleChip('drivers')}
-                    title="Drivers only is on. Trucks with no driver AND no live appointment are hidden; an Unassigned truck is always shown. Click to show them."
-                    className="uppercase tracking-[.1em] text-accent hover:underline"
-                  >
-                    {hiddenDriverless} without a driver hidden
-                  </button>
-                </>
-              ) : null}
-            </span>
-            <span className="font-sans text-small text-text-muted">
-              {selectedId ? (
-                <>
-                  1 selected · <span className="text-accent">Esc</span> to clear
-                </>
-              ) : (
-                <>
-                  {/* §12.79: the search box's own hints hide below 1680px; these do not. */}
-                  <span className="text-accent">/</span> to filter ·{' '}
-                  <span className="text-accent">⌘K</span> to jump
-                </>
-              )}
-            </span>
-          </div>
-
           {/*
             §14 feature 14. The toast stack anchors HERE, to the split area,
             not to the window: bottom-left belongs to the bulk bar now
