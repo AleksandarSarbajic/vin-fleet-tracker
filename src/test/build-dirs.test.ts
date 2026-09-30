@@ -27,9 +27,11 @@ async function resolvedNextConfig(): Promise<NextConfig> {
 describe('the e2e build never shares a directory with next dev', () => {
   it('playwright builds and serves from its own directory, not .next', async () => {
     const { default: config, E2E_DIST_DIR } = await import('../../playwright.config');
-    const server = Array.isArray(config.webServer)
-      ? config.webServer[0]
-      : config.webServer;
+    // The APP's server, found by what it runs: since §12.87 the list also
+    // holds the Sentry sink, and position is not a contract.
+    const servers = Array.isArray(config.webServer) ? config.webServer : [config.webServer];
+    const server = servers.find((s) => s?.command.includes('next start'));
+    expect(server, 'no webServer runs next start').toBeDefined();
     expect(E2E_DIST_DIR).not.toBe('.next');
     expect(server?.env?.['NEXT_DIST_DIR']).toBe(E2E_DIST_DIR);
   });

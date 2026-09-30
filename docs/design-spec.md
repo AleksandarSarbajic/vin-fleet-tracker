@@ -6294,6 +6294,46 @@ Session cookies in traces and `e2e/.auth/` are not scrubbed — they are
 tokens, not the password, and expire; rotating the password should sign the
 account out everywhere as well.
 
+## 12.87 Tracing: every sign-in, 1% of the rest
+
+To see real sign-in times from Vercel instead of guessing them from a laptop,
+the app's Node and edge runtimes trace through one sampler
+(`src/lib/sentry-sampling.ts`); the browser and the worker stay at 0.
+
+- **A POST to `/login` → 1.** Sign-ins are a few a day, so a flat rate would
+  see one every few months.
+- **A span whose parent was kept → 1.** Sentry v11 streams spans and a child
+  can come back through the sampler alone: the first version dropped the
+  Supabase `/auth/v1/token` call out of sampled sign-ins as "1% of the rest",
+  which is the one span a slow sign-in is broken down by.
+- **An unsampled parent is ignored.** The browser runs at 0, so every request
+  carries `parentSampled: false`; inheriting it would drop every sign-in.
+- **Everything else → 0.01.** Includes the middleware's `getUser`, which
+  appears as a `GET <project>.supabase.co` child of `middleware GET`.
+
+**The privacy policy applies to traces, proven by removing it.** A real
+sign-in against the production build, with the DSN pointed at a local sink
+(`e2e/sentry-sink.mjs`, memory only): with `SENTRY_DATA_COLLECTION` the trace
+has no cookie, token, authorization header or body. With the setting removed,
+the Node sign-in span gained `http.request.body.data` holding the password
+and the email — the whole form. `e2e/sentry-traces.spec.ts` fails on either,
+naming what leaked without printing it, and requires the auth call to be in
+the trace. The whole e2e suite now sends to the sink rather than to a blank
+DSN, so the SDK is exercised on every run.
+
+**The guard on the guard.** `sentry-privacy.test.ts` matched raw text, so a
+config whose `dataCollection` line had been replaced by a comment mentioning
+it still passed. It now strips comments and requires the setting itself, and
+also requires every `Sentry.init` to declare tracing: `tracesSampler:
+sampleTraces` in the two server runtimes, `tracesSampleRate: 0` elsewhere,
+nothing else anywhere.
+
+Open: one run in fifteen had no auth span in the sign-in trace within 30 s
+and did not reproduce in fourteen further runs. Spans are buffered per trace
+and flushed after 5 s (`SpanBuffer`), so a trace can arrive in pieces; on
+Vercel the question is whether the function's final flush always happens.
+The 24-hour production data answers it.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

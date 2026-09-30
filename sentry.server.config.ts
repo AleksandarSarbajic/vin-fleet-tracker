@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
+import { sampleTraces } from '@/lib/sentry-sampling';
 
 /**
  * The Next app's Node runtime. A DIFFERENT Sentry project from the worker's
@@ -16,11 +17,13 @@ Sentry.init({
   release: process.env.SENTRY_RELEASE,
 
   /**
-   * Errors, not traces — the same call as the worker makes, for a different
-   * reason. `/api/fleet` is polled every 20 seconds per open console; tracing
-   * it would spend the quota on the most predictable request in the system.
+   * §12.87. Every sign-in, 1% of everything else — see
+   * src/lib/sentry-sampling.ts. A flat rate either misses the sign-ins (they
+   * are a few a day) or spends the quota on `/api/fleet`, polled every 20 s
+   * per open console. Same sampler as the edge config, so a sampled sign-in
+   * is timed through the middleware too.
    */
-  tracesSampleRate: 0,
+  tracesSampler: sampleTraces,
 
   /**
    * Turned on by `SENTRY_DEBUG=1` without a code change, which is the only

@@ -20,6 +20,14 @@ import { RESULTS_ROOT, newRunId } from './e2e/results';
 loadEnv({ path: '.env.local' });
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
+/**
+ * §12.87. The local Sentry stand-in. The DSN's path carries "sentry" because
+ * the env schema asks a DSN to look like one; the SDK posts envelopes to
+ * `<origin>/sentrysink/api/1/envelope/`.
+ */
+export const SENTRY_SINK_PORT = Number(process.env.SENTRY_SINK_PORT ?? 3199);
+export const SENTRY_SINK_URL = `http://127.0.0.1:${SENTRY_SINK_PORT}`;
+const SENTRY_SINK_DSN = `http://e2e@127.0.0.1:${SENTRY_SINK_PORT}/sentrysink/1`;
 /** The e2e build's own directory — never `.next`, which `next dev` owns. */
 export const E2E_DIST_DIR = '.next-e2e';
 const TEST_DATABASE_URL =
@@ -100,39 +108,60 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
+  webServer: [
     /**
-     * Built and started fresh. `reuseExistingServer` is off even locally: a
-     * stale server from a previous edit passing this suite is the exact
-     * failure mode a deploy gate must not have.
+     * §12.87. A stand-in for Sentry's ingest, started BEFORE the app so the
+     * app's first envelope has somewhere to land. The app is built with its
+     * DSN pointed here: every error and trace the real SDK would have sent to
+     * Sentry arrives on loopback instead, where `sentry-traces.spec.ts` reads
+     * exactly what would have left the building. Memory only, never disk.
      */
-    command: `npm run build && npx next start -p ${PORT}`,
-    /*
-     * The build goes to its own directory (see `env` below). Sharing `.next`
-     * with a running `next dev` broke that dev server on every run (§12.72).
-     */
-    url: `http://127.0.0.1:${PORT}/login`,
-    reuseExistingServer: false,
-    timeout: 240_000,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: {
-      /** Read by next.config.ts for BOTH halves — the build and the start. */
-      NEXT_DIST_DIR: E2E_DIST_DIR,
-      /**
-       * DATA is local and disposable; AUTH is the real hosted Supabase.
-       *
-       * `NEXT_PUBLIC_SUPABASE_URL` and the publishable key are inherited from
-       * .env.local unchanged, so the login the browser performs is a real one
-       * and the middleware redirect being tested is the real middleware. Only
-       * the two Postgres connections are redirected — which is why the env
-       * schema now permits a loopback cluster.
-       */
-      DATABASE_URL: TEST_DATABASE_URL,
-      DIRECT_URL: TEST_DATABASE_URL,
-      /** Off: the suite deliberately provokes 500s and 429s. */
-      NEXT_PUBLIC_SENTRY_DSN: '',
-      SENTRY_WORKER_DSN: '',
+    {
+      command: 'node e2e/sentry-sink.mjs',
+      url: `${SENTRY_SINK_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 10_000,
+      env: { SENTRY_SINK_PORT: String(SENTRY_SINK_PORT) },
     },
-  },
+    {
+      /**
+       * Built and started fresh. `reuseExistingServer` is off even locally: a
+       * stale server from a previous edit passing this suite is the exact
+       * failure mode a deploy gate must not have.
+       */
+      command: `npm run build && npx next start -p ${PORT}`,
+      /*
+       * The build goes to its own directory (see `env` below). Sharing `.next`
+       * with a running `next dev` broke that dev server on every run (§12.72).
+       */
+      url: `http://127.0.0.1:${PORT}/login`,
+      reuseExistingServer: false,
+      timeout: 240_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: {
+        /** Read by next.config.ts for BOTH halves — the build and the start. */
+        NEXT_DIST_DIR: E2E_DIST_DIR,
+        /**
+         * DATA is local and disposable; AUTH is the real hosted Supabase.
+         *
+         * `NEXT_PUBLIC_SUPABASE_URL` and the publishable key are inherited from
+         * .env.local unchanged, so the login the browser performs is a real one
+         * and the middleware redirect being tested is the real middleware. Only
+         * the two Postgres connections are redirected — which is why the env
+         * schema now permits a loopback cluster.
+         */
+        DATABASE_URL: TEST_DATABASE_URL,
+        DIRECT_URL: TEST_DATABASE_URL,
+        /**
+         * The local sink, never the real project: the suite deliberately
+         * provokes 500s and 429s. Pointed somewhere rather than blank so the
+         * SDK actually runs — a blank DSN makes it inert, and an inert SDK
+         * cannot be shown to leak nothing (§12.87).
+         */
+        NEXT_PUBLIC_SENTRY_DSN: SENTRY_SINK_DSN,
+        SENTRY_WORKER_DSN: '',
+      },
+    },
+  ],
 });

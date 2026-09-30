@@ -49,12 +49,25 @@ function sourceFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
+/**
+ * The code with comments stripped. A guard that matched on raw text passed a
+ * config whose setting had been replaced by a comment MENTIONING it — found
+ * by deleting the line on purpose (§12.87) and watching this stay green.
+ */
+function code(file: string): string {
+  return readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
 describe('every runtime that starts Sentry applies the policy', () => {
   it('has no Sentry.init anywhere without dataCollection', () => {
     const root = join(import.meta.dirname, '..', '..');
     const offenders = sourceFiles(root).filter((file) => {
-      const body = readFileSync(file, 'utf8');
-      return body.includes('Sentry.init(') && !body.includes('dataCollection');
+      const body = code(file);
+      return (
+        body.includes('Sentry.init(') && !/dataCollection:\s*SENTRY_DATA_COLLECTION\b/.test(body)
+      );
     });
 
     expect(
@@ -81,5 +94,66 @@ describe('every runtime that starts Sentry applies the policy', () => {
       'src/instrumentation-client.ts',
       'src/worker/sentry.ts',
     ]);
+  });
+});
+
+/**
+ * §12.87. Tracing is on for the app's two server runtimes, through ONE
+ * sampler, and off everywhere else — decided per init site, in code, so a
+ * fifth `Sentry.init` cannot quietly trace at the SDK's default or at a rate
+ * someone typed.
+ */
+describe('every runtime that starts Sentry declares its tracing', () => {
+  const root = join(import.meta.dirname, '..', '..');
+  const sites = () =>
+    sourceFiles(root)
+      .filter((f) => code(f).includes('Sentry.init('))
+      .map((f) => ({ file: f.slice(root.length + 1), body: code(f) }));
+
+  const usesSampler = (body: string) => /tracesSampler:\s*sampleTraces\b/.test(body);
+  const tracingOff = (body: string) => /tracesSampleRate:\s*0\s*[,}\n]/.test(body);
+
+  it('samples the Node and edge runtimes with the shared sampler, and nothing else', () => {
+    for (const file of ['sentry.server.config.ts', 'sentry.edge.config.ts']) {
+      const site = sites().find((s) => s.file === file);
+      expect(site, file).toBeDefined();
+      expect(usesSampler(site!.body), `${file} uses sampleTraces`).toBe(true);
+      // A rate next to a sampler is ignored by the SDK and misleads a reader.
+      expect(site!.body, `${file} has no tracesSampleRate`).not.toMatch(/tracesSampleRate/);
+    }
+  });
+
+  it('keeps the browser and the worker at rate 0', () => {
+    for (const file of ['src/instrumentation-client.ts', 'src/worker/sentry.ts']) {
+      const site = sites().find((s) => s.file === file);
+      expect(site, file).toBeDefined();
+      expect(tracingOff(site!.body), `${file} sets tracesSampleRate: 0`).toBe(true);
+      expect(site!.body, `${file} has no tracesSampler`).not.toMatch(/tracesSampler/);
+    }
+  });
+
+  it('lets no init site leave tracing to a default or to a hand-typed rate', () => {
+    const undeclared = sites()
+      .filter(({ body }) => !usesSampler(body) && !tracingOff(body))
+      .map((s) => s.file);
+    expect(
+      undeclared,
+      'Declare tracing explicitly: `tracesSampler: sampleTraces` (server runtimes) ' +
+        'or `tracesSampleRate: 0`. See src/lib/sentry-sampling.ts.',
+    ).toEqual([]);
+
+    /** Every value assigned to `key` in the code, trimmed. */
+    const valuesOf = (key: string, body: string) =>
+      [...body.matchAll(new RegExp(`${key}:\\s*([^,}\\n]+)`, 'g'))].map((m) => m[1]!.trim());
+
+    const otherRates = sourceFiles(root)
+      .filter((f) => valuesOf('tracesSampleRate', code(f)).some((v) => v !== '0'))
+      .map((f) => f.slice(root.length + 1));
+    expect(otherRates, 'a tracesSampleRate other than 0').toEqual([]);
+
+    const otherSamplers = sourceFiles(root)
+      .filter((f) => valuesOf('tracesSampler', code(f)).some((v) => v !== 'sampleTraces'))
+      .map((f) => f.slice(root.length + 1));
+    expect(otherSamplers, 'a tracesSampler other than sampleTraces').toEqual([]);
   });
 });
