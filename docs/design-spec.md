@@ -6273,6 +6273,27 @@ After the last stop of an open load departs, the row has no next stop and
 reads `NO APPT` until the load is closed — unchanged, and the same as after a
 detected departure.
 
+## 12.86 The e2e password is scrubbed from every kept artifact
+
+A failed sign-in wrote the e2e account's password to disk in five places:
+the aria snapshot in `error-context.md` (it prints input values, password
+fields included), and inside `trace.zip` the `fill` step, the DOM snapshot,
+the `POST /login` body, and an attached copy of `error-context.md`. §12.84
+keeps twenty runs, so each copy lasted a day or more. Playwright cannot mask
+a typed value.
+
+`e2e/redact-reporter.ts` runs last (`onEnd`, after every worker has written
+its artifacts) and rewrites every file in the run folder, zip entries
+included, replacing the password — raw, form-encoded and base64 — with
+`[REDACTED]`. It then scans again and **fails the run** if any copy is
+left. Proven with a throwaway spec that typed the real password and failed:
+seven occurrences scrubbed, an independent scan found none, and the trace
+still opens.
+
+Session cookies in traces and `e2e/.auth/` are not scrubbed — they are
+tokens, not the password, and expire; rotating the password should sign the
+account out everywhere as well.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

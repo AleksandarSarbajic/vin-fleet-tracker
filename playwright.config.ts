@@ -53,7 +53,14 @@ export default defineConfig({
    */
   retries: 0,
   outputDir: `${RESULTS_ROOT}/${E2E_RUN_ID}`,
-  reporter: process.env.CI ? [['github'], ['list']] : [['list']],
+  /**
+   * §12.86. The redactor runs last and scrubs the e2e password out of every
+   * artifact the run kept — Playwright records typed values and cannot mask
+   * them. It fails the run if any copy survives.
+   */
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['./e2e/redact-reporter.ts']]
+    : [['list'], ['./e2e/redact-reporter.ts']],
   timeout: 45_000,
   expect: { timeout: 10_000 },
 
