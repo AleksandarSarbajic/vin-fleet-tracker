@@ -45,12 +45,18 @@ import { emptyState, type EmptyAction } from '@/lib/empty-state';
 import { useFleetHealth } from '@/hooks/useFleetHealth';
 import type { FleetHealth } from '@/server/health';
 import { flashView, type RowFlashView } from '@/lib/flash';
+import { can } from '@/lib/roles';
+import { scopeToList, type TruckList } from '@/lib/truck-lists';
+import { useTruckLists } from '@/hooks/useTruckLists';
+import { TruckListEditor, type EditorMode } from './TruckListEditor';
+import { AddToListModal } from './AddToListModal';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
  * Typed as FleetRow[] because it only ever stands in for one.
  */
 const NO_ROWS: FleetRow[] = [];
+const NO_LISTS: TruckList[] = [];
 
 interface Props {
   initial: FleetResponse;
@@ -69,6 +75,10 @@ interface Props {
   initialTruck: string | null;
   /** Filter chips ride in the URL so a link carries the whole view (§9.6). */
   initialChips: string[];
+  /** §12.90. The shared lists, server-rendered so a list link paints filtered. */
+  initialLists?: TruckList[];
+  /** §12.90. `?list=<id>` — by id, so renaming a list does not break links. */
+  initialList?: string | null;
   /** For the edit modal's driver picker. */
   drivers: BoardDriver[];
   role: Role;
@@ -82,6 +92,8 @@ export function Console({
   initialQuery,
   initialTruck,
   initialChips,
+  initialLists = NO_LISTS,
+  initialList = null,
   drivers,
   role,
 }: Props) {
@@ -91,8 +103,12 @@ export function Console({
 
   /** Search and selection both live in the URL so a link carries the view. */
   const syncUrl = useCallback(
-    (next: { q?: string; truck?: string | null; chips?: FilterKey[] }) => {
+    (next: { q?: string; truck?: string | null; chips?: FilterKey[]; list?: string | null }) => {
       const search = new URLSearchParams(window.location.search);
+      if (next.list !== undefined) {
+        if (next.list) search.set('list', next.list);
+        else search.delete('list');
+      }
       if (next.chips !== undefined) {
         if (next.chips.length > 0) search.set('chips', next.chips.join(','));
         else search.delete('chips');
@@ -129,15 +145,74 @@ export function Console({
    */
   const all = useMemo(() => data?.fleet ?? NO_ROWS, [data]);
 
+  /* ----------------------------- shared lists (§12.90) ------------------- */
+
+  const { data: lists = initialLists } = useTruckLists(initialLists);
+  const [listId, setListId] = useState<string | null>(initialList);
+  /** Said, never silent: the list in the link, or the one on screen, is gone. */
+  const [listNotice, setListNotice] = useState<{ text: string; warn: boolean } | null>(null);
+  const activeList = useMemo(
+    () => (listId === null ? null : (lists.find((l) => l.id === listId) ?? null)),
+    [lists, listId],
+  );
+
+  const applyList = useCallback(
+    (id: string | null) => {
+      setListId(id);
+      setListNotice(null);
+      syncUrl({ list: id });
+    },
+    [syncUrl],
+  );
+
+  /**
+   * A list that is not there any more — a link to a deleted list, or the list
+   * on screen deleted by someone else and gone from the next poll. The board
+   * falls back to the full fleet and says so; it is never left blank.
+   */
+  useEffect(() => {
+    if (listId === null || activeList !== null) return;
+    setListId(null);
+    setListNotice({ text: 'This list no longer exists — showing the full fleet.', warn: true });
+    syncUrl({ list: null });
+  }, [listId, activeList, syncUrl]);
+
+  /**
+   * The list scopes the board FIRST; the chips and the search then narrow it
+   * (list AND chips AND search). The chip counts are still taken over `all`,
+   * so they stay fleet-wide.
+   */
+  const scoped = useMemo(
+    () => scopeToList(all, activeList ? new Set(activeList.truckIds) : null),
+    [all, activeList],
+  );
+
   /**
    * Nothing selected means "active trucks, any status" (§12.9). The filter
    * runs over the real `active` column rather than being special-cased inside
    * the Inactive chip.
    */
   const rows = useMemo(
-    () => all.filter((row) => passesFilters(row, chips)),
-    [all, chips],
+    () => scoped.filter((row) => passesFilters(row, chips)),
+    [scoped, chips],
   );
+
+  /**
+   * §12.90. A list's inactive trucks follow the Inactive chip rule like any
+   * other — hidden unless that chip is on — and the header says how many, so
+   * a truck in the list is never missing without a word.
+   */
+  const listInactiveHidden = useMemo(
+    () =>
+      activeList && !chips.has('inactive') ? scoped.filter((row) => !row.active).length : 0,
+    [activeList, chips, scoped],
+  );
+  /** The list's size as the default rule shows it: its active trucks. */
+  const listShown = useMemo(() => scoped.filter((row) => row.active).length, [scoped]);
+
+  const canEditLists = can(role, 'dispatcher');
+  const [listEditor, setListEditor] = useState<EditorMode | null>(null);
+  const [addingToList, setAddingToList] = useState(false);
 
   /**
    * §12.78. How many trucks Drivers only is hiding RIGHT NOW: the rows the
@@ -147,8 +222,8 @@ export function Console({
   const hiddenDriverless = useMemo(() => {
     if (!chips.has('drivers')) return 0;
     const without = new Set([...chips].filter((k) => k !== 'drivers'));
-    return all.filter((row) => passesFilters(row, without)).length - rows.length;
-  }, [all, chips, rows.length]);
+    return scoped.filter((row) => passesFilters(row, without)).length - rows.length;
+  }, [scoped, chips, rows.length]);
 
   /* --------------------------- status toasts (§12.50) -------------------- */
 
@@ -423,14 +498,14 @@ export function Console({
   const empty = useMemo(
     () =>
       emptyState({
-        total: all.length,
+        total: scoped.length,
         afterChips: rows.length,
         afterSearch: filtered.length,
         listed: unpinnedRows.length,
         query,
         chipCount: chips.size,
       }),
-    [all.length, rows.length, filtered.length, unpinnedRows.length, query, chips],
+    [scoped.length, rows.length, filtered.length, unpinnedRows.length, query, chips],
   );
 
   /**
@@ -565,6 +640,21 @@ export function Console({
             // Nothing to save when the board already IS a saved view; the
             // save would only be refused as a duplicate a moment later.
             canSaveCurrent: savedViews.active === null,
+            lists: {
+              items: lists,
+              activeId: activeList?.id ?? null,
+              canEdit: canEditLists,
+              onApply: applyList,
+              onNew: () =>
+                setListEditor({
+                  kind: 'create',
+                  initialIds: [],
+                }),
+              onEdit: (id: string) => {
+                const list = lists.find((l) => l.id === id);
+                if (list) setListEditor({ kind: 'edit', list });
+              },
+            },
           }}
         />
 
@@ -597,6 +687,27 @@ export function Console({
             onRetry={() => void refetch()}
             retrying={isFetching}
           />
+        ) : null}
+
+        {listNotice ? (
+          <div
+            role="status"
+            data-list-notice=""
+            className={`flex shrink-0 items-center gap-3 border-b px-4 py-2 text-body ${
+              listNotice.warn
+                ? 'border-status-risk-bd bg-status-risk-bg text-status-risk-fg'
+                : 'border-status-neutral-bd bg-status-neutral-bg text-text'
+            }`}
+          >
+            <span className="flex-1">{listNotice.text}</span>
+            <button
+              type="button"
+              onClick={() => setListNotice(null)}
+              className="font-cond text-micro uppercase tracking-[.08em] text-text"
+            >
+              Dismiss
+            </button>
+          </div>
         ) : null}
 
         {missingTruck ? (
@@ -637,7 +748,42 @@ export function Console({
                   ·{' '}
                 </>
               ) : null}
-              {rows.length} trucks · sorted by urgency
+              {/* §12.90. The list by name, and its size — "4 of 12" once the
+                  chips or the search narrow it further. */}
+              {activeList ? (
+                <>
+                  list:{' '}
+                  <span
+                    data-list-title=""
+                    title={activeList.name}
+                    className="inline-block max-w-[280px] truncate align-bottom normal-case tracking-normal text-accent"
+                  >
+                    {activeList.name}
+                  </span>{' '}
+                  —{' '}
+                  <span data-list-size="">
+                    {filtered.length === listShown
+                      ? `${listShown} trucks`
+                      : `${filtered.length} of ${listShown} trucks`}
+                  </span>
+                  {listInactiveHidden > 0 ? (
+                    <>
+                      {' · '}
+                      <button
+                        type="button"
+                        onClick={() => toggleChip('inactive')}
+                        title="Inactive trucks are hidden unless the Inactive chip is on. Click to show them."
+                        className="uppercase tracking-[.1em] text-accent hover:underline"
+                      >
+                        {listInactiveHidden} inactive hidden
+                      </button>
+                    </>
+                  ) : null}
+                  {' · sorted by urgency'}
+                </>
+              ) : (
+                <>{rows.length} trucks · sorted by urgency</>
+              )}
               {chips.has('drivers') ? (
                 <>
                   {' · '}
@@ -707,6 +853,7 @@ export function Console({
                       barOpen: bulk.barOpen,
                       onForceStatus: () => setBulkAction('status'),
                       onAddNote: () => setBulkAction('note'),
+                      ...(canEditLists ? { onAddToList: () => setAddingToList(true) } : {}),
                       onClear: bulk.clear,
                     }}
                     rows={unpinnedRows}
@@ -782,6 +929,40 @@ export function Console({
               bulk.clear();
             }}
             onClose={() => setBulkAction(null)}
+          />
+        ) : null}
+
+        {listEditor ? (
+          <TruckListEditor
+            mode={listEditor}
+            fleet={all}
+            checkedIds={ordered.filter((r) => bulk.checked.has(r.id)).map((r) => r.id)}
+            canEdit={canEditLists}
+            onClose={() => setListEditor(null)}
+            onSaved={(id, created) => {
+              setListEditor(null);
+              // A new list is shown at once; an edited one stays as it was.
+              if (created && id) applyList(id);
+            }}
+            onDeleted={(id) => {
+              setListEditor(null);
+              // Our own delete: back to the fleet quietly, not "no longer exists".
+              if (listId === id) applyList(null);
+            }}
+          />
+        ) : null}
+
+        {addingToList ? (
+          <AddToListModal
+            trucks={ordered.filter((r) => bulk.checked.has(r.id))}
+            lists={lists}
+            onClose={() => setAddingToList(false)}
+            onDone={(message) => {
+              setAddingToList(false);
+              bulk.clear();
+              // A confirmation, not a warning: neutral, not the risk amber.
+              setListNotice({ text: message, warn: false });
+            }}
           />
         ) : null}
 

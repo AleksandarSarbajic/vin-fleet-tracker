@@ -9,6 +9,9 @@ import {
   enforceRateLimit,
   setRateLimitStore,
 } from './rate-limit';
+import { FLEET_POLL_MS } from '@/hooks/useFleet';
+import { HEALTH_POLL_MS } from '@/hooks/useFleetHealth';
+import { LISTS_POLL_MS } from '@/hooks/useTruckLists';
 
 /**
  * Inbound limiting (phase 6, item 3). `samsara/client.ts` limited what we send;
@@ -150,6 +153,65 @@ describe('the limits clear what the console actually does', () => {
     }
   });
 
+  /**
+   * §12.90. The shared-lists poll joined the console's traffic: every 20 s,
+   * beside the fleet. Four tabs open for one dispatcher, for an hour, every
+   * request the console makes on a timer — fleet and the selected truck's
+   * trail (`read.heavy`), lists and the health strip (`read`) — each tab on
+   * its own phase, plus a focus refetch of everything from all four tabs at
+   * once every ten minutes. The intervals are the hooks' own constants, so
+   * speeding any of them up re-runs this against the new rate.
+   */
+  it('leaves room for four tabs polling fleet, trail, lists and health for an hour', async () => {
+    const c = clock();
+    setRateLimitStore(new MemoryRateLimitStore(100, c.now));
+    const polls: { limit: 'read' | 'read.heavy'; every: number }[] = [
+      { limit: 'read.heavy', every: FLEET_POLL_MS },
+      { limit: 'read.heavy', every: FLEET_POLL_MS }, // the trail
+      { limit: 'read', every: LISTS_POLL_MS },
+      { limit: 'read', every: HEALTH_POLL_MS },
+    ];
+    const HOUR = 3_600_000;
+    const events: { at: number; limit: 'read' | 'read.heavy' }[] = [];
+    for (let tab = 0; tab < 4; tab += 1) {
+      const phase = tab * 4_700; // tabs opened a few seconds apart
+      for (const p of polls) {
+        for (let at = phase; at < HOUR; at += p.every)
+          events.push({ at, limit: p.limit });
+      }
+    }
+    for (let at = 0; at < HOUR; at += 600_000) {
+      for (let tab = 0; tab < 4; tab += 1) {
+        for (const p of polls) events.push({ at, limit: p.limit });
+      }
+    }
+    events.sort((a, b) => a.at - b.at);
+
+    const refused: Record<string, number> = { read: 0, 'read.heavy': 0 };
+    const sent: Record<string, number> = { read: 0, 'read.heavy': 0 };
+    let t = 0;
+    for (const e of events) {
+      c.advance(e.at - t);
+      t = e.at;
+      sent[e.limit]! += 1;
+      await enforceRateLimit(e.limit, 'four-tabs').catch(() => (refused[e.limit]! += 1));
+    }
+    expect(refused).toEqual({ read: 0, 'read.heavy': 0 });
+
+    // The margin, stated: steady polling against each bucket's sustained rate.
+    const perMinute = (limit: 'read' | 'read.heavy') =>
+      polls
+        .filter((p) => p.limit === limit)
+        .reduce((n, p) => n + (4 * 60_000) / p.every, 0);
+    expect(perMinute('read')).toBe(16);
+    expect(perMinute('read') / (LIMITS.read.refillPerSecond * 60)).toBeLessThan(0.15);
+    expect(perMinute('read.heavy')).toBe(24);
+    expect(
+      perMinute('read.heavy') / (LIMITS['read.heavy'].refillPerSecond * 60),
+    ).toBeLessThan(0.45);
+    expect(sent['read']).toBeGreaterThan(900);
+  });
+
   it('still stops a runaway loop inside a second', async () => {
     const c = clock();
     setRateLimitStore(new MemoryRateLimitStore(100, c.now));
@@ -171,7 +233,9 @@ describe('clientAddress', () => {
     new Request('https://example.test/api/fleet', { headers });
 
   it('takes the first x-forwarded-for entry', () => {
-    expect(clientAddress(req({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' }))).toBe('203.0.113.9');
+    expect(clientAddress(req({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' }))).toBe(
+      '203.0.113.9',
+    );
   });
 
   it('falls back to x-real-ip, then to a constant', () => {
@@ -211,7 +275,8 @@ describe('every route handler is rate limited', () => {
   it('spends an address token in every exported handler', () => {
     const offenders = files
       .map(({ path, body }) => {
-        const handlers = body.match(/^export async function (GET|POST|PATCH|PUT|DELETE)/gm) ?? [];
+        const handlers =
+          body.match(/^export async function (GET|POST|PATCH|PUT|DELETE)/gm) ?? [];
         const guards = body.match(/enforceRateLimit\('address'/g) ?? [];
         return handlers.length === guards.length
           ? null
@@ -229,7 +294,9 @@ describe('every route handler is rate limited', () => {
   it('applies a per-user limit wherever it authenticates', () => {
     const offenders = files
       .filter(({ body }) => /require(User|Role)\(/.test(body))
-      .filter(({ body }) => !/enforceRateLimit\('(read|read\.heavy|write|geocode)'/.test(body))
+      .filter(
+        ({ body }) => !/enforceRateLimit\('(read|read\.heavy|write|geocode)'/.test(body),
+      )
       .map(({ path }) => path.split('/api/')[1]!);
 
     expect(

@@ -155,6 +155,13 @@
       "when": 1790727569664,
       "tag": "0021_arrival_anchor",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790790456976,
+      "tag": "0022_truck_lists",
+      "breakpoints": true
     }
   ]
 }

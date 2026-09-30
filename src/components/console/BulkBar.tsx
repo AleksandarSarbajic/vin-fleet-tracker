@@ -30,6 +30,7 @@ export function BulkBar({
   lastVisible,
   onForceStatus,
   onAddNote,
+  onAddToList,
   onClear,
 }: {
   rows: FleetRow[];
@@ -37,6 +38,8 @@ export function BulkBar({
   lastVisible: number;
   onForceStatus: () => void;
   onAddNote: () => void;
+  /** §12.90. Absent for a viewer, who cannot change lists. */
+  onAddToList?: () => void;
   onClear: () => void;
 }) {
   const picked = rows.filter((r) => checked.has(r.id));
@@ -78,6 +81,15 @@ export function BulkBar({
         >
           Add note…
         </button>
+        {onAddToList ? (
+          <button
+            type="button"
+            onClick={onAddToList}
+            className="h-[20px] border border-line-hair bg-surface-raised px-2 font-cond text-micro uppercase tracking-[.09em] text-text hover:border-accent"
+          >
+            Add to list…
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClear}

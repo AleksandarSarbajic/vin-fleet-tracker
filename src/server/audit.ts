@@ -30,6 +30,8 @@ export const AUDIT_ENTITIES = [
   'driver',
   /** §12.45: a rename rewrites how every past override reads. */
   'profile',
+  /** §12.90: a shared truck list — its name and its trucks, by number. */
+  'truck_list',
 ] as const;
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 

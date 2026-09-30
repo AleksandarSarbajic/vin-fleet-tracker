@@ -6532,6 +6532,104 @@ the popup's tip says the marker is.
 - The Clear stop e2e now opens the timeline by clicking the row and the
   popup's Timeline button, as a dispatcher does.
 
+## 12.90 Shared truck lists
+
+A list is a named set of trucks that every dispatcher sees and uses ("Bob's
+trucks"). A personal view (§14 feature 11) is a chip set and a search term
+kept in one browser. The two combine: **the list decides which trucks are in
+scope, then the chips and the search narrow it** (list AND chips AND search).
+The chip counts stay fleet-wide.
+
+**Storage** (migration 0022):
+
+- `truck_lists` holds the id, the name, a `version` and who created and last
+  changed it.
+- `truck_list_members` holds `(list_id, truck_id)` with that pair as primary
+  key. Trucks are stored **by id**, a foreign key to `trucks`; the number is
+  only what the UI shows.
+- A truck deleted from `trucks` leaves every list (cascade). Nothing in the
+  app deletes trucks.
+- A **deactivated** truck stays in its lists and follows the Inactive chip
+  rule: hidden unless that chip is on. The header then says "N inactive
+  hidden", and that line is a button that turns the chip on.
+
+**The database itself enforces** the rules any caller could otherwise skip:
+
+- Names are stored trimmed and whitespace-collapsed, 1–40 characters, and are
+  unique case-insensitively (a unique index on `lower(name)`).
+- **50 lists and 200 trucks per list** are insert triggers, each taking a lock
+  first so two inserts racing at 49 cannot both pass.
+- Both tables have row-level security enabled, a deny policy and no grants to
+  the API roles, like every other table (`db:verify`).
+
+**Migration order:** the migration is additive only, so the app deployed
+before it keeps working. It was applied to production and `db:verify` passed
+*before* the code that reads these tables was pushed.
+
+**Permissions:**
+
+- Anyone signed in can read and apply lists.
+- Dispatchers and admins can create, edit and delete them (`requireRole
+  ('dispatcher')`, which an admin outranks).
+- The server functions check the role again. A database test calls every
+  write as a viewer and sees every one refused with nothing written, and as an
+  admin and a dispatcher and sees every one pass.
+- A static test asserts the route's gate for each handler.
+
+**Two editors at once:**
+
+- An edit or delete carries the `version` it started from, and is refused if
+  another save landed in between. The refusal says who saved and when, and
+  offers "Reload the current list"; it never merges silently.
+- "Add to list…" only adds, so it cannot overwrite anyone's work. It takes no
+  version, skips trucks already present, and bumps the version.
+
+**Every create, edit and delete writes one `audit_log` row** (entity
+`truck_list`) with the actor, the name, and the truck numbers before and after
+(plus `added` and `removed` on an edit).
+
+**In the console:**
+
+- **Views menu.** A "Lists · shared with every dispatcher" section sits above
+  "My views", each list with its truck count. It also has "Show the full
+  fleet", "New list…", and "Edit" on hover.
+- **Header.** "Fleet — list: Bob's trucks — 12 trucks", or "4 of 12 trucks"
+  when the chips or the search narrow it further.
+- **Create and edit.**
+  - The trucks are chips, and each can be removed.
+  - A paste box reads numbers separated by commas, spaces, periods,
+    semicolons or new lines, as they are typed. Duplicates collapse.
+  - Numbers not in the fleet are named and left out, because a list holds
+    trucks, not numbers. Junk is named too. None of this blocks the save.
+  - "Add the N checked rows" takes the rows checked in the console.
+  - Delete asks "Delete “Bob's trucks” for everyone?".
+- **"Add to list…"** in the bulk bar (two or more checked rows) picks a list
+  or names a new one.
+- **The URL** carries `?list=<id>`, not the name, so a rename does not break a
+  link. A link to a missing list, or the list on screen deleted by someone
+  else, falls back to the full fleet with "This list no longer exists —
+  showing the full fleet". The board is never blank.
+- **Refresh:** lists poll every 20 s beside the fleet, so another person's
+  change arrives within one poll. It is a separate `GET /api/truck-lists`
+  spending the `read` budget. Four tabs of one dispatcher use about 13% of
+  `read` and 40% of `read.heavy` sustained: `rate-limit.test.ts` replays an
+  hour of it, including focus refetches from all four tabs at once, and
+  nothing is refused.
+
+**Tests:**
+
+- Unit tests for the parser and the list filter.
+- Database tests for the unique name, both caps, the foreign keys and cascade,
+  the permissions for all three roles, the version conflict, and the audit
+  rows.
+- An e2e test that creates "Bob's trucks" with the 12, reloads and sees exactly
+  those 12, adds a list from checked rows, adds one truck, removes one, and
+  deletes the list. A second covers the list deleted by someone else while on
+  screen; a third, the link to a deleted list.
+- Breaking the filter on purpose (`scopeToList` returning every row) fails
+  three unit tests and the e2e run, which reads "16 trucks" where 12 were
+  expected.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

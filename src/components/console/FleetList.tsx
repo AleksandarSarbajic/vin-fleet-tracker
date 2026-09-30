@@ -70,6 +70,8 @@ interface Props {
     barOpen: boolean;
     onForceStatus: () => void;
     onAddNote: () => void;
+    /** §12.90. Absent for a viewer. */
+    onAddToList?: () => void;
     onClear: () => void;
   };
   query: string;
@@ -320,6 +322,7 @@ export function FleetList({
           lastVisible={lastVisible}
           onForceStatus={bulk.onForceStatus}
           onAddNote={bulk.onAddNote}
+          {...(bulk.onAddToList ? { onAddToList: bulk.onAddToList } : {})}
           onClear={bulk.onClear}
         />
       ) : (

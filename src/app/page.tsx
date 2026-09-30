@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/auth';
 import { loadFleet } from '@/server/fleet';
 import { loadAssignmentBoard } from '@/server/assignments';
 import { loadFleetHealth } from '@/server/health';
+import { loadTruckLists } from '@/server/truck-lists';
 import { db } from '@/db';
 
 /** Live positions — never cached. */
@@ -29,10 +30,12 @@ export default async function ConsolePage({
   // less often than positions do.
   // §14 feature 8 rides along with the prefetch for the same reason the fleet
   // does: the strip has a value on the first paint, so it never flashes empty.
-  const [payload, board, health] = await Promise.all([
+  const [payload, board, health, lists] = await Promise.all([
     loadFleet(),
     loadAssignmentBoard(db),
     loadFleetHealth(db, serverEnv.DISPATCH_TZ),
+    // §12.90. So a `?list=` link paints already filtered, not the fleet first.
+    loadTruckLists(db),
   ]);
 
   return (
@@ -44,6 +47,8 @@ export default async function ConsolePage({
       initialQuery={first(params['q']) ?? ''}
       initialTruck={first(params['truck'])}
       initialChips={(first(params['chips']) ?? '').split(',').filter(Boolean)}
+      initialLists={lists}
+      initialList={first(params['list'])}
       drivers={board.drivers}
       role={user.role}
     />

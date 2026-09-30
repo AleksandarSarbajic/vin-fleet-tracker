@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
+import type { TruckList } from '@/lib/truck-lists';
 import { chipLabel } from './FilterChips';
 
 /**
@@ -23,6 +24,21 @@ import { chipLabel } from './FilterChips';
  * reaches the views instead (§14.3: "⌘K is navigation plus view-only actions
  * — apply a saved view").
  */
+/**
+ * §12.90. The shared lists, shown ABOVE the personal views in the same menu:
+ * a list decides which trucks are in scope and a view then narrows them, so
+ * the menu reads in the order the board applies them.
+ */
+export interface ListsMenu {
+  items: TruckList[];
+  activeId: string | null;
+  /** Dispatchers and admins. A viewer sees and applies lists, and is told why not more. */
+  canEdit: boolean;
+  onApply: (id: string | null) => void;
+  onNew: () => void;
+  onEdit: (id: string) => void;
+}
+
 export function SavedViews({
   views,
   active,
@@ -31,6 +47,7 @@ export function SavedViews({
   onRemove,
   onRename,
   canSaveCurrent,
+  lists,
 }: {
   views: SavedView[];
   active: SavedView | null;
@@ -46,7 +63,11 @@ export function SavedViews({
    * refuses.
    */
   canSaveCurrent: boolean;
+  lists?: ListsMenu;
 }) {
+  const activeList = lists?.items.find((l) => l.id === lists.activeId) ?? null;
+  /** What the trigger names: the view if one is active, else the list. */
+  const activeLabel = active ? active.name : activeList ? `List: ${activeList.name}` : null;
   const [open, setOpen] = useState(false);
   /**
    * §12.83. Where the menu is drawn — FIXED, in viewport coordinates, from the
@@ -137,8 +158,8 @@ export function SavedViews({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={active ? `Views: ${active.name}` : undefined}
-        title={active ? `Views: ${active.name}` : undefined}
+        aria-label={activeLabel ? `Views: ${activeLabel}` : undefined}
+        title={activeLabel ? `Views: ${activeLabel}` : undefined}
         ref={trigger}
         onClick={() => {
           const box = trigger.current?.getBoundingClientRect();
@@ -156,7 +177,7 @@ export function SavedViews({
           setError(null);
         }}
         className={`flex h-[26px] shrink-0 items-center gap-1.5 border px-3 font-cond text-micro uppercase tracking-[.09em] ${
-          active
+          activeLabel
             ? 'border-accent text-accent'
             : 'border-line-hair text-text-secondary hover:bg-row-hover'
         }`}
@@ -169,10 +190,10 @@ export function SavedViews({
           accent mark, and the list title directly beneath carries the name
           at every width. The full name is always the accessible name.
         */}
-        {active ? (
+        {activeLabel ? (
           <>
             <span className="hidden max-w-[180px] truncate min-[1680px]:inline">
-              Views: {active.name}
+              Views: {activeLabel}
             </span>
             <span className="min-[1680px]:hidden">Views</span>
             <span
@@ -198,6 +219,17 @@ export function SavedViews({
           style={anchor ? { top: anchor.top, left: anchor.left } : undefined}
           className="fixed z-30 w-[280px] border border-line-hair bg-surface-raised py-1 text-left"
         >
+          {lists ? (
+            <ListsSection
+              lists={lists}
+              onDone={() => setOpen(false)}
+            />
+          ) : null}
+          {lists ? (
+            <p className="px-3 pb-1 pt-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+              My views · this browser
+            </p>
+          ) : null}
           {views.length === 0 ? (
             <p className="px-3 py-2 text-body text-text-mutedOnSelected">
               No saved views yet. Filter the board, then save it here.
@@ -344,4 +376,85 @@ function describe(view: SavedView): string {
   if (view.chips.length > 0) parts.push(view.chips.map(chipLabel).join(', '));
   if (view.query) parts.push(`“${view.query}”`);
   return parts.length === 0 ? 'The whole active fleet' : parts.join(' · ');
+}
+
+/**
+ * §12.90. The shared lists: each with its truck count, the active one marked,
+ * a way back to the full fleet, and — for dispatchers and admins — new and
+ * edit. Scrolls inside its own cap so fifty lists never push the personal
+ * views off the menu.
+ */
+function ListsSection({ lists, onDone }: { lists: ListsMenu; onDone: () => void }) {
+  return (
+    <div data-lists-section="" className="border-b border-line-hair pb-1">
+      <p className="px-3 pb-1 pt-1 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+        Lists · shared with every dispatcher
+      </p>
+      {lists.items.length === 0 ? (
+        <p className="px-3 py-1.5 text-body text-text-mutedOnSelected">No shared lists yet.</p>
+      ) : (
+        <div data-list-items="" className="max-h-[min(40vh,240px)] overflow-y-auto">
+          {lists.items.map((list) => (
+            <div key={list.id} className="group/list flex items-center">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  lists.onApply(list.id);
+                  onDone();
+                }}
+                className={`flex min-w-0 flex-1 items-baseline gap-2 px-3 py-1.5 text-left hover:bg-row-hover ${
+                  list.id === lists.activeId ? 'text-accent' : 'text-text'
+                }`}
+              >
+                <span className="truncate text-body">{list.name}</span>
+                <span className="shrink-0 font-sans text-small tabular-nums text-text-mutedOnSelected">
+                  {list.truckIds.length} {list.truckIds.length === 1 ? 'truck' : 'trucks'}
+                </span>
+              </button>
+              {lists.canEdit ? (
+                <button
+                  type="button"
+                  aria-label={`Edit the list ${list.name}`}
+                  onClick={() => {
+                    lists.onEdit(list.id);
+                    onDone();
+                  }}
+                  className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-muted opacity-0 hover:text-text focus-visible:opacity-100 group-hover/list:opacity-100"
+                >
+                  Edit
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+      {lists.activeId !== null ? (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            lists.onApply(null);
+            onDone();
+          }}
+          className="w-full px-3 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover"
+        >
+          Show the full fleet
+        </button>
+      ) : null}
+      <button
+        type="button"
+        role="menuitem"
+        disabled={!lists.canEdit}
+        title={lists.canEdit ? undefined : 'Only dispatchers and admins can create lists.'}
+        onClick={() => {
+          lists.onNew();
+          onDone();
+        }}
+        className="w-full px-3 py-1.5 text-left text-body text-accent hover:bg-row-hover disabled:text-text-muted disabled:hover:bg-transparent"
+      >
+        New list…
+      </button>
+    </div>
+  );
 }

@@ -9,6 +9,7 @@ import {
   pgEnum,
   pgSchema,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -801,6 +802,61 @@ export const overrides = pgTable(
       'overrides_other_needs_note',
       sql`reason <> 'OTHER' or length(btrim(coalesce(reason_note, ''))) > 0`,
     ),
+  ],
+);
+
+/* ------------------------------ truck lists ---------------------------- */
+
+/**
+ * §12.90. A named, shared set of trucks ("Bob's trucks"). Every dispatcher
+ * sees every list; dispatchers and admins edit them.
+ *
+ * `name` is stored normalised (trimmed, whitespace collapsed, 1..40 chars) and
+ * unique case-insensitively. `version` is bumped by every change: an edit or
+ * delete names the version it started from and is refused if another landed
+ * in between. The 50-list and 200-truck caps are triggers (migration 0022),
+ * because a CHECK cannot count.
+ */
+export const truckLists = pgTable(
+  'truck_lists',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    name: text('name').notNull(),
+    version: integer('version').notNull().default(1),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(now),
+    updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex('truck_lists_name_unique').on(sql`lower(${t.name})`),
+    check(
+      'truck_lists_name_shape',
+      sql`name = regexp_replace(btrim(name), '\s+', ' ', 'g') and char_length(name) between 1 and 40`,
+    ),
+    check('truck_lists_version_positive', sql`version >= 1`),
+  ],
+);
+
+/**
+ * By truck ID, never by the typed number. A deleted truck leaves its lists
+ * (cascade); a deactivated one stays, and the Inactive chip decides.
+ */
+export const truckListMembers = pgTable(
+  'truck_list_members',
+  {
+    listId: uuid('list_id')
+      .notNull()
+      .references(() => truckLists.id, { onDelete: 'cascade' }),
+    truckId: uuid('truck_id')
+      .notNull()
+      .references(() => trucks.id, { onDelete: 'cascade' }),
+    addedBy: uuid('added_by').references(() => profiles.id, { onDelete: 'set null' }),
+    addedAt: timestamp('added_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listId, t.truckId] }),
+    index('truck_list_members_truck_idx').on(t.truckId),
   ],
 );
 

@@ -8,7 +8,7 @@ import { SearchField } from './SearchField';
 import { FilterChips, type FilterKey } from './FilterChips';
 import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
-import { SavedViews } from './SavedViews';
+import { SavedViews, type ListsMenu } from './SavedViews';
 import { BRAND } from '@/lib/brand';
 import type { SavedView } from '@/lib/views';
 
@@ -87,6 +87,8 @@ interface Props {
     onRemove: (id: string) => void;
     onRename: (id: string, name: string) => string | null;
     canSaveCurrent: boolean;
+    /** §12.90. The shared truck lists, shown above the personal views. */
+    lists?: ListsMenu;
   };
 }
 
@@ -202,6 +204,7 @@ export function ConsoleHeader({
             onRemove={views.onRemove}
             onRename={views.onRename}
             canSaveCurrent={views.canSaveCurrent}
+            {...(views.lists ? { lists: views.lists } : {})}
           />
           <FilterChips
             rows={rows}
