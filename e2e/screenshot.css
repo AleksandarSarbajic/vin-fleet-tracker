@@ -1,0 +1,29 @@
+/*
+ * §12.96. Applied ONLY while a baseline screenshot is taken. The map's tiles
+ * are drawn by Mapbox from the network and differ run to run, so the canvas
+ * is made invisible rather than masked: a mask paints over its whole box,
+ * which would also hide the popup, the map controls and any dialog in front
+ * of the map — the things the baselines exist to hold still.
+ */
+canvas.mapboxgl-canvas {
+  visibility: hidden !important;
+}
+
+/*
+ * The values that change by themselves, tagged by the baseline spec just
+ * before the shot. Hidden, not masked, for the same reason: a mask paints
+ * over a dialog in front of them; hidden text under a dialog stays under it.
+ */
+[data-shot-hide] {
+  visibility: hidden !important;
+}
+
+/*
+ * A value inside a control that must stay checked — the stale chip's age:
+ * its text (and the icon drawn in the same colour) goes transparent, its
+ * border and size stay in the picture.
+ */
+[data-shot-text],
+[data-shot-text] * {
+  color: transparent !important;
+}

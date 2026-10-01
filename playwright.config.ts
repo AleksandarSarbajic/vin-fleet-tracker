@@ -72,7 +72,21 @@ export default defineConfig({
     ? [['github'], ['list'], ['./e2e/redact-reporter.ts']]
     : [['list'], ['./e2e/redact-reporter.ts']],
   timeout: 45_000,
-  expect: { timeout: 10_000 },
+  expect: {
+    timeout: 10_000,
+    /**
+     * §12.96. Zero means zero: no per-pixel colour tolerance and no pixel
+     * allowance, so "desktop unchanged" is a measurement, not a judgement.
+     */
+    toHaveScreenshot: {
+      threshold: 0,
+      maxDiffPixels: 0,
+      animations: 'disabled',
+      caret: 'hide',
+    },
+  },
+  // Committed baselines live beside the specs, one folder per spec file.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
 
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
@@ -106,7 +120,17 @@ export default defineConfig({
       dependencies: ['setup'],
       // auth.spec.ts asserts the redirect and the login itself, so it must
       // start signed OUT. It sets its own storageState.
-      testIgnore: /auth\.setup\.ts/,
+      testIgnore: [/auth\.setup\.ts/, /phone-signout\.spec\.ts/],
+    },
+    /**
+     * §12.96. The app's sign-out ends EVERY session of the account (Supabase's
+     * default global scope), including the one the specs above share. So the
+     * phone sign-out check signs in on its own and runs after all of them.
+     */
+    {
+      name: 'phone-signout',
+      testMatch: /phone-signout\.spec\.ts/,
+      dependencies: ['chromium'],
     },
   ],
 

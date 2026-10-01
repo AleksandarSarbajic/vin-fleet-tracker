@@ -6954,6 +6954,165 @@ hovered, then "Copy address" copies the address without selecting and the
 star pins. Removing the rule from the copy button fails the touch test on the
 selection itself (`aria-selected` stays `false`).
 
+## 12.96 A phone view for checking the board — plan, and stage 0
+
+Phones are for CHECKING the board (§12.94: editing is on the desktop). Below
+768px the console gets its own view; at 768px and wider it must stay pixel for
+pixel what it is. Approved 2026-10-01, built in stages, each approved after
+the report on the one before.
+
+**Switching.** Tailwind's `md` is 768px. Phone pieces carry `md:hidden`, the
+desktop pieces they replace `max-md:hidden`; the server sends both and CSS
+shows one, so the first paint is right and nothing flashes. No script reads the
+width to choose a layout (the editing block keeps its own media query). Data,
+polling, filters, scope and selection stay in `Console`; the phone pieces are
+display only, and add NO key listeners — the chips (0–8), the scope menu (V)
+and search (/) already listen page-wide, and a second copy would fire twice.
+
+**The view.**
+
+- Sticky top bar: logo, scope button with its ×, feed state always visible
+  (green dot and "3s ago", or red "Feed down 25m"), a search icon that opens a
+  full-width field (no keyboard handling of its own), the account menu.
+- Count tiles — All, Late, At risk — 44px tall and tappable as filters; a More
+  sheet holds the other filters, the Today summary and the density toggle,
+  which leave the first screen.
+- A List | Map switch at the top (not a bottom tab bar: Safari's toolbar and
+  the home bar), 44px, list first.
+- Two-line cards, no checkboxes or rail: truck number and status chip; driver
+  · next-stop city · appointment or ETA, whichever the desktop column shows.
+  Cards carry `data-phone-card`, NOT `data-row-id`, so no existing selector
+  finds two rows.
+- A truck sheet, from a card or a marker, in place of the map popup: status,
+  next stop, appointment, ETA, position, GPS age, load number; Timeline, Show
+  on map, and Call driver as a plain `tel:+1…` link only when the number is
+  dialable (all 8 numbers on file are; 25 of 33 drivers have none). No editing,
+  no messaging, no `sms:`.
+- Map tab: 44px controls, the marker key folded behind a Key button.
+- The feed-down banner wraps its whole sentence. The tour is skipped below
+  768px, the login card fits at 320, the scope menu at 320–360, the timeline
+  is `min(620px, 100%)` wide.
+- No `viewport-fit=cover`, no safe-area work (decided).
+
+**Added with the approval.**
+
+- *Back from the background.* When a phone tab becomes visible again it
+  refetches at once and shows "Updating…" (`data-updating`) in the top bar
+  until the answer lands. "3s ago" is never shown for data the page fetched
+  more than 60s earlier without that marker.
+- *Both lists in the page break no existing selector.* Every stage reports
+  which existing tests, if any, needed changing.
+- *Sign-out is tested at a phone size* (390px), from the top bar's account
+  menu.
+
+**Stages.**
+
+| Stage | What |
+|---|---|
+| 0 | Desktop baselines and the phone e2e harness (this section) |
+| 1 | Top bar (scope, feed state, search, account, Updating…), tiles and More sheet, Today strip and density off the first screen, tour skipped, login fits at 320 |
+| 2 | Cards, the List \| Map switch with list first, the map mounted once |
+| 3 | Truck sheet with the call link, the map tab (key button, 44px controls, sheet instead of popup), timeline width |
+| 4 | Scope menu width, banner wrapping, toasts on phones, the 12px sweep, the full phone checks green |
+
+Not touched by any stage: the worker, status logic, the APIs, the database,
+the Edit Stop modal and the editing block.
+
+### Stage 0 — the desktop, held still
+
+`e2e/desktop-baseline.spec.ts` shoots eight states — default, a list with the
+outside note, a selected truck with its popup, the timeline, Edit Stop, the
+scope menu open, the bulk bar, feed down — at 768, 1024, 1280, 1440, 1680 and
+1920 (900px high): 48 page shots and 6 popup shots, committed under
+`e2e/__screenshots__/`. The comparison allows nothing: `threshold: 0`,
+`maxDiffPixels: 0` (`playwright.config.ts`), animations off, caret hidden.
+
+What holds them still:
+
+- a fixed seed, appointments on 2030-06-04 so the status cannot move with the
+  date, and the feed-down instant fixed 25 minutes before the frozen clock;
+- the browser clock frozen (`page.clock.setFixedTime`);
+- HIDDEN rather than masked, via `e2e/screenshot.css`, only what the server
+  stamps with its own real time and so changes by itself: the map's canvas
+  (tiles), the two clocks, the healthy sync age, the banner's retry countdown,
+  the GPS ages (rows — text only, the chip's border stays — popup and map
+  footer), and the projected ETAs (popup, and the ETA column from 1440). A
+  Playwright mask paints a box over everything in front of the value too —
+  the popup, a dialog — so it would have hidden the very things being held.
+
+**Where they are valid.** The baselines are macOS renders by Playwright's own
+Chromium; the path has no `{platform}` because the suite runs on one machine
+(there is no CI). Another OS or a Playwright upgrade changes font rendering:
+re-baseline on unchanged code first (`--update-snapshots`), check the new set
+is stable, and only then compare a stage against it.
+
+**The one thing not held: where the popup sits.** That is the map camera's
+call and moves a few pixels run to run. Its content is shot on its own
+(`…-popup.png`, map controls hidden under it); in the page shot it is hidden.
+
+**Proof the comparison is stable and can fail.** Two consecutive runs on
+unchanged code: 54 of 54 identical, both times. A 1px right border added on
+purpose to the header's logo group failed every width (989–1,060 pixels different), then was
+reverted.
+
+### Stage 0 — the phone harness
+
+`e2e/phone.spec.ts` runs each check at 320×568, 360×640, 375×667, 390×844,
+430×932 and 667×375, touch and mobile emulation on. Widths are measured
+against the configured screen, never `window.innerWidth`: with mobile
+emulation Chrome widens the layout to fit overflowing content, and the page
+then reports that everything fits. The checks name the contract the stages
+build to: `data-phone-topbar`, `data-phone-feed`, `data-phone-account`,
+`data-phone-search`, `data-count-tile`, `data-phone-more`, `data-phone-tab`,
+`data-phone-card` / `data-card-field`, `data-truck-sheet` / `data-sheet-field`,
+`data-updating`, `data-marker-key-toggle`.
+
+A check the current app cannot pass is listed in `NOT_YET` with the stage that
+makes it pass, and runs as an expected failure (`test.fail`), so the suite
+stays green. When a stage makes one pass, Playwright reports it as
+unexpectedly passing until its line is deleted — the list shrinks stage by
+stage and cannot fall out of date. `PHONE_REPORT=1` runs every check unmarked.
+
+On the app as stage 0 found it (`PHONE_REPORT=1`, 2026-10-01):
+
+| Check | Why it fails today | Stage |
+|---|---|---|
+| no control is cut off by the screen edge | the header runs off the right: Search, Assignments, the account menu and the chips past Late (6–8 controls in portrait); "Drivers only" at 667×375 | 1, 2 |
+| every control used is at least 44px | 18 controls at every size (credit links aside): the scope button 30px tall, chips 28, zoom and style buttons 32, account 30, search 20 | 1–3 |
+| Late and At risk tiles are visible without scrolling | there are no tiles | 1 |
+| the Today strip and density are off the first screen | both are on the list | 1 |
+| search opens a full-width field from the top bar | there is no top bar | 1 |
+| the tour does not open on a phone | it opens at every size | 1 |
+| the login card fits the screen | wider than the screen at 320–430; fits at 667×375 | 1 |
+| feed down is visible, its sentence whole | no top-bar feed state; the banner's sentence is cut at every size | 1, 4 |
+| returning from the background refetches and says Updating… | no `data-updating` | 1 |
+| every row field is readable without sideways scrolling | there are no cards | 2 |
+| the map mounts once across List/Map switches | no phone tabs (and today's toggle unmounts the map) | 2 |
+| the truck sheet fits and calls only a dialable number | there is no sheet | 3 |
+| the marker key is folded behind a button | there is no key button | 3 |
+| the timeline fits the screen width | reached from the sheet, which does not exist | 3 |
+| the scope menu fits the screen | wider than 320 and 360; fits from 375 | 4 |
+| no text under 12px | 33 pieces at every size: chips 11.5px, the FLEET tag 10px, map toolbar and marker key 10.5–11px, the map footer 10.5px | 4 |
+| on a 390px phone, the account menu signs out | no `data-phone-account` | 1 |
+
+Already true, and held: editing stays hidden; the phone view adds no keyboard
+listeners (the page's keydown listeners at 390 equal those at 1280).
+
+**The credits are ours.** The plan exempted "Mapbox's attribution" from the
+12px rule. In this product the attribution is our own footer (`map-credits`,
+`attributionControl` off, `MapChrome.tsx`), so it is held to 12px on phones. Its
+links are exempt from the 44px rule only: they are text links the Mapbox terms
+require, not controls anyone uses to check the board.
+
+**Sign-out ends every session.** The app's `supabase.auth.signOut()` uses
+Supabase's default global scope: signing out on the phone signs the dispatcher
+out of their desktop too. Not changed here. It is why
+`e2e/phone-signout.spec.ts` is its own Playwright project that runs after
+every other spec (it would otherwise end the session the others share) and
+signs in by itself.
+
+**Existing tests changed by stage 0:** none.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
