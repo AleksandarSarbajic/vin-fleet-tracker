@@ -76,7 +76,8 @@ interface Props {
   panRequest: number;
   onSelect: (id: string | null) => void;
   /** §12.10's Enter, reachable from the map too. */
-  onEdit: (id: string) => void;
+  /** §12.94. Null below the editing width. */
+  onEdit: ((id: string) => void) | null;
   /** §14 feature 15. */
   onTimeline: (id: string) => void;
   /** Incremented on split drag-end. The map reflows then, never mid-drag. */

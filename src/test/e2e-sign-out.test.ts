@@ -22,10 +22,10 @@ const NOW = new Date('2026-10-01T16:00:00Z');
 const inAnHour = Math.floor(NOW.getTime() / 1000) + 3600;
 const anHourAgo = Math.floor(NOW.getTime() / 1000) - 3600;
 
-const jwt = (sub: string, exp = inAnHour) =>
+const jwt = (sub: string, exp = inAnHour, session = 's1') =>
   [
     Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url'),
-    Buffer.from(JSON.stringify({ sub, exp })).toString('base64url'),
+    Buffer.from(JSON.stringify({ sub, exp, session_id: session })).toString('base64url'),
     'signature',
   ].join('.');
 
@@ -38,13 +38,22 @@ const env = (over: Partial<SignOutEnv> = {}): SignOutEnv => ({
   ...over,
 });
 
-/** A Supabase that answers tokens with `issue` and logs out with 204. */
-const network = (issue: (grant: string) => string | null = () => null) => {
+/**
+ * A Supabase that answers tokens with `issue` and logs out with 204 — or
+ * with `logoutStatus(token)`, for a token whose session is already gone.
+ */
+const network = (
+  issue: (grant: string) => string | null = () => null,
+  logoutStatus: (token: string) => number = () => 204,
+) => {
   const calls: { url: string; auth: string | null }[] = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const headers = (init?.headers ?? {}) as Record<string, string>;
     calls.push({ url, auth: headers['authorization'] ?? null });
-    if (url.includes('/logout')) return new Response(null, { status: 204 });
+    if (url.includes('/logout')) {
+      const token = (headers['authorization'] ?? '').replace(/^Bearer /, '');
+      return new Response(null, { status: logoutStatus(token) });
+    }
     const grant = new URL(url).searchParams.get('grant_type') ?? '';
     const token = issue(grant);
     return token
@@ -53,7 +62,7 @@ const network = (issue: (grant: string) => string | null = () => null) => {
   }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 };
-const logouts = (calls: { url: string }[]) =>
+const logouts = <T extends { url: string }>(calls: T[]) =>
   calls.filter((c) => c.url.includes('/logout'));
 
 /** The cookie `auth.setup.ts` saves, in Supabase's own `base64-` form. */
@@ -161,6 +170,12 @@ describe('it signs out the e2e account, and only it', () => {
 });
 
 describe('the teardown targets E2E_USER_ID, wired end to end', () => {
+  /**
+   * The teardown reads the REAL clock, so its tokens must be unexpired on it.
+   * A token stamped against the fixed NOW above expired at 17:00 UTC on
+   * 2026-10-01 and this block started failing on the hour.
+   */
+  const live = (sub: string) => jwt(sub, Math.floor(Date.now() / 1000) + 3600);
   const processEnv = {
     NEXT_PUBLIC_SUPABASE_URL: URL_,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
@@ -175,7 +190,7 @@ describe('the teardown targets E2E_USER_ID, wired end to end', () => {
 
   it('signs out the stored e2e session', async () => {
     const { fetchImpl, calls } = network();
-    const result = await runTeardown(processEnv, () => state(jwt(E2E)), fetchImpl);
+    const result = await runTeardown(processEnv, () => state(live(E2E)), fetchImpl);
     expect(result.done).toBe(true);
     expect(logouts(calls)).toHaveLength(1);
   });
@@ -184,10 +199,109 @@ describe('the teardown targets E2E_USER_ID, wired end to end', () => {
     const { fetchImpl, calls } = network();
     const result = await runTeardown(
       processEnv,
-      () => state(jwt(SOMEONE_ELSE)),
+      () => state(live(SOMEONE_ELSE)),
       fetchImpl,
     );
     expect(result.done).toBe(false);
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * The stale session: the file on disk names the e2e account, but a previous
+ * teardown already signed that session out, so Supabase answers 401/403.
+ */
+describe('a stale stored session falls back to a fresh e2e sign-in', () => {
+  const STALE = jwt(E2E, inAnHour, 'old');
+  const FRESH = jwt(E2E, inAnHour, 'new');
+  const gone = (token: string) => (token === STALE ? 403 : 204);
+  const signIns = (calls: { url: string }[]) =>
+    calls.filter((c) => c.url.includes('grant_type=password'));
+
+  it.each([401, 403])(
+    'on %i: signs in fresh, checks it, and signs out everywhere',
+    async (status) => {
+      const { fetchImpl, calls } = network(
+        (grant) => (grant === 'password' ? FRESH : null),
+        (token) => (token === STALE ? status : 204),
+      );
+      const result = await signOutE2eAccount(env(), {
+        stored: { accessToken: STALE, refreshToken: 'r1' },
+        fetchImpl,
+        now: NOW,
+      });
+      expect(result).toEqual({ done: true, userId: E2E, via: 'fresh sign-in' });
+      expect(signIns(calls)).toHaveLength(1);
+      expect(logouts(calls).map((c) => c.auth)).toEqual([
+        `Bearer ${STALE}`,
+        `Bearer ${FRESH}`,
+      ]);
+    },
+  );
+
+  it('a fresh sign-in that comes back as another account is refused, and never signed out', async () => {
+    const { fetchImpl, calls } = network(
+      (grant) => (grant === 'password' ? jwt(SOMEONE_ELSE) : null),
+      gone,
+    );
+    const result = await signOutE2eAccount(env(), {
+      stored: { accessToken: STALE, refreshToken: 'r1' },
+      fetchImpl,
+      now: NOW,
+    });
+    expect(result.done).toBe(false);
+    // Only the stale e2e token ever reached the logout.
+    expect(logouts(calls).map((c) => c.auth)).toEqual([`Bearer ${STALE}`]);
+  });
+
+  it('another account’s stored session is still refused with NO request sent', async () => {
+    const { fetchImpl, calls } = network(() => FRESH, gone);
+    const result = await signOutE2eAccount(env(), {
+      stored: { accessToken: jwt(SOMEONE_ELSE), refreshToken: 'r1' },
+      fetchImpl,
+      now: NOW,
+    });
+    expect(result.done).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('any other failure (500) is reported, not retried', async () => {
+    const { fetchImpl, calls } = network(
+      () => FRESH,
+      () => 500,
+    );
+    const result = await signOutE2eAccount(env(), {
+      stored: { accessToken: jwt(E2E), refreshToken: 'r1' },
+      fetchImpl,
+      now: NOW,
+    });
+    expect(result).toEqual({
+      done: false,
+      reason: 'Supabase refused the global sign-out (500).',
+    });
+    expect(signIns(calls)).toEqual([]);
+  });
+
+  it('through the teardown itself, from a stale state file', async () => {
+    // The teardown runs on the real clock, so this token must be unexpired on it.
+    const STALE_NOW = jwt(E2E, Math.floor(Date.now() / 1000) + 3600, 'old');
+
+    const { fetchImpl, calls } = network(
+      (grant) => (grant === 'password' ? FRESH : null),
+      (token) => (token === STALE_NOW ? 403 : 204),
+    );
+    const result = await runTeardown(
+      {
+        NEXT_PUBLIC_SUPABASE_URL: URL_,
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+        E2E_USER_ID: E2E,
+        E2E_EMAIL: 'e2e@example.test',
+        E2E_PASSWORD: 'not-a-real-password',
+      },
+      () => state(STALE_NOW),
+      fetchImpl,
+    );
+    expect(result).toMatchObject({ done: true, via: 'fresh sign-in' });
+    expect(logouts(calls)).toHaveLength(2);
   });
 });

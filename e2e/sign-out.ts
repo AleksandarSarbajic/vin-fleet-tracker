@@ -12,9 +12,11 @@
  *
  *   - a stored session (the cookie `auth.setup.ts` saved) is decoded locally
  *     and its `sub` compared before it is refreshed or used;
- *   - only when there is no stored session does it sign in with the e2e
- *     credentials — a request that has to happen before the user id is known
- *     — and then the same comparison gates the logout.
+ *   - only when there is no stored session, or the stored one is STALE (a
+ *     previous run already signed it out, so the logout answers 401/403),
+ *     does it sign in with the e2e credentials — a request that has to happen
+ *     before the user id is known — and then the same comparison gates the
+ *     logout. Any other failure is reported, not retried.
  *
  * No token, password or email is ever returned or logged; a refusal names
  * the first eight characters of the two ids, nothing more.
@@ -154,15 +156,37 @@ export async function signOutE2eAccount(
     return { done: false, reason: 'The Supabase URL or publishable key is not set.' };
   }
 
-  let token: string | null = null;
-  let via: 'stored session' | 'fresh sign-in' = 'stored session';
+  /**
+   * The gate every logout passes through, whichever way the token was
+   * obtained: its subject must be exactly E2E_USER_ID, or nothing is sent.
+   */
+  const logoutWith = async (
+    token: string,
+    via: 'stored session' | 'fresh sign-in',
+  ): Promise<SignOutResult & { status?: number }> => {
+    const sub = jwtClaims(token).sub;
+    const refused = refusal(env.expectedUserId, sub);
+    if (refused) return { done: false, reason: refused };
+    const response = await fetchImpl(`${env.supabaseUrl}/auth/v1/logout?scope=global`, {
+      method: 'POST',
+      headers: { apikey: env.apiKey!, authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      return {
+        done: false,
+        reason: `Supabase refused the global sign-out (${response.status}).`,
+        status: response.status,
+      };
+    }
+    return { done: true, userId: sub!, via };
+  };
 
   if (options.stored) {
     // Checked BEFORE it is refreshed or used.
     const before = refusal(env.expectedUserId, jwtClaims(options.stored.accessToken).sub);
     if (before) return { done: false, reason: before };
     const { exp } = jwtClaims(options.stored.accessToken);
-    token =
+    const token =
       exp !== null && exp > nowSeconds + 30
         ? options.stored.accessToken
         : options.stored.refreshToken
@@ -170,34 +194,33 @@ export async function signOutE2eAccount(
               refresh_token: options.stored.refreshToken,
             })
           : null;
-  }
-
-  if (token === null) {
-    if (!env.email || !env.password) {
-      return { done: false, reason: 'No usable stored session and no e2e credentials.' };
+    if (token !== null) {
+      const result = await logoutWith(token, 'stored session');
+      /**
+       * A STALE stored session: a previous run's teardown already signed it
+       * out, so its token is dead (401/403) — the file on disk outlived it.
+       * Fall through to a fresh sign-in, which passes the same gate. Any
+       * other outcome, a refusal included, is final.
+       */
+      if (result.done || (result.status !== 401 && result.status !== 403)) {
+        return strip(result);
+      }
     }
-    via = 'fresh sign-in';
-    token = await tokenRequest(env, fetchImpl, 'password', {
-      email: env.email,
-      password: env.password,
-    });
-    if (token === null) return { done: false, reason: 'The e2e sign-in was refused.' };
   }
 
-  // The gate the logout passes through, whichever way the token was obtained.
-  const sub = jwtClaims(token).sub;
-  const refused = refusal(env.expectedUserId, sub);
-  if (refused) return { done: false, reason: refused };
-
-  const response = await fetchImpl(`${env.supabaseUrl}/auth/v1/logout?scope=global`, {
-    method: 'POST',
-    headers: { apikey: env.apiKey, authorization: `Bearer ${token}` },
+  if (!env.email || !env.password) {
+    return { done: false, reason: 'No usable stored session and no e2e credentials.' };
+  }
+  const fresh = await tokenRequest(env, fetchImpl, 'password', {
+    email: env.email,
+    password: env.password,
   });
-  if (!response.ok) {
-    return {
-      done: false,
-      reason: `Supabase refused the global sign-out (${response.status}).`,
-    };
-  }
-  return { done: true, userId: sub!, via };
+  if (fresh === null) return { done: false, reason: 'The e2e sign-in was refused.' };
+  return strip(await logoutWith(fresh, 'fresh sign-in'));
+}
+
+/** The status is internal to the fallback; the result says only what happened. */
+function strip(result: SignOutResult & { status?: number }): SignOutResult {
+  if (result.done) return result;
+  return { done: false, reason: result.reason };
 }

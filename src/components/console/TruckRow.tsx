@@ -425,7 +425,8 @@ interface Props {
    * §12.48. Double-click opens the edit modal — the mouse equivalent of the
    * Enter binding (§12.10), not a new behaviour.
    */
-  onEdit: (id: string) => void;
+  /** §12.94. Null below the editing width: double-click then opens nothing. */
+  onEdit: ((id: string) => void) | null;
 }
 
 function TruckRowImpl({
@@ -501,7 +502,7 @@ function TruckRowImpl({
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest('[data-no-dblclick]')) return;
         window.getSelection()?.removeAllRanges();
-        onEdit(row.id);
+        onEdit?.(row.id);
       }}
       onKeyDown={(e) => {
         /**

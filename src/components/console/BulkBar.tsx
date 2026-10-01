@@ -2,6 +2,7 @@
 
 import type { FleetRow } from '@/server/fleet-query';
 import { isProblem } from '@/lib/status';
+import { DESKTOP_ONLY } from '@/lib/editing';
 
 /**
  * The bulk bar (§14, feature 2).
@@ -36,8 +37,9 @@ export function BulkBar({
   rows: FleetRow[];
   checked: ReadonlySet<string>;
   lastVisible: number;
-  onForceStatus: () => void;
-  onAddNote: () => void;
+  /** §12.94. Both null below the editing width; the bar then says where editing is. */
+  onForceStatus: (() => void) | null;
+  onAddNote: (() => void) | null;
   /** §12.90. Absent for a viewer, who cannot change lists. */
   onAddToList?: () => void;
   onClear: () => void;
@@ -67,20 +69,28 @@ export function BulkBar({
       </span>
 
       <span className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={onForceStatus}
-          className="h-[20px] border border-line-hair bg-surface-raised px-2 font-cond text-micro uppercase tracking-[.09em] text-text hover:border-accent"
-        >
-          Force status…
-        </button>
-        <button
-          type="button"
-          onClick={onAddNote}
-          className="h-[20px] border border-line-hair bg-surface-raised px-2 font-cond text-micro uppercase tracking-[.09em] text-text hover:border-accent"
-        >
-          Add note…
-        </button>
+        {onForceStatus && onAddNote ? (
+          <>
+            <button
+              type="button"
+              onClick={onForceStatus}
+              className="h-[20px] border border-line-hair bg-surface-raised px-2 font-cond text-micro uppercase tracking-[.09em] text-text hover:border-accent"
+            >
+              Force status…
+            </button>
+            <button
+              type="button"
+              onClick={onAddNote}
+              className="h-[20px] border border-line-hair bg-surface-raised px-2 font-cond text-micro uppercase tracking-[.09em] text-text hover:border-accent"
+            >
+              Add note…
+            </button>
+          </>
+        ) : (
+          <span data-desktop-only="" className="text-text-muted">
+            {DESKTOP_ONLY}
+          </span>
+        )}
         {onAddToList ? (
           <button
             type="button"

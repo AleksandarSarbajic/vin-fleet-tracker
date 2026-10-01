@@ -68,8 +68,8 @@ interface Props {
   pinRefused: boolean;
   bulk: {
     barOpen: boolean;
-    onForceStatus: () => void;
-    onAddNote: () => void;
+    onForceStatus: (() => void) | null;
+    onAddNote: (() => void) | null;
     /** §12.90. Absent for a viewer. */
     onAddToList?: () => void;
     onClear: () => void;
@@ -86,7 +86,8 @@ interface Props {
   onResort: () => void;
   onSelect: (id: string) => void;
   /** §12.48: double-click a row to edit, the mouse form of Enter. */
-  onEdit: (id: string) => void;
+  /** §12.94. Null below the editing width: a row then opens nothing. */
+  onEdit: ((id: string) => void) | null;
 }
 
 export function FleetList({

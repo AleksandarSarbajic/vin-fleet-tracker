@@ -6875,6 +6875,62 @@ with a recording fake network ("refused" means nothing was sent); pointing the
 teardown at another id fails three of its tests, including the one where the
 other account's session would otherwise have been signed out.
 
+**Stale session (fixed 2026-10-01).** A session file left from an earlier run
+names a session that run's teardown already ended, so the logout answers 401
+or 403. The teardown now falls back to a fresh e2e sign-in, checks that its
+token is exactly `E2E_USER_ID`, and signs out everywhere. Every refusal rule is
+unchanged: another account's stored session is still refused with nothing
+sent, and a fresh sign-in that comes back as another account is never signed
+out. Any other failure (a 500) is reported, not retried. Making the fallback
+never fire fails three tests.
+
+## 12.94 Editing is on the desktop console
+
+Phones are for checking the board. The phone audit (2026-10-01) found the
+Edit Stop modal 720px wide on a 390px screen with Save and Cancel off it, and
+Clear stop's confirm step the same, so a dispatcher could open them and not
+get out.
+
+**Below 768px** (portrait and landscape) nothing opens the Edit Stop modal —
+and so Clear stop, which lives inside it — or a bulk edit:
+
+- The map popup shows "Editing is on the desktop console" where Edit load was.
+- A row's double-click and Enter on the selection select, and open nothing.
+- A toast's Open shows the truck, and opens nothing.
+- The bulk bar keeps its count, Add to list and Clear; "Force status…" and
+  "Add note…" give way to the same note.
+- The palette has no edit command and the URL no edit parameter, so neither
+  is a route.
+- A window narrowed below 768px while an editor is open closes it.
+
+One number (`EDIT_MIN_WIDTH_PX` in `lib/editing.ts`), read through a media
+query at the moment an edit is asked for, and by `useEditingAllowed` for what
+is drawn. Edit controls appear only after a tap, by which time hydration has
+read the real width, so nothing editable is painted on a phone. At 768px and
+wider nothing changed.
+
+`E` ("Edit the selected stop") is in the keymap but has never had a handler;
+it does nothing at any width. Recorded, not built.
+
+**Tests.** `EditingBlocked.test.tsx` runs the console with the media query
+answering narrow and wide: Enter, double-click, the map's editor prop and the
+bulk bar. `e2e/phone-editing.spec.ts` at 320, 390, 430 and 667×375 selects a
+truck, opens its popup, presses Enter, double-taps, checks two rows, opens
+the palette and loads a link, then asserts no Edit load, no editor, no Clear
+stop and no confirm step exist; at 1280 the popup, Enter, double-click, Clear
+stop and the bulk edits all still work. Moving the breakpoint to 300px fails
+all four phone tests.
+
+**Why the popup was missing at 430 and 667×375 (the audit's open question).**
+Not the map. The audit tapped the CENTRE of the row, and at those widths the
+centre is where "Copy address" (430) or "Copy load info" (667) sits: invisible
+until hover, still tappable, and its click stops the row from being selected.
+So nothing was selected and the map had no popup to show; at 320–390 the
+centre fell on the driver's name. Tapping the truck number selects at every
+width, which is what the e2e test does. On a touch screen the copy buttons
+are invisible traps; the smallest fix is to not render them, or the pin star,
+where there is no hover (`[@media(hover:none)]:hidden`). Not changed here.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

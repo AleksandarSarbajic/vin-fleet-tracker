@@ -56,6 +56,8 @@ import {
 import { useTruckLists } from '@/hooks/useTruckLists';
 import { TruckListEditor, type EditorMode } from './TruckListEditor';
 import { AddToListModal } from './AddToListModal';
+import { useEditingAllowed } from '@/hooks/useEditingAllowed';
+import { editingAllowedNow } from '@/lib/editing';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -330,6 +332,15 @@ export function Console({
   const [panRequest, setPanRequest] = useState(0);
   /** §12.10: Enter opens the edit modal on the selected row. */
   const [editingId, setEditingId] = useState<string | null>(null);
+  /**
+   * §12.94. Editing is a desktop job: below 768px nothing opens the Edit
+   * Stop modal (and so Clear stop) or the bulk edits. Every route goes
+   * through `openEditor`, which asks the width at the moment it is called.
+   */
+  const editingAllowed = useEditingAllowed();
+  const openEditor = useCallback((id: string) => {
+    if (editingAllowedNow()) setEditingId(id);
+  }, []);
   /** §14 feature 15. Read-only, so it needs no dirty state and no confirm. */
   const [timelineId, setTimelineId] = useState<string | null>(null);
   const [missingTruck, setMissingTruck] = useState<string | null>(null);
@@ -417,7 +428,7 @@ export function Console({
         if (!targetId) return;
         event.preventDefault();
         if (targetId !== selectedId) select(targetId);
-        setEditingId(targetId);
+        openEditor(targetId);
         return;
       }
 
@@ -439,7 +450,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ordered, selectedId, select, query, editingId]);
+  }, [ordered, selectedId, select, query, editingId, openEditor]);
 
   /**
    * §14 feature 6. Which rows changed since the last poll.
@@ -561,6 +572,18 @@ export function Console({
   const orderedIds = useMemo(() => ordered.map((r) => r.id), [ordered]);
   const bulk = useBulkSelection(orderedIds);
   const [bulkAction, setBulkAction] = useState<'status' | 'note' | null>(null);
+
+  /**
+   * §12.94. A window narrowed below the editing width while an editor is open
+   * closes it: the trap the rule exists to prevent is an editor on a screen
+   * too narrow to save or cancel it. Unsaved edits in it are lost, which only
+   * a desktop window shrunk mid-edit can meet.
+   */
+  useEffect(() => {
+    if (editingAllowed) return;
+    setEditingId(null);
+    setBulkAction(null);
+  }, [editingAllowed]);
 
   /**
    * §14's `X` binding, and Esc's new first job.
@@ -855,8 +878,8 @@ export function Console({
                     pinRefused={pins.refused}
                     bulk={{
                       barOpen: bulk.barOpen,
-                      onForceStatus: () => setBulkAction('status'),
-                      onAddNote: () => setBulkAction('note'),
+                      onForceStatus: editingAllowed ? () => setBulkAction('status') : null,
+                      onAddNote: editingAllowed ? () => setBulkAction('note') : null,
                       ...(canEditLists ? { onAddToList: () => setAddingToList(true) } : {}),
                       onClear: bulk.clear,
                     }}
@@ -870,7 +893,7 @@ export function Console({
                     drift={drift}
                     onResort={resort}
                     onSelect={select}
-                    onEdit={setEditingId}
+                    onEdit={editingAllowed ? openEditor : null}
                   />
                 </div>
               }
@@ -882,7 +905,7 @@ export function Console({
                   selectedId={selectedId}
                   panRequest={panRequest}
                   onSelect={select}
-                  onEdit={setEditingId}
+                  onEdit={editingAllowed ? openEditor : null}
                   onTimeline={setTimelineId}
                   resizeSignal={resizeSignal}
                   reducedMotion={reducedMotion}
@@ -894,7 +917,8 @@ export function Console({
               toasts={toasts}
               onOpen={(truckId) => {
                 select(truckId);
-                setEditingId(truckId);
+                // Below the editing width a toast shows the truck, nothing more.
+                openEditor(truckId);
               }}
               onExpire={dismissToast}
               reducedMotion={reducedMotion}
@@ -911,7 +935,7 @@ export function Console({
           />
         ) : null}
 
-        {editingRow ? (
+        {editingRow && editingAllowed ? (
           <EditStopModal
             row={editingRow}
             drivers={drivers}
@@ -921,7 +945,7 @@ export function Console({
           />
         ) : null}
 
-        {bulkAction ? (
+        {bulkAction && editingAllowed ? (
           <BulkActionModal
             action={bulkAction}
             rows={ordered}

@@ -9,6 +9,7 @@ import { StatusChip } from '../StatusChip';
 import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL, upcomingLabel } from '@/lib/status';
+import { DESKTOP_ONLY } from '@/lib/editing';
 
 /**
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
@@ -130,7 +131,8 @@ export function MapPopup({
 }: {
   row: FleetRow;
   fetchedAt: string | null;
-  onEdit: (id: string) => void;
+  /** §12.94. Null below the editing width: the popup says where editing is instead. */
+  onEdit: ((id: string) => void) | null;
   /**
    * §14 feature 15. The popup is the per-truck surface that already exists,
    * so the timeline opens from here rather than from a new binding — §14
@@ -308,13 +310,19 @@ export function MapPopup({
           >
             Timeline
           </button>
-          <button
-            type="button"
-            onClick={() => onEdit(row.id)}
-            className="h-7 bg-accent px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover"
-          >
-            Edit load
-          </button>
+          {onEdit ? (
+            <button
+              type="button"
+              onClick={() => onEdit(row.id)}
+              className="h-7 bg-accent px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover"
+            >
+              Edit load
+            </button>
+          ) : (
+            <span data-desktop-only="" className="self-center text-small text-text-mutedOnOverlay">
+              {DESKTOP_ONLY}
+            </span>
+          )}
         </div>
       </div>
     </Popup>
