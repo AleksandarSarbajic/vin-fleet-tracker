@@ -6857,6 +6857,24 @@ the modal reopened with "No load" and Clear stop disabled, and the timeline
 showing "Load delivered"; the save-time path with Delivered; and two previous
 loads with Delivered and Keep it open.
 
+## 12.93 The e2e account signs itself out after every run
+
+The browser suite runs the app locally, but the app signs in against the
+production Supabase project, and nothing ever signed out: by 2026-10-01 the
+e2e account held 100 live sessions (the real account: 4). They were cleared
+once, by the code below, which left the other account's sessions untouched.
+
+`e2e/global-teardown.ts` now runs after every run, passed or failed, and calls
+Supabase's global logout (`/auth/v1/logout?scope=global`) with the e2e
+account's own token — the session `auth.setup.ts` saved, refreshed if it
+expired, or a fresh e2e sign-in when none was saved. **It refuses unless the
+token's subject is exactly `E2E_USER_ID`**, checked locally before any request
+that could change anything; a refusal or a failed logout fails the run. It
+never logs a token or password. `src/test/e2e-sign-out.test.ts` holds the gate
+with a recording fake network ("refused" means nothing was sent); pointing the
+teardown at another id fails three of its tests, including the one where the
+other account's session would otherwise have been signed out.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -46,6 +46,8 @@ export const E2E_RUN_ID = (process.env['E2E_RUN_ID'] ??= newRunId());
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
+  // Signs the e2e account out of production auth everywhere, pass or fail.
+  globalTeardown: './e2e/global-teardown.ts',
   /**
    * One worker, no parallelism. Every spec truncates and re-seeds one shared
    * database, so parallel files would be rewriting each other's fixtures and
