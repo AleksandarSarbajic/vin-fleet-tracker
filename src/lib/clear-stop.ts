@@ -137,3 +137,114 @@ export function confirmLines(input: {
   }
   return lines;
 }
+
+/* ------------------------- previous loads (§12.92) ----------------------- */
+
+/**
+ * §12.92. A PREVIOUS load: open, and every one of its stops departed. Done
+ * on the road, not closed in the system — nothing closes a load by itself
+ * when its last stop is left; that is Clear stop's job.
+ *
+ * When the fleet row has no next stop, every open load the truck holds is
+ * one of these: the next stop is the first undeparted stop of an open load,
+ * so "no next stop" means no open load has one.
+ */
+export function previousLoads(stops: readonly TimelineStop[]): OpenLoadChoice[] {
+  return openLoadChoices(stops).filter(
+    (load) => load.stops.length > 0 && load.stops.every((s) => s.departedAt !== null),
+  );
+}
+
+/**
+ * The edit modal's subtitle in its new-load state. Keyed off the SAME
+ * `openLoadCount` that enables Clear stop, so the header can never say there
+ * is no load while the button can close one.
+ */
+export function newLoadSubtitle(openLoadCount: number): string {
+  if (openLoadCount === 0) return 'No load on this truck yet';
+  return `No next stop. ${openLoadCount} previous ${
+    openLoadCount === 1 ? 'load' : 'loads'
+  } still open`;
+}
+
+/** "6612193", or "no number" (§12.21: blank means blank, and says so). */
+function shortName(loadNumber: string | null): string {
+  return loadNumber ?? 'no number';
+}
+
+function lastStop(load: OpenLoadChoice): TimelineStop {
+  return [...load.stops].sort((a, b) => a.sequence - b.sequence).at(-1)!;
+}
+
+function lastPlace(load: OpenLoadChoice): string {
+  const last = lastStop(load);
+  return last.city ?? last.addressLine ?? 'an unnamed stop';
+}
+
+/** A time in dispatch time; the weekday too when it is not today there. */
+function dispatchTime(iso: string, dispatchTz: string, now: Date): string {
+  const day = (d: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: dispatchTz }).format(d);
+  const at = new Date(iso);
+  return timeInZone(at, dispatchTz, { weekday: day(at) !== day(now) });
+}
+
+/**
+ * The line above the form for each previous load:
+ *
+ *   Previous load 6612193: Vernon Hills, arrived 09:19 CDT, departed
+ *   09:57 CDT (detected automatically). Still open.
+ */
+export function previousLoadLine(
+  load: OpenLoadChoice,
+  dispatchTz: string,
+  now: Date,
+): string {
+  const last = lastStop(load);
+  const arrived = last.arrivedAt
+    ? `arrived ${dispatchTime(last.arrivedAt, dispatchTz, now)}`
+    : 'arrival not recorded';
+  const departed = last.departedAt
+    ? `departed ${dispatchTime(last.departedAt, dispatchTz, now)}`
+    : 'not departed';
+  const how =
+    last.arrivedSource === 'detected'
+      ? ' (detected automatically)'
+      : last.arrivedSource === 'dispatcher'
+        ? ' (marked by hand)'
+        : '';
+  return `Previous load ${shortName(load.loadNumber)}: ${lastPlace(load)}, ${arrived}, ${departed}${how}. Still open.`;
+}
+
+/**
+ * Clear stop's tooltip when the form is empty: it names what it would act
+ * on, so the button never closes something the dispatcher cannot see.
+ * `null` while the loads are still being read.
+ */
+export function clearStopTitle(previous: readonly OpenLoadChoice[] | null): string {
+  if (previous === null || previous.length === 0) {
+    return 'Close a previous load still open on this truck.';
+  }
+  const named = previous.map((l) => `${shortName(l.loadNumber)} (${lastPlace(l)})`);
+  return previous.length === 1
+    ? `Close previous load ${named[0]!}.`
+    : `Close one of ${previous.length} previous loads: ${named.join(', ')}.`;
+}
+
+/** The save-time question, one per previous load. */
+export function savePrompt(load: OpenLoadChoice): string {
+  return `Previous load ${shortName(load.loadNumber)} is still open. Close it as Delivered?`;
+}
+
+/** The three answers. `keep` closes nothing; there is no default. */
+export const SAVE_ANSWERS = ['DELIVERED', 'CANCELLED', 'keep'] as const;
+export type SaveAnswer = (typeof SAVE_ANSWERS)[number];
+
+/** What a set of answers asks the save to close. "Keep it open" closes nothing. */
+export function closesFor(
+  answers: Readonly<Record<string, SaveAnswer>>,
+): { loadId: string; status: ClearStatus }[] {
+  return Object.entries(answers).flatMap(([loadId, answer]) =>
+    answer === 'keep' ? [] : [{ loadId, status: answer }],
+  );
+}

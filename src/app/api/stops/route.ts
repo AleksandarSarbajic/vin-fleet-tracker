@@ -12,6 +12,7 @@ import { StopEdit } from '@/lib/stop-edit';
 import { statusConfig } from '@/server/fleet';
 import { saveStopEdit, StopEditError } from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
+import { ClearStopError } from '@/server/clear-stop';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.message, fields: [{ field: error.field, message: error.message }] },
         { status: 400 },
+      );
+    }
+    if (error instanceof ClearStopError) {
+      // §12.92. A previous load the save was told to close had changed under
+      // it — closed elsewhere, moved, deleted. Nothing was written, the new
+      // load included; the modal re-reads and asks again.
+      return NextResponse.json(
+        { error: error.message, closePrevious: true },
+        { status: 409 },
       );
     }
     if (error instanceof StalePreviewError) {

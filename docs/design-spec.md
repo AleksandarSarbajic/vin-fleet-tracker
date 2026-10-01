@@ -6795,6 +6795,68 @@ chip tooltips (`Late · key 1`) and `V`. Forcing the search to 420px at 1440
 fails C (27px spare) and F (2px). Below 1280 is not held to the numbers; one
 picture is taken at 1086.
 
+## 12.92 A previous load is named, closable from the form, and asked about
+
+Truck 124, 2026-10-01: load 6612193's only stop was detected in at 09:19 CDT
+and out at 09:57. Nothing closes a load when its last stop is left — that is
+Clear stop's job (§12.88) — so the load stayed open with no next stop. The
+modal, which builds its header from the next stop, opened as **New load** with
+the subtitle **"No load on this truck yet"**, while Clear stop beside it was
+enabled (it keys off `openLoadCount`, correctly) and could close a load the
+screen said was not there.
+
+**A previous load** is an open load whose every stop has departed. When the
+fleet row has no next stop, every open load the truck holds is one: the next
+stop is the first undeparted stop of an open load.
+
+- **The header.** The title stays `New load — truck N`, because the form still
+  creates one. The subtitle comes from the same `openLoadCount` as the Clear
+  stop rule: `No load on this truck yet` only at 0, otherwise
+  `No next stop. 1 previous load still open` / `2 previous loads still open`.
+  They cannot disagree: "No load" shows exactly when Clear stop is disabled.
+- **The line above the form**, one per previous load, read fresh from the
+  timeline like Clear stop's confirm step: `Previous load 6612193: Vernon
+  Hills, arrived 09:19 CDT, departed 09:57 CDT (detected automatically). Still
+  open.` The last stop's city, both times in dispatch time (the weekday added
+  when it was not today), `marked by hand` for a dispatcher's arrival, `no
+  number` for a load without one (§12.21). Its **Close load…** opens Clear
+  stop's confirm step with that load already chosen.
+- **Clear stop's tooltip** names the load when the form is empty —
+  `Close previous load 6612193 (Vernon Hills).`, or `Close one of 2 previous
+  loads: …` — so it never acts on something the dispatcher cannot see.
+- **The save-time question.** Saving a NEW load on a truck with a previous
+  load asks first, per load: `Previous load 6612193 is still open. Close it as
+  Delivered?` — **Delivered**, **Cancelled**, **Keep it open**. No answer is
+  preselected and focus starts on "Back to the form", so an Enter carried over
+  from Save goes back. Nothing is written until every previous load is
+  answered; the last answer saves. Esc and Back return to the form unsaved.
+- **One transaction.** The answers ride in the save as `closePrevious`
+  (new loads only — on an existing stop's edit it is refused). The save calls
+  Clear stop's own `clearStop` inside its transaction (a savepoint), before
+  inserting the new load: the same checks, the same arrival record kept, the
+  same `operator-clear-stop` audit row per closed load, and the new stop's
+  audit names what it closed. A load closed elsewhere meanwhile is refused
+  (409), nothing is written, and the modal re-reads and asks again.
+
+**Tests.** Unit: which loads are previous, the subtitle for 0/1/2 and that
+it says "No load" only at 0, the line (detected, by hand, no number, last
+stop, weekday), the tooltip, the question and what each answer closes.
+Component: the header for 0/1/2 with "No load" exactly when Clear stop is
+disabled; one and two lines; Close load… preselecting the second of two;
+the question asked before any request, focus on Back, and the save body for
+Delivered, Cancelled and Keep it open, and for two loads only after both
+answers. Database: closing as Delivered and as Cancelled with the new load,
+Keep it open closing nothing, refusal on an existing stop, a load closed
+elsewhere refusing the save, and **broken on purpose after the close** — a
+trigger raises when the new stop is inserted, reporting the previous load as
+already DELIVERED at that moment — after which the previous load is still
+open, no new load exists and there is no audit row. Reverting the subtitle to
+the old constant fails the header tests for 1 and 2. E2E: a truck whose only
+load was detected in and out — the header, the line, Close load…, the row,
+the modal reopened with "No load" and Clear stop disabled, and the timeline
+showing "Load delivered"; the save-time path with Delivered; and two previous
+loads with Delivered and Keep it open.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

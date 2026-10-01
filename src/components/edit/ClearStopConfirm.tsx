@@ -36,6 +36,7 @@ export function ClearStopConfirm({
   truckName,
   dispatchTz,
   unsaved,
+  initialLoadId = null,
   onBack,
   onCleared,
 }: {
@@ -43,6 +44,11 @@ export function ClearStopConfirm({
   truckName: string;
   dispatchTz: string;
   unsaved: readonly string[];
+  /**
+   * §12.92. Opened from a previous-load line's "Close load…": that load is
+   * already chosen, while it is still one of the truck's open loads.
+   */
+  initialLoadId?: string | null;
   onBack: () => void;
   onCleared: () => void;
 }) {
@@ -64,7 +70,8 @@ export function ClearStopConfirm({
     if (ready) setProblem((p) => (p === STILL_READING ? null : p));
   }, [ready]);
 
-  const chosenId = picked ?? initialChoice(choices);
+  const named = choices.some((c) => c.loadId === initialLoadId) ? initialLoadId : null;
+  const chosenId = picked ?? named ?? initialChoice(choices);
   const choice = choices.find((c) => c.loadId === chosenId) ?? null;
   const lines = choice
     ? confirmLines({

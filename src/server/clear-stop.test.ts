@@ -441,7 +441,9 @@ describeDb('Clear stop (§12.88)', () => {
         );
         if (!contained) return { failure, contained } as const;
 
-        await tx.execute(sql.raw(`drop trigger clear_stop_break on ${table}`));
+        // The trigger is left in place: it fires on writes only, the reads
+        // below are unaffected, and the rollback removes it. Dropping it took
+        // an exclusive lock on a table the parallel test files write to.
         return {
           contained: true as const,
           failure,
@@ -663,5 +665,229 @@ describeDb('Clear stop (§12.88)', () => {
     expect(seen.cleared.arrivedAt).toEqual(seen.departed.arrivedAt);
     expect(seen.cleared.arrivedSource).toBe('dispatcher');
     expect(seen.cleared.departedAt).toEqual(seen.departed.departedAt);
+  });
+});
+
+/**
+ * §12.92 — the save-time question's write: a NEW load saved with
+ * `closePrevious` closes the previous load through `clearStop` itself, inside
+ * the save's transaction. Addresses are left blank so the save does not
+ * geocode — the close is what is under test, not the network.
+ */
+describeDb('a new load that closes the previous one (§12.92)', () => {
+  const newLoad = (
+    truckId: string,
+    over: Partial<StopEdit> & Record<string, unknown> = {},
+  ) =>
+    StopEdit.parse({
+      stopId: null,
+      truckId,
+      loadNumber: 'NEXT-1',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: null,
+      city: null,
+      state: null,
+      zip: null,
+      appointment: null,
+      dispatcherNote: null,
+      ...over,
+    });
+
+  /**
+   * The previous load as truck 124 had it: arrived and departed, both
+   * detected, no anchor (an anchor belongs to a hand-marked arrival only),
+   * and still open.
+   */
+  const previous = (tx: Tx, truckId: string) =>
+    addLoad(tx, truckId, '6612193', [
+      { seq: 1, arrivedAt: hoursAgo(2), source: 'detected', departedAt: hoursAgo(1) },
+    ]);
+
+  const loadsOn = (tx: Tx, truckId: string) =>
+    tx
+      .select({ number: loads.loadNumber, status: loads.status })
+      .from(loads)
+      .where(eq(loads.truckId, truckId))
+      .orderBy(asc(loads.createdAt));
+
+  it.each(['DELIVERED', 'CANCELLED'] as const)(
+    'closes it as %s with Clear stop’s own audit row, and creates the new load',
+    async (status) => {
+      const seen = await rolledBack(async (tx) => {
+        const { truck, dispatcher } = await world(tx);
+        const { loadId } = await previous(tx, truck.id);
+        const stopsBefore = await stopRows(tx, loadId);
+        const result = await saveStopEdit(tx as never, {
+          actorUserId: dispatcher.id,
+          dispatchTz: TZ,
+          edit: newLoad(truck.id, { closePrevious: [{ loadId, status }] }),
+        });
+        const [stopAudit] = await tx
+          .select({ after: auditLog.after })
+          .from(auditLog)
+          .where(eq(auditLog.entityId, result.stopId));
+        return {
+          loads: await loadsOn(tx, truck.id),
+          stopsBefore,
+          stopsAfter: await stopRows(tx, loadId),
+          closeAudit: await auditFor(tx, loadId),
+          stopAudit: stopAudit?.after as { closedPrevious?: unknown },
+          row: await fleetRow(tx, truck.id),
+          dispatcher: dispatcher.id,
+        };
+      });
+
+      expect(seen.loads).toEqual([
+        { number: '6612193', status },
+        { number: 'NEXT-1', status: 'DISPATCHED' },
+      ]);
+      // Clear stop's rules, because it IS Clear stop: the arrival record kept
+      // as it was, and one `operator-clear-stop` row by the dispatcher.
+      expect(seen.stopsAfter).toEqual(seen.stopsBefore);
+      expect(seen.stopsAfter[0]!.arrivedSource).toBe('detected');
+      expect(seen.closeAudit).toHaveLength(1);
+      expect(seen.closeAudit[0]!.actor).toBe(seen.dispatcher);
+      expect(seen.closeAudit[0]!.after).toMatchObject({
+        loadStatus: status,
+        source: 'operator-clear-stop',
+      });
+      // The new stop's own row names what it closed.
+      expect(seen.stopAudit.closedPrevious).toEqual([
+        { loadId: expect.any(String), status },
+      ]);
+      // The board: one open load, the new one, as the next stop.
+      expect(seen.row.openLoadCount).toBe(1);
+      expect(seen.row.nextStop?.loadNumber).toBe('NEXT-1');
+    },
+  );
+
+  it('"Keep it open" — no closePrevious — closes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId } = await previous(tx, truck.id);
+      await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: newLoad(truck.id),
+      });
+      return {
+        loads: await loadsOn(tx, truck.id),
+        closeAudit: await auditFor(tx, loadId),
+        row: await fleetRow(tx, truck.id),
+      };
+    });
+    expect(seen.loads.map((l) => l.status)).toEqual(['DISPATCHED', 'DISPATCHED']);
+    expect(seen.closeAudit).toEqual([]);
+    expect(seen.row.openLoadCount).toBe(2);
+  });
+
+  it('refuses closePrevious on an edit of an existing stop, and changes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId } = await previous(tx, truck.id);
+      const other = await addLoad(tx, truck.id, 'OTHER-1', [{ seq: 1 }]);
+      const failure = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: newLoad(truck.id, {
+          stopId: other.stopIds[0]!,
+          closePrevious: [{ loadId, status: 'DELIVERED' }],
+        }),
+      }).then(
+        () => null,
+        (error: unknown) => said(error),
+      );
+      return { failure, status: await loadStatus(tx, loadId) };
+    });
+    expect(seen.failure).toMatch(/only closed when a new load is saved/);
+    expect(seen.status).toBe('DISPATCHED');
+  });
+
+  it('a previous load closed elsewhere first: refused, and the new load is NOT created', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId } = await previous(tx, truck.id);
+      await clearStop(tx, {
+        actorUserId: dispatcher.id,
+        request: { truckId: truck.id, loadId, status: 'DELIVERED' },
+      });
+      const failure = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: newLoad(truck.id, { closePrevious: [{ loadId, status: 'CANCELLED' }] }),
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      return { failure, loads: await loadsOn(tx, truck.id) };
+    });
+    expect(seen.failure).toBeInstanceOf(ClearStopError);
+    expect((seen.failure as Error).message).toBe(
+      'That load is already Delivered. Nothing was changed.',
+    );
+    expect(seen.loads).toEqual([{ number: '6612193', status: 'DELIVERED' }]);
+  });
+
+  /**
+   * Broken on purpose, AFTER the close: a trigger raises when the new load's
+   * stop is inserted — which happens after `clearStop` has closed the previous
+   * load and after the new load row exists. The exception carries the
+   * previous load's status as the failing statement saw it, so the test
+   * proves the close HAD happened when it failed.
+   */
+  it('fails after the close, and leaves both untouched', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId } = await previous(tx, truck.id);
+      const stopsBefore = await stopRows(tx, loadId);
+      await tx.execute(
+        sql.raw(`
+        create function pg_temp.new_load_break() returns trigger language plpgsql as $$
+        begin
+          raise exception 'broken on purpose: previous load is %',
+            (select status from loads where id = '${loadId}');
+        end $$;
+        create trigger new_load_break before insert on stops
+          for each row execute function pg_temp.new_load_break();
+      `),
+      );
+
+      const failure = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: newLoad(truck.id, { closePrevious: [{ loadId, status: 'DELIVERED' }] }),
+      }).then(
+        () => null,
+        (error: unknown) => said(error),
+      );
+
+      // Without its own transaction the failure would abort THIS one too.
+      const contained = await tx.execute(sql`select 1`).then(
+        () => true,
+        () => false,
+      );
+      if (!contained) return { failure, contained } as const;
+      // Left in place (see above): the rollback removes it.
+      return {
+        contained: true as const,
+        failure,
+        loads: await loadsOn(tx, truck.id),
+        stopsBefore,
+        stopsAfter: await stopRows(tx, loadId),
+        audit: await tx.select({ id: auditLog.id }).from(auditLog),
+      };
+    });
+
+    // It failed, and with the previous load already closed.
+    expect(seen.failure).toContain('broken on purpose: previous load is DELIVERED');
+    expect(seen.contained, 'the save was not one transaction').toBe(true);
+    if (!seen.contained) return;
+    // …and none of it happened: still open, no new load, its stop as it was,
+    // no audit row of either kind.
+    expect(seen.loads).toEqual([{ number: '6612193', status: 'DISPATCHED' }]);
+    expect(seen.stopsAfter).toEqual(seen.stopsBefore);
+    expect(seen.stopsAfter[0]!.departedAt).not.toBeNull();
+    expect(seen.audit).toEqual([]);
   });
 });

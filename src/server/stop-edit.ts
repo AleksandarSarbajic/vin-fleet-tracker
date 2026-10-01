@@ -5,6 +5,7 @@ import { ANCHOR_MAX_AGE_MINUTES, anchorAtTick, type AnchorDecision } from '@/lib
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
 import { ARRIVAL_CLEARED } from './arrival-columns';
+import { clearStop } from './clear-stop';
 import { writeAudit, type AuditEntry, type Db } from './audit';
 import { fallbackWarning, geocodeAddress, MISS_MESSAGE, type GeocodeOutcome } from './geocode';
 import { clearOverride, setOverride } from './override';
@@ -69,6 +70,15 @@ export async function saveStopEdit(
 ): Promise<StopEditResult> {
   const { edit } = input;
   const warnings: SaveWarning[] = [];
+
+  // §12.92. Closing previous loads belongs to creating a new one. On an edit
+  // of an existing stop it is refused, never quietly ignored.
+  if (edit.stopId && edit.closePrevious?.length) {
+    throw new StopEditError(
+      'Previous loads are only closed when a new load is saved. Nothing was changed.',
+      'closePrevious',
+    );
+  }
 
   const typed: AddressParts = {
     addressLine: edit.addressLine,
@@ -527,6 +537,20 @@ export async function saveStopEdit(
        */
       if (geocode) await tx.delete(stopRoutes).where(eq(stopRoutes.stopId, stopId));
     } else {
+      /**
+       * §12.92. The previous loads the dispatcher said to close, closed FIRST
+       * and by Clear stop's own function — its checks, its anchor clearing,
+       * its audit row with source `operator-clear-stop`. Nested here it is a
+       * savepoint of this transaction, so if anything below fails the closes
+       * are undone with the new load: both land or neither does.
+       */
+      for (const close of edit.closePrevious ?? []) {
+        await clearStop(tx, {
+          actorUserId: input.actorUserId,
+          request: { truckId: edit.truckId, loadId: close.loadId, status: close.status },
+        });
+      }
+
       // "New load" state — same fields, same validation, same conversion.
       // A separate creation flow would be a second place for the appointment
       // path to go wrong.
@@ -661,6 +685,11 @@ export async function saveStopEdit(
          * actually moved it. A history that showed an arrival being re-set on
          * every unrelated edit would bury the one entry that matters.
          */
+        // §12.92: the previous loads this save closed, by id and status. Each
+        // has its own `operator-clear-stop` row too.
+        ...(!existing && edit.closePrevious?.length
+          ? { closedPrevious: edit.closePrevious }
+          : {}),
         ...(arrivalWritten !== undefined
           ? {
               arrivedAt: arrivalWritten,

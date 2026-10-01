@@ -24,6 +24,17 @@ import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
+import { PreviousLoadQuestion } from './PreviousLoadQuestion';
+import { useTruckTimeline } from '@/hooks/useTruckTimeline';
+import {
+  clearStopTitle,
+  closesFor,
+  newLoadSubtitle,
+  previousLoadLine,
+  previousLoads,
+  type ClearStatus,
+  type SaveAnswer,
+} from '@/lib/clear-stop';
 import { useFocusTrap } from './useModalChrome';
 
 /**
@@ -201,6 +212,29 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const [discarding, setDiscarding] = useState(false);
   /** §12.88. Clear stop's confirm step is open. */
   const [clearing, setClearing] = useState(false);
+  /** §12.92. Opened from a previous-load line: that load comes preselected. */
+  const [clearLoadId, setClearLoadId] = useState<string | null>(null);
+
+  /**
+   * §12.92. No next stop, but open loads: every one of them is a PREVIOUS
+   * load — open, every stop departed. Read fresh, like Clear stop's confirm
+   * step, for the lines above the form, the Clear stop tooltip and the
+   * save-time question. Nothing is read for a truck that does not need it.
+   */
+  const needsPrevious = !stop && row.openLoadCount > 0;
+  const timeline = useTruckTimeline(needsPrevious ? row.id : null, { fresh: true });
+  const previous = needsPrevious && timeline.data ? previousLoads(timeline.data) : null;
+  const previousReady = previous !== null && !timeline.isFetching;
+  /** The save-time question is open, and what has been answered so far. */
+  const [asking, setAsking] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, SaveAnswer>>({});
+  /**
+   * What the save closes. Null until the question has been answered — a save
+   * that needs the answer will not go without one.
+   */
+  const [closes, setCloses] = useState<{ loadId: string; status: ClearStatus }[] | null>(
+    null,
+  );
 
   const toEdit = useCallback(
     (f: typeof initialForm) => {
@@ -394,7 +428,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
   const send = useCallback(
-    async (token?: string) => {
+    async (token?: string, closeList = closes) => {
       if (!parsed.success) return;
       setSaving(true);
       setErrors([]);
@@ -467,14 +501,31 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             ...parsed.data,
             ...(token ? { previewToken: token } : {}),
             ...(overrideEdit ? { override: overrideEdit } : {}),
+            // §12.92: closed in the same transaction as the new load.
+            ...(closeList?.length ? { closePrevious: closeList } : {}),
           }),
         });
 
         if (response.status === 409) {
-          const body = (await response.json()) as { preview: ReassignPreview };
-          // The world moved under the open dialog. Re-ask on the fresh view.
+          const body = (await response.json()) as {
+            preview?: ReassignPreview;
+            error?: string;
+            closePrevious?: boolean;
+          };
           queryClient.setQueryData(key, snapshot);
-          setPreview(body.preview);
+          if (body.closePrevious) {
+            // §12.92. A previous load changed under the question — closed
+            // elsewhere, say. Nothing was written; ask again on a fresh read.
+            setCloses(null);
+            setAnswers({});
+            setErrors([
+              { field: '*', message: body.error ?? 'A previous load changed. Nothing was saved.' },
+            ]);
+            await queryClient.invalidateQueries({ queryKey: ['timeline', row.id] });
+            return;
+          }
+          // The world moved under the open dialog. Re-ask on the fresh view.
+          if (body.preview) setPreview(body.preview);
           return;
         }
         if (!response.ok) {
@@ -484,6 +535,8 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             reference?: string;
           };
           queryClient.setQueryData(key, snapshot);
+          // Nothing was closed either; the next Save asks again.
+          setCloses(null);
           setErrors(
             body.fields?.length
               ? body.fields
@@ -529,6 +582,12 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         }
 
         await queryClient.invalidateQueries({ queryKey: key });
+        if (closeList?.length) {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['fleet-health'] }),
+            queryClient.invalidateQueries({ queryKey: ['timeline', row.id] }),
+          ]);
+        }
 
         if (saved.warnings?.length) {
           setSaveWarnings(saved.warnings);
@@ -537,6 +596,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         onClose();
       } catch (error: unknown) {
         queryClient.setQueryData(key, snapshot);
+        setCloses(null);
         setErrors([
           { field: '*', message: error instanceof Error ? error.message : 'Save failed.' },
         ]);
@@ -546,12 +606,23 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     },
     // `edit` is deliberately absent: this function reads `parsed.data` only.
     // The raw form shape does not leave the component (§12.21).
-    [active, onClose, overrideEdit, parsed, queryClient, row.active, row.id],
+    [active, closes, onClose, overrideEdit, parsed, queryClient, row.active, row.id],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
-  const save = useCallback(async () => {
+  const save = useCallback(async (closeList?: { loadId: string; status: ClearStatus }[]) => {
     if (!canSave) return;
+    /**
+     * §12.92. A new load on a truck still holding a previous one asks about
+     * it first, every time. Never closed without the answer.
+     */
+    const answered = closeList ?? closes;
+    if (needsPrevious && answered === null) {
+      setAnswers({});
+      setAsking(true);
+      return;
+    }
+    setCloses(answered);
     if (driverChanged) {
       const response = await fetch('/api/assignments/preview', {
         method: 'POST',
@@ -563,15 +634,39 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         return;
       }
     }
-    await send();
-  }, [canSave, driverChanged, driverId, row.id, send]);
+    await send(undefined, answered);
+  }, [canSave, closes, driverChanged, driverId, needsPrevious, row.id, send]);
+
+  /** One answer given; the last one saves. */
+  const answer = useCallback(
+    (loadId: string, given: SaveAnswer) => {
+      const next = { ...answers, [loadId]: given };
+      setAnswers(next);
+      if (!previous || !previousReady) return;
+      if (!previous.every((load) => next[load.loadId] !== undefined)) return;
+      const forThese = Object.fromEntries(
+        previous.map((load) => [load.loadId, next[load.loadId]!]),
+      );
+      setAsking(false);
+      void save(closesFor(forThese));
+    },
+    [answers, previous, previousReady, save],
+  );
+
+  // Read fresh, and nothing is open any more (closed elsewhere): nothing to ask.
+  useEffect(() => {
+    if (asking && previousReady && previous.length === 0) {
+      setAsking(false);
+      void save([]);
+    }
+  }, [asking, previous, previousReady, save]);
 
   /** Esc raises the discard confirm; it never closes silently (§9.9). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // §12.88. The confirm step owns Enter and Esc while it is open: Esc
       // backs out of it, never out of this modal.
-      if (clearing) return;
+      if (clearing || asking) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -585,7 +680,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [clearing, dirty.length, onClose, preview, save]);
+  }, [asking, clearing, dirty.length, onClose, preview, save]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -608,7 +703,10 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     ? lockedReason
     : row.openLoadCount === 0
       ? 'This truck has no open load to close.'
-      : 'Close a finished load in one step.';
+      : !stop
+        ? // §12.92: the form is empty, so the tooltip names the load.
+          clearStopTitle(previous)
+        : 'Close a finished load in one step.';
   const currentDriverName = drivers.find((d) => d.id === initialDriverId)?.name ?? null;
 
   return (
@@ -631,7 +729,8 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
               <p className="mt-0.5 text-small text-text-mutedOnOverlay">
                 {stop
                   ? (stop.loadNumber ?? 'Load number not given yet')
-                  : 'No load on this truck yet'}
+                  : // §12.92: the same count that enables Clear stop.
+                    newLoadSubtitle(row.openLoadCount)}
                 {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
               </p>
             </div>
@@ -660,6 +759,48 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           ) : null}
 
           <div className="p-4">
+            {/* ------------------------- previous loads -------------------- */}
+            {needsPrevious ? (
+              <div
+                data-previous-loads=""
+                className="mb-4 space-y-2 border border-status-risk-bd bg-status-risk-bg px-3 py-2"
+              >
+                {timeline.isError ? (
+                  <p role="alert" className="text-body text-status-late-fg">
+                    This truck&apos;s open loads could not be read.
+                  </p>
+                ) : previous === null ? (
+                  <p className="text-body text-text-secondary">
+                    Reading this truck&apos;s open loads…
+                  </p>
+                ) : (
+                  previous.map((load) => (
+                    <div
+                      key={load.loadId}
+                      data-previous-load={load.loadId}
+                      className="flex items-center gap-3"
+                    >
+                      <p className="flex-1 text-body text-text">
+                        {previousLoadLine(load, dispatchTz, new Date(openedAt))}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={!canClear}
+                        title={mayEdit ? undefined : lockedReason}
+                        onClick={() => {
+                          setClearLoadId(load.loadId);
+                          setClearing(true);
+                        }}
+                        className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45"
+                      >
+                        Close load…
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+
             {/* ---------------------------- assignment --------------------- */}
             <fieldset disabled={!mayEdit} className="border-0 p-0">
               <legend className="mb-2 flex w-full items-baseline justify-between border-b border-line-soft pb-1.5">
@@ -914,7 +1055,10 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                 data-clear-stop
                 disabled={!canClear}
                 title={clearTitle}
-                onClick={() => setClearing(true)}
+                onClick={() => {
+                  setClearLoadId(null);
+                  setClearing(true);
+                }}
                 className="h-10 shrink-0 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45 disabled:hover:bg-transparent"
               >
                 Clear stop
@@ -964,8 +1108,20 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           truckName={truckName}
           dispatchTz={dispatchTz}
           unsaved={dirty}
+          initialLoadId={clearLoadId}
           onBack={() => setClearing(false)}
           onCleared={onClose}
+        />
+      ) : null}
+
+      {asking ? (
+        <PreviousLoadQuestion
+          loads={previousReady ? previous : null}
+          answers={answers}
+          dispatchTz={dispatchTz}
+          now={new Date(openedAt)}
+          onAnswer={answer}
+          onBack={() => setAsking(false)}
         />
       ) : null}
 

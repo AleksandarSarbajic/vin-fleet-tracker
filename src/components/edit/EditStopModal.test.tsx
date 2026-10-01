@@ -572,8 +572,22 @@ describe('Clear stop (§12.88)', () => {
 
     await act(async () => {
       land({ ok: true, status: 200, json: async () => ({ stops: [timelineStop({})] }) });
-      await new Promise((r) => setTimeout(r, 0));
     });
+    /*
+     * The read lands over several turns — the response, its json(), the
+     * query's update, then the effect that withdraws the sentence. One timer
+     * tick was enough on an idle machine and not under the full parallel run,
+     * so this waits for the condition, bounded, instead of for a tick.
+     */
+    for (
+      let turn = 0;
+      turn < 50 && confirmStep()!.querySelector('[role="alert"]');
+      turn += 1
+    ) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+    }
     expect(confirmStep()!.querySelector('[role="alert"]')).toBeNull();
     await press('Enter');
     expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_A, status: 'DELIVERED' }]);
@@ -592,5 +606,204 @@ describe('Clear stop (§12.88)', () => {
     expect(confirmStep()!.textContent).toContain('Load LD-4417 is closed as Cancelled.');
     await press('Enter', cancelled);
     expect(clears()).toEqual([{ truckId: TRUCK, loadId: LOAD_A, status: 'CANCELLED' }]);
+  });
+});
+
+describe('a truck with no next stop but open loads (§12.92)', () => {
+  const LOAD_A = '44444444-4444-4444-8444-444444444444';
+  const LOAD_B = '44444444-4444-4444-8444-4444444444bb';
+  const NOW = Date.now();
+  const ago = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
+
+  /** A finished stop on an open load: arrived and departed, never closed. */
+  const done = (
+    loadId: string,
+    loadNumber: string | null,
+    city: string,
+    source: string,
+  ) => ({
+    stopId: `${loadId.slice(0, -2)}${loadId === LOAD_A ? '0a' : '0b'}`,
+    loadId,
+    loadNumber,
+    loadStatus: 'AVAILABLE',
+    loadCreatedAt: ago(20),
+    sequence: 1,
+    type: 'DEL',
+    addressLine: '220 N Fairway Dr',
+    city,
+    state: 'IL',
+    zip: '60061',
+    apptStartUtc: null,
+    apptEndUtc: null,
+    apptTz: 'America/Chicago',
+    apptType: 'APPT',
+    arrivedAt: ago(2),
+    arrivedSource: source,
+    departedAt: ago(1),
+    dispatcherNote: null,
+    noteAt: null,
+    overrides: [],
+  });
+  const ONE = [done(LOAD_A, '6612193', 'Vernon Hills', 'detected')];
+  const TWO = [...ONE, done(LOAD_B, null, 'Joliet', 'dispatcher')];
+
+  const serve = (timeline: unknown[]) => {
+    globalThis.fetch = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        String(url).startsWith('/api/timeline') ? { stops: timeline } : { ok: true },
+    })) as unknown as typeof fetch;
+  };
+  const posted = (path: string) =>
+    (
+      globalThis.fetch as unknown as { mock: { calls: [string, RequestInit?][] } }
+    ).mock.calls
+      .filter(([url, init]) => url === path && init?.method === 'POST')
+      .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>);
+
+  const settle = () =>
+    act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  const renderEmpty = async (openLoadCount: number, timeline: unknown[]) => {
+    serve(timeline);
+    await render(fleetRow({ nextStop: null, openLoadCount }));
+    await settle();
+  };
+  const subtitle = () => container!.querySelector('h2 + p')?.textContent ?? '';
+  const lines = () =>
+    [...container!.querySelectorAll('[data-previous-load]')].map(
+      (el) => el.querySelector('p')?.textContent,
+    );
+  const question = () =>
+    document.querySelector('[role="dialog"][aria-label="Previous load still open"]');
+  const answer = async (loadId: string, label: string) => {
+    const group = document.querySelector(`[data-save-question="${loadId}"]`)!;
+    const button = [...group.querySelectorAll('button')].find(
+      (b) => b.textContent === label,
+    )!;
+    await act(async () => button.click());
+    await settle();
+  };
+  const typeCityAndSave = async () => {
+    await act(async () => setValue(fieldLabelled('City'), 'Aurora'));
+    await act(async () => buttonLabelled('Save').click());
+    await settle();
+  };
+
+  describe('the header and Clear stop agree', () => {
+    it.each([
+      [0, [], 'No load on this truck yet'],
+      [1, ONE, 'No next stop. 1 previous load still open'],
+      [2, TWO, 'No next stop. 2 previous loads still open'],
+    ] as const)('with %i open loads', async (count, timeline, expected) => {
+      await renderEmpty(count, [...timeline]);
+      expect(container!.querySelector('h2')?.textContent).toBe('New load — truck 137');
+      expect(subtitle()).toContain(expected);
+      // Never "No load" while Clear stop can act on one, and the reverse.
+      expect(subtitle().includes('No load')).toBe(buttonLabelled('Clear stop').disabled);
+    });
+  });
+
+  it('shows one line for one previous load, in dispatch time, with Close load…', async () => {
+    await renderEmpty(1, ONE);
+    const t = (h: number) =>
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Chicago',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(ago(h)));
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toMatch(
+      new RegExp(
+        `^Previous load 6612193: Vernon Hills, arrived ${t(2)} C[DS]T, departed ${t(1)} C[DS]T \\(detected automatically\\)\\. Still open\\.$`,
+      ),
+    );
+    expect(buttonLabelled('Clear stop').title).toBe(
+      'Close previous load 6612193 (Vernon Hills).',
+    );
+  });
+
+  it('shows a line for each of two, and Close load… opens the confirm step on THAT load', async () => {
+    await renderEmpty(2, TWO);
+    expect(lines()).toHaveLength(2);
+    expect(lines()[1]).toMatch(
+      /^Previous load no number: Joliet, .*\(marked by hand\)\. Still open\.$/,
+    );
+    expect(buttonLabelled('Clear stop').title).toBe(
+      'Close one of 2 previous loads: 6612193 (Vernon Hills), no number (Joliet).',
+    );
+
+    const second = container!.querySelector(`[data-previous-load="${LOAD_B}"] button`)!;
+    await act(async () => (second as HTMLButtonElement).click());
+    await settle();
+    const checked = document.querySelector<HTMLInputElement>(
+      'input[name="clear-load"]:checked',
+    );
+    // Chosen already — on a two-load truck the plain Clear stop chooses none.
+    expect(checked?.value).toBe(LOAD_B);
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(posted('/api/stops/clear')).toEqual([
+      { truckId: ROW.id, loadId: LOAD_B, status: 'DELIVERED' },
+    ]);
+  });
+
+  describe('saving a new load asks about the previous one first', () => {
+    it('asks, and saves nothing until it is answered; focus starts on Back', async () => {
+      await renderEmpty(1, ONE);
+      await typeCityAndSave();
+      expect(question()?.textContent).toContain(
+        'Previous load 6612193 is still open. Close it as Delivered?',
+      );
+      expect(posted('/api/stops')).toEqual([]);
+      expect(document.activeElement?.textContent).toBe('Back to the form');
+
+      // Back: still nothing saved, nothing closed.
+      await act(async () => (document.activeElement as HTMLButtonElement).click());
+      expect(question()).toBeNull();
+      expect(posted('/api/stops')).toEqual([]);
+    });
+
+    it.each([
+      ['Delivered', [{ loadId: LOAD_A, status: 'DELIVERED' }]],
+      ['Cancelled', [{ loadId: LOAD_A, status: 'CANCELLED' }]],
+      ['Keep it open', undefined],
+    ] as const)('"%s" saves the new load with that answer', async (label, expected) => {
+      await renderEmpty(1, ONE);
+      await typeCityAndSave();
+      await answer(LOAD_A, label);
+      const [body] = posted('/api/stops');
+      expect(body?.city).toBe('Aurora');
+      expect(body?.stopId).toBeNull();
+      expect(body?.closePrevious).toEqual(expected);
+      // One request: never a separate clear.
+      expect(posted('/api/stops/clear')).toEqual([]);
+    });
+
+    it('with two, saves only once both are answered', async () => {
+      await renderEmpty(2, TWO);
+      await typeCityAndSave();
+      await answer(LOAD_A, 'Delivered');
+      expect(posted('/api/stops')).toEqual([]);
+      await answer(LOAD_B, 'Keep it open');
+      expect(posted('/api/stops').map((b) => b.closePrevious)).toEqual([
+        [{ loadId: LOAD_A, status: 'DELIVERED' }],
+      ]);
+    });
+
+    it('does not ask when the truck holds no open load', async () => {
+      await renderEmpty(0, []);
+      await typeCityAndSave();
+      expect(question()).toBeNull();
+      expect(posted('/api/stops')).toHaveLength(1);
+      expect(posted('/api/stops')[0]?.closePrevious).toBeUndefined();
+    });
   });
 });

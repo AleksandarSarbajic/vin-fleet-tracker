@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CLEAR_STATUSES } from '@/lib/clear-stop';
 import { AppointmentInput, WallTimeInput } from './appointment';
 import { LOAD_STATUSES } from './loads';
 import { StopOverrideEdit } from './override';
@@ -234,6 +235,18 @@ export const StopEdit = z
      * required when the assignment changes — see server/reassign.ts.
      */
     previewToken: z.string().optional(),
+
+    /**
+     * §12.92. A NEW load only: the truck's previous loads the dispatcher
+     * answered "close" for, each with its status. Closed by Clear stop's own
+     * `clearStop`, inside this save's transaction — the new load and the
+     * closes land together or not at all. A load answered "Keep it open" is
+     * simply not here; nothing is ever closed that is not named.
+     */
+    closePrevious: z
+      .array(z.object({ loadId: z.string().uuid(), status: z.enum(CLEAR_STATUSES) }).strict())
+      .max(20)
+      .optional(),
   })
   .strict();
 

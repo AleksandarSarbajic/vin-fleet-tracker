@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   ClearStopRequest,
+  clearStopTitle,
+  closesFor,
   confirmLines,
   DEFAULT_CLEAR_STATUS,
   initialChoice,
+  newLoadSubtitle,
   openLoadChoices,
+  previousLoadLine,
+  previousLoads,
+  savePrompt,
   timelineSentence,
 } from './clear-stop';
 import { timeInZone } from './format';
@@ -178,5 +184,118 @@ describe('what the confirm step says', () => {
     expect(lines([stop()], { unsaved: ['appointment', 'note'] }).at(-1)).toBe(
       'Unsaved edits in this form are discarded: appointment, note.',
     );
+  });
+});
+
+/* ------------------------- previous loads (§12.92) ----------------------- */
+
+describe('previous loads (§12.92)', () => {
+  const done = (over: Partial<TimelineStop> = {}) =>
+    stop({
+      city: 'Vernon Hills',
+      arrivedAt: ago(4),
+      arrivedSource: 'detected',
+      departedAt: ago(3),
+      ...over,
+    });
+
+  it('is an open load with every stop departed — and nothing else', () => {
+    const rows = [
+      done({ loadId: 'done', loadNumber: '6612193' }),
+      // Open, one stop still ahead: not previous.
+      stop({ stopId: 'a1', loadId: 'going', departedAt: ago(5), sequence: 1 }),
+      stop({ stopId: 'a2', loadId: 'going', sequence: 2 }),
+      // Closed: not previous, whatever its stops say.
+      done({ stopId: 'c1', loadId: 'closed', loadStatus: 'DELIVERED' }),
+    ];
+    expect(previousLoads(rows).map((l) => l.loadId)).toEqual(['done']);
+  });
+
+  describe('the header', () => {
+    it.each([
+      [0, 'No load on this truck yet'],
+      [1, 'No next stop. 1 previous load still open'],
+      [2, 'No next stop. 2 previous loads still open'],
+    ])('with %i open loads: %s', (count, expected) => {
+      expect(newLoadSubtitle(count)).toBe(expected);
+    });
+
+    it('says "No load" only when there is none', () => {
+      for (const count of [0, 1, 2, 7]) {
+        expect(newLoadSubtitle(count).includes('No load')).toBe(count === 0);
+      }
+    });
+  });
+
+  describe('the line above the form', () => {
+    const now = new Date(NOW);
+    const at = (h: number) => timeInZone(new Date(ago(h)), TZ);
+
+    it('names the load, the last stop, both times in dispatch time, and how', () => {
+      const [load] = previousLoads([done({ loadNumber: '6612193' })]);
+      expect(previousLoadLine(load!, TZ, now)).toBe(
+        `Previous load 6612193: Vernon Hills, arrived ${at(4)}, departed ${at(3)} (detected automatically). Still open.`,
+      );
+    });
+
+    it('says "marked by hand" for an arrival the dispatcher entered', () => {
+      const [load] = previousLoads([done({ arrivedSource: 'dispatcher' })]);
+      expect(previousLoadLine(load!, TZ, now)).toContain('(marked by hand). Still open.');
+    });
+
+    it('says "no number" for a load without one (§12.21)', () => {
+      const [load] = previousLoads([done({ loadNumber: null })]);
+      expect(previousLoadLine(load!, TZ, now)).toMatch(/^Previous load no number: /);
+    });
+
+    it('uses the LAST stop, and gives the weekday when it was not today', () => {
+      const [load] = previousLoads([
+        done({ stopId: 'p', sequence: 1, city: 'Joliet', departedAt: ago(40) }),
+        done({ stopId: 'q', sequence: 2, arrivedAt: ago(30), departedAt: ago(29) }),
+      ]);
+      const day = timeInZone(new Date(ago(30)), TZ, { weekday: true });
+      expect(previousLoadLine(load!, TZ, now)).toContain(`Vernon Hills, arrived ${day}`);
+    });
+  });
+
+  describe('Clear stop names what it would close when the form is empty', () => {
+    it('one load, by number and place', () => {
+      expect(clearStopTitle(previousLoads([done({ loadNumber: '6612193' })]))).toBe(
+        'Close previous load 6612193 (Vernon Hills).',
+      );
+    });
+
+    it('two loads, both named', () => {
+      const two = previousLoads([
+        done({ loadId: 'a', loadNumber: '6612193' }),
+        done({ stopId: 's2', loadId: 'b', loadNumber: null, city: 'Joliet' }),
+      ]);
+      expect(clearStopTitle(two)).toBe(
+        'Close one of 2 previous loads: 6612193 (Vernon Hills), no number (Joliet).',
+      );
+    });
+
+    it('says what it is waiting for while the loads are read', () => {
+      expect(clearStopTitle(null)).toBe(
+        'Close a previous load still open on this truck.',
+      );
+    });
+  });
+
+  describe('the save-time question', () => {
+    it('asks by number', () => {
+      const [load] = previousLoads([done({ loadNumber: '6612193' })]);
+      expect(savePrompt(load!)).toBe(
+        'Previous load 6612193 is still open. Close it as Delivered?',
+      );
+    });
+
+    it('closes what was answered Delivered or Cancelled, and nothing kept open', () => {
+      expect(closesFor({ a: 'DELIVERED', b: 'keep', c: 'CANCELLED' })).toEqual([
+        { loadId: 'a', status: 'DELIVERED' },
+        { loadId: 'c', status: 'CANCELLED' },
+      ]);
+      expect(closesFor({ a: 'keep' })).toEqual([]);
+    });
   });
 });
