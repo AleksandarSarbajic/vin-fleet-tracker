@@ -66,8 +66,8 @@ export const TOUR: readonly TourStep[] = [
   {
     id: 'row',
     title: 'Everything about a truck is on its row',
-    body: 'Open a stop to edit it, pin a truck to keep it above the list, or check several and act on them together. Hovering a row shows controls for copying the address or the load details.',
-    keys: [['E'], ['P'], ['X'], ['D']],
+    body: 'Double-click a row (or press Enter) to edit its stop, pin a truck to keep it above the list, or check several and act on them together. Hovering a row shows controls for copying the address or the load details.',
+    keys: [['Enter'], ['P'], ['X'], ['D']],
   },
   {
     id: 'map',

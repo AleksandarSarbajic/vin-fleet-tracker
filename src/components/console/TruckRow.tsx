@@ -606,7 +606,10 @@ function TruckRowImpl({
             onPin(row.id);
           }}
           onDoubleClick={(e) => e.stopPropagation()}
-          className={`shrink-0 leading-none transition-opacity duration-ground ${
+          // §12.95. Not drawn where there is no hover, pinned or not: on a
+          // touch screen a tap on the row must select the truck. A pinned
+          // truck still says so by sitting in the pinned block.
+          className={`shrink-0 leading-none transition-opacity duration-ground [@media(hover:none)]:hidden ${
             pinned
               ? 'text-accent opacity-100'
               : 'text-text-muted opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100'

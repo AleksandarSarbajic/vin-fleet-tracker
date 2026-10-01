@@ -686,7 +686,6 @@ the **dispatch** zone.
 | `Esc` | Clears search, **then** clears selection. In a dirty modal, raises the discard confirm — never a silent close. |
 | `↑` `↓` | Move row selection, map follows |
 | `Enter` | **Open the edit modal.** Selection already shows the detail panel, so binding `Enter` to "detail" was redundant (§12.10). |
-| `E` | Open edit (same as `Enter`) |
 | `1`–`7` | Toggle the filter chips, in drawn order: `1` Late · `2` At risk · `3` On time · `4` Arrived · `5` Upcoming *(was Tomorrow, §12.82)* · `6` Data issues · `7` Inactive; `8` Drivers only (§12.78). Chips are **multi-select** (§12.9). |
 | `0` | Reset filters to All |
 | `Cmd/Ctrl` + `Enter` | Save (edit modal) |
@@ -1495,7 +1494,8 @@ Each toggles independently. `0` resets to All.
 ## 12.10 `Enter` opens the edit modal
 
 Selection already shows the detail panel, so binding `Enter` to "open detail"
-was redundant. `Enter` and `E` both open edit.
+was redundant. `Enter` opens edit. *(`E` was listed here too and never built;
+removed from the key map in §12.95.)*
 
 Fixed in §8.1.
 
@@ -6909,8 +6909,8 @@ is drawn. Edit controls appear only after a tap, by which time hydration has
 read the real width, so nothing editable is painted on a phone. At 768px and
 wider nothing changed.
 
-`E` ("Edit the selected stop") is in the keymap but has never had a handler;
-it does nothing at any width. Recorded, not built.
+`E` ("Edit the selected stop") was in the keymap but never had a handler; it
+did nothing at any width. Removed in §12.95.
 
 **Tests.** `EditingBlocked.test.tsx` runs the console with the media query
 answering narrow and wide: Enter, double-click, the map's editor prop and the
@@ -6930,6 +6930,29 @@ centre fell on the driver's name. Tapping the truck number selects at every
 width, which is what the e2e test does. On a touch screen the copy buttons
 are invisible traps; the smallest fix is to not render them, or the pin star,
 where there is no hover (`[@media(hover:none)]:hidden`). Not changed here.
+
+## 12.95 A tap on a row selects it; the sheet lists only keys that work
+
+**Hover-only controls are not drawn where there is no hover.** The row's
+"Copy address" and "Copy load info" buttons and its pin star appear on hover.
+On a touch screen they were invisible buttons that still took taps: at 430px
+the centre of a row was "Copy address", so a tap there copied the address and
+did not select the truck (§12.94's popup that never opened). They now carry
+`[@media(hover:none)]:hidden` — pinned or not, for the star; a pinned truck
+still says so by sitting in the pinned block. With a mouse nothing changed.
+
+**`E` is gone.** "Edit the selected stop" was on the shortcut sheet and in
+the tour with no handler behind it. It is removed from the key map, and the
+tour's row step names `Enter` (or a double-click) instead. No edit letter is
+built. The key-map test asserts no `E` and no edit binding other than Enter.
+
+**Tests.** `e2e/touch-row.spec.ts`: on a touch-emulated 430px screen (checked
+to match `(hover: none)`), a tap on the middle of a row selects the truck,
+the clipboard still holds what it held before, and no copy button or pin star
+is drawn; with a mouse at 1280 the buttons are invisible until the row is
+hovered, then "Copy address" copies the address without selecting and the
+star pins. Removing the rule from the copy button fails the touch test on the
+selection itself (`aria-selected` stays `false`).
 
 # 13. Still open
 

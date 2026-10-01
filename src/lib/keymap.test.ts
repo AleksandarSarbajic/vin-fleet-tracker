@@ -73,6 +73,18 @@ describe('the registry describes what the console actually binds', () => {
     expect(grouped).toHaveLength(KEYMAP.length);
   });
 
+  /**
+   * §12.95. `E` ("Edit the selected stop") sat in the sheet for months with no
+   * handler behind it: a key the sheet promised and the console ignored.
+   * Editing opens with Enter or a double-click; there is no edit letter.
+   */
+  it('lists no E: there is no single-letter edit key', () => {
+    expect(KEYMAP.some((b) => b.keys.includes('E'))).toBe(false);
+    expect(KEYMAP.some((b) => /edit/i.test(b.label) && b.keys.join('') !== 'Enter')).toBe(
+      false,
+    );
+  });
+
   it('marks as planned exactly the keys §14 proposes but has not built', () => {
     // The brief proposed ? ⌘K P X D. All five have shipped — `⌘K` last, with
     // the command palette — so nothing is planned any more. This is an

@@ -84,7 +84,6 @@ export interface Binding {
 export const KEYMAP: readonly Binding[] = [
   { keys: ['↑', '↓'], label: 'Move the selection', group: 'list', owner: 'Console' },
   { keys: ['Enter'], label: 'Open the selected truck', group: 'list', owner: 'Console' },
-  { keys: ['E'], label: 'Edit the selected stop', group: 'list', owner: 'Console' },
   {
     keys: ['Esc'],
     label: 'Clear the search, then the selection',

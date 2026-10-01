@@ -68,7 +68,12 @@ export function CopyButton({
       onClick={copy}
       onDoubleClick={(e) => e.stopPropagation()}
       style={{ right: offset }}
-      className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 border border-line-hair bg-surface-raised px-1 leading-none transition-opacity duration-ground ${
+      /*
+       * §12.95. Not drawn where there is no hover. It only appears on hover,
+       * so on a touch screen it was an invisible button in the middle of the
+       * row: a tap there copied an address and did not select the truck.
+       */
+      className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 border border-line-hair bg-surface-raised px-1 leading-none transition-opacity duration-ground [@media(hover:none)]:hidden ${
         copied
           ? 'text-status-ontime-fg opacity-100'
           : 'text-text-muted opacity-0 hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100'
