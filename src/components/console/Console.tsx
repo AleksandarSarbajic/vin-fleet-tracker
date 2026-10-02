@@ -1068,8 +1068,10 @@ export function Console({
               toasts={toasts}
               onOpen={(truckId) => {
                 select(truckId);
-                // Below the editing width a toast shows the truck, nothing more.
+                // Below the editing width a toast shows the truck, nothing more:
+                // on a phone, in its truck sheet (§12.96, stage 4).
                 openEditor(truckId);
+                if (isPhoneNow()) setSheetOpen(true);
               }}
               onExpire={dismissToast}
               reducedMotion={reducedMotion}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Map, { Layer, Source, type MapMouseEvent, type MapRef } from 'react-map-gl/mapbox';
 import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 import type { Point } from 'geojson';
@@ -314,8 +314,12 @@ export function FleetMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, panRequest]);
 
+  /** §12.96, stage 4. The phone's folded key; any tap on the map folds it again. */
+  const [keyOpen, setKeyOpen] = useState(false);
+
   const handleClick = useCallback(
     (event: MapMouseEvent) => {
+      setKeyOpen(false);
       const feature = event.features?.[0];
       if (!feature) {
         onSelect(null);
@@ -392,7 +396,7 @@ export function FleetMap({
       >
         <ZoomControl onZoom={zoom} />
         <BasemapToggle basemap={basemap} onChange={setBasemap} />
-        <MarkerKey />
+        <MarkerKey open={keyOpen} onToggle={() => setKeyOpen((was) => !was)} />
         {/*
           Not mounted until the stored basemap has been read. Mounting at the
           default and switching a frame later would load the dark style, fetch

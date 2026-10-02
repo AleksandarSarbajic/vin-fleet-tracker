@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { STATUSES, type Status } from '@/lib/status';
 import { STATUS_LABEL } from '@/lib/status';
 import { elapsed } from '@/lib/format';
@@ -256,9 +255,19 @@ export function BasemapToggle({
  * The key. On a phone (§12.96, stage 3) it is folded behind a 44px Key
  * button: open, it covered a third of a 320px map. At 768px and up it is
  * always shown, as it was, and the button is not drawn.
+ *
+ * Stage 4: the map owns `open`, so a tap anywhere on the map folds it again;
+ * and open, it is two columns in the column left of the zoom buttons —
+ * above the Key row on a tall screen, beside the Key on a short one — so it
+ * covers neither the zoom nor the style buttons, nor Mapbox's logo.
  */
-export function MarkerKey() {
-  const [open, setOpen] = useState(false);
+export function MarkerKey({
+  open = false,
+  onToggle = () => {},
+}: {
+  open?: boolean;
+  onToggle?: () => void;
+}) {
   return (
     <>
       <button
@@ -267,7 +276,7 @@ export function MarkerKey() {
         data-marker-key-toggle=""
         aria-expanded={open}
         aria-label={open ? 'Hide the marker key' : 'Show the marker key'}
-        onClick={() => setOpen((was) => !was)}
+        onClick={onToggle}
         className={`absolute bottom-[14px] right-4 z-10 flex h-11 min-w-11 items-center justify-center border px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] md:hidden max-md:group-data-[sheet-open]/map:hidden ${
           open
             ? 'border-accent bg-surface-overlay text-text'
@@ -285,11 +294,16 @@ function MarkerKeyPanel({ open }: { open: boolean }) {
   return (
     <div
       data-map-control
-      className={`absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px] max-md:group-data-[sheet-open]/map:hidden ${
-        open ? 'max-md:bottom-[66px]' : 'max-md:hidden'
+      data-marker-key-panel=""
+      className={`absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px] max-md:grid max-md:grid-cols-2 max-md:gap-x-4 max-md:gap-y-1 max-md:py-2 max-md:group-data-[sheet-open]/map:hidden ${
+        open
+          ? // Left of the zoom column, so never over it; above the Key row,
+            // so never over Mapbox's logo; on a short screen, down by the Key.
+            'max-md:bottom-[66px] max-md:right-[68px] max-md:[@media(max-height:480px)]:bottom-[14px]'
+          : 'max-md:hidden'
       }`}
     >
-      <span className="mb-0.5 font-cond text-micro uppercase text-text-muted">
+      <span className="mb-0.5 font-cond text-micro uppercase text-text-muted max-md:col-span-2">
         Marker key
       </span>
       {KEY_ROWS.map((status) => (

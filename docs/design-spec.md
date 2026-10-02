@@ -7328,6 +7328,129 @@ for stage 4: feed down (the banner's sentence), the scope menu's width, 12px.
 the popup's "Editing is on the desktop console" at phone sizes; the popup is
 not drawn there now, so it asserts the sheet's.
 
+### Stage 4 — cleanup
+
+Below 768px only.
+
+- **Feed-down banner**: the sentence wraps, whole, instead of being cut to
+  one line — which had cut exactly its point, "do not quote an ETA from this
+  screen", at every phone size. Retry now (44px) and the countdown take a
+  second line. The banner sits outside the scrolling pane, so Retry is always
+  on screen.
+- **Scope menu**: as wide as the screen allows (at most its 360px) and never
+  taller than the room under the button, scrolling inside itself; every item
+  44px, the find field included. Rename and Delete on a saved view are shown
+  outright — they appeared on hover, which a phone does not have, and were
+  invisible buttons that still took taps. **A phone applies shared lists and
+  edits none**: the list editor is a 600px panel that ran off the screen, the
+  trap §12.94 closed for the stop editor. "Lists are edited on the desktop
+  console" stands where New list… and Edit were.
+- **The 12px floor**: one rule in `globals.css` (`max-width: 767px`) raises
+  every text-size utility under 12px — the `micro` (10.5px) and `small`
+  (11.5px) tokens and the few one-off sizes — to 12px. One rule rather than a
+  `max-md:` on each of ~200 uses, so the floor holds for whatever is added
+  next. Inputs are 16px there: iOS Safari zooms into any field under 16px when
+  it is focused (the login card, the search, the menus' find fields) and stays
+  zoomed. **Nothing we draw is under 12px on a phone**, measured on the list,
+  the More sheet, the scope and account menus, search, the map with its key
+  open, the truck sheet, the timeline, the feed-down banner, a toast and the
+  login card. Exempt: Mapbox's own logo and attribution control. The credits
+  footer is ours and is 12px; its links are exempt from the 44px rule only.
+- **Marker key**: a tap anywhere on the map folds it (the map owns its open
+  state now). Open, it is two columns in the column left of the zoom buttons
+  — above the Key row on a tall screen, beside the Key on a short one — so it
+  covers neither the zoom nor the style buttons, nor Mapbox's logo.
+- **Toasts**: the pane's width less 12px a side, from the pane's top — the
+  pane is under the tiles, so a toast cannot cover the top bar or the tiles,
+  and the truck sheet (z-40) sits above it. Open is 44px and opens the truck's
+  sheet on a phone; a 44px × dismisses it. They were 340px wide, off a 320px
+  screen, with a 10.5px Open.
+
+**Checks.** Nothing is marked expected-to-fail any more; `NOT_YET` is empty.
+Every phone check passes at all six sizes. Added in stage 4: the banner's
+clause on screen and Retry at 44px; the scope menu whole, nothing sideways,
+every item 44px, with a shared list in it; the open key clear of zoom and
+style and folded by a map tap; the toast under the tiles, inside the screen,
+under the sheet, dismissible at 44px. The 12px check now walks every state
+above instead of the first screen alone.
+
+**Existing tests changed by stage 4:** none. Two harness fixes in the
+phone spec, found by the final full run: the sheet check tapped Close and
+then a card 50ms later — Chrome cancels a tap's click when a second touch
+follows that fast, so Close never fired and the next tap landed on the sheet
+(at 320 it covers the card); it now waits for the sheet to close. And 44px
+heights are compared rounded to the pixel: a toast still sliding in measured
+its 44px buttons at 43.99998.
+
+### The phone view, as built
+
+**What it is for.** Checking the board from a phone: which trucks are late
+or at risk, where a truck is, when it is due, and calling its driver. Not
+working the board — that is the desktop console.
+
+**The breakpoint.** 768px, Tailwind's `md`, the same number as the editing
+width (`EDIT_MIN_WIDTH_PX`, §12.94; `lib/phone.ts` derives from it and a test
+holds the three equal). Below it the phone pieces show (`md:hidden`) and the
+desktop pieces they replace hide (`max-md:hidden`): the server sends both and
+CSS chooses, so the first paint is right and no script reads the width to
+decide the layout. Script asks the width (`isPhoneNow`, a media query at the
+moment of the tap) only for behaviour: whether a marker's tap opens the
+truck sheet, whether the tour opens itself. Data, polling, filters, scope,
+search and selection live once, in `Console`; the phone pieces display them.
+Width is not orientation: a phone on its side 768px wide or more gets the
+desktop console.
+
+**What it does.**
+
+- A sticky top bar: scope (list or view, with its ×, the name on its own
+  line), the feed state always visible ("3s ago", or "Feed down 25m"),
+  search, the account menu. Back from the background it refetches at once
+  and says "Updating…" with no age until the answer lands.
+- Tiles for All, Late and At risk, and More for every other filter, Today
+  and density.
+- List | Map, list first; the map is mounted once and kept across switches.
+- Two-line cards: truck and status; driver, next-stop city, "Appt" time.
+- The truck sheet, from a card or a marker: every fact the popup carries,
+  Timeline, Show on map, Call driver.
+- On its side (480px tall or less) the bar and tiles fold into 113px of 375.
+
+**What it does not do.**
+
+- **No editing.** No Edit Stop, no Clear stop, no bulk edit, no list
+  editing: "Editing is on the desktop console" (and "Lists are edited on the
+  desktop console") stands where each was. No route — a tap, a key, a toast,
+  a link — opens an editor below 768px (§12.94).
+- **No messaging.** Call driver is a plain `tel:` link to a number that dials
+  as it stands, handed to the phone's own dialler; nothing is sent to anyone,
+  there is no `sms:` link, and the number is never printed.
+- **No keyboard handling of its own.** The phone pieces add no key listener;
+  a test counts the page's keydown listeners at 390 and holds them equal to
+  1280's.
+- No `viewport-fit=cover` and no safe-area padding (decided at the plan): the
+  page stays inside Safari's safe areas, and nothing is fixed to the bottom.
+
+**How desktop is proven unchanged.** `e2e/desktop-baseline.spec.ts` shoots
+eight states at 768, 1024, 1280, 1440, 1680 and 1920 — 54 committed images —
+and compares with no tolerance at all (`threshold: 0`, `maxDiffPixels: 0`).
+Only what changes by itself is hidden (map tiles, clocks, sync, GPS and ETA
+ages, the retry countdown); the popup's position is the map camera's and is
+not held. Every stage ran it three passes in a row with zero differences,
+then in the full suite, and broke the phone breakpoint on purpose to show it
+fails: the top bar to 800px (stage 1), the cards to 1086px (stage 2), the Key
+button to 1100px (stage 3), the 12px type floor to 1100px (stage 4: every
+shot at 768 and 1024 failed).
+Two of the 54 were re-captured once (stage 2), on unchanged code, because
+the harness had caught a hovered checkbox; the stage-2 code rendered them
+identically. 768 and 1024 matter most: below 1086px both panes are mounted
+and CSS chooses.
+
+**How the phone is proven.** `e2e/phone.spec.ts` runs every check at
+320×568, 360×640, 375×667, 390×844, 430×932 and 667×375, touch on, measured
+against the screen's own width; `e2e/phone-signout.spec.ts` signs out at 390
+and proves the account's other sessions survive; `e2e/phone-editing.spec.ts`
+proves nothing opens an editor below 768px. Expected failures were marked
+per stage in `NOT_YET` and removed as each stage landed; it is empty.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -112,10 +112,16 @@ export function FeedBanner({
   return (
     <div
       role="alert"
-      className="flex h-[38px] shrink-0 items-center gap-2.5 border-b border-status-late-bd bg-status-late-bg px-4 text-status-late-fg"
+      /*
+       * §12.96, stage 4. On a phone the sentence WRAPS, whole: cut to one line
+       * it lost exactly its point — "do not quote an ETA from this screen" —
+       * at every phone size. Retry now and the countdown take a second line
+       * there, Retry at 44px.
+       */
+      className="flex h-[38px] shrink-0 items-center gap-2.5 border-b border-status-late-bd bg-status-late-bg px-4 text-status-late-fg max-md:h-auto max-md:flex-wrap max-md:gap-y-2 max-md:px-3 max-md:py-2.5"
     >
       <Warning />
-      <p className="min-w-0 flex-1 truncate text-body font-medium">
+      <p className="min-w-0 flex-1 truncate text-body font-medium max-md:basis-[calc(100%-2rem)] max-md:whitespace-normal">
         {since === null ? (
           /**
            * No `newest_position_at` at all. §12.34's singleton: a fresh
@@ -140,7 +146,7 @@ export function FeedBanner({
         type="button"
         onClick={onRetry}
         disabled={retrying}
-        className="h-[26px] shrink-0 border border-status-late-fg px-2.5 font-cond text-micro uppercase tracking-[.08em] text-status-late-fg disabled:opacity-45"
+        className="h-[26px] shrink-0 border border-status-late-fg px-2.5 font-cond text-micro uppercase tracking-[.08em] text-status-late-fg disabled:opacity-45 max-md:ml-[26px] max-md:h-11 max-md:px-4"
       >
         {retrying ? 'Retrying…' : 'Retry now'}
       </button>

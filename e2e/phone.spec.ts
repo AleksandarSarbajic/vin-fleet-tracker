@@ -41,9 +41,7 @@ const ANA_PHONE = '3125550101';
 
 /** The checks the current app cannot pass, and the stage that makes them pass. */
 const NOT_YET: Record<string, string> = {
-  'feed down is visible, its sentence whole': 'stage 1 (top bar) and 4 (banner)',
-  'the scope menu fits the screen': 'stage 4',
-  'no text under 12px': 'stage 4',
+  // Empty since stage 4: every check passes at every size.
 };
 
 /** The shared list `seed` makes: "Bob's trucks", trucks 200–211. */
@@ -353,6 +351,9 @@ check(
         return box.left >= 0 && box.right <= vw;
       }, size.width);
     expect.soft(fits, `${size.name}: login card inside the screen`).toBe(true);
+    expect
+      .soft(await smallText(page), `${size.name}: text under 12px on the login card`)
+      .toEqual([]);
   },
   { signedIn: false },
 );
@@ -364,16 +365,35 @@ check(
     await expect
       .soft(page.locator('[data-phone-feed]'), `${size.name}: top-bar feed state`)
       .toContainText(/Feed down/, { timeout: 3_000 });
-    const sentence = page
-      .getByRole('alert')
-      .filter({ hasText: 'Position feed' })
-      .locator('p');
+    const banner = page.getByRole('alert').filter({ hasText: 'Position feed' });
+    const sentence = banner.locator('p');
     const whole = await sentence.evaluate(
       (p, vw) =>
-        p.scrollWidth <= p.clientWidth + 1 && p.getBoundingClientRect().right <= vw,
+        p.scrollWidth <= p.clientWidth + 1 &&
+        p.scrollHeight <= p.clientHeight + 1 &&
+        p.getBoundingClientRect().right <= vw,
       size.width,
     );
     expect.soft(whole, `${size.name}: banner sentence whole`).toBe(true);
+    // The clause that is the point of the banner, on screen.
+    await expect.soft(sentence).toContainText('do not quote an ETA from this screen');
+    expect
+      .soft(
+        await within(page, '[role="alert"] p', size.width, size.height),
+        `${size.name}: sentence on screen`,
+      )
+      .toBe(true);
+    const retry = banner.getByRole('button', { name: /Retry now|Retrying/ });
+    const box = (await retry.boundingBox())!;
+    expect
+      .soft(Math.round(box.height), `${size.name}: Retry now height`)
+      .toBeGreaterThanOrEqual(44);
+    expect
+      .soft(box.x + box.width, `${size.name}: Retry now on screen`)
+      .toBeLessThanOrEqual(size.width);
+    expect
+      .soft(await smallText(page), `${size.name}: text under 12px with the banner up`)
+      .toEqual([]);
   },
   { feedDown: true },
 );
@@ -499,7 +519,7 @@ check('the truck sheet fits and calls only a dialable number', async (page, size
   expect.soft(sideways, `${size.name}: the sheet scrolls sideways`).toBe(false);
   const close = sheet.getByRole('button', { name: 'Close' });
   expect
-    .soft((await close.boundingBox())!.height, `${size.name}: Close height`)
+    .soft(Math.round((await close.boundingBox())!.height), `${size.name}: Close height`)
     .toBeGreaterThanOrEqual(44);
   for (const field of [
     'status',
@@ -534,11 +554,15 @@ check('the truck sheet fits and calls only a dialable number', async (page, size
     )
     .toBe(true);
   expect
-    .soft((await call.boundingBox())!.height, `${size.name}: Call height`)
+    .soft(Math.round((await call.boundingBox())!.height), `${size.name}: Call height`)
     .toBeGreaterThanOrEqual(44);
   await expect.soft(page.locator('a[href^="sms:"]')).toHaveCount(0);
   // Marko has no number: no call link at all.
   await close.tap();
+  // Gone before the next tap. A second touch 50ms after the first cancels
+  // the first one's click in Chrome — no hand taps twice that fast — and
+  // at 320 the sheet covers the card, so the tap landed on the sheet.
+  await expect(page.locator('[data-truck-sheet]')).toHaveCount(0);
   await page.locator(`[data-phone-card="${IDS.truckDallas}"]`).tap();
   await expect(page.locator('[data-truck-sheet]')).toHaveAttribute(
     'aria-label',
@@ -588,6 +612,33 @@ check('the marker key is folded behind a button', async (page, size) => {
     .toBeHidden({ timeout: 2_000 });
   await page.locator('[data-marker-key-toggle]').tap({ timeout: 3_000 });
   await expect.soft(page.getByText('Marker key')).toBeVisible();
+  // Open, it covers neither the zoom nor the style buttons.
+  const rect = (sel: string) =>
+    page
+      .locator(sel)
+      .first()
+      .evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return { l: b.left, r: b.right, t: b.top, b: b.bottom };
+      });
+  const key = await rect('[data-marker-key-panel]');
+  for (const [name, sel] of [
+    ['zoom', '[data-map-control]:has(> button[aria-label="Zoom in"])'],
+    ['style', '[role="group"][aria-label="Basemap"]'],
+  ] as const) {
+    const other = await rect(sel);
+    const overlaps =
+      key.l < other.r && key.r > other.l && key.t < other.b && key.b > other.t;
+    expect
+      .soft(overlaps, `${size.name}: the open key covers the ${name} buttons`)
+      .toBe(false);
+  }
+  // A tap anywhere on the map folds it — here its empty top-left corner.
+  const canvas = (await page.locator('canvas.mapboxgl-canvas').boundingBox())!;
+  await page.touchscreen.tap(canvas.x + 24, canvas.y + 24);
+  await expect
+    .soft(page.getByText('Marker key'), `${size.name}: folded by a map tap`)
+    .toBeHidden({ timeout: 3_000 });
 });
 
 check('the timeline fits the screen width', async (page, size) => {
@@ -616,33 +667,68 @@ check('the timeline fits the screen width', async (page, size) => {
 });
 
 check('the scope menu fits the screen', async (page, size) => {
-  await board(page);
+  // With a shared list, so the lists section is in the menu too.
+  await board(page, `/?list=${bobsList}`);
   await page
+    .locator('[data-phone-topbar]')
     .getByRole('button', { name: /^Scope/ })
-    .first()
     .tap();
   const menu = page.getByRole('menu', { name: 'Lists and views' });
   await expect(menu).toBeVisible();
   const fits = await menu.evaluate(
     (el, [vw, vh]) => {
       const b = el.getBoundingClientRect();
-      return b.left >= 0 && b.right <= vw! && b.bottom <= vh!;
+      return b.left >= 0 && b.right <= vw! && b.top >= 0 && b.bottom <= vh!;
     },
     [size.width, size.height],
   );
   expect.soft(fits, `${size.name}: scope menu inside the screen`).toBe(true);
+  // Nothing in it clipped, "Save current view…" least of all.
+  const save = menu.getByRole('menuitem', { name: /Save current view|already saved/ });
+  await save.scrollIntoViewIfNeeded();
+  const whole = await save.evaluate(
+    (el, vw) =>
+      el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= vw,
+    size.width,
+  );
+  expect.soft(whole, `${size.name}: "Save current view…" whole`).toBe(true);
+  const sideways = await menu.evaluate((el) =>
+    [...el.querySelectorAll('*')].some(
+      (n) =>
+        (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1 &&
+        getComputedStyle(n).overflowX !== 'visible',
+    ),
+  );
+  expect
+    .soft(sideways, `${size.name}: something in the menu scrolls sideways`)
+    .toBe(false);
+  // Every item a finger can hit.
+  const small = await menu.evaluate((el) =>
+    [...el.querySelectorAll('button, [role="menuitem"], input')]
+      .map((n) => ({
+        name: (n.textContent || n.getAttribute('aria-label') || '').trim().slice(0, 24),
+        h: Math.round(n.getBoundingClientRect().height),
+      }))
+      .filter((c) => c.h > 0 && c.h < 44)
+      .map((c) => `${c.name} ${c.h}px`),
+  );
+  expect.soft(small, `${size.name}: menu items under 44px`).toEqual([]);
 });
 
-check('no text under 12px', async (page, size) => {
-  await board(page);
-  const small = await page.evaluate(() => {
+/**
+ * Text under 12px, on every phone state, not only the first screen. Mapbox's
+ * own logo and attribution control are exempt (not ours to resize); the
+ * credits footer is ours and is measured. Screen-reader-only text is not
+ * drawn. A state's offenders are named with the state.
+ */
+async function smallText(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
     const out: string[] = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
       const text = (node.textContent ?? '').trim();
       const el = node.parentElement;
-      // Mapbox's own controls only: the credits footer is ours, and held to 12px.
       if (
         !text ||
         !el ||
@@ -652,11 +738,132 @@ check('no text under 12px', async (page, size) => {
       const box = el.getBoundingClientRect();
       if (box.width === 0 || getComputedStyle(el).visibility === 'hidden') continue;
       const px = parseFloat(getComputedStyle(el).fontSize);
-      if (px < 12) out.push(`${px}px "${text.slice(0, 20)}"`);
+      if (px < 12) out.push(`${px}px "${text.slice(0, 24)}"`);
     }
     return [...new Set(out)];
   });
-  expect.soft(small, `${size.name}: text under 12px`).toEqual([]);
+}
+
+check('no text under 12px', async (page, size) => {
+  const offenders: string[] = [];
+  const measure = async (state: string) => {
+    for (const o of await smallText(page)) offenders.push(`${state}: ${o}`);
+  };
+  await board(page);
+  await measure('list');
+
+  await page.locator('[data-phone-more]').tap();
+  await measure('More sheet');
+  await page.getByRole('button', { name: 'Done' }).tap();
+
+  await page
+    .locator('[data-phone-topbar]')
+    .getByRole('button', { name: /^Scope/ })
+    .tap();
+  await measure('scope menu');
+  await page
+    .locator('[data-phone-topbar]')
+    .getByRole('button', { name: /^Scope/ })
+    .tap();
+
+  await page.locator('[data-phone-account]').tap();
+  await measure('account menu');
+  await page.locator('[data-phone-account]').tap();
+
+  await page.locator('[data-phone-search]').tap();
+  await page.locator('[data-phone-topbar] input').fill('chi');
+  await measure('search');
+  await page.getByRole('button', { name: 'Close search' }).tap();
+
+  await page.locator('[data-phone-tab="map"]').tap();
+  await page.locator('canvas.mapboxgl-canvas').waitFor();
+  await page.locator('[data-marker-key-toggle]').tap();
+  await measure('map, key open');
+  await page.locator('[data-marker-key-toggle]').tap();
+
+  await page.locator('[data-phone-tab="list"]').tap();
+  await page.locator(`[data-phone-card="${IDS.truckChicago}"]`).tap();
+  await measure('truck sheet');
+  await page
+    .locator('[data-truck-sheet]')
+    .getByRole('button', { name: 'Timeline' })
+    .tap();
+  await page.getByRole('dialog', { name: /Timeline for truck 101/ }).waitFor();
+  await page.waitForTimeout(400);
+  await measure('timeline');
+
+  expect.soft(offenders, `${size.name}: text under 12px`).toEqual([]);
+});
+
+/**
+ * §12.96, stage 4. A truck going late raises a toast. On a phone it sits in
+ * the pane under the tiles — never over the top bar or the tiles — inside the
+ * screen, below the truck sheet when one is open, and clears with a 44px tap.
+ */
+check('a toast stays under the tiles and clears with a 44px tap', async (page, size) => {
+  const sql = connect();
+  try {
+    // 101 upcoming at first load, then late at the next fetch: one crossing.
+    await sql`update stops set appointment_start_utc = ${new Date(Date.now() + 26 * 3_600_000)}
+              where id = ${IDS.stopChicago}`;
+    await board(page);
+    await page.locator(`[data-phone-card="${IDS.truckDallas}"]`).tap();
+    await sql`update stops set appointment_start_utc = ${new Date(Date.now() - 2 * 3_600_000)}
+              where id = ${IDS.stopChicago}`;
+  } finally {
+    await sql.end();
+  }
+  // Fetch now rather than in 20s: the return-from-background refetch.
+  await page.evaluate(() => {
+    for (const state of ['hidden', 'visible'] as const) {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+  });
+  const toast = page.locator('[data-toast]');
+  await expect(toast, `${size.name}: a toast`).toBeVisible({ timeout: 10_000 });
+
+  // The sheet stays above it: its buttons take the tap, not the toast.
+  for (const name of ['Close', 'Timeline', 'Show on map']) {
+    const b = (await page
+      .locator('[data-truck-sheet]')
+      .getByRole('button', { name })
+      .boundingBox())!;
+    const onTop = await page.evaluate(
+      ([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('[data-truck-sheet]'),
+      [b.x + b.width / 2, b.y + b.height / 2],
+    );
+    expect.soft(onTop, `${size.name}: the toast covers the sheet's ${name}`).toBe(true);
+  }
+  await page.locator('[data-truck-sheet]').getByRole('button', { name: 'Close' }).tap();
+
+  const tilesBottom = await page
+    .locator('[data-phone-tiles]')
+    .evaluate((el) => el.getBoundingClientRect().bottom);
+  const box = (await toast.boundingBox())!;
+  expect
+    .soft(box.y, `${size.name}: toast under the tiles`)
+    .toBeGreaterThanOrEqual(tilesBottom);
+  expect
+    .soft(
+      box.x >= 0 && box.x + box.width <= size.width,
+      `${size.name}: toast inside the screen`,
+    )
+    .toBe(true);
+  for (const name of [/^Open$/, /^Dismiss/]) {
+    const h = Math.round(
+      (await toast.getByRole('button', { name }).boundingBox())!.height,
+    );
+    expect.soft(h, `${size.name}: ${name} height`).toBeGreaterThanOrEqual(44);
+  }
+  expect
+    .soft(await smallText(page), `${size.name}: text under 12px with a toast`)
+    .toEqual([]);
+  await toast.getByRole('button', { name: /^Dismiss/ }).tap();
+  await expect(toast, `${size.name}: dismissed`).toHaveCount(0, { timeout: 3_000 });
 });
 
 /* -------------------- already true, and must stay true -------------------- */

@@ -62,7 +62,13 @@ export function Toasts({ toasts, onOpen, onExpire, reducedMotion }: Props) {
        *
        * `top-[76px]` clears the zoom control. See the note above.
        */
-      className="pointer-events-none absolute right-4 top-[76px] z-20 flex flex-col gap-2"
+      /*
+       * §12.96, stage 4. On a phone, the width of the pane less 12px a side,
+       * from its top: this box is the pane under the tiles, so a toast can
+       * never cover the top bar or the tiles, and the truck sheet (z-40)
+       * sits above it. 340px wide it ran off a 320px screen.
+       */
+      className="pointer-events-none absolute right-4 top-[76px] z-20 flex flex-col gap-2 max-md:left-3 max-md:right-3 max-md:top-3"
     >
       {toasts.slice(0, TOAST_MAX).map((toast) => (
         <Toast
@@ -124,7 +130,7 @@ function Toast({
     <div
       data-toast={toast.status}
       data-leaving={leaving ? '' : undefined}
-      className={`pointer-events-auto flex w-[340px] items-center justify-between gap-3 border border-l-[3px] border-line-hair border-l-status-late-fg bg-surface-overlay py-2 pl-3 pr-2.5 ${
+      className={`pointer-events-auto flex w-[340px] items-center justify-between gap-3 border border-l-[3px] border-line-hair border-l-status-late-fg bg-surface-overlay py-2 pl-3 pr-2.5 max-md:w-auto max-md:gap-1 max-md:py-1 max-md:pr-1 ${
         reducedMotion ? '' : leaving ? 'animate-toast-out' : 'animate-toast-in'
       }`}
     >
@@ -140,9 +146,30 @@ function Toast({
           // that moment reads as the click having missed.
           dismiss();
         }}
-        className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-accent hover:text-accent-hover"
+        className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-accent hover:text-accent-hover max-md:ml-auto max-md:h-11 max-md:px-3"
       >
         Open
+      </button>
+      {/* §12.96, stage 4: a phone has no hover to wait out six seconds with,
+          so it gets a way to clear the toast that is not "open the truck". */}
+      <button
+        type="button"
+        aria-label={`Dismiss: truck ${toast.truckLabel} is now late`}
+        onClick={dismiss}
+        className="flex h-11 w-11 shrink-0 items-center justify-center text-text-secondary md:hidden"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
       </button>
     </div>
   );

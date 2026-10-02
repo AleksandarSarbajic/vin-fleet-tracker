@@ -94,7 +94,13 @@ export function ScopeMenu({
   const activeList = lists?.items.find((l) => l.id === lists.activeId) ?? null;
   const scoped = activeList !== null || active !== null;
   const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [anchor, setAnchor] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    /** On a phone: never taller than the room below the button (§12.96). */
+    maxHeight?: number;
+  } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [find, setFind] = useState('');
   const [naming, setNaming] = useState(false);
@@ -123,10 +129,16 @@ export function ScopeMenu({
   const toggle = useCallback(() => {
     const rect = trigger.current?.getBoundingClientRect();
     if (rect) {
+      // §12.96, stage 4: on a phone, as wide as the screen allows and never
+      // taller than it — 360px ran off 320 and 360, clipping "Save current view…".
+      const width = phone ? Math.min(MENU_WIDTH, window.innerWidth - 16) : MENU_WIDTH;
+      const top = rect.bottom + 4;
       setAnchor({
-        top: rect.bottom + 4,
+        top,
         // Kept on screen when the button sits near the right edge.
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8)),
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+        width,
+        ...(phone ? { maxHeight: window.innerHeight - top - 8 } : {}),
       });
     }
     setOpen((was) => !was);
@@ -134,7 +146,7 @@ export function ScopeMenu({
     setNaming(false);
     setRenaming(null);
     setError(null);
-  }, []);
+  }, [phone]);
 
   /** §12.91: `V` opens the menu. Nothing else in the console binds it. */
   useEffect(() => {
@@ -352,11 +364,23 @@ export function ScopeMenu({
           aria-label="Lists and views"
           data-views-menu=""
           style={
-            anchor ? { top: anchor.top, left: anchor.left, width: MENU_WIDTH } : undefined
+            anchor
+              ? {
+                  top: anchor.top,
+                  left: anchor.left,
+                  width: anchor.width,
+                  ...(anchor.maxHeight ? { maxHeight: anchor.maxHeight } : {}),
+                }
+              : undefined
           }
-          className="fixed z-30 w-[360px] border border-line-control bg-surface-raised text-left shadow-modal"
+          className={`fixed z-30 w-[360px] border border-line-control bg-surface-raised text-left shadow-modal ${
+            phone ? 'overflow-y-auto overscroll-contain' : ''
+          }`}
         >
-          <label className="flex h-9 items-center gap-2 border-b border-line-soft px-3">
+          <label
+            // 45px on a phone: 44px of field above the 1px rule.
+            className={`flex ${phone ? 'h-[45px]' : 'h-9'} items-center gap-2 border-b border-line-soft px-3`}
+          >
             <svg
               width="14"
               height="14"
@@ -380,7 +404,7 @@ export function ScopeMenu({
               onChange={(e) => setFind(e.target.value)}
               placeholder="Find a list or view"
               aria-label="Find a list or view"
-              className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay"
+              className={`min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay ${phone ? 'self-stretch' : ''}`}
             />
           </label>
 
@@ -392,7 +416,7 @@ export function ScopeMenu({
                 setOpen(false);
                 if (scoped) onClear();
               }}
-              className={`flex h-8 w-full items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
+              className={`flex ${phone ? 'min-h-11' : 'h-8'} w-full items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
                 scoped ? '' : 'bg-surface-overlay'
               }`}
             >
@@ -406,6 +430,7 @@ export function ScopeMenu({
 
           {lists ? (
             <ListsSection
+              phone={phone}
               lists={lists}
               shown={shownLists}
               finding={needle !== ''}
@@ -472,7 +497,7 @@ export function ScopeMenu({
                         }}
                         className={`flex min-w-0 flex-1 items-center gap-[10px] px-3 py-1.5 text-left hover:bg-row-hover ${
                           view.id === active?.id ? 'text-accent' : 'text-text'
-                        }`}
+                        } ${phone ? 'min-h-11' : ''}`}
                       >
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate font-sans text-[13px]">
@@ -490,7 +515,12 @@ export function ScopeMenu({
                         onClick={() =>
                           setRenaming({ id: view.id, name: view.name, error: null })
                         }
-                        className="shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100"
+                        // On a phone there is no hover to reveal it: shown, 44px.
+                        className={
+                          phone
+                            ? 'min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
+                            : 'shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100'
+                        }
                       >
                         Rename
                       </button>
@@ -498,7 +528,11 @@ export function ScopeMenu({
                         type="button"
                         aria-label={`Delete the view ${view.name}`}
                         onClick={() => onRemove(view.id)}
-                        className="mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100"
+                        className={
+                          phone
+                            ? 'mr-1 min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
+                            : 'mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100'
+                        }
                       >
                         Delete
                       </button>
@@ -538,13 +572,15 @@ export function ScopeMenu({
                 <button
                   type="button"
                   onClick={commit}
-                  className="mt-1.5 border border-line-hair px-2 py-1 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
+                  className={`mt-1.5 border border-line-hair px-2 py-1 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent ${phone ? 'min-h-11 px-4' : ''}`}
                 >
                   Save
                 </button>
               </div>
             ) : (
-              <div className="flex h-[34px] items-center justify-between px-3">
+              <div
+                className={`flex ${phone ? 'min-h-11' : 'h-[34px]'} items-center justify-between px-3`}
+              >
                 {/* A label, not a control: the list has one order (§12.91). */}
                 <span className="font-sans text-[12px] text-text-secondary">
                   Sorted by urgency
@@ -554,7 +590,7 @@ export function ScopeMenu({
                   role="menuitem"
                   disabled={!canSaveCurrent}
                   onClick={() => setNaming(true)}
-                  className="font-sans text-[12px] text-accent hover:underline disabled:text-text-mutedOnSelected disabled:no-underline"
+                  className={`font-sans text-[12px] text-accent hover:underline disabled:text-text-mutedOnSelected disabled:no-underline ${phone ? 'min-h-11' : ''}`}
                 >
                   {canSaveCurrent ? 'Save current view…' : 'This view is already saved'}
                 </button>
@@ -643,11 +679,18 @@ function ListsSection({
   shown,
   finding,
   onDone,
+  phone = false,
 }: {
   lists: ListsMenu;
   shown: TruckList[];
   finding: boolean;
   onDone: () => void;
+  /**
+   * §12.96, stage 4. A phone applies a list and edits none: the list editor
+   * is a 600px panel that ran off the screen, the trap §12.94 closed for the
+   * stop editor. It says where lists are edited instead.
+   */
+  phone?: boolean;
 }) {
   return (
     <div data-lists-section="">
@@ -671,7 +714,7 @@ function ListsSection({
                     lists.onApply(list.id);
                     onDone();
                   }}
-                  className={`flex h-8 min-w-0 flex-1 items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
+                  className={`flex ${phone ? 'min-h-11' : 'h-8'} min-w-0 flex-1 items-center gap-[10px] px-3 text-left hover:bg-row-hover ${
                     list.id === lists.activeId ? 'text-accent' : 'text-text'
                   }`}
                 >
@@ -680,7 +723,7 @@ function ListsSection({
                   </span>
                   <Count>{list.truckIds.length}</Count>
                 </button>
-                {lists.canEdit ? (
+                {lists.canEdit && !phone ? (
                   <button
                     type="button"
                     aria-label={`Edit the list ${list.name}`}
@@ -697,21 +740,27 @@ function ListsSection({
             ))}
           </div>
         )}
-        <button
-          type="button"
-          role="menuitem"
-          disabled={!lists.canEdit}
-          title={
-            lists.canEdit ? undefined : 'Only dispatchers and admins can create lists.'
-          }
-          onClick={() => {
-            lists.onNew();
-            onDone();
-          }}
-          className="w-full px-3 py-1.5 text-left font-sans text-[13px] text-accent hover:bg-row-hover disabled:text-text-mutedOnSelected disabled:hover:bg-transparent"
-        >
-          New list…
-        </button>
+        {phone ? (
+          <p className="px-3 py-2 font-sans text-[13px] text-text-mutedOnSelected">
+            Lists are edited on the desktop console
+          </p>
+        ) : (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!lists.canEdit}
+            title={
+              lists.canEdit ? undefined : 'Only dispatchers and admins can create lists.'
+            }
+            onClick={() => {
+              lists.onNew();
+              onDone();
+            }}
+            className="w-full px-3 py-1.5 text-left font-sans text-[13px] text-accent hover:bg-row-hover disabled:text-text-mutedOnSelected disabled:hover:bg-transparent"
+          >
+            New list…
+          </button>
+        )}
       </Section>
     </div>
   );

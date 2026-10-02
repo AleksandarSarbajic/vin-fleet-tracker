@@ -127,3 +127,39 @@
     }
   }
 }
+
+/*
+ * §12.96, stage 4 — the phone's type floor.
+ *
+ * Below 768px nothing we draw is under 12px. One rule here rather than a
+ * `max-md:` beside each of the ~200 uses of the two small tokens (`micro`
+ * 10.5px, `small` 11.5px) and the few one-off sizes: the floor then holds
+ * for anything added later that uses them, instead of depending on whoever
+ * adds it remembering. Outside every layer and after `@tailwind utilities`,
+ * so it wins over the utility on source order at equal specificity.
+ *
+ * Inputs are 16px there: iOS Safari zooms the page into any field under 16px
+ * the moment it is focused (the login card, the phone's search, the menus'
+ * find fields), and the zoom stays after the keyboard closes.
+ *
+ * Mapbox's own logo is exempt; it is not ours to resize.
+ */
+@media (max-width: 767px) {
+  .text-micro,
+  .text-small,
+  .text-\[9\.5px\],
+  .text-\[10px\],
+  .text-\[10\.5px\],
+  .text-\[11px\],
+  .text-\[11\.5px\] {
+    font-size: 12px;
+  }
+
+  /* `[class]` so it outranks the field's own size utility (0-1-1 > 0-1-0). */
+  input,
+  input[class],
+  select[class],
+  textarea[class] {
+    font-size: 16px;
+  }
+}
