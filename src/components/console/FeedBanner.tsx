@@ -142,18 +142,37 @@ export function FeedBanner({
         )}
       </p>
 
+      {/*
+       * §12.98. Neither the button nor the countdown may change width with
+       * what it says, or "Retry now" jumps sideways every time the count
+       * crosses 10 — and again when the label becomes "Retrying…". Each is
+       * sized by invisible copies of its widest text, with the live text laid
+       * over them: two digits in tabular figures for the count (the poll is
+       * 20 s), and the longer of the two labels for the button.
+       */}
       <button
         type="button"
         onClick={onRetry}
         disabled={retrying}
-        className="h-[26px] shrink-0 border border-status-late-fg px-2.5 font-cond text-micro uppercase tracking-[.08em] text-status-late-fg disabled:opacity-45 max-md:ml-[26px] max-md:h-11 max-md:px-4"
+        className="inline-grid h-[26px] shrink-0 place-items-center border border-status-late-fg px-2.5 font-cond text-micro uppercase tracking-[.08em] text-status-late-fg disabled:opacity-45 max-md:ml-[26px] max-md:h-11 max-md:px-4"
       >
-        {retrying ? 'Retrying…' : 'Retry now'}
+        <span aria-hidden="true" className="invisible [grid-area:1/1]">
+          Retry now
+        </span>
+        <span aria-hidden="true" className="invisible [grid-area:1/1]">
+          Retrying…
+        </span>
+        <span className="[grid-area:1/1]">{retrying ? 'Retrying…' : 'Retry now'}</span>
       </button>
 
       {seconds !== null ? (
-        <span className="shrink-0 text-small tabular-nums text-status-late-dim">
-          {retrying ? 'retrying now' : `auto-retry in ${seconds}s`}
+        <span className="relative shrink-0 whitespace-nowrap text-small tabular-nums text-status-late-dim">
+          <span aria-hidden="true" className="invisible">
+            auto-retry in {'0'.repeat(String(Math.ceil(pollMs / 1000)).length)}s
+          </span>
+          <span className="absolute left-0 top-0">
+            {retrying ? 'retrying now' : `auto-retry in ${seconds}s`}
+          </span>
         </span>
       ) : null}
     </div>

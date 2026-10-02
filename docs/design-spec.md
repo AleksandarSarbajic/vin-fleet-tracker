@@ -7511,6 +7511,34 @@ reaches the network): Next trip, Correction, Back, an unreached stop, and the
 route refusing a save that skips the question. Removing the server's refusal
 fails the last one: 200 instead of 409.
 
+## 12.98 "Retry now" holds still while the countdown runs
+
+The feed banner's "auto-retry in Ns" counts 20 to 0 between polls, and it
+sized itself to its text: every time it crossed 10, "Retry now" beside it
+moved sideways, and again by a fraction of a pixel when its label became
+"Retrying…". Found because the desktop baselines failed on 2026-10-02 on
+unchanged code: the baseline freezes the browser clock at 2026-10-01 15:00
+UTC while `fetchedAt` is the server's real time, so the hidden countdown held
+the seconds between the two — about 100,000, one digit longer every few days.
+
+Both now reserve the width of their widest text, laid out in an invisible copy
+under the live one: `auto-retry in 00s` in tabular figures (two digits, from
+the 20 s poll), and the wider of the button's two labels. The countdown's live
+text is positioned over its reserved box, so even an impossible value cannot
+widen it. Applies below 768 px too.
+
+**Tests.** `e2e/feed-countdown.spec.ts` watches one whole cycle at 1440, 390
+and 320, requires both a two-digit and a one-digit count to have been seen,
+and the button at one position throughout. Before the fix: three positions on
+desktop, two on each phone. `e2e/phone.spec.ts` still passes at every size,
+including the wrapped sentence and the 44 px Retry now.
+
+**Re-baselined: the six `3-feed-down` images only.** From 1024 up the only
+change is "Retry now" 19 px further right, same size, and the hidden countdown
+box; at 768 the truncated sentence also shows two more letters ("do not qu…"),
+because the reserved two digits are narrower than the frozen-clock value was.
+The other 48 match at zero differences, three runs in a row.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
