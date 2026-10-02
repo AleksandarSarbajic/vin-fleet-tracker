@@ -340,8 +340,26 @@ export function MapFooter({
     */
     <div className="flex min-h-[26px] shrink-0 items-center justify-between gap-4 border-t border-line-hair px-3 py-1 font-sans text-micro normal-case tracking-normal text-text-muted">
       <span className="min-w-0 truncate">
-        Positions from ELD{age ? ` · newest ${age} ago` : ''} · problem markers
-        never cluster
+        Positions from ELD
+        {age ? (
+          <>
+            {' · newest '}
+            {/*
+             * §12.99. Reserved like the header's age, so the required credits
+             * sharing this line never reflow when it gains or loses a digit.
+             */}
+            <span className="inline-grid tabular-nums">
+              <span aria-hidden="true" className="invisible [grid-area:1/1]">
+                88m
+              </span>
+              <span data-live-age="map-footer" className="justify-self-end [grid-area:1/1]">
+                {age}
+              </span>
+            </span>
+            {' ago'}
+          </>
+        ) : null}{' '}
+        · problem markers never cluster
       </span>
       {/*
         * Required credit, both of them.

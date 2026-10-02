@@ -7539,6 +7539,79 @@ box; at 768 the truncated sentence also shows two more letters ("do not qu…"),
 because the reserved two digits are narrower than the frozen-clock value was.
 The other 48 match at zero differences, three runs in a row.
 
+## 12.99 Ticking ages hold their width
+
+Found while checking §12.98 for the same fault elsewhere. Every value the
+desktop baselines hide because it changes by itself was rewritten in place,
+narrow then wide, to see whether anything else moved. Clocks, ETAs, the
+popup's age and the rows' GPS ages move nothing. Two did:
+
+- **The header's "Synced Ns ago"** moved the Assignments button. The age
+  resets with every 20 s poll and crosses 9 to 10 each time, so the button
+  jumped every 20 seconds.
+- **The map footer's "newest Ns ago"** reflowed the Mapbox and Census credits
+  that share its line whenever the age gained or lost a digit.
+
+Both now reserve "88m" in tabular figures (every value from 0s to 59m), the
+live value right-aligned over it. The credits are unchanged in wording and
+markup. The red feed-down block keeps sizing to its text: its age changes
+digits only a few times in an outage.
+
+The baseline's footer value counted the seconds since the run seeded its
+positions, real time on both sides, so a slow run could have changed it. The
+spec now re-stamps every position to 90 seconds old before each page load:
+it always reads "1m".
+
+**Tests.** `e2e/live-values-hold-still.spec.ts` rewrites each age through 1s,
+9s, 10s, 59s, 88s, 1m, 9m and 59m and requires every element outside it to
+keep one position and size: the header at 1440, the footer at 1440 and 390.
+Before: Assignments moved at 10s; the credits at six of the eight values.
+Shrinking the header's reservation to "8s" fails it again.
+
+## 12.100 768 to 1023: the account menu was off the screen
+
+Found by §12.99's re-baseline: at 768 with a truck selected, the account
+button sat past the right edge in the saved image, and the account menu could
+not be reached. §12.91 held the header only from 1280 up. Measured in the
+worst states (a list, Drivers only, a truck selected, feed healthy and down):
+row 1 overflowed by 72 / 127px at 768 and 40 / 95px at 800; row 2 by 124px at
+1023 up to 379px at 768. The nine chips alone need 793px with their gaps. Every
+step of §12.91's collapse order was already taken.
+
+**Below 1024 only:**
+
+- **Sync** reads the age alone beside the dot, "12s", still in its reserved
+  "88m" box. "Synced 12s ago" is its tooltip and its accessible name. The red
+  feed-down block never shortens.
+- **Search** is a 32px icon. A tap or "/" opens the field over row 1; Esc,
+  or focus leaving it (a tablet has no Esc key), closes it and returns focus
+  to the icon. The query is kept, the rows stay filtered, and an accent dot on
+  the icon (its name: "Search, filtering “…”") says a filter is on. ⌘K still
+  opens the jump box.
+- **Row 2** runs on two 36px lines, 72px in all: the eight status chips,
+  then, from the divider, Drivers only and the notes. Nothing is hidden or
+  shortened. A fixed break rather than a natural wrap, because the chips fit
+  in one line only from 793px, and a layout that changes there would put
+  Drivers only on a line of its own at 768.
+
+The header is 120px below 1024 and 84px from 1024 up, where nothing changed
+but §12.99's reserved space.
+
+**Tests.** `e2e/header.spec.ts`: at 768, 800, 900 and 1023, feed healthy and
+down, each with a list, Drivers only and a truck selected: the account button
+fully on screen, no sideways scroll, nothing overlapping (now box against box
+in both directions, since row 2 has two lines), every chip and note fully
+visible and in order, rows 48 and 72, and the sync label's visible text, its
+tooltip and its accessible name. On the old code all eight failed: the account
+button off screen at 768 and 800, row 2 scrolling at 900 and 1023. Taking the
+wrap out fails all eight again. A second group opens the search by tap and by
+"/", closes it with Esc to the icon, keeps the query and its dot, and checks
+⌘K and that 1024 still has the inline field.
+
+Found along the way, not changed: below 1086 the map/list toggle is component
+state, not stored, so a test's "Hide map" clicked as the first fetch lands can
+be lost; the narrow tests retry until the list shows.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

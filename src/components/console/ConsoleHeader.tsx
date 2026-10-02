@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
@@ -185,12 +185,39 @@ export function ConsoleHeader({
     : null;
   const localTime = `${timeInZone(now, viewerZone).split(' ')[0] ?? ''} ${zoneAbbreviation(now, viewerZone)} · you`;
 
+  /**
+   * §12.100. Below 1024 the search is a 32px icon, and the field opens over
+   * row 1 on a tap or "/". Esc closes it back to the icon; so does moving
+   * focus anywhere else (a tablet has no Esc key). The query is the
+   * console's, not the field's, so closing never clears it — the dot on the
+   * icon says a filter is still on.
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [focusTick, setFocusTick] = useState(0);
+  const searchIcon = useRef<HTMLButtonElement | null>(null);
+  const searchBox = useRef<HTMLDivElement | null>(null);
+  const narrow = () => window.matchMedia('(max-width: 1023px)').matches;
+  const openSearch = useCallback(() => {
+    if (narrow()) setSearchOpen(true);
+    setFocusTick((t) => t + 1);
+  }, []);
+  useEffect(() => {
+    if (focusTick > 0) searchBox.current?.querySelector('input')?.focus();
+  }, [focusTick]);
+  const closeSearch = useCallback(() => {
+    if (!searchOpen || !narrow()) return false;
+    setSearchOpen(false);
+    searchIcon.current?.focus();
+    return true;
+  }, [searchOpen]);
+  const filtering = query.trim();
+
   return (
     // §12.96: below 768px the phone's top bar and tiles stand in for this.
     <header data-console-header="" className="shrink-0 max-md:hidden">
       <div
         data-header-row="1"
-        className="flex h-12 items-center gap-3 border-b border-line-soft bg-surface-raised px-4"
+        className="relative flex h-12 items-center gap-3 border-b border-line-soft bg-surface-raised px-4"
       >
         <div className="flex shrink-0 items-center gap-[10px]">
           {/* The MONOGRAM, not the lockup (§12.71): at this size the lockup's
@@ -227,15 +254,61 @@ export function ConsoleHeader({
           onClear={scope.onClear}
         />
 
+        <button
+          ref={searchIcon}
+          type="button"
+          onClick={openSearch}
+          aria-label={filtering ? `Search, filtering “${filtering}”` : 'Search'}
+          aria-expanded={searchOpen}
+          title="Filter list ( / )"
+          className="relative flex h-8 w-8 shrink-0 items-center justify-center border border-line-control text-text hover:bg-row-hover min-[1024px]:hidden"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          {filtering ? (
+            <span
+              data-search-active=""
+              aria-hidden="true"
+              className="absolute right-[3px] top-[3px] h-[6px] w-[6px] bg-accent"
+            />
+          ) : null}
+        </button>
+
         <div
+          ref={searchBox}
           data-header-search=""
-          className="w-[160px] shrink-0 min-[1280px]:w-[220px] min-[1440px]:w-[260px] min-[1680px]:w-[340px] min-[1920px]:w-[420px]"
+          onBlur={(event) => {
+            if (searchOpen && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setSearchOpen(false);
+            }
+          }}
+          // Esc from anything inside it — the clear button included.
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && closeSearch()) event.stopPropagation();
+          }}
+          className={`w-[160px] shrink-0 min-[1280px]:w-[220px] min-[1440px]:w-[260px] min-[1680px]:w-[340px] min-[1920px]:w-[420px] ${
+            searchOpen
+              ? 'max-[1023px]:absolute max-[1023px]:inset-0 max-[1023px]:z-20 max-[1023px]:flex max-[1023px]:w-auto max-[1023px]:items-center max-[1023px]:bg-surface-raised max-[1023px]:px-4'
+              : 'max-[1023px]:hidden'
+          }`}
         >
           <SearchField
             value={query}
             onChange={onQueryChange}
             matchCount={matchCount}
             totalCount={totalCount}
+            onSlash={openSearch}
+            onEscape={closeSearch}
           />
         </div>
 
@@ -326,12 +399,33 @@ export function ConsoleHeader({
             />
             <span
               data-sync-label=""
+              {...(age ? { title: `Synced ${age} ago` } : {})}
               className="whitespace-nowrap font-sans text-[12px] text-text-secondary"
             >
               {age ? (
                 <>
+                  {/* §12.100. The whole sentence, for a screen reader at any width. */}
+                  <span className="sr-only">Synced {age} ago</span>
+                  <span aria-hidden="true" data-sync-visible="">
                   <span className="hidden min-[1440px]:inline">Synced </span>
-                  {age} ago
+                  {/*
+                   * §12.99. The age resets every 20 s poll and crosses 9 → 10
+                   * each time; sized to its text it moved the Assignments
+                   * button. It reserves "88m" in tabular figures — every value
+                   * from 0s to 59m — with the live value right-aligned over it.
+                   */}
+                  <span className="inline-grid tabular-nums">
+                    <span aria-hidden="true" className="invisible [grid-area:1/1]">
+                      88m
+                    </span>
+                    <span data-live-age="sync" className="justify-self-end [grid-area:1/1]">
+                      {age}
+                    </span>
+                  </span>
+                  {/* §12.100. Below 1024 the age alone, beside the dot; the
+                      sentence is in the tooltip and the accessible name. */}
+                  <span className="max-[1023px]:hidden"> ago</span>
+                  </span>
                 </>
               ) : (
                 'Syncing…'
@@ -358,7 +452,7 @@ export function ConsoleHeader({
 
       <div
         data-header-row="2"
-        className="flex h-9 items-center gap-[6px] border-b border-line-hair bg-surface-bar px-4"
+        className="flex h-9 items-center gap-[6px] border-b border-line-hair bg-surface-bar px-4 max-[1023px]:h-[72px] max-[1023px]:flex-wrap max-[1023px]:gap-y-0"
       >
         <FilterChips
           rows={rows}

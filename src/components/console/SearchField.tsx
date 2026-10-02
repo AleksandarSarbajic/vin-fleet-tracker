@@ -8,9 +8,24 @@ interface Props {
   onChange: (value: string) => void;
   matchCount: number;
   totalCount: number;
+  /**
+   * §12.100. Below 1024 the field is folded behind an icon, and "/" has to
+   * open it before anything can be focused. Given, "/" calls this instead of
+   * focusing the input itself.
+   */
+  onSlash?: () => void;
+  /** §12.100. Given and returning true, Esc was handled (it closed the field). */
+  onEscape?: () => boolean;
 }
 
-export function SearchField({ value, onChange, matchCount, totalCount }: Props) {
+export function SearchField({
+  value,
+  onChange,
+  matchCount,
+  totalCount,
+  onSlash,
+  onEscape,
+}: Props) {
   const ref = useRef<HTMLInputElement | null>(null);
 
   /** "/" focuses search; Esc clears it, then clears selection (§8.1). */
@@ -18,12 +33,13 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '/' && !isTypingTarget(event.target)) {
         event.preventDefault();
-        ref.current?.focus();
+        if (onSlash) onSlash();
+        else ref.current?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onSlash]);
 
   const active = value.trim().length > 0;
 
@@ -48,6 +64,10 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === 'Escape' && onEscape?.()) {
+            e.stopPropagation();
+            return;
+          }
           if (e.key === 'Escape' && active) {
             e.stopPropagation();
             onChange('');
@@ -72,7 +92,11 @@ export function SearchField({ value, onChange, matchCount, totalCount }: Props) 
           </span>
           <button
             type="button"
-            onClick={() => onChange('')}
+            onClick={() => {
+              onChange('');
+              // Back to the box: the next keystroke is the next search.
+              ref.current?.focus();
+            }}
             aria-label="Clear search"
             className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center border border-line-hair text-text-secondary"
           >

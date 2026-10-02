@@ -185,7 +185,17 @@ export function FilterChips({
   }, [onToggle, onReset]);
 
   return (
-    <div className="flex shrink-0 items-center gap-[6px]" role="group" aria-label="Filter by status">
+    /*
+     * §12.100. Below 1024 the group lays out as `contents`, so its chips wrap
+     * with the rest of row 2: the status chips on the first 36px line, and —
+     * from the divider, which becomes the line break — Drivers only and the
+     * notes on the second. Every chip whole and in order.
+     */
+    <div
+      className="flex shrink-0 items-center gap-[6px] max-[1023px]:contents"
+      role="group"
+      aria-label="Filter by status"
+    >
       <Chip
         label="All"
         count={rows.filter((r) => r.active).length}
@@ -210,7 +220,7 @@ export function FilterChips({
       <span
         aria-hidden="true"
         data-chip-divider=""
-        className="mx-[6px] h-5 w-px shrink-0 bg-line-rule"
+        className="mx-[6px] h-5 w-px shrink-0 bg-line-rule max-[1023px]:m-0 max-[1023px]:h-0 max-[1023px]:basis-full"
       />
       <Chip
         label={LABEL.drivers}
@@ -252,7 +262,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={selected}
       title={`${label} · key ${keyName}`}
-      className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${ink} ${
+      className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] max-[1023px]:my-1 font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${ink} ${
         selected ? '!border-accent bg-surface-overlay' : 'hover:bg-row-hover'
       }`}
     >

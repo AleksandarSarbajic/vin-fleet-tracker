@@ -140,7 +140,24 @@ async function hideLiveValues(
   );
 }
 
+/**
+ * §12.99. The map footer's "newest Ns ago" is the age of the newest position
+ * at the instant the SERVER answered the fetch — real time on both sides, so
+ * the frozen browser clock does not hold it. Seeded once per width, it counted
+ * the seconds the run had taken. Re-stamped to 90 seconds before every load,
+ * it reads "1m" however slow the run is.
+ */
+async function restampPositions(): Promise<void> {
+  const sql = connect();
+  try {
+    await sql`update positions set recorded_at = now() - interval '90 seconds'`;
+  } finally {
+    await sql.end();
+  }
+}
+
 async function open(page: Page, path = '/'): Promise<void> {
+  await restampPositions();
   await page.goto(path);
   await page.locator('[data-console-header]').waitFor();
   await page.evaluate(() => document.fonts.ready);

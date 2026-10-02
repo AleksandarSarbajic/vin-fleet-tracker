@@ -144,11 +144,13 @@ async function measure(page: Page): Promise<Measured> {
       };
       const items: Element[] = [];
       for (const child of row.children) {
-        if (!laid(child)) continue;
-        // The chip group is measured chip by chip.
-        if (child.getAttribute('role') === 'group')
+        // The chip group is measured chip by chip — below 1024 it lays out as
+        // `contents` (§12.100), so it has no box of its own.
+        if (child.getAttribute('role') === 'group') {
           items.push(...[...child.children].filter(laid));
-        else items.push(child);
+          continue;
+        }
+        if (laid(child)) items.push(child);
       }
       const boxes = items
         .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -158,12 +160,25 @@ async function measure(page: Page): Promise<Measured> {
           .trim()
           .slice(0, 40);
       const overlaps: string[] = [];
-      for (let i = 1; i < boxes.length; i += 1) {
-        const [a, b] = [boxes[i - 1]!, boxes[i]!];
-        if (b.r.left < a.r.right - 0.5) overlaps.push(`${name(a.el)} ⟂ ${name(b.el)}`);
+      // Box against box, both axes: below 1024 row 2 runs on two lines, and
+      // two chips stacked one above the other do not overlap.
+      for (let i = 0; i < boxes.length; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          const [a, b] = [boxes[i]!.r, boxes[j]!.r];
+          const across = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const down = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (across > 0.5 && down > 0.5) {
+            overlaps.push(`${name(boxes[i]!.el)} ⟂ ${name(boxes[j]!.el)}`);
+          }
+        }
       }
       for (const { el, r } of boxes) {
-        if (r.left < box.left - 0.5 || r.right > box.right + 0.5) {
+        if (
+          r.left < box.left - 0.5 ||
+          r.right > box.right + 0.5 ||
+          r.top < box.top - 0.5 ||
+          r.bottom > box.bottom + 0.5
+        ) {
           overlaps.push(`${name(el)} leaves the row`);
         }
       }
@@ -448,4 +463,172 @@ test('every view function works through the scope menu: save, rename, delete', a
   await menu.getByRole('button', { name: 'Delete the view Late this morning' }).click();
   await expect(menu).toContainText('No saved views yet');
   await expect(page.locator('[data-scope] [data-view-title]')).toHaveCount(0);
+});
+
+/**
+ * §12.100 — 768 to 1023px, which §12.91 did not hold to the numbers. With a
+ * truck selected, "1 selected · Esc to clear" joins row 1 and the row was
+ * wider than the screen: the account button sat past the right edge, and the
+ * account menu could not be reached. Worst states as dispatchers meet them:
+ * a list active, Drivers only, a truck selected, with the feed healthy and
+ * with it down.
+ */
+const NARROW = [768, 800, 900, 1023] as const;
+
+async function openNarrow(page: Page, width: number, down: boolean): Promise<void> {
+  await resetWorld({ extraTrucks: 30, appointmentUtc: new Date(Date.now() - 2 * 3_600_000) });
+  const list = await seedList(true);
+  if (down) await feedDown();
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('ft.tour.seen', '1');
+    } catch {
+      // No storage: the tour may open, and the test then fails on what it covers.
+    }
+  });
+  await page.setViewportSize({ width, height: 800 });
+  await page.goto(`/?list=${list}&chips=drivers`);
+  // Below 1086 the map and the list share a toggle, remembered per dispatcher.
+  const hideMap = page.getByRole('button', { name: /^Hide map$/ });
+  const rows = page.locator('[data-row-id]').first();
+  if (down) await expect(page.locator('[data-console-header] [data-feed-down]')).toBeVisible({ timeout: 15_000 });
+  await expect(hideMap.or(rows).first()).toBeVisible({ timeout: 15_000 });
+  // Clicked straight after the first fetch lands, the toggle and the row
+  // click can each be lost to the render it triggers; retried until the list
+  // shows and a truck is selected.
+  await expect(async () => {
+    if (await hideMap.isVisible()) await hideMap.click();
+    await rows.click({ timeout: 2_000 });
+    await expect(rows).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+  await page.evaluate(() => document.fonts.ready);
+}
+
+for (const width of NARROW) {
+  for (const down of [false, true]) {
+    test(`${width}px, ${down ? 'feed down' : 'feed healthy'}, list + Drivers only + a truck selected: the account button is on screen and nothing in the header overflows`, async ({
+      page,
+    }, info) => {
+      await openNarrow(page, width, down);
+      const header = page.locator('[data-console-header]');
+      await expect(header.getByText(/^1 selected/).filter({ visible: true })).toHaveCount(1);
+      if (down) {
+        // The feed-down block never shortens (§12.91).
+        await expect(header.locator('[data-feed-down]')).toContainText(/Last sync \d{2}:\d{2}/);
+        await expect(header.locator('[data-feed-down]')).toContainText(/\d+m ago/);
+      }
+      await headerShot(page, info, `narrow-${width}-${down ? 'down' : 'healthy'}`);
+
+      const m = await measure(page);
+      await expect(page.getByRole('button', { name: /^Account/ })).toBeInViewport({ ratio: 1 });
+      expect(m.pageScroll, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+      // Row 2 runs on two 36px lines below 1024: the status chips, then
+      // Drivers only and the notes.
+      expect(m.rows.map((r) => r.height), 'row heights').toEqual([48, 72]);
+      for (const [i, row] of m.rows.entries()) {
+        expect(row.scroll, `row ${i + 1} scrolls sideways`).toBe(0);
+        expect(row.overlaps, `row ${i + 1} overlaps`).toEqual([]);
+      }
+      expect(m.chipsOutside, 'chips off screen').toEqual([]);
+      for (const name of m.scopeNames) {
+        expect(name.clipped, `scope name "${name.text}" is visible`).toBe(false);
+      }
+      // Every chip and every note whole, in order.
+      const chips = page.getByRole('group', { name: 'Filter by status' }).getByRole('button');
+      await expect(chips).toHaveText([
+        /^All\d+$/, /^Late\d+$/, /^At risk\d+$/, /^On time\d+$/, /^Arrived\d+$/,
+        /^Upcoming\d+$/, /^Data issues\d+$/, /^Inactive\d+$/, /^Drivers only\d+$/,
+      ]);
+      for (const chip of await chips.all()) await expect(chip).toBeInViewport({ ratio: 1 });
+      const notes = header.locator('[data-note]');
+      await expect(notes).toHaveCount(3);
+      for (const note of await notes.all()) await expect(note).toBeInViewport({ ratio: 1 });
+      if (!down) {
+        // The age on the label itself (tablets have no hover), the full
+        // sentence in its tooltip and its accessible name.
+        const sync = header.locator('[data-sync-label]');
+        // What is painted: innerText leaves out the invisible width-keeper and
+        // includes nothing hidden below 1024.
+        expect((await sync.locator('[data-sync-visible]').innerText()).trim()).toMatch(/^\d+[smh]$/);
+        await expect(sync).toHaveAttribute('title', /^Synced \d+[smh] ago$/);
+        await expect(header.getByText(/^Synced \d+[smh] ago$/)).toHaveCount(1);
+      }
+    });
+  }
+}
+
+/**
+ * §12.100 — below 1024 the search is a 32px icon that opens the field over
+ * row 1. The filter keeps working while it is closed, and a dot on the icon
+ * says that it is.
+ */
+test.describe('below 1024px the search is an icon', () => {
+  const rows = (page: Page) => page.locator('[data-row-id]');
+
+  test.beforeEach(async ({ page }) => {
+    await resetWorld({ extraTrucks: 12 });
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto('/');
+    const hideMap = page.getByRole('button', { name: /^Hide map$/ });
+    await expect(hideMap.or(rows(page).first()).first()).toBeVisible({ timeout: 15_000 });
+    // As in the narrow states: the toggle can be lost to the first fetch's render.
+    await expect(async () => {
+      if (await hideMap.isVisible()) await hideMap.click();
+      await expect(page.getByRole('button', { name: /^Show map$/ })).toBeVisible({ timeout: 1_000 });
+      await expect(rows(page).first()).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test('opens on a tap or "/", closes on Esc to the icon, and the query survives', async ({
+    page,
+  }, info) => {
+    const icon = page.getByRole('button', { name: /^Search/ });
+    const field = page.getByLabel('Search the fleet');
+    await expect(icon).toBeVisible();
+    await expect(field).toBeHidden();
+    await expect(icon.locator('[data-search-active]')).toHaveCount(0);
+    const all = await rows(page).count();
+
+    await icon.click();
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    // Over row 1, at full width — not squeezed into the icon's slot.
+    const box = (await field.boundingBox())!;
+    expect(box.width).toBeGreaterThan(500);
+    await field.fill('Dallas');
+    await expect(rows(page)).toHaveCount(1);
+    await headerShot(page, info, 'search-open-900');
+
+    await page.keyboard.press('Escape');
+    await expect(field).toBeHidden();
+    await expect(icon).toBeFocused();
+    // Still filtering, and it says so.
+    await expect(rows(page)).toHaveCount(1);
+    await expect(icon.locator('[data-search-active]')).toHaveCount(1);
+    await expect(icon).toHaveAccessibleName(/Dallas/);
+    await headerShot(page, info, 'search-closed-active-900');
+
+    await page.locator('body').click({ position: { x: 5, y: 700 } });
+    await page.keyboard.press('/');
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue('Dallas');
+    await page.getByRole('button', { name: 'Clear search' }).click();
+    await expect(rows(page)).toHaveCount(all);
+    await page.keyboard.press('Escape');
+    await expect(field).toBeHidden();
+    await expect(icon.locator('[data-search-active]')).toHaveCount(0);
+  });
+
+  test('⌘K still opens the jump box while the field is closed', async ({ page }) => {
+    await page.locator('body').click({ position: { x: 5, y: 700 } });
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(page.getByRole('dialog').filter({ has: page.getByLabel('Jump to a truck, view or action') })).toBeVisible();
+  });
+
+  test('at 1024 the field is in the row, as before', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await expect(page.getByLabel('Search the fleet')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Search/ })).toBeHidden();
+  });
 });
