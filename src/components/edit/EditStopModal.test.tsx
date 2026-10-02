@@ -807,3 +807,152 @@ describe('a truck with no next stop but open loads (§12.92)', () => {
     });
   });
 });
+
+/**
+ * The overwritten-trips fix, in the modal. A REACHED stop saved with a new
+ * city or load number asks "correction, or the next trip?" before anything is
+ * sent. Nothing is preselected, focus starts on "Back to the form", and the
+ * answer rides in the one save request. The server half is
+ * `server/clear-stop.test.ts`; the rule both call is `lib/reached-stop.ts`.
+ */
+describe('a reached stop given a new city or number asks first', () => {
+  const REACHED = fleetRow({
+    nextStop: nextStop({
+      loadNumber: '12120640',
+      city: 'Joliet',
+      // 06:44 at the stop on Fri 18 September — not today, so the weekday shows.
+      arrivedAt: new Date('2026-09-18T11:44:00.000Z').toISOString(),
+      arrivedSource: 'detected',
+      apptTz: 'America/Chicago',
+    }),
+    etaAbsence: 'arrived',
+    status: 'ARRIVED',
+    computed: 'ARRIVED',
+  });
+
+  const question = () =>
+    container!.querySelector<HTMLElement>('[role="dialog"][aria-label="Stop already reached"]');
+
+  const bodies = () =>
+    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
+      .filter(([url]) => url === '/api/stops')
+      .map(([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>);
+
+  const save = async () => {
+    await act(async () => {
+      buttonLabelled('Save').click();
+    });
+  };
+
+  const choose = async (label: 'Correction' | 'Next trip' | 'Back to the form') => {
+    const button = Array.from(question()!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === label,
+    );
+    if (!button) throw new Error(`No ${label} in the question`);
+    await act(async () => button.click());
+  };
+
+  it('asks before saving a new city: nothing chosen, focus on Back, and Back sends nothing', async () => {
+    await render(REACHED);
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await save();
+
+    expect(question()?.textContent).toMatch(
+      /This stop was reached at \w{3} 06:44 \S+\. Is this a correction, or the next trip\?/,
+    );
+    // It says what the next trip would close.
+    expect(question()?.textContent).toContain('Load 12120640 closes as Delivered');
+    for (const b of question()!.querySelectorAll('button')) {
+      expect(b.getAttribute('aria-pressed') ?? 'false').toBe('false');
+    }
+    expect(document.activeElement?.textContent?.trim()).toBe('Back to the form');
+    expect(bodies()).toEqual([]);
+
+    await choose('Back to the form');
+    expect(question()).toBeNull();
+    expect(bodies()).toEqual([]);
+    // Back to the form, with the typing still there.
+    expect(fieldLabelled('City').value).toBe('Des Plaines');
+  });
+
+  it('Esc backs out of the question, not out of the modal', async () => {
+    await render(REACHED);
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await save();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(question()).toBeNull();
+    expect(fieldLabelled('City').value).toBe('Des Plaines');
+    expect(bodies()).toEqual([]);
+  });
+
+  it('asks before saving a new load number', async () => {
+    await render(REACHED);
+    await act(async () => setValue(fieldLabelled('Load number'), '200584'));
+    await save();
+    expect(question()).not.toBeNull();
+    expect(bodies()).toEqual([]);
+  });
+
+  it.each([
+    ['Correction', 'correction'],
+    ['Next trip', 'next-trip'],
+  ] as const)('"%s" saves once, carrying that answer', async (label, sent) => {
+    await render(REACHED);
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await save();
+    await choose(label);
+
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]).toMatchObject({
+      stopId: REACHED.nextStop!.stopId,
+      city: 'Des Plaines',
+      reachedStop: sent,
+    });
+    expect(question()).toBeNull();
+  });
+
+  it('does not ask on a stop that was not reached', async () => {
+    await render();
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await save();
+    expect(question()).toBeNull();
+    expect(bodies()).toHaveLength(1);
+    expect('reachedStop' in bodies()[0]!).toBe(false);
+  });
+
+  it('does not ask when a reached stop is saved with the same city and number', async () => {
+    await render(REACHED);
+    await act(async () => setValue(fieldLabelled('State'), 'WI'));
+    await save();
+    expect(question()).toBeNull();
+    expect(bodies()).toHaveLength(1);
+  });
+
+  it('asks when the server says the stop was reached after the modal opened', async () => {
+    const reachedMeanwhile = new Date('2026-09-18T12:05:00.000Z').toISOString();
+    let call = 0;
+    globalThis.fetch = vi.fn(async () =>
+      call++ === 0
+        ? {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: 'This stop has been reached.',
+              reachedStop: { arrivedAt: reachedMeanwhile },
+            }),
+          }
+        : { ok: true, status: 200, json: async () => ({ ok: true }) },
+    ) as unknown as typeof fetch;
+
+    await render();
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await save();
+
+    // The server's arrival, 07:05 at the stop — not anything the modal had.
+    expect(question()?.textContent).toMatch(/reached at \w{3} 07:05 /);
+    await choose('Next trip');
+    expect(bodies().map((b) => b['reachedStop'])).toEqual([undefined, 'next-trip']);
+  });
+});

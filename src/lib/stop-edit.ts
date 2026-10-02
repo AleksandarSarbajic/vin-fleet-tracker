@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CLEAR_STATUSES } from '@/lib/clear-stop';
+import { REACHED_ANSWERS } from '@/lib/reached-stop';
 import { AppointmentInput, WallTimeInput } from './appointment';
 import { LOAD_STATUSES } from './loads';
 import { StopOverrideEdit } from './override';
@@ -247,6 +248,17 @@ export const StopEdit = z
       .array(z.object({ loadId: z.string().uuid(), status: z.enum(CLEAR_STATUSES) }).strict())
       .max(20)
       .optional(),
+
+    /**
+     * The dispatcher's answer when a REACHED stop is saved with a new city or
+     * load number (lib/reached-stop.ts). Required then — the server refuses
+     * the save without it — and ignored otherwise.
+     *
+     *     correction   save as typed, on this stop
+     *     next-trip    close this load as Delivered, and save the form as a
+     *                  new load, in one transaction
+     */
+    reachedStop: z.enum(REACHED_ANSWERS).optional(),
   })
   .strict();
 

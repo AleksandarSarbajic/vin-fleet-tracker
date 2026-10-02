@@ -182,7 +182,7 @@ function lastPlace(load: OpenLoadChoice): string {
 }
 
 /** A time in dispatch time; the weekday too when it is not today there. */
-function dispatchTime(iso: string, dispatchTz: string, now: Date): string {
+export function dispatchTime(iso: string, dispatchTz: string, now: Date): string {
   const day = (d: Date) =>
     new Intl.DateTimeFormat('en-CA', { timeZone: dispatchTz }).format(d);
   const at = new Date(iso);

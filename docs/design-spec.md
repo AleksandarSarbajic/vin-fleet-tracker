@@ -7451,6 +7451,66 @@ and proves the account's other sessions survive; `e2e/phone-editing.spec.ts`
 proves nothing opens an editor below 768px. Expected failures were marked
 per stage in `NOT_YET` and removed as each stage landed; it is empty.
 
+## 12.97 A reached stop asks: correction, or the next trip?
+
+Stage 1 of the driver history page. Measured in production on 2026-10-02:
+dispatchers had been typing the next trip over the stop the truck had just
+reached. 41 of 79 edits moved a stop to a new city and 23 changed its load
+number; 42 load numbers had been saved and 19 were left in `loads`. Truck 141
+on 2026-09-28: load 12120640 was detected in at Joliet at 07:40, and at 08:04
+the same stop became 200584 Des Plaines. §12.85 then wiped the Joliet arrival
+with the old address, so of 19 real arrivals since 09-18, 7 survive only in
+`audit_log`. A history page built on `loads` alone would be missing them.
+
+**The rule** (`lib/reached-stop.ts`, `needsReachedAnswer`): a stop with
+`arrived_at` saved with a different city or a different load number needs the
+dispatcher's answer. Asked **every time**, including a change that looks like
+a typo ("Fargo" to "FARGO"): which one it is cannot be read from the data, and
+a heuristic would be the guess this exists to stop. A changed state, ZIP,
+street line, note or appointment alone does not ask. An omitted load number
+is "left alone" (§12.21), not a change. The modal can only open a reached stop
+that has not departed, since a departed stop is no longer the next stop.
+
+**The question** (`ReachedStopQuestion.tsx`): "This stop was reached at 07:40
+CDT. Is this a correction, or the next trip?" — the arrival in dispatch time,
+with the weekday when it was not today (the same formatter as §12.92's line).
+**Correction** saves as typed, on the same stop: an address change still
+clears the arrival (§12.85). **Next trip** closes this load as Delivered, with
+its arrival kept, and saves the form as a new load. **Back to the form** saves
+nothing. Nothing is preselected and focus starts on Back, so an Enter carried
+over from Save goes back; Esc goes back too.
+
+**The write** (`server/stop-edit.ts`). The answer rides in the save as
+`reachedStop`. Without it, the server refuses with `ReachedStopError` (409,
+`reachedStop: { arrivedAt }`) and writes nothing, so an API client cannot skip
+the question and a stop reached after the modal opened is asked about with the
+server's arrival. The modal and the server call the same function. Next trip,
+in one transaction: Clear stop's own `clearStop` closes the load as Delivered
+(its checks, its `operator-clear-stop` audit row); the save then runs as a new
+load, geocoding the new stop even when the address is unchanged, and ignoring
+the arrival the form re-sends (it is the reached stop's). The new stop's audit
+row carries `nextTripAfter: { loadId, status }`.
+
+**Tests.** Unit: when it asks (city, number, cleared number, cleared city,
+other capitals, a stop that had no city) and when it does not (not reached,
+nothing changed, number omitted), and the sentence in dispatch time. Database
+(`server/clear-stop.test.ts`): refused with no answer for a new city, a new
+number and a case change, with nothing written; a stop not reached and a
+reached stop with only a note change save without asking; Correction on the
+same stop and load; Next trip closing as Delivered with Clear stop's audit
+row, the reached stop unchanged and the new stop located and unreached; Next
+trip with only the number changed; and **broken on purpose after the close**,
+a trigger raising on the new stop's insert, reporting the reached load as
+already DELIVERED, after which everything is as it was with no audit row.
+Component: asks for a city and a number change, nothing chosen, focus on Back,
+Back and Esc send nothing and keep the typing, each answer sends one request
+carrying it, no question for an unreached stop or an unchanged city and
+number, and a 409 from the server opening the question with the server's
+time. E2E (`e2e/reached-stop.spec.ts`, new address pre-cached so nothing
+reaches the network): Next trip, Correction, Back, an unreached stop, and the
+route refusing a save that skips the question. Removing the server's refusal
+fails the last one: 200 instead of 409.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

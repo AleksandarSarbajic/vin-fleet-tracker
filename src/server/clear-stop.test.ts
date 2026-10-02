@@ -16,8 +16,9 @@ import { StopEdit } from '@/lib/stop-edit';
 import { timelineStay } from '@/lib/timeline';
 import { sweepArrivals } from '@/worker/arrival';
 import { clearStop, ClearStopError } from './clear-stop';
+import { CHAIN_VERSION } from './geocode';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from './fleet-query';
-import { saveStopEdit } from './stop-edit';
+import { ReachedStopError, saveStopEdit } from './stop-edit';
 import { loadTruckTimeline } from './timeline';
 import type { Tx } from './audit';
 
@@ -888,6 +889,320 @@ describeDb('a new load that closes the previous one (§12.92)', () => {
     expect(seen.loads).toEqual([{ number: '6612193', status: 'DISPATCHED' }]);
     expect(seen.stopsAfter).toEqual(seen.stopsBefore);
     expect(seen.stopsAfter[0]!.departedAt).not.toBeNull();
+    expect(seen.audit).toEqual([]);
+  });
+});
+
+/**
+ * The overwritten-trips fix. A reached stop — arrived, not yet departed, the
+ * only reached stop the modal can open — saved with a new city or load
+ * number needs the dispatcher's answer: a correction saves as typed; the next
+ * trip closes this load as Delivered through `clearStop` and creates a new
+ * load, in one transaction. Truck 141 on 2026-09-28 is the case: 12120640
+ * detected in at Joliet, then typed over with 200584 Des Plaines.
+ *
+ * Both addresses are in the geocode cache, so nothing here reaches the
+ * network.
+ */
+describeDb('a reached stop given a new city or number', () => {
+  const MOORHEAD = {
+    addressLine: '1200 28th Ave S',
+    city: 'Moorhead',
+    state: 'MN',
+    zip: '56560',
+    lat: 46.8473,
+    lng: -96.7553,
+  };
+
+  const cacheMoorhead = (tx: Tx) =>
+    tx.insert(geocodeCache).values({
+      normalizedAddress: normalizeAddress(MOORHEAD),
+      lat: MOORHEAD.lat,
+      lng: MOORHEAD.lng,
+      precision: 'street',
+      confidence: 'census:exact',
+      matchedAddress: '1200 28TH AVE S, MOORHEAD, MN, 56560',
+      provider: CHAIN_VERSION,
+    });
+
+  /**
+   * `world()` caches Fargo under an old provider tag, which the geocoder
+   * treats as a miss and re-asks the network about. The next trip geocodes
+   * its new stop, so here the row has to be current.
+   */
+  const cacheFargoCurrent = (tx: Tx) =>
+    tx
+      .update(geocodeCache)
+      .set({ provider: CHAIN_VERSION })
+      .where(eq(geocodeCache.normalizedAddress, normalizeAddress(FARGO)));
+
+  /** Detected in an hour ago, not departed: the modal's next stop. */
+  const reachedLoad = (tx: Tx, truckId: string) =>
+    addLoad(tx, truckId, '12120640', [{ seq: 1, arrivedAt: hoursAgo(1), source: 'detected' }]);
+
+  /** The modal's save of that stop, with `over` applied. */
+  const editOf = (
+    truckId: string,
+    stopId: string,
+    over: Partial<StopEdit> & Record<string, unknown> = {},
+  ) =>
+    StopEdit.parse({
+      stopId,
+      truckId,
+      loadNumber: '12120640',
+      loadStatus: 'DISPATCHED',
+      stopType: 'DEL',
+      addressLine: FARGO.addressLine,
+      city: FARGO.city,
+      state: FARGO.state,
+      zip: FARGO.zip,
+      appointment: null,
+      ...over,
+    });
+
+  const nextTrip = {
+    loadNumber: '200584',
+    stopType: 'PU',
+    addressLine: MOORHEAD.addressLine,
+    city: MOORHEAD.city,
+    state: MOORHEAD.state,
+    zip: MOORHEAD.zip,
+  } as const;
+
+  const loadsOn = (tx: Tx, truckId: string) =>
+    tx
+      .select({ id: loads.id, number: loads.loadNumber, status: loads.status })
+      .from(loads)
+      .where(eq(loads.truckId, truckId))
+      .orderBy(asc(loads.createdAt));
+
+  const allAudit = (tx: Tx) =>
+    tx.select({ entity: auditLog.entity, after: auditLog.after }).from(auditLog);
+
+  const attempt = (promise: Promise<unknown>) =>
+    promise.then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+  it.each([
+    ['a new city', { city: 'Moorhead' }],
+    ['a new load number', { loadNumber: '200584' }],
+    ['the same city in other capitals', { city: 'FARGO' }],
+  ])('refuses %s with no answer, and changes nothing', async (_, over) => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId, stopIds } = await reachedLoad(tx, truck.id);
+      const before = await stopRows(tx, loadId);
+      const failure = await attempt(
+        saveStopEdit(tx as never, {
+          actorUserId: dispatcher.id,
+          dispatchTz: TZ,
+          edit: editOf(truck.id, stopIds[0]!, over),
+        }),
+      );
+      return {
+        failure,
+        arrivedAt: before[0]!.arrivedAt!.toISOString(),
+        before,
+        after: await stopRows(tx, loadId),
+        loads: await loadsOn(tx, truck.id),
+        audit: await allAudit(tx),
+      };
+    });
+    expect(seen.failure).toBeInstanceOf(ReachedStopError);
+    // The modal asks with the arrival the SERVER holds, not its own copy.
+    expect((seen.failure as ReachedStopError).arrivedAt).toBe(seen.arrivedAt);
+    expect(seen.after).toEqual(seen.before);
+    expect(seen.loads.map((l) => [l.number, l.status])).toEqual([['12120640', 'DISPATCHED']]);
+    expect(seen.audit).toEqual([]);
+  });
+
+  it('saves a stop that was NOT reached without asking', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      await cacheMoorhead(tx);
+      const { loadId, stopIds } = await addLoad(tx, truck.id, '12120640', [{ seq: 1 }]);
+      await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, nextTrip),
+      });
+      return { stops: await stopRows(tx, loadId), loads: await loadsOn(tx, truck.id) };
+    });
+    expect(seen.loads.map((l) => l.number)).toEqual(['200584']);
+    expect(seen.stops.map((s) => s.city)).toEqual(['Moorhead']);
+  });
+
+  it('saves a reached stop without asking when neither the city nor the number moved', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      const { loadId, stopIds } = await reachedLoad(tx, truck.id);
+      await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, { dispatcherNote: 'dock 4' }),
+      });
+      return await stopRows(tx, loadId);
+    });
+    expect(seen[0]!.dispatcherNote).toBe('dock 4');
+    expect(seen[0]!.arrivedAt).not.toBeNull();
+  });
+
+  it('"Correction": saves as typed, on the same stop and load', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      await cacheMoorhead(tx);
+      const { loadId, stopIds } = await reachedLoad(tx, truck.id);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, { ...nextTrip, reachedStop: 'correction' }),
+      });
+      return {
+        result,
+        loadId,
+        stopId: stopIds[0]!,
+        stops: await stopRows(tx, loadId),
+        loads: await loadsOn(tx, truck.id),
+      };
+    });
+    expect(seen.result.stopId).toBe(seen.stopId);
+    expect(seen.result.loadId).toBe(seen.loadId);
+    expect(seen.loads.map((l) => [l.number, l.status])).toEqual([['200584', 'DISPATCHED']]);
+    expect(seen.stops[0]).toMatchObject({ city: 'Moorhead', type: 'PU' });
+    // §12.85, unchanged: a new address is a new place, so the arrival goes.
+    expect(seen.stops[0]!.arrivedAt).toBeNull();
+  });
+
+  it('"Next trip": closes this load as Delivered, keeps its stop as reached, and creates the new load unreached', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      await cacheMoorhead(tx);
+      const { loadId, stopIds } = await reachedLoad(tx, truck.id);
+      const before = await stopRows(tx, loadId);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, { ...nextTrip, reachedStop: 'next-trip' }),
+      });
+      const [newStop] = await tx.select().from(stops).where(eq(stops.id, result.stopId));
+      const [newStopAudit] = await tx
+        .select({ before: auditLog.before, after: auditLog.after })
+        .from(auditLog)
+        .where(eq(auditLog.entityId, result.stopId));
+      return {
+        loadId,
+        result,
+        before,
+        after: await stopRows(tx, loadId),
+        newStop: newStop!,
+        newStopAudit: newStopAudit!,
+        closeAudit: await auditFor(tx, loadId),
+        loads: await loadsOn(tx, truck.id),
+        row: await fleetRow(tx, truck.id),
+        dispatcher: dispatcher.id,
+      };
+    });
+
+    expect(seen.loads.map((l) => [l.number, l.status])).toEqual([
+      ['12120640', 'DELIVERED'],
+      ['200584', 'DISPATCHED'],
+    ]);
+    expect(seen.result.loadId).not.toBe(seen.loadId);
+    // The trip that happened is still on the record, exactly as it was.
+    expect(seen.after).toEqual(seen.before);
+    expect(seen.after[0]!.arrivedAt).not.toBeNull();
+    // The new trip starts where nothing has been reached yet.
+    expect(seen.newStop).toMatchObject({
+      sequence: 1,
+      type: 'PU',
+      city: 'Moorhead',
+      lat: MOORHEAD.lat,
+      lng: MOORHEAD.lng,
+      arrivedAt: null,
+      departedAt: null,
+    });
+    // Clear stop's own audit row, by the dispatcher, and the new stop's row
+    // naming what it closed.
+    expect(seen.closeAudit).toHaveLength(1);
+    expect(seen.closeAudit[0]!.actor).toBe(seen.dispatcher);
+    expect(seen.closeAudit[0]!.after).toMatchObject({
+      loadStatus: 'DELIVERED',
+      source: 'operator-clear-stop',
+    });
+    expect(seen.newStopAudit.before).toBeNull();
+    expect(seen.newStopAudit.after).toMatchObject({
+      nextTripAfter: { loadId: seen.loadId, status: 'DELIVERED' },
+    });
+    expect(seen.row.openLoadCount).toBe(1);
+    expect(seen.row.nextStop?.loadNumber).toBe('200584');
+  });
+
+  it('"Next trip" with only the number changed: the new stop is located at the same address', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      await cacheFargoCurrent(tx);
+      const { stopIds } = await reachedLoad(tx, truck.id);
+      const result = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, { loadNumber: '200584', reachedStop: 'next-trip' }),
+      });
+      return (await tx.select().from(stops).where(eq(stops.id, result.stopId)))[0]!;
+    });
+    expect(seen).toMatchObject({ city: 'Fargo', lat: FARGO.lat, lng: FARGO.lng, arrivedAt: null });
+  });
+
+  /**
+   * Broken on purpose, AFTER the close: a trigger raises when the new stop is
+   * inserted, reporting the reached load's status as the failing statement
+   * saw it — so the test proves the close had happened when it failed.
+   */
+  it('"Next trip" that fails after the close leaves everything as it was', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truck, dispatcher } = await world(tx);
+      await cacheMoorhead(tx);
+      const { loadId, stopIds } = await reachedLoad(tx, truck.id);
+      const before = await stopRows(tx, loadId);
+      await tx.execute(
+        sql.raw(`
+        create function pg_temp.next_trip_break() returns trigger language plpgsql as $$
+        begin
+          raise exception 'broken on purpose: reached load is %',
+            (select status from loads where id = '${loadId}');
+        end $$;
+        create trigger next_trip_break before insert on stops
+          for each row execute function pg_temp.next_trip_break();
+      `),
+      );
+      const failure = await saveStopEdit(tx as never, {
+        actorUserId: dispatcher.id,
+        dispatchTz: TZ,
+        edit: editOf(truck.id, stopIds[0]!, { ...nextTrip, reachedStop: 'next-trip' }),
+      }).then(
+        () => null,
+        (error: unknown) => said(error),
+      );
+      const contained = await tx.execute(sql`select 1`).then(
+        () => true,
+        () => false,
+      );
+      if (!contained) return { failure, contained } as const;
+      return {
+        contained: true as const,
+        failure,
+        before,
+        after: await stopRows(tx, loadId),
+        loads: await loadsOn(tx, truck.id),
+        audit: await allAudit(tx),
+      };
+    });
+    expect(seen.failure).toContain('broken on purpose: reached load is DELIVERED');
+    expect(seen.contained, 'the save was not one transaction').toBe(true);
+    if (!seen.contained) return;
+    expect(seen.loads.map((l) => [l.number, l.status])).toEqual([['12120640', 'DISPATCHED']]);
+    expect(seen.after).toEqual(seen.before);
     expect(seen.audit).toEqual([]);
   });
 });

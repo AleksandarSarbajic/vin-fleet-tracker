@@ -2,6 +2,7 @@ import { desc, eq, sql, type SQL } from 'drizzle-orm';
 import { loads, positions, stopRoutes, stops, trucks } from '@/db/schema';
 import { normalizeAddress, type AddressParts } from '@/lib/address';
 import { ANCHOR_MAX_AGE_MINUTES, anchorAtTick, type AnchorDecision } from '@/lib/arrival';
+import { needsReachedAnswer } from '@/lib/reached-stop';
 import type { StopEdit } from '@/lib/stop-edit';
 import { resolveAppointment, resolveWallTime, type ResolvedAppointment } from './appointment';
 import { ARRIVAL_CLEARED } from './arrival-columns';
@@ -47,6 +48,19 @@ export interface StopEditResult {
  */
 const FUTURE_ARRIVAL_TOLERANCE_MS = 5 * 60_000;
 
+/**
+ * A reached stop was saved with a new city or load number, and the save did
+ * not say whether that is a correction or the next trip. Nothing is written;
+ * the modal asks, with the arrival this carries — the one the SERVER holds,
+ * which may be newer than the modal's own copy.
+ */
+export class ReachedStopError extends Error {
+  constructor(readonly arrivedAt: string) {
+    super('This stop has been reached. Say whether this is a correction or the next trip.');
+    this.name = 'ReachedStopError';
+  }
+}
+
 export class StopEditError extends Error {
   constructor(
     message: string,
@@ -80,6 +94,15 @@ export async function saveStopEdit(
     );
   }
 
+  /**
+   * The dispatcher said this is the NEXT TRIP, not a correction: the stop
+   * being edited keeps its record, its load closes as Delivered, and the save
+   * becomes a new load. Everything below treats it as one from here on —
+   * including the geocode, because the new stop needs coordinates of its own
+   * even when the address did not change.
+   */
+  const isNextTrip = edit.stopId !== null && edit.reachedStop === 'next-trip';
+
   const typed: AddressParts = {
     addressLine: edit.addressLine,
     city: edit.city,
@@ -104,7 +127,8 @@ export async function saveStopEdit(
    * branch below, which refuses to keep coordinates that no longer describe
    * the address being written.
    */
-  const previousAddress = edit.stopId ? await readAddress(db, edit.stopId) : null;
+  const previousAddress =
+    edit.stopId && !isNextTrip ? await readAddress(db, edit.stopId) : null;
   const addressChanged =
     previousAddress === null || normalizeAddress(previousAddress) !== normalizeAddress(typed);
 
@@ -190,7 +214,7 @@ export async function saveStopEdit(
 
     /* -------------------------- the load and stop ---------------------- */
 
-    const existing = edit.stopId
+    const stored = edit.stopId
       ? (
           await tx
             .select({
@@ -222,9 +246,37 @@ export async function saveStopEdit(
         )[0]
       : undefined;
 
-    if (edit.stopId && !existing) {
+    if (edit.stopId && !stored) {
       throw new StopEditError('That stop no longer exists.', 'stopId');
     }
+
+    /**
+     * The overwritten-trips fix. Asked every time the city or number of a
+     * reached stop changes, and never answered here: no answer, no save.
+     */
+    if (
+      stored &&
+      edit.reachedStop === undefined &&
+      needsReachedAnswer(
+        {
+          arrivedAt: stored.arrivedAt?.toISOString() ?? null,
+          city: stored.city,
+          loadNumber: stored.loadNumber,
+        },
+        { city: edit.city, loadNumber: edit.loadNumber },
+      )
+    ) {
+      throw new ReachedStopError(stored.arrivedAt!.toISOString());
+    }
+
+    /** The row this save writes over — none, for the next trip. */
+    const existing = isNextTrip ? undefined : stored;
+    /**
+     * The modal re-sends the stored arrival on every save. On the next trip
+     * that arrival is the REACHED stop's, and it stays there: the new stop
+     * starts unreached.
+     */
+    const arrivedAtEdit = isNextTrip ? undefined : edit.arrivedAt;
 
     /**
      * §12.23 — an edit writes only the fields the form owns. Coordinates are
@@ -373,15 +425,15 @@ export async function saveStopEdit(
       arrivalColumns = CLEARED;
       arrivalWritten = null;
       arrivalWipedBy = 'address-changed';
-    } else if (edit.arrivedAt === null) {
+    } else if (arrivedAtEdit === null) {
       // Clearing nothing is not a change, and must not write an audit row
       // saying an arrival was removed.
       if (existing?.arrivedAt) {
         arrivalColumns = CLEARED;
         arrivalWritten = null;
       }
-    } else if (edit.arrivedAt !== undefined) {
-      const arrival = await resolveWallTime(tx, edit.arrivedAt);
+    } else if (arrivedAtEdit !== undefined) {
+      const arrival = await resolveWallTime(tx, arrivedAtEdit);
       const at = new Date(arrival.utc).getTime();
 
       /**
@@ -544,6 +596,13 @@ export async function saveStopEdit(
        * savepoint of this transaction, so if anything below fails the closes
        * are undone with the new load: both land or neither does.
        */
+      // The next trip closes the reached stop's load first, the same way.
+      if (isNextTrip) {
+        await clearStop(tx, {
+          actorUserId: input.actorUserId,
+          request: { truckId: edit.truckId, loadId: stored!.loadId, status: 'DELIVERED' },
+        });
+      }
       for (const close of edit.closePrevious ?? []) {
         await clearStop(tx, {
           actorUserId: input.actorUserId,
@@ -690,6 +749,8 @@ export async function saveStopEdit(
         ...(!existing && edit.closePrevious?.length
           ? { closedPrevious: edit.closePrevious }
           : {}),
+        // The reached stop's load this save closed, as the next trip after it.
+        ...(isNextTrip ? { nextTripAfter: { loadId: stored!.loadId, status: 'DELIVERED' } } : {}),
         ...(arrivalWritten !== undefined
           ? {
               arrivedAt: arrivalWritten,

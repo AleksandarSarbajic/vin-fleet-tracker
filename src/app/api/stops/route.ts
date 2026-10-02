@@ -10,7 +10,7 @@ import {
 } from '@/server/rate-limit';
 import { StopEdit } from '@/lib/stop-edit';
 import { statusConfig } from '@/server/fleet';
-import { saveStopEdit, StopEditError } from '@/server/stop-edit';
+import { ReachedStopError, saveStopEdit, StopEditError } from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
 import { ClearStopError } from '@/server/clear-stop';
 
@@ -59,6 +59,15 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.message, fields: [{ field: error.field, message: error.message }] },
         { status: 400 },
+      );
+    }
+    if (error instanceof ReachedStopError) {
+      // A reached stop's city or number changed and the save did not say
+      // whether it is a correction or the next trip. Nothing was written; the
+      // modal asks, quoting the arrival the server holds.
+      return NextResponse.json(
+        { error: error.message, reachedStop: { arrivedAt: error.arrivedAt } },
+        { status: 409 },
       );
     }
     if (error instanceof ClearStopError) {

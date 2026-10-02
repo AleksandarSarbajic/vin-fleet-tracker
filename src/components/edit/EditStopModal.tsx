@@ -25,6 +25,8 @@ import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
 import { PreviousLoadQuestion } from './PreviousLoadQuestion';
+import { ReachedStopQuestion } from './ReachedStopQuestion';
+import { needsReachedAnswer, type ReachedAnswer } from '@/lib/reached-stop';
 import { useTruckTimeline } from '@/hooks/useTruckTimeline';
 import {
   clearStopTitle,
@@ -236,6 +238,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     null,
   );
 
+  /**
+   * The overwritten-trips fix. The arrival being asked about while the
+   * "correction, or the next trip?" question is open — the stop's own, or the
+   * one the server answered a save with when the stop was reached after this
+   * modal opened. Null when the question is closed.
+   */
+  const [reachedAsk, setReachedAsk] = useState<string | null>(null);
+  /** The answer given, held for a save that goes on to the reassign preview. */
+  const [reachedAnswer, setReachedAnswer] = useState<ReachedAnswer | null>(null);
+
   const toEdit = useCallback(
     (f: typeof initialForm) => {
       const trimmed = (value: string) => (value.trim() === '' ? null : value.trim());
@@ -428,7 +440,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
   const send = useCallback(
-    async (token?: string, closeList = closes) => {
+    async (token?: string, closeList = closes, reached = reachedAnswer) => {
       if (!parsed.success) return;
       setSaving(true);
       setErrors([]);
@@ -503,6 +515,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             ...(overrideEdit ? { override: overrideEdit } : {}),
             // §12.92: closed in the same transaction as the new load.
             ...(closeList?.length ? { closePrevious: closeList } : {}),
+            ...(reached ? { reachedStop: reached } : {}),
           }),
         });
 
@@ -511,8 +524,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             preview?: ReassignPreview;
             error?: string;
             closePrevious?: boolean;
+            reachedStop?: { arrivedAt: string };
           };
           queryClient.setQueryData(key, snapshot);
+          setReachedAnswer(null);
+          if (body.reachedStop) {
+            // Reached after this modal opened. Nothing was written; ask, with
+            // the arrival the server holds.
+            setReachedAsk(body.reachedStop.arrivedAt);
+            return;
+          }
           if (body.closePrevious) {
             // §12.92. A previous load changed under the question — closed
             // elsewhere, say. Nothing was written; ask again on a fresh read.
@@ -537,6 +558,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           queryClient.setQueryData(key, snapshot);
           // Nothing was closed either; the next Save asks again.
           setCloses(null);
+          setReachedAnswer(null);
           setErrors(
             body.fields?.length
               ? body.fields
@@ -597,6 +619,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
       } catch (error: unknown) {
         queryClient.setQueryData(key, snapshot);
         setCloses(null);
+        setReachedAnswer(null);
         setErrors([
           { field: '*', message: error instanceof Error ? error.message : 'Save failed.' },
         ]);
@@ -606,12 +629,32 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     },
     // `edit` is deliberately absent: this function reads `parsed.data` only.
     // The raw form shape does not leave the component (§12.21).
-    [active, closes, onClose, overrideEdit, parsed, queryClient, row.active, row.id],
+    [active, closes, onClose, overrideEdit, parsed, queryClient, reachedAnswer, row.active, row.id],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
-  const save = useCallback(async (closeList?: { loadId: string; status: ClearStatus }[]) => {
-    if (!canSave) return;
+  const save = useCallback(async (
+    closeList?: { loadId: string; status: ClearStatus }[],
+    reached?: ReachedAnswer,
+  ) => {
+    if (!canSave || !parsed.success) return;
+    /**
+     * The overwritten-trips fix: a reached stop given a new city or number is
+     * asked about first, every time — the same rule the server enforces.
+     */
+    const given = reached ?? null;
+    if (
+      stop?.arrivedAt &&
+      given === null &&
+      needsReachedAnswer(
+        { arrivedAt: stop.arrivedAt, city: stop.city, loadNumber: stop.loadNumber },
+        { city: parsed.data.city, loadNumber: parsed.data.loadNumber },
+      )
+    ) {
+      setReachedAsk(stop.arrivedAt);
+      return;
+    }
+    setReachedAnswer(given);
     /**
      * §12.92. A new load on a truck still holding a previous one asks about
      * it first, every time. Never closed without the answer.
@@ -634,8 +677,8 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         return;
       }
     }
-    await send(undefined, answered);
-  }, [canSave, closes, driverChanged, driverId, needsPrevious, row.id, send]);
+    await send(undefined, answered, given);
+  }, [canSave, closes, driverChanged, driverId, needsPrevious, parsed, row.id, send, stop]);
 
   /** One answer given; the last one saves. */
   const answer = useCallback(
@@ -666,7 +709,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     const onKey = (event: KeyboardEvent) => {
       // §12.88. The confirm step owns Enter and Esc while it is open: Esc
       // backs out of it, never out of this modal.
-      if (clearing || asking) return;
+      if (clearing || asking || reachedAsk) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -680,7 +723,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [asking, clearing, dirty.length, onClose, preview, save]);
+  }, [asking, clearing, dirty.length, onClose, preview, reachedAsk, save]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -1122,6 +1165,20 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           now={new Date(openedAt)}
           onAnswer={answer}
           onBack={() => setAsking(false)}
+        />
+      ) : null}
+
+      {reachedAsk ? (
+        <ReachedStopQuestion
+          arrivedAt={reachedAsk}
+          loadNumber={stop?.loadNumber ?? null}
+          dispatchTz={dispatchTz}
+          now={new Date()}
+          onAnswer={(given) => {
+            setReachedAsk(null);
+            void save(undefined, given);
+          }}
+          onBack={() => setReachedAsk(null)}
         />
       ) : null}
 
