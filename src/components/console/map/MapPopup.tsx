@@ -15,11 +15,9 @@ import { DESKTOP_ONLY } from '@/lib/editing';
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
  * shows, so nothing critical is hover-only.
  *
- * The action row carries "Edit load" only. "Call driver" is NOT here: it is
- * hidden when `drivers.phone` is null rather than rendered as a dead button,
- * and the fleet query does not carry the phone — Samsara returns none for
- * this org, so every value would be null today. It joins when a dispatcher
- * has somewhere to type one.
+ * The action row carries "Edit load" only. "Call driver" is on the phone's
+ * truck sheet instead (§12.96, stage 3), which replaces this popup below
+ * 768px — a desktop has no dialler to hand a `tel:` link to.
  *
  * §12.24: `Projected` carries the distance AND the time — "412 mi · ETA
  * 14:18 CDT" — because the popup has the room the 128px ETA column does not,
@@ -32,7 +30,7 @@ import { DESKTOP_ONLY } from '@/lib/editing';
  * column did not, and "07:00 to 15:00" is the fact a dispatcher needs before
  * phoning a receiver (§12.22).
  */
-function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
+export function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
   if (!stop.apptTz || !stop.apptStartUtc) return 'none';
   const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
   if (stop.apptType !== 'FCFS') return from;
@@ -49,7 +47,7 @@ function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
  * able to tell "the board cannot project this stop" from "nobody has typed
  * anything yet", and as an em dash those are the same pixel.
  */
-function projectedLine(row: FleetRow): string {
+export function projectedLine(row: FleetRow): string {
   const zone = row.nextStop?.apptTz;
   switch (row.etaAbsence) {
     case 'has-eta': {
@@ -191,14 +189,11 @@ export function MapPopup({
       focusAfterOpen={false}
       onClose={onClose}
       maxWidth="288px"
+      // §12.96, stage 3: hidden below 768px, where the truck sheet stands in
+      // for it (globals.css — a utility class here loses to Mapbox's own).
       className="ft-popup"
     >
-      {/* §12.96: on a phone on its side the popup is taller than the map;
-          held under the pane's height there, it scrolls inside itself. */}
-      <div
-        ref={box}
-        className="w-[288px] border border-accent bg-surface-raised max-md:max-h-[55dvh] max-md:overflow-y-auto"
-      >
+      <div ref={box} className="w-[288px] border border-accent bg-surface-raised">
         <div className="flex items-center justify-between gap-2 border-b border-line-hair px-[10px] py-2">
           <span className="font-sans text-[15px] font-bold tabular-nums text-text">
             {row.truckNumber ?? row.samsaraName}

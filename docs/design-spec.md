@@ -7275,6 +7275,59 @@ with only that line added: 2 of 54 baselines changed, the two predicted, and
 a second run there matched all 54. Stage 2's render of those two shots is
 identical to them, 0 pixels at both widths.
 
+### Stage 3 — the truck sheet, Call driver, the Map tab, the timeline
+
+Below 768px only.
+
+- **The truck sheet** (`phone/TruckSheet.tsx`, `data-truck-sheet`) replaces
+  the map popup on phones, which is not drawn there. A card's tap opens it
+  over the list; a marker's tap over the map (asked at the moment of the tap,
+  as the editing rule is). A sheet from the bottom, never taller than the
+  screen: the header (truck, status chip, a 44px Close) and the buttons stay
+  put and the facts between them scroll. The facts are the popup's, through
+  the popup's own formatters (`apptLine`, `projectedLine`): next stop
+  (address, city), the appointment under an "Appt" label, the ETA with its
+  basis ("routed road miles", "straight-line estimate"), position, speed,
+  GPS age, load, driver, and an override's Computed and Forced by. Buttons:
+  Timeline, Show on map (the sheet steps aside, the Map tab shows, the map
+  pans to the truck) and Call driver. Where Edit load was: "Editing is on the
+  desktop console".
+- **Call driver** (`lib/dial.ts`): a plain `tel:+1XXXXXXXXXX` link, 44px,
+  only for a number that dials as it stands — ten digits after punctuation
+  and an optional leading 1, area code and exchange not starting 0 or 1;
+  anything else (an extension, a short number, a letter) gets no link. The
+  number comes from the drivers list the console already holds, by the truck
+  the driver is on, and is never printed: the link says "Call driver". No
+  messaging, no `sms:`. Tests compare the number and print only its last
+  three digits (`maskPhone`).
+- **Cards say "Appt"**: line 2 reads "Appt 14:30 CDT", so a time on a card
+  never reads as an ETA.
+- **Map tab**: zoom and Map/Satellite are 44px on phones; the marker key is
+  folded behind a 44px Key button (`data-marker-key-toggle`, not drawn at
+  768px and up, where the key shows as before). The map's controls stand
+  aside while the sheet is open — keyed to the sheet now, not to a selection,
+  so after Show on map they are back.
+- **Timeline** fits: its grid's one column is held to the screen below
+  768px — the login card's defect, which left the 620px panel off a 320px
+  screen — so `min(620px, 100%)` holds. Its Close is 44px there.
+- **The popup is hidden by CSS, at two classes.** `max-md:hidden` on it lost
+  to Mapbox's own `.mapboxgl-popup { display: flex }` (a tie at one class,
+  lost on source order): the popup stayed on screen and its keep-clear pan
+  moved the map. `globals.css` hides `.ft-popup.mapboxgl-popup` below 768px,
+  and FleetMap skips the keep-clear pan for a popup with no box.
+
+**Checks.** Unmarked and passing at every size: the truck sheet (fits; every
+field; the ETA's basis; the note; Call driver a 44px `tel:` link for Ana and
+none for Marko; no `sms:` anywhere; nothing scrolls sideways), every control
+on the Map tab at least 44px, the marker key folded behind a button, and the
+timeline (fits, no sideways scroll). Added: a marker's tap opens the sheet,
+and the map's controls stand aside while it is open. Still expected to fail,
+for stage 4: feed down (the banner's sentence), the scope menu's width, 12px.
+
+**Existing tests changed by stage 3: one.** `phone-editing.spec.ts` asserted
+the popup's "Editing is on the desktop console" at phone sizes; the popup is
+not drawn there now, so it asserts the sheet's.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -58,22 +58,23 @@ for (const phone of PHONES) {
     await page.goto('/');
     await tab(page, 'list').waitFor();
 
-    // A card's tap shows the truck on the map: details, Timeline — and the
-    // note, not Edit load.
+    // §12.96, stage 3: a card's tap opens the truck sheet — details,
+    // Timeline, and the note where Edit load was.
     await card(page, IDS.truckChicago).tap();
-    await expect(tab(page, 'map')).toHaveAttribute('aria-selected', 'true');
-    const timeline = page.getByRole('button', { name: 'Timeline' });
-    await expect(timeline).toBeVisible({ timeout: 15_000 });
+    const sheet = page.locator('[data-truck-sheet]');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Timeline' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit load' })).toHaveCount(0);
-    await expect(page.locator('.mapboxgl-popup [data-desktop-only]')).toHaveText(NOTE);
+    await expect(sheet.locator('[data-desktop-only]')).toHaveText(NOTE);
 
-    // A card: Enter on the selection, and a double-tap.
-    await tab(page, 'list').tap();
-    await card(page, IDS.truckChicago).tap();
+    // Enter on the selection, and a double-tap on a card.
     await page.keyboard.press('Enter');
-    await tab(page, 'list').tap();
+    await expect(editor(page)).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Close' }).tap();
     await card(page, IDS.truckDallas).dblclick();
     await expect(editor(page)).toHaveCount(0);
+    if ((await sheet.count()) > 0)
+      await sheet.getByRole('button', { name: 'Close' }).tap();
 
     // No bulk edit can start: a phone draws no checkbox to check.
     await tab(page, 'list').tap();

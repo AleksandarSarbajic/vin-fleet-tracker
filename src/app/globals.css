@@ -42,6 +42,20 @@
   }
 
   /**
+   * §12.96, stage 3. Below 768px the truck sheet stands in for the popup.
+   * Two classes for the same reason as above: `max-md:hidden` on the popup
+   * ties with Mapbox's `.mapboxgl-popup { display: flex }` at 0-1-0 and loses
+   * on source order — the popup stayed on screen, and the map kept panning to
+   * hold it clear of the controls. FleetMap skips that pan for a popup with no
+   * box. `md` is 768px; the query is written out because this is plain CSS.
+   */
+  @media (max-width: 767px) {
+    .ft-popup.mapboxgl-popup {
+      display: none;
+    }
+  }
+
+  /**
    * The 3px status rail in column one (spec §5.5). Every other rail state is
    * a flat token and uses a `bg-*` utility directly; these two are repeating
    * gradients, which Tailwind has no utility for. The colour still comes from

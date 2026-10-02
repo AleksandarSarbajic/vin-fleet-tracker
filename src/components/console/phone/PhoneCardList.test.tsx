@@ -67,7 +67,8 @@ describe('a card', () => {
     expect(field('status')).toMatch(/late/i);
     expect(field('driver')).toBe('Ana Petrovic');
     expect(field('city')).toBe('Chicago, IL');
-    expect(field('time')).toContain(local(START));
+    // Labelled, so a time on a card never reads as an ETA (§12.96, stage 3).
+    expect(field('time')).toMatch(new RegExp(`^Appt ${local(START)}`));
   });
 
   it('an FCFS stop reads "by" its closing time, as the desktop Appt cell does', () => {
@@ -76,7 +77,7 @@ describe('a card', () => {
         nextStop: { apptStartUtc: START, apptEndUtc: END, apptTz: ZONE, apptType: 'FCFS' },
       }),
     ]);
-    expect(field('time')).toMatch(new RegExp(`^by ${local(END)}`));
+    expect(field('time')).toMatch(new RegExp(`^Appt by ${local(END)}`));
   });
 
   it('says what is missing rather than printing a dash', () => {

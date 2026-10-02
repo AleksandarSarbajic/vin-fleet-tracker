@@ -12,7 +12,7 @@ import { apptText } from '../TruckRow';
  * 768px only (`md:hidden`; the desktop list beside it is `max-md:hidden`).
  *
  *   line 1  truck number                                  status chip
- *   line 2  driver · next-stop city · appointment
+ *   line 2  driver · next-stop city · Appt 14:30 CDT
  *
  * The time is the desktop's Appt cell exactly — `by 15:00 CDT` for an FCFS
  * stop — because that is the column the desktop keeps when it is narrow
@@ -96,7 +96,9 @@ function Card({
       : (stop.addressLine ?? 'No address')
     : 'No next stop';
   const appt = apptText(row);
-  const time = appt.time === '—' ? 'No appt' : `${appt.prefix ? `${appt.prefix} ` : ''}${appt.time}`;
+  // "Appt" says what kind of time it is (stage 3): never mistaken for an ETA.
+  const time =
+    appt.time === '—' ? 'No appt' : `Appt ${appt.prefix ? `${appt.prefix} ` : ''}${appt.time}`;
 
   return (
     <button

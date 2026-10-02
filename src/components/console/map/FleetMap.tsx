@@ -83,6 +83,12 @@ interface Props {
   /** Incremented on split drag-end. The map reflows then, never mid-drag. */
   resizeSignal: number;
   reducedMotion: boolean;
+  /**
+   * §12.96, stage 3. The phone's truck sheet is open over the map: its own
+   * controls (zoom, style, the key) stand aside until it closes. Never true
+   * at 768px and up, where the sheet does not exist.
+   */
+  sheetOpen?: boolean;
 }
 
 export function FleetMap({
@@ -96,6 +102,7 @@ export function FleetMap({
   onTimeline,
   resizeSignal,
   reducedMotion,
+  sheetOpen = false,
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
   /** The map pane: the map fills it, and the controls sit on top of it. */
@@ -201,6 +208,9 @@ export function FleetMap({
     const frame = frameRef.current;
     const popup = frame?.querySelector('.ft-popup');
     if (!map || !frame || !popup) return;
+    // §12.96: on a phone the popup is not drawn (the truck sheet is). A box of
+    // nothing at 0,0 would read as a popup far off the map and pan to it.
+    if (popup.getBoundingClientRect().width === 0) return;
     const { dx, dy } = popupClearance(
       rectOf(popup),
       rectOf(frame),
@@ -375,9 +385,9 @@ export function FleetMap({
           then spilled up over the tiles and took their taps. Clipped there. */}
       <div
         ref={frameRef}
-        // `data-popup-open`: on a phone the map's own controls stand aside
-        // while a truck's popup is up (MapChrome), so nothing covers it.
-        {...(selectedRow ? { 'data-popup-open': '' } : {})}
+        // `data-sheet-open`: on a phone the map's own controls stand aside
+        // while the truck sheet is up (MapChrome).
+        {...(sheetOpen ? { 'data-sheet-open': '' } : {})}
         className="group/map relative min-h-0 flex-1 max-md:overflow-hidden"
       >
         <ZoomControl onZoom={zoom} />

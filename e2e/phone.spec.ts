@@ -6,6 +6,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { IDS, connect, resetWorld } from './fixtures';
+import { maskPhone } from '../src/lib/dial';
 
 /**
  * §12.96 — the phone view's checks, written BEFORE the phone view exists.
@@ -40,11 +41,7 @@ const ANA_PHONE = '3125550101';
 
 /** The checks the current app cannot pass, and the stage that makes them pass. */
 const NOT_YET: Record<string, string> = {
-  'every control on the Map tab is at least 44px': 'stage 3',
   'feed down is visible, its sentence whole': 'stage 1 (top bar) and 4 (banner)',
-  'the truck sheet fits and calls only a dialable number': 'stage 3',
-  'the marker key is folded behind a button': 'stage 3',
-  'the timeline fits the screen width': 'stage 3',
   'the scope menu fits the screen': 'stage 4',
   'no text under 12px': 'stage 4',
 };
@@ -491,28 +488,96 @@ check('the truck sheet fits and calls only a dialable number', async (page, size
       `${size.name}: sheet fits`,
     )
     .toBe(true);
+  // Nothing cut: the facts scroll inside the sheet, never sideways.
+  const sideways = await sheet.evaluate((el) =>
+    [el, ...el.querySelectorAll('*')].some(
+      (n) =>
+        (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1 &&
+        getComputedStyle(n).overflowX !== 'visible',
+    ),
+  );
+  expect.soft(sideways, `${size.name}: the sheet scrolls sideways`).toBe(false);
+  const close = sheet.getByRole('button', { name: 'Close' });
+  expect
+    .soft((await close.boundingBox())!.height, `${size.name}: Close height`)
+    .toBeGreaterThanOrEqual(44);
   for (const field of [
     'status',
     'next-stop',
     'appointment',
     'eta',
     'position',
+    'speed',
     'gps-age',
     'load',
+    'driver',
   ]) {
     await expect
       .soft(sheet.locator(`[data-sheet-field="${field}"]`), `${size.name}: ${field}`)
       .toBeVisible();
   }
   await expect
-    .soft(sheet.locator('a[href^="tel:"]'))
-    .toHaveAttribute('href', `tel:+1${ANA_PHONE}`);
-  await expect.soft(sheet.locator('a[href^="sms:"]')).toHaveCount(0, { timeout: 2_000 });
-  // Marko has no number: no call link at all.
-  await page.locator(`[data-phone-card="${IDS.truckDallas}"]`).tap();
+    .soft(sheet.locator('[data-sheet-field="eta"]'))
+    .toContainText(/routed|straight-line estimate|estimated from last route/);
   await expect
-    .soft(page.locator('[data-truck-sheet] a[href^="tel:"]'))
-    .toHaveCount(0, { timeout: 2_000 });
+    .soft(sheet.locator('[data-desktop-only]'))
+    .toHaveText('Editing is on the desktop console');
+  // Ana's number dials. Compared, never printed: a failure names the last
+  // three digits only.
+  const call = sheet.locator('a[href^="tel:"]');
+  await expect.soft(call, `${size.name}: Call driver`).toHaveCount(1);
+  const href = (await call.getAttribute('href')) ?? '';
+  expect
+    .soft(
+      href === `tel:+1${ANA_PHONE}`,
+      `${size.name}: calls tel:+1${maskPhone(ANA_PHONE)}`,
+    )
+    .toBe(true);
+  expect
+    .soft((await call.boundingBox())!.height, `${size.name}: Call height`)
+    .toBeGreaterThanOrEqual(44);
+  await expect.soft(page.locator('a[href^="sms:"]')).toHaveCount(0);
+  // Marko has no number: no call link at all.
+  await close.tap();
+  await page.locator(`[data-phone-card="${IDS.truckDallas}"]`).tap();
+  await expect(page.locator('[data-truck-sheet]')).toHaveAttribute(
+    'aria-label',
+    'Truck 102',
+  );
+  await expect.soft(page.locator('[data-truck-sheet] a[href^="tel:"]')).toHaveCount(0);
+});
+
+/**
+ * A marker's tap opens the sheet too. "Show on map" pans the map to the truck,
+ * so its marker is then the canvas's centre (on a phone the popup is not drawn,
+ * so nothing nudges the map off it). Dallas, alone on the map.
+ */
+check('a marker tap opens the truck sheet', async (page, size) => {
+  await board(page);
+  await page.locator(`[data-phone-card="${IDS.truckDallas}"]`).tap({ timeout: 3_000 });
+  await page
+    .locator('[data-truck-sheet]')
+    .getByRole('button', { name: 'Show on map' })
+    .tap();
+  await expect(page.locator('[data-truck-sheet]')).toHaveCount(0);
+  await expect(page.locator('[data-phone-tab="map"]')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  const canvas = page.locator('canvas.mapboxgl-canvas');
+  await expect(async () => {
+    const box = (await canvas.boundingBox())!;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.locator('[data-truck-sheet]')).toHaveAttribute(
+      'aria-label',
+      'Truck 102',
+      {
+        timeout: 1_000,
+      },
+    );
+  }, `${size.name}: the marker opens the sheet`).toPass({ timeout: 10_000 });
+  // The map's own controls stand aside while it is open.
+  await expect(page.getByRole('button', { name: 'Zoom in' })).toBeHidden();
 });
 
 check('the marker key is folded behind a button', async (page, size) => {
@@ -540,6 +605,14 @@ check('the timeline fits the screen width', async (page, size) => {
     return b.left >= 0 && b.right <= vw;
   }, size.width);
   expect.soft(fits, `${size.name}: timeline inside the screen`).toBe(true);
+  const sideways = await panel.evaluate((el) =>
+    [el, ...el.querySelectorAll('*')].some(
+      (n) =>
+        (n as HTMLElement).scrollWidth > (n as HTMLElement).clientWidth + 1 &&
+        getComputedStyle(n).overflowX !== 'visible',
+    ),
+  );
+  expect.soft(sideways, `${size.name}: the timeline scrolls sideways`).toBe(false);
 });
 
 check('the scope menu fits the screen', async (page, size) => {

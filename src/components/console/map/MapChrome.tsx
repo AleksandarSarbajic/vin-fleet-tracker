@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { STATUSES, type Status } from '@/lib/status';
 import { STATUS_LABEL } from '@/lib/status';
 import { elapsed } from '@/lib/format';
@@ -177,14 +178,14 @@ export function ZoomControl({
   onZoom: (direction: 1 | -1) => void;
 }) {
   return (
-    <div data-map-control className="absolute right-4 top-[14px] z-10 flex flex-col border border-line-hair max-md:group-data-[popup-open]/map:hidden">
+    <div data-map-control className="absolute right-4 top-[14px] z-10 flex flex-col border border-line-hair max-md:group-data-[sheet-open]/map:hidden">
       {([1, -1] as const).map((d) => (
         <button
           key={d}
           type="button"
           onClick={() => onZoom(d)}
           aria-label={d === 1 ? 'Zoom in' : 'Zoom out'}
-          className={`flex h-8 w-8 items-center justify-center bg-surface-raised font-sans text-base text-text ${d === 1 ? 'border-b border-line-hair' : ''}`}
+          className={`flex h-8 w-8 items-center justify-center bg-surface-raised font-sans text-base text-text max-md:h-11 max-md:w-11 ${d === 1 ? 'border-b border-line-hair' : ''}`}
         >
           {d === 1 ? '+' : '−'}
         </button>
@@ -205,7 +206,8 @@ const BASEMAP_LABEL: Record<Basemap, string> = { dark: 'Map', satellite: 'Satell
  * be covered for six seconds at a time.
  *
  * `right-[56px]` is the zoom stack's 16px inset + 34px width + a 6px gap, so
- * the two read as one cluster of map controls at the same height.
+ * the two read as one cluster of map controls at the same height. On a phone
+ * (§12.96, stage 3) both are 44px, so the gap rule gives `right-[68px]`.
  *
  * A joined pair rather than density's separated one: over satellite imagery a
  * gap between two buttons is a strip of photograph, which reads as clutter. The
@@ -224,7 +226,7 @@ export function BasemapToggle({
       role="group"
       aria-label="Basemap"
       data-map-control
-      className="absolute right-[56px] top-[14px] z-10 flex border border-line-hair bg-surface-raised max-md:group-data-[popup-open]/map:hidden"
+      className="absolute right-[56px] top-[14px] z-10 flex border border-line-hair bg-surface-raised max-md:right-[68px] max-md:group-data-[sheet-open]/map:hidden"
     >
       {BASEMAPS.map((option, index) => {
         const active = option === basemap;
@@ -234,7 +236,7 @@ export function BasemapToggle({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(option)}
-            className={`flex h-8 items-center px-3 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground ${
+            className={`flex h-8 items-center px-3 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground max-md:h-11 max-md:min-w-11 max-md:justify-center ${
               index > 0 ? 'border-l border-line-hair' : ''
             } ${
               active
@@ -250,11 +252,42 @@ export function BasemapToggle({
   );
 }
 
+/**
+ * The key. On a phone (§12.96, stage 3) it is folded behind a 44px Key
+ * button: open, it covered a third of a 320px map. At 768px and up it is
+ * always shown, as it was, and the button is not drawn.
+ */
 export function MarkerKey() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        data-map-control
+        data-marker-key-toggle=""
+        aria-expanded={open}
+        aria-label={open ? 'Hide the marker key' : 'Show the marker key'}
+        onClick={() => setOpen((was) => !was)}
+        className={`absolute bottom-[14px] right-4 z-10 flex h-11 min-w-11 items-center justify-center border px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] md:hidden max-md:group-data-[sheet-open]/map:hidden ${
+          open
+            ? 'border-accent bg-surface-overlay text-text'
+            : 'border-line-hair bg-surface-raised text-text-secondary'
+        }`}
+      >
+        Key
+      </button>
+      <MarkerKeyPanel open={open} />
+    </>
+  );
+}
+
+function MarkerKeyPanel({ open }: { open: boolean }) {
   return (
     <div
       data-map-control
-      className="absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px] max-md:group-data-[popup-open]/map:hidden"
+      className={`absolute bottom-[14px] right-4 z-10 flex flex-col gap-[5px] border border-line-hair bg-surface-scrim px-[11px] py-[9px] max-md:group-data-[sheet-open]/map:hidden ${
+        open ? 'max-md:bottom-[66px]' : 'max-md:hidden'
+      }`}
     >
       <span className="mb-0.5 font-cond text-micro uppercase text-text-muted">
         Marker key

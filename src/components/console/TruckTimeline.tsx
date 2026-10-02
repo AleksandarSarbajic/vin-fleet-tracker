@@ -100,7 +100,13 @@ export function TruckTimeline({
 
   return (
     <div
-      className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+      /*
+       * §12.96, stage 3. Below 768px the grid's one column is held to the
+       * screen: left to itself the track grew to the 620px panel, and the
+       * panel's `max-w-full` measured against that track and fit nothing —
+       * the login card's defect (stage 1). `min(620px, 100%)` now holds.
+       */
+      className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6 max-md:grid-cols-[minmax(0,1fr)] max-md:p-3"
       role="dialog"
       aria-modal="true"
       aria-label={`Timeline for truck ${truckLabel}`}
@@ -119,7 +125,7 @@ export function TruckTimeline({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 border border-line-hair px-3 py-1 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+            className="shrink-0 border border-line-hair px-3 py-1 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover max-md:h-11 max-md:min-w-11"
           >
             Close
           </button>

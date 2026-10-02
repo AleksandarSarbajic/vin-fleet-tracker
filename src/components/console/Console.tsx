@@ -63,6 +63,9 @@ import { PhoneTopBar } from './phone/PhoneTopBar';
 import { PhoneNotes, PhoneTiles } from './phone/PhoneTiles';
 import { PhoneMoreSheet } from './phone/PhoneMoreSheet';
 import { PhoneCardList } from './phone/PhoneCardList';
+import { TruckSheet } from './phone/TruckSheet';
+import { dialableTel } from '@/lib/dial';
+import { isPhoneNow } from '@/lib/phone';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -749,15 +752,36 @@ export function Console({
     [onResizeEnd],
   );
   /**
-   * A tapped card, until stage 3's truck sheet: select the truck and show it
-   * on the map with its popup — details, Timeline, and where the editor
-   * would be, "Editing is on the desktop console". The List tab is the way
-   * back, and the list keeps its scroll while hidden.
+   * §12.96, stage 3. The phone's truck sheet, in place of the map popup: a
+   * card's tap opens it over the list, a marker's over the map.
    */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const tapCard = useCallback(
     (id: string) => {
       select(id);
+      setSheetOpen(true);
+    },
+    [select],
+  );
+  /**
+   * The map's own selection. On a phone a marker's tap opens the sheet; at
+   * 768px and up nothing changes — the popup is the map's, as before. Asked
+   * at the moment of the tap, the way the editing rule is (§12.94).
+   */
+  const selectFromMap = useCallback(
+    (id: string | null) => {
+      select(id);
+      if (id !== null && isPhoneNow()) setSheetOpen(true);
+    },
+    [select],
+  );
+  /** "Show on map": the sheet steps aside and the map pans to the truck. */
+  const showOnMap = useCallback(
+    (id: string) => {
+      setSheetOpen(false);
       showPane('map');
+      // Selecting again asks the map to pan, even to the truck already selected.
+      select(id);
     },
     [select, showPane],
   );
@@ -850,6 +874,19 @@ export function Console({
           onPane={showPane}
         />
         <PhoneNotes notes={headerNotes} />
+        {sheetOpen && selectedRow ? (
+          <TruckSheet
+            row={selectedRow}
+            fetchedAt={data?.fetchedAt ?? null}
+            feedStale={feedStale}
+            // The number from the drivers list the console already holds, by
+            // the truck its driver is on: no new data reaches the browser.
+            tel={dialableTel(drivers.find((d) => d.truckId === selectedRow.id)?.phone)}
+            onClose={() => setSheetOpen(false)}
+            onTimeline={setTimelineId}
+            onShowOnMap={showOnMap}
+          />
+        ) : null}
         {moreOpen ? (
           <PhoneMoreSheet
             rows={scoped}
@@ -1017,10 +1054,11 @@ export function Console({
                   feedStale={data?.feedStale ?? false}
                   selectedId={selectedId}
                   panRequest={panRequest}
-                  onSelect={select}
+                  onSelect={selectFromMap}
                   onEdit={editingAllowed ? openEditor : null}
                   onTimeline={setTimelineId}
                   resizeSignal={resizeSignal}
+                  sheetOpen={sheetOpen && selectedRow !== null}
                   reducedMotion={reducedMotion}
                 />
               }
