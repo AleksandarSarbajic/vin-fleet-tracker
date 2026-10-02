@@ -253,6 +253,14 @@ for (const width of WIDTHS) {
     await page.getByRole('button', { name: 'Edit load' }).click();
     await page.locator('[role="dialog"][aria-label^="Edit stop"]').waitFor();
     await page.waitForTimeout(400);
+    /*
+     * Parked, like every other state. The click on Edit load left the pointer
+     * wherever the popup had been — the camera's call, not held — and the
+     * modal opens under it: at 768 and 1024 the stage-0 baseline caught the
+     * arrival checkbox in its hover shade (32 pixels). Re-baselined on the
+     * unchanged stage-1 code with only this line added (§12.96, stage 2).
+     */
+    await page.mouse.move(2, HEIGHT - 2);
     await shoot(page, '7-edit-stop', width);
     await page.keyboard.press('Escape');
 

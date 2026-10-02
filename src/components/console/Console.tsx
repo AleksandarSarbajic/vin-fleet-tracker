@@ -62,6 +62,7 @@ import { useResumeRefetch } from '@/hooks/useResumeRefetch';
 import { PhoneTopBar } from './phone/PhoneTopBar';
 import { PhoneNotes, PhoneTiles } from './phone/PhoneTiles';
 import { PhoneMoreSheet } from './phone/PhoneMoreSheet';
+import { PhoneCardList } from './phone/PhoneCardList';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -734,6 +735,46 @@ export function Console({
   const [resizeSignal, setResizeSignal] = useState(0);
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
 
+  /**
+   * §12.96, stage 2. The phone's List | Map tabs, list first. The map stays
+   * mounted behind its tab (Split hides it with CSS), so showing it asks it
+   * to measure again, the same signal a split drag sends.
+   */
+  const [phonePane, setPhonePane] = useState<'list' | 'map'>('list');
+  const showPane = useCallback(
+    (pane: 'list' | 'map') => {
+      setPhonePane(pane);
+      if (pane === 'map') onResizeEnd();
+    },
+    [onResizeEnd],
+  );
+  /**
+   * A tapped card, until stage 3's truck sheet: select the truck and show it
+   * on the map with its popup — details, Timeline, and where the editor
+   * would be, "Editing is on the desktop console". The List tab is the way
+   * back, and the list keeps its scroll while hidden.
+   */
+  const tapCard = useCallback(
+    (id: string) => {
+      select(id);
+      showPane('map');
+    },
+    [select, showPane],
+  );
+  /** The phone lists every truck in order, pinned ones in place: it has no pinned block. */
+  const phoneEmpty = useMemo(
+    () =>
+      emptyState({
+        total: scoped.length,
+        afterChips: rows.length,
+        afterSearch: filtered.length,
+        listed: ordered.length,
+        query,
+        chipCount: chips.size,
+      }),
+    [scoped.length, rows.length, filtered.length, ordered.length, query, chips],
+  );
+
   return (
     /*
      * §14.5. One layer for the cheat sheet, the palette and the tour, so two
@@ -805,6 +846,8 @@ export function Console({
           onReset={resetChips}
           onMore={() => setMoreOpen(true)}
           moreOpen={moreOpen}
+          pane={phonePane}
+          onPane={showPane}
         />
         <PhoneNotes notes={headerNotes} />
         {moreOpen ? (
@@ -907,6 +950,7 @@ export function Console({
           <div className="relative flex min-h-0 flex-1 flex-col">
             <Split
               onResizeEnd={onResizeEnd}
+              phonePane={phonePane}
               /*
                * `min-h-0` beside `h-full` on the wrapper below.
                *
@@ -922,34 +966,47 @@ export function Console({
                 <div className="flex h-full min-h-0 flex-col">
                   {/* §14.5: the strip is read with the list, not the header. */}
                   <ListToolbar density={density} onDensity={setDensity} health={health} />
-                  <FleetList
-                    density={density}
-                    checked={bulk.checked}
-                    onCheck={bulk.toggle}
-                    pinnedRows={pinnedRows}
-                    flashFor={flashFor}
-                    reducedMotion={reducedMotion}
-                    isPinned={pins.isPinned}
-                    onPin={pins.toggle}
-                    pinRefused={pins.refused}
-                    bulk={{
-                      barOpen: bulk.barOpen,
-                      onForceStatus: editingAllowed ? () => setBulkAction('status') : null,
-                      onAddNote: editingAllowed ? () => setBulkAction('note') : null,
-                      ...(canEditLists ? { onAddToList: () => setAddingToList(true) } : {}),
-                      onClear: bulk.clear,
-                    }}
-                    rows={unpinnedRows}
-                    fetchedAt={data?.fetchedAt ?? null}
-                    feedStale={data?.feedStale ?? false}
+                  {/* §12.96: below 768px the cards stand in for it. `contents`
+                      gives the wrapper no box of its own at 768 and up. */}
+                  <div className="contents max-md:hidden">
+                    <FleetList
+                      density={density}
+                      checked={bulk.checked}
+                      onCheck={bulk.toggle}
+                      pinnedRows={pinnedRows}
+                      flashFor={flashFor}
+                      reducedMotion={reducedMotion}
+                      isPinned={pins.isPinned}
+                      onPin={pins.toggle}
+                      pinRefused={pins.refused}
+                      bulk={{
+                        barOpen: bulk.barOpen,
+                        onForceStatus: editingAllowed ? () => setBulkAction('status') : null,
+                        onAddNote: editingAllowed ? () => setBulkAction('note') : null,
+                        ...(canEditLists ? { onAddToList: () => setAddingToList(true) } : {}),
+                        onClear: bulk.clear,
+                      }}
+                      rows={unpinnedRows}
+                      fetchedAt={data?.fetchedAt ?? null}
+                      feedStale={data?.feedStale ?? false}
+                      selectedId={selectedId}
+                      query={query}
+                      empty={empty}
+                      onEmptyAction={onEmptyAction}
+                      drift={drift}
+                      onResort={resort}
+                      onSelect={select}
+                      onEdit={editingAllowed ? openEditor : null}
+                    />
+                  </div>
+                  <PhoneCardList
+                    rows={ordered}
                     selectedId={selectedId}
-                    query={query}
-                    empty={empty}
-                    onEmptyAction={onEmptyAction}
-                    drift={drift}
-                    onResort={resort}
-                    onSelect={select}
-                    onEdit={editingAllowed ? openEditor : null}
+                    feedStale={feedStale}
+                    fetchedAt={data?.fetchedAt ?? null}
+                    reducedMotion={reducedMotion}
+                    empty={phoneEmpty}
+                    onTap={tapCard}
                   />
                 </div>
               }

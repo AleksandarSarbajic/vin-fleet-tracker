@@ -16,6 +16,12 @@ import type { SavedView } from '@/lib/views';
  * Row 1: the monogram, the scope button with its ×, search, the account
  * menu — every control 44px. Row 2: the feed, always visible.
  *
+ * On a SHORT screen (480px tall or less: a phone on its side) the feed moves
+ * into row 1, between the scope and search, so the bar is one 56px line
+ * (§12.96, stage 2). Row 1 becomes `display: contents` there and `order`
+ * places the feed. While searching, the field keeps the whole width and the
+ * feed keeps its own line.
+ *
  * It handles no keys (§12.96): the desktop header is still mounted, hidden,
  * and its listeners for `/`, `V` and 0–8 are the only ones. Search here is a
  * tap that opens a full-width field.
@@ -69,10 +75,14 @@ export function PhoneTopBar({
   return (
     <div
       data-phone-topbar=""
-      className="sticky top-0 z-20 shrink-0 border-b border-line-soft bg-surface-raised md:hidden"
+      className={`sticky top-0 z-20 flex shrink-0 flex-wrap items-center border-b border-line-soft bg-surface-raised md:hidden ${
+        searching
+          ? ''
+          : '[@media(max-height:480px)]:h-14 [@media(max-height:480px)]:flex-nowrap [@media(max-height:480px)]:gap-2 [@media(max-height:480px)]:px-3'
+      }`}
     >
       {searching ? (
-        <div className="relative flex h-14 items-center px-2">
+        <div className="relative flex h-14 w-full items-center px-2">
           <input
             type="search"
             autoFocus
@@ -113,7 +123,7 @@ export function PhoneTopBar({
           </button>
         </div>
       ) : (
-        <div className="flex h-14 items-center gap-2 px-3">
+        <div className="flex h-14 w-full items-center gap-2 px-3 [@media(max-height:480px)]:contents">
           <Image
             src={BRAND.monogram.src}
             width={BRAND.monogram.width}
@@ -142,7 +152,7 @@ export function PhoneTopBar({
             data-phone-search=""
             aria-label="Search"
             onClick={() => setSearching(true)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center border border-line-control text-text-secondary"
+            className="flex h-11 w-11 shrink-0 items-center justify-center border border-line-control text-text-secondary [@media(max-height:480px)]:order-2"
           >
             <svg
               width="18"
@@ -157,7 +167,9 @@ export function PhoneTopBar({
               <path d="m20 20-3.5-3.5" />
             </svg>
           </button>
-          <AccountMenu user={user} phone />
+          <div className="shrink-0 [@media(max-height:480px)]:order-2">
+            <AccountMenu user={user} phone />
+          </div>
         </div>
       )}
 
@@ -166,6 +178,7 @@ export function PhoneTopBar({
         feedNewestAt={feedNewestAt}
         feedStale={feedStale}
         updating={updating}
+        inline={!searching}
       />
     </div>
   );
@@ -182,11 +195,14 @@ function PhoneFeed({
   feedNewestAt,
   feedStale,
   updating,
+  inline,
 }: {
   fetchedAt: string | null;
   feedNewestAt: string | null;
   feedStale: boolean;
   updating: boolean;
+  /** On a short screen, inside row 1 rather than a line of its own. */
+  inline: boolean;
 }) {
   // Seeded from the fetch, as the desktop header is, so the server's render
   // and the browser's agree (ConsoleHeader's note).
@@ -206,7 +222,11 @@ function PhoneFeed({
   return (
     <div
       data-phone-feed=""
-      className="flex h-8 items-center gap-3 px-3 font-sans text-[12px]"
+      className={`flex h-8 w-full items-center gap-3 px-3 font-sans text-[12px] ${
+        inline
+          ? '[@media(max-height:480px)]:order-1 [@media(max-height:480px)]:h-auto [@media(max-height:480px)]:w-auto [@media(max-height:480px)]:shrink-0 [@media(max-height:480px)]:px-0'
+          : ''
+      }`}
     >
       {/* The desktop header's live region is hidden with it; this is the phone's. */}
       <span role="status" aria-live="polite" className="sr-only">

@@ -40,16 +40,17 @@ const ANA_PHONE = '3125550101';
 
 /** The checks the current app cannot pass, and the stage that makes them pass. */
 const NOT_YET: Record<string, string> = {
-  'every control used is at least 44px': 'stages 1–3',
+  'every control on the Map tab is at least 44px': 'stage 3',
   'feed down is visible, its sentence whole': 'stage 1 (top bar) and 4 (banner)',
-  'every row field is readable without sideways scrolling': 'stage 2',
-  'the map mounts once across List/Map switches': 'stage 2',
   'the truck sheet fits and calls only a dialable number': 'stage 3',
   'the marker key is folded behind a button': 'stage 3',
   'the timeline fits the screen width': 'stage 3',
   'the scope menu fits the screen': 'stage 4',
   'no text under 12px': 'stage 4',
 };
+
+/** The shared list `seed` makes: "Bob's trucks", trucks 200–211. */
+let bobsList = '';
 
 async function seed(options: { feedDown?: boolean } = {}): Promise<void> {
   // 101 and 102 late (appointment 2 h gone, drivers), 103 unassigned, 12 more.
@@ -60,6 +61,11 @@ async function seed(options: { feedDown?: boolean } = {}): Promise<void> {
   const sql = connect();
   try {
     await sql`update drivers set phone = ${ANA_PHONE} where id = ${IDS.driverAna}`;
+    const [list] = await sql<{ id: string }[]>`
+      insert into truck_lists (name) values (${"Bob's trucks"}) returning id`;
+    await sql`insert into truck_list_members (list_id, truck_id)
+              select ${list!.id}, id from trucks where truck_number between 200 and 211`;
+    bobsList = list!.id;
     if (options.feedDown) {
       const at = new Date(Date.now() - 25 * 60_000);
       await sql`update feed_health set newest_position_at = ${at}, last_success_at = ${at}`;
@@ -190,22 +196,83 @@ async function check(
 
 check('no control is cut off by the screen edge', async (page, size) => {
   await board(page);
-  const cut = (await controls(page, size.width)).filter((c) => c.cut).map((c) => c.name);
-  expect.soft(cut, `${size.name}: controls past the screen edge`).toEqual([]);
+  // Both tabs: the list first, as the board opens, then the map.
+  for (const tab of ['list', 'map'] as const) {
+    if (tab === 'map') await page.locator('[data-phone-tab="map"]').tap();
+    const cut = (await controls(page, size.width))
+      .filter((c) => c.cut)
+      .map((c) => c.name);
+    expect
+      .soft(cut, `${size.name}, ${tab} tab: controls past the screen edge`)
+      .toEqual([]);
+  }
 });
 
 /**
  * The map footer's credit links (`map-credits`) are the one exemption: text
  * links the Mapbox terms require, not controls anyone uses to check the board.
  * Their TEXT is held to 12px like everything else we draw (below).
+ *
+ * Split by tab in stage 2: the board opens on the List tab, where the hidden
+ * map's controls have no size and are not measured at all. The Map tab's
+ * controls (zoom, style, the marker key) are stage 3's.
  */
-check('every control used is at least 44px', async (page, size) => {
-  await board(page);
-  const small = (await controls(page, size.width))
+const under44 = async (page: Page, vw: number) =>
+  (await controls(page, vw))
     .filter((c) => !c.credit && (c.h < 44 || c.w < 44))
     .map((c) => `${c.name} ${c.w}x${c.h}`);
-  expect.soft(small, `${size.name}: controls under 44px`).toEqual([]);
+
+check('every control on the List tab is at least 44px', async (page, size) => {
+  await board(page);
+  await expect(page.locator('[data-phone-tab="list"]')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  expect
+    .soft(await under44(page, size.width), `${size.name}: controls under 44px`)
+    .toEqual([]);
 });
+
+check('every control on the Map tab is at least 44px', async (page, size) => {
+  await board(page);
+  await page.locator('[data-phone-tab="map"]').tap({ timeout: 3_000 });
+  await page.locator('canvas.mapboxgl-canvas').waitFor();
+  expect
+    .soft(await under44(page, size.width), `${size.name}: controls under 44px`)
+    .toEqual([]);
+});
+
+/** §12.96, stage 2: "Bob's trucks" whole in the scope button, at 320 too. */
+check("a list's name reads whole in the scope button", async (page, size) => {
+  await board(page, `/?list=${bobsList}`);
+  const name = page.locator('[data-phone-scope-name]');
+  await expect(name).toHaveText("Bob's trucks");
+  const whole = await name.evaluate(
+    (el, vw) =>
+      el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= vw,
+    size.width,
+  );
+  expect.soft(whole, `${size.name}: the list's name is cut`).toBe(true);
+});
+
+/**
+ * §12.96, stage 2. On its side a phone is 375px tall: the top bar, the feed
+ * and the tiles (with the List | Map tabs) take about a third of it at most.
+ */
+check(
+  'on its side, the top bar and tiles take a third of the height at most',
+  async (page, size) => {
+    await board(page);
+    const bottom = await page
+      .locator('[data-phone-tiles]')
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    expect
+      .soft(bottom, `${size.name}: bottom edge of the bar and tiles`)
+      .toBeLessThanOrEqual(Math.ceil(size.height / 3) + 2);
+    await expect(page.locator('[data-phone-feed]')).toBeVisible();
+  },
+  { sizes: [SIZES[5]] },
+);
 
 check('Late and At risk tiles are visible without scrolling', async (page, size) => {
   await board(page);
@@ -454,7 +521,7 @@ check('the marker key is folded behind a button', async (page, size) => {
   await expect
     .soft(page.getByText('Marker key'), `${size.name}: key folded`)
     .toBeHidden({ timeout: 2_000 });
-  await page.locator('[data-marker-key-toggle]').tap();
+  await page.locator('[data-marker-key-toggle]').tap({ timeout: 3_000 });
   await expect.soft(page.getByText('Marker key')).toBeVisible();
 });
 
@@ -464,7 +531,7 @@ check('the timeline fits the screen width', async (page, size) => {
   await page
     .locator('[data-truck-sheet]')
     .getByRole('button', { name: 'Timeline' })
-    .tap();
+    .tap({ timeout: 3_000 });
   const panel = page
     .getByRole('dialog', { name: /Timeline for truck 101/ })
     .locator(':scope > div');

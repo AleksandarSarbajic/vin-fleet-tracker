@@ -7,16 +7,21 @@ import { IDS, resetWorld } from './fixtures';
  * on a phone they were invisible buttons in the middle of the row: at 430px
  * the row's centre was "Copy address", and a tap there copied instead of
  * selecting. With a mouse they still appear on hover and work.
+ *
+ * §12.96, stage 2: below 768px the rows are the phone's cards, which have no
+ * copy or pin buttons at all. The rule still matters on a touch screen 768px
+ * and wider — a tablet, which draws the desktop rows — so that is where this
+ * runs now: 820×1180, an iPad Air held upright.
  */
 
 const SENTINEL = 'clipboard before the tap';
 
-test('touch, 430px: a tap on the middle of a row selects it and copies nothing', async ({
+test('touch, 820px tablet: a tap on the middle of a row selects it and copies nothing', async ({
   browser,
 }) => {
   await resetWorld();
   const context = await browser.newContext({
-    viewport: { width: 430, height: 932 },
+    viewport: { width: 820, height: 1180 },
     isMobile: true,
     hasTouch: true,
     storageState: 'e2e/.auth/dispatcher.json',

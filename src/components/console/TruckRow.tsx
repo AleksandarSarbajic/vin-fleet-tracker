@@ -185,7 +185,7 @@ function stopTitle(row: FleetRow): string | null {
  * closes, and the closing time is what the status engine measures projected
  * arrival against (§12.22). The full window is in the tooltip.
  */
-function apptText(row: FleetRow): { prefix: string | null; time: string } {
+export function apptText(row: FleetRow): { prefix: string | null; time: string } {
   const stop = row.nextStop;
   if (!stop?.apptTz) return { prefix: null, time: '—' };
 

@@ -250,51 +250,72 @@ export function ScopeMenu({
                 } min-[1280px]:max-w-[260px] min-[1440px]:max-w-[320px] min-[1680px]:max-w-[340px] min-[1920px]:max-w-[360px]`
           }
         >
-          {activeList ? (
+          {phone ? (
+            /*
+             * §12.96, stage 2. Two lines on a phone: what kind of scope and how
+             * many trucks, then the NAME on a line of its own. Tag, name and
+             * count side by side left "Bob's trucks" a few letters at 320px.
+             */
+            <span className="flex min-w-0 flex-1 flex-col items-start gap-[3px]">
+              <span
+                className={`font-cond text-[12px] font-semibold uppercase leading-none tracking-[.1em] ${
+                  scoped ? 'text-accent' : 'text-text-secondary'
+                }`}
+              >
+                {[activeList ? 'List' : null, active ? 'View' : null]
+                  .filter(Boolean)
+                  .join(' + ') || 'Fleet'}{' '}
+                · <span className="tabular-nums">{scopeCount}</span>
+              </span>
+              <span
+                data-phone-scope-name=""
+                className="w-full truncate font-sans text-[14px] font-medium leading-tight text-text"
+              >
+                {[activeList?.name, active?.name].filter(Boolean).join(' · ') ||
+                  'All trucks'}
+              </span>
+            </span>
+          ) : (
             <>
-              <KindTag active phone={phone}>
-                List
-              </KindTag>
-              <ScopeName {...(phone ? {} : { 'data-list-title': '' })}>
-                {activeList.name}
-              </ScopeName>
+              {activeList ? (
+                <>
+                  <KindTag active>List</KindTag>
+                  <ScopeName data-list-title="">{activeList.name}</ScopeName>
+                </>
+              ) : null}
+              {active ? (
+                <>
+                  <KindTag active>View</KindTag>
+                  <ScopeName data-view-title="">{active.name}</ScopeName>
+                </>
+              ) : null}
+              {!scoped ? (
+                <>
+                  <KindTag>Fleet</KindTag>
+                  <ScopeName>All trucks</ScopeName>
+                </>
+              ) : null}
+              <span
+                data-scope-count=""
+                className="shrink-0 font-sans text-[13px] font-medium leading-none tabular-nums text-text-secondary"
+              >
+                {scopeCount}
+              </span>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+                className="shrink-0 text-text-secondary"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
             </>
-          ) : null}
-          {active ? (
-            <>
-              <KindTag active phone={phone}>
-                View
-              </KindTag>
-              <ScopeName {...(phone ? {} : { 'data-view-title': '' })}>
-                {active.name}
-              </ScopeName>
-            </>
-          ) : null}
-          {!scoped ? (
-            <>
-              <KindTag phone={phone}>Fleet</KindTag>
-              <ScopeName>All trucks</ScopeName>
-            </>
-          ) : null}
-          <span
-            {...(phone ? {} : { 'data-scope-count': '' })}
-            className="shrink-0 font-sans text-[13px] font-medium leading-none tabular-nums text-text-secondary"
-          >
-            {scopeCount}
-          </span>
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-            className="shrink-0 text-text-secondary"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
+          )}
         </button>
         {scoped ? (
           <button
@@ -547,18 +568,10 @@ export function ScopeMenu({
 }
 
 /** FLEET / LIST / VIEW — never collapses (§12.91). */
-function KindTag({
-  children,
-  active,
-  phone = false,
-}: {
-  children: string;
-  active?: boolean;
-  phone?: boolean;
-}) {
+function KindTag({ children, active }: { children: string; active?: boolean }) {
   return (
     <span
-      {...(phone ? {} : { 'data-kind-tag': '' })}
+      data-kind-tag=""
       className={`shrink-0 border px-[5px] py-[3px] font-cond text-[10px] font-semibold uppercase leading-none tracking-[.1em] ${
         active ? 'border-accent text-accent' : 'border-line-tag text-text-secondary'
       }`}

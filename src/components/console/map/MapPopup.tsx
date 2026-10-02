@@ -193,7 +193,12 @@ export function MapPopup({
       maxWidth="288px"
       className="ft-popup"
     >
-      <div ref={box} className="w-[288px] border border-accent bg-surface-raised">
+      {/* §12.96: on a phone on its side the popup is taller than the map;
+          held under the pane's height there, it scrolls inside itself. */}
+      <div
+        ref={box}
+        className="w-[288px] border border-accent bg-surface-raised max-md:max-h-[55dvh] max-md:overflow-y-auto"
+      >
         <div className="flex items-center justify-between gap-2 border-b border-line-hair px-[10px] py-2">
           <span className="font-sans text-[15px] font-bold tabular-nums text-text">
             {row.truckNumber ?? row.samsaraName}

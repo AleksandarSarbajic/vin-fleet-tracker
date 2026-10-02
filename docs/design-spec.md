@@ -7198,6 +7198,83 @@ nudges the popup wholly inside the map, onto whole pixels, before that one
 shot. It moves the popup, nothing in it, and the tolerance stays zero. Three
 passes at all six widths after it: 18 of 18 identical.
 
+### Stage 2 — cards, List | Map, the map mounted once
+
+Below 768px only.
+
+- **Cards** (`phone/PhoneCardList.tsx`, `data-phone-card`, never
+  `data-row-id`). Line 1: the truck number and the row's own status chip
+  (with its stale age or later-day label). Line 2: the driver, the next
+  stop's city, and the appointment — the desktop's Appt cell exactly, `by
+  15:00 CDT` for an FCFS stop. That is the column the desktop keeps when it is
+  narrow (§12.17 cuts ETA first); the ETA is the truck sheet's, stage 3. A
+  missing value says so: "No driver", "No next stop", "No appt". No checkbox,
+  status rail, copy or pin button. Nothing truncates: a long field wraps, so
+  every field reads whole at 320. At least 44px tall. The phone lists every
+  truck in the console's order, pinned ones in place — it has no pinned
+  block — so it computes its own empty state over what it shows.
+- **List | Map** (`data-phone-tab`), 44px, list first, under the tiles.
+- **The map is mounted once.** Below 1086px `Split` used to render ONE pane,
+  `{mapVisible ? map : list}`, so every switch threw the map away and built a
+  new one. Both panes are mounted now and CSS hides one: the desktop toggle's
+  rule at 768px and up (`md:hidden`), the phone tab's below (`max-md:hidden`).
+  Showing a hidden map sends the resize signal a split drag sends. A map that
+  loads inside a hidden pane skips its fleet fit, which in a 0×0 box means
+  nothing, and fits on the first resize that finds a size. At 768–1085 the
+  toggle, its label and its default (map first) are unchanged; what changes
+  there is that the map keeps its camera across a toggle instead of starting
+  again from the fleet fit.
+- **A tapped card, until the truck sheet**: selects the truck and shows the
+  Map tab with its popup — details, Timeline, and "Editing is on the desktop
+  console". The List tab is the way back; the list keeps its scroll while
+  hidden. On a phone the map's own controls (zoom, style, the marker key)
+  stand aside while a popup is up, and the popup is held under 55% of the
+  screen's height and scrolls: at 320 the controls covered its header, and on
+  a phone on its side it was taller than the map.
+- **Scope name on its own line.** On a phone the scope button reads "LIST ·
+  12" over "Bob's trucks" — the kind and the count, then the name with the
+  button's whole width. Tag, name and count side by side left the name a few
+  letters at 320.
+- **On its side** (480px tall or less): the feed moves into the top bar
+  between scope and search, and the List | Map tabs join the tiles' line. The
+  top bar, feed and tiles end at 113px of 375 (30%, measured from the
+  screenshot); in stage 1 they ended at 158px, with the 32px Hide map bar
+  under them.
+
+**Checks.** Unmarked and passing at every size: every row field readable,
+the map mounted once, every control on the List tab at least 44px (the 44px
+check is split by tab: the board opens on the list, where a hidden map's
+controls have no size and were never measured; the Map tab's are stage 3),
+and two added this stage — a list's name whole in the scope button, and the
+top bar and tiles under a third of a phone on its side. "No control is cut
+off" now measures both tabs. The marker-key and timeline checks got a 3s tap
+timeout: they now reach a stage-3 control and waited four minutes for it.
+
+**Existing tests changed by stage 2: two.** Both drove the desktop rows at
+phone widths, and below 768px those rows are the cards now.
+
+- `phone-editing.spec.ts`: the phone half taps cards and tabs instead of the
+  desktop toggle and rows. The bulk-bar part became "a phone draws no
+  checkbox" — there is nothing to start a bulk edit from. The 1280 half is
+  unchanged.
+- `touch-row.spec.ts`: moved from a 430px phone to an 820×1180 touch tablet.
+  Cards have no copy or pin buttons at all; the rule it holds (no hover-only
+  buttons where there is no hover) still matters on a touch screen that draws
+  the desktop rows.
+
+**Two baselines re-captured, on unchanged code.** The Edit Stop shot at 768
+and 1024 differed by 32 pixels, three passes out of three: the arrival
+checkbox, a shade darker. The stage-0 baseline had caught it HOVERED. The
+spec clicked the popup's Edit load and shot the modal without parking the
+pointer — every other state parks it — so the pointer sat wherever the popup
+had been, which is the camera's call and is not held. At 768–1085 the map
+now keeps its camera across the toggle, the popup opens elsewhere, and the
+pointer no longer lands on the checkbox. Fixed in the harness (the pointer is
+parked before that shot) and re-captured in a worktree at the stage-1 commit
+with only that line added: 2 of 54 baselines changed, the two predicted, and
+a second run there matched all 54. Stage 2's render of those two shots is
+identical to them, 0 pixels at both widths.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

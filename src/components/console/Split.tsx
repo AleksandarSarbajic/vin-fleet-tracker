@@ -36,11 +36,20 @@ function writeStored(pct: number): void {
 interface Props {
   list: React.ReactNode;
   map: React.ReactNode;
-  /** Called on drag-end so the map reflows once, never mid-drag. */
+  /**
+   * Called on drag-end so the map reflows once, never mid-drag — and when
+   * the toggle shows the map again, since it stays mounted while hidden.
+   */
   onResizeEnd: () => void;
+  /**
+   * §12.96. Below 768px the phone's List | Map tabs choose the pane, list
+   * first; the desktop toggle chooses at 768–1085, map first. CSS applies
+   * whichever the width says, so neither reads the width.
+   */
+  phonePane?: 'list' | 'map';
 }
 
-export function Split({ list, map, onResizeEnd }: Props) {
+export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [pct, setPct] = useState(DEFAULT_PCT);
   /**
@@ -160,16 +169,38 @@ export function Split({ list, map, onResizeEnd }: Props) {
   // Below 1086px the split is off: the list runs full width and the map is a
   // toggle.
   if (!splitEnabled) {
+    /*
+     * §12.96. Both panes stay MOUNTED and CSS hides one. The toggle used to
+     * render one or the other, so every switch threw the map away and built
+     * a new one — tiles, markers, camera and all. Each pane carries two
+     * rules: the desktop toggle's (`md:`) and the phone tab's (`max-md:`).
+     */
     return (
       <div ref={boxRef} className="relative flex min-h-0 flex-1 flex-col">
         <button
           type="button"
-          onClick={() => setMapVisible((v) => !v)}
-          className="flex h-8 shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent"
+          onClick={() => {
+            const next = !mapVisible;
+            setMapVisible(next);
+            // Hidden, it kept the size it had; shown, it measures again.
+            if (next) onResizeEnd();
+          }}
+          className="flex h-8 shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent max-md:hidden"
         >
           {mapVisible ? 'Hide map' : 'Show map'}
         </button>
-        <div className="min-h-0 flex-1">{mapVisible ? map : list}</div>
+        <div
+          data-pane="map"
+          className={`min-h-0 flex-1 ${mapVisible ? '' : 'md:hidden'} ${phonePane === 'map' ? '' : 'max-md:hidden'}`}
+        >
+          {map}
+        </div>
+        <div
+          data-pane="list"
+          className={`min-h-0 flex-1 ${mapVisible ? 'md:hidden' : ''} ${phonePane === 'list' ? '' : 'max-md:hidden'}`}
+        >
+          {list}
+        </div>
       </div>
     );
   }

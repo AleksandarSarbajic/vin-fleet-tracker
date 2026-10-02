@@ -5,10 +5,15 @@ import { chipCounts, type FilterKey } from '../FilterChips';
 import type { HeaderNote } from '../ConsoleHeader';
 
 /**
- * §12.96, stage 1 — the phone's first line under the top bar: All, Late and
- * At risk as 44px+ tiles, each a filter (the same toggles as the desktop
- * chips, counted over the same rows, §12.8), and More, which opens the sheet
- * holding every other filter. Below 768px only.
+ * §12.96 — the phone's first line under the top bar: All, Late and At risk
+ * as 44px+ tiles, each a filter (the same toggles as the desktop chips,
+ * counted over the same rows, §12.8), and More, which opens the sheet holding
+ * every other filter (stage 1). Then the List | Map tabs, list first
+ * (stage 2). Below 768px only.
+ *
+ * On a SHORT screen — a phone on its side, 480px tall or less — the tabs
+ * join the tiles on one 44px line, so the top bar and this together take
+ * under a third of the height (§12.96, stage 2).
  */
 
 const TILE_INK = {
@@ -34,6 +39,8 @@ export function PhoneTiles({
   onReset,
   onMore,
   moreOpen,
+  pane,
+  onPane,
 }: {
   /** Every truck in scope — the fleet, or the active list's (§12.8). */
   rows: FleetRow[];
@@ -42,6 +49,8 @@ export function PhoneTiles({
   onReset: () => void;
   onMore: () => void;
   moreOpen: boolean;
+  pane: 'list' | 'map';
+  onPane: (pane: 'list' | 'map') => void;
 }) {
   const counts = chipCounts(rows);
   const all = rows.filter((r) => r.active).length;
@@ -49,51 +58,81 @@ export function PhoneTiles({
 
   return (
     <div
-      role="group"
-      // Not the desktop chips' "Filter by status": a label of its own, so no
-      // existing selector finds the tiles as well as the chips.
-      aria-label="Status tiles"
-      className="grid shrink-0 grid-cols-4 gap-2 border-b border-line-soft bg-surface-bar px-3 py-2 md:hidden"
+      data-phone-tiles=""
+      className="grid shrink-0 grid-cols-4 gap-2 border-b border-line-soft bg-surface-bar px-3 py-2 md:hidden [@media(max-height:480px)]:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.6fr)] [@media(max-height:480px)]:py-1.5"
     >
-      <Tile
-        tile="all"
-        label="All"
-        count={all}
-        selected={chips.size === 0}
-        onClick={onReset}
-      />
-      <Tile
-        tile="late"
-        label="Late"
-        count={counts.late}
-        selected={chips.has('late')}
-        onClick={() => onToggle('late')}
-      />
-      <Tile
-        tile="risk"
-        label="At risk"
-        count={counts.risk}
-        selected={chips.has('risk')}
-        onClick={() => onToggle('risk')}
-      />
-      <button
-        type="button"
-        data-phone-more=""
-        aria-haspopup="dialog"
-        aria-expanded={moreOpen}
-        aria-label={moreOn > 0 ? `More filters, ${moreOn} on` : 'More filters'}
-        onClick={onMore}
-        className={`flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 border ${
-          moreOn > 0 ? 'border-accent bg-surface-overlay' : 'border-line-control'
-        }`}
+      <div
+        role="group"
+        // Not the desktop chips' "Filter by status": a label of its own, so no
+        // existing selector finds the tiles as well as the chips.
+        aria-label="Status tiles"
+        className="contents"
       >
-        <span className="font-sans text-[16px] font-semibold leading-none text-text">
-          {moreOn > 0 ? `${moreOn} on` : '···'}
-        </span>
-        <span className="font-cond text-[12px] font-semibold uppercase leading-none tracking-[.08em] text-text-secondary">
-          More
-        </span>
-      </button>
+        <Tile
+          tile="all"
+          label="All"
+          count={all}
+          selected={chips.size === 0}
+          onClick={onReset}
+        />
+        <Tile
+          tile="late"
+          label="Late"
+          count={counts.late}
+          selected={chips.has('late')}
+          onClick={() => onToggle('late')}
+        />
+        <Tile
+          tile="risk"
+          label="At risk"
+          count={counts.risk}
+          selected={chips.has('risk')}
+          onClick={() => onToggle('risk')}
+        />
+        <button
+          type="button"
+          data-phone-more=""
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-label={moreOn > 0 ? `More filters, ${moreOn} on` : 'More filters'}
+          onClick={onMore}
+          className={`flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 border [@media(max-height:480px)]:h-11 ${
+            moreOn > 0 ? 'border-accent bg-surface-overlay' : 'border-line-control'
+          }`}
+        >
+          <span className="font-sans text-[16px] font-semibold leading-none text-text">
+            {moreOn > 0 ? `${moreOn} on` : '···'}
+          </span>
+          <span className="font-cond text-[12px] font-semibold uppercase leading-none tracking-[.08em] text-text-secondary">
+            More
+          </span>
+        </button>
+      </div>
+
+      {/* §12.96, stage 2. List first; the map stays mounted behind its tab. */}
+      <div
+        role="tablist"
+        aria-label="Show"
+        className="col-span-4 grid grid-cols-2 [@media(max-height:480px)]:col-span-1"
+      >
+        {(['list', 'map'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="tab"
+            data-phone-tab={p}
+            aria-selected={pane === p}
+            onClick={() => onPane(p)}
+            className={`h-11 border font-cond text-[13px] font-semibold uppercase tracking-[.1em] ${
+              pane === p
+                ? 'border-accent bg-surface-overlay text-text'
+                : 'border-line-control text-text-secondary'
+            } ${p === 'list' ? 'border-r-0' : ''}`}
+          >
+            {p === 'list' ? 'List' : 'Map'}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -118,12 +157,12 @@ function Tile({
       aria-pressed={selected}
       aria-label={`${label}, ${count}`}
       onClick={onClick}
-      className={`flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 border ${TILE_INK[tile]} ${
+      className={`flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 border [@media(max-height:480px)]:h-11 [@media(max-height:480px)]:gap-0.5 ${TILE_INK[tile]} ${
         selected ? '!border-accent bg-surface-overlay' : ''
       }`}
     >
       <span
-        className={`font-sans text-[20px] font-semibold leading-none tabular-nums ${
+        className={`font-sans text-[20px] font-semibold leading-none tabular-nums [@media(max-height:480px)]:text-[16px] ${
           tile === 'all' ? 'text-accent' : ''
         }`}
       >

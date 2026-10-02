@@ -233,6 +233,12 @@ export function FleetMap({
     if (!map) return;
 
     if (didFit.current) return;
+    /*
+     * §12.96. A map mounted in a hidden pane (the phone's Map tab, list
+     * first) loads with no size, and a fit into a 0×0 box is meaningless.
+     * It waits for the first resize that finds a real size, below.
+     */
+    if (map.getContainer().clientWidth === 0 || map.getContainer().clientHeight === 0) return;
     didFit.current = true;
     const bounds = boundsOf(rows);
     if (!bounds) return; // No active truck has a position — keep the US view.
@@ -254,12 +260,19 @@ export function FleetMap({
     keepPopupClearSoon();
   }, [rows, keepPopupClearSoon]);
 
-  /** Split drag-end only. During the drag Mapbox is simply not told. */
+  /**
+   * Split drag-end, and a hidden pane shown again (§12.96). During a drag
+   * Mapbox is simply not told.
+   */
   useEffect(() => {
     if (resizeSignal === 0) return;
     mapRef.current?.getMap()?.resize();
+    // Loaded while hidden: the fleet fit it skipped then, now there is a box.
+    if (!didFit.current) handleLoad();
     // A narrower pane can leave the open popup over its edge.
     keepPopupClearSoon();
+    // `handleLoad` changes with every poll's rows; this answers to the signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resizeSignal, keepPopupClearSoon]);
 
   /**
@@ -360,7 +373,13 @@ export function FleetMap({
     <div className="relative flex h-full w-full flex-col bg-surface-sunken">
       {/* §12.96: on a phone the pane can be shorter than the marker key, which
           then spilled up over the tiles and took their taps. Clipped there. */}
-      <div ref={frameRef} className="relative min-h-0 flex-1 max-md:overflow-hidden">
+      <div
+        ref={frameRef}
+        // `data-popup-open`: on a phone the map's own controls stand aside
+        // while a truck's popup is up (MapChrome), so nothing covers it.
+        {...(selectedRow ? { 'data-popup-open': '' } : {})}
+        className="group/map relative min-h-0 flex-1 max-md:overflow-hidden"
+      >
         <ZoomControl onZoom={zoom} />
         <BasemapToggle basemap={basemap} onChange={setBasemap} />
         <MarkerKey />
