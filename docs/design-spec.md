@@ -7106,12 +7106,97 @@ require, not controls anyone uses to check the board.
 
 **Sign-out ends every session.** The app's `supabase.auth.signOut()` uses
 Supabase's default global scope: signing out on the phone signs the dispatcher
-out of their desktop too. Not changed here. It is why
-`e2e/phone-signout.spec.ts` is its own Playwright project that runs after
+out of their desktop too. Not changed here — changed in stage 1, below. It is
+why `e2e/phone-signout.spec.ts` is its own Playwright project that runs after
 every other spec (it would otherwise end the session the others share) and
 signs in by itself.
 
 **Existing tests changed by stage 0:** none.
+
+### Stage 1 — top bar, tiles, More, back from the background
+
+Below 768px only. Every phone piece is `md:hidden`; the desktop pieces it
+replaces are `max-md:hidden` (the header, and the list toolbar that carries
+Today and density). Data, scope, chips, search and selection stay in
+`Console`; the phone pieces are display only.
+
+- **Top bar** (`phone/PhoneTopBar.tsx`, `data-phone-topbar`), sticky. Row 1:
+  the monogram; the scope button with its × (`ScopeMenu phone` — 44px, left
+  as wide as the row allows); search (`data-phone-search`); the account menu
+  (`AccountMenu phone`, `data-phone-account`, 44px items). Row 2, always
+  visible (`data-phone-feed`): a green dot and "3s ago", or the red "Feed down
+  25m", with its own polite live region (the desktop's is hidden with the
+  desktop header).
+- **Search** opens a full-width field in place of row 1, with "N of M" and a
+  close button. Closing clears it: a filter nobody can see is a filter nobody
+  knows is on. A link carrying `?q=` opens with the field showing.
+- **Tiles** (`phone/PhoneTiles.tsx`): All, Late, At risk — 52px, the desktop
+  chips' toggles over the same rows (§12.8) — and More, which says how many of
+  its filters are on. The group is labelled "Status tiles", not the chips'
+  "Filter by status", so no selector for the chips finds the tiles too. The
+  desktop's row-2 notes (inactive hidden, outside the list, no-driver hidden)
+  follow as 44px buttons when there is one to show.
+- **More** (`phone/PhoneMoreSheet.tsx`): a bottom sheet with the six other
+  filters, the Today summary and density. Done, or a tap above it, closes it.
+- **Back from the background** (`hooks/useResumeRefetch.ts`): on
+  `visibilitychange` to visible, or `pageshow` from the back-forward cache,
+  the fleet is refetched at once (`cancelRefetch: false`, joining React
+  Query's own focus refetch rather than sending a second) and the top bar
+  says "Updating…" (`data-updating`) until it settles — success or failure —
+  with NO age shown meanwhile. The age's clock is renewed when the marker
+  comes and goes, so a frozen clock never prints "3s ago".
+- **No keys.** The phone pieces add no key listener: no `/`, `V` or 0–8, and
+  the phone menus do not take Esc. The desktop header is hidden but mounted,
+  and its listeners stay the only ones.
+- **Tour**: not opened below 768px, and not marked seen there either — it
+  marks itself seen on mount, which would have spent the desktop's tour on a
+  phone visit. On the desktop the marking is unchanged. (A first attempt marked
+  it seen only once it had been on screen; the desktop baselines caught it —
+  the e2e sign-in saves its browser state with the tour still up, so every
+  spec after it met the tour. Reverted to the mount rule.)
+- **Login card**: the grid's column is held to the screen below 768px; the
+  420px card's `max-w-full` was measuring against a track the card itself had
+  widened.
+- **Map pane** clipped on phones: in landscape the pane is shorter than the
+  marker key, which spilled up over the tiles and took their taps. Stage 3
+  folds the key behind a button.
+
+**Sign-out is local.** `signOut({ scope: 'local' })` ends this device's
+session only; a refusal from the auth server is logged, not swallowed. The e2e
+teardown still signs the e2e account out everywhere (§12.93).
+`phone-signout.spec.ts` signs in twice at 390px, signs out of one from the top
+bar's account menu, and asserts that one is out (`/` → `/login`, the fleet API
+401) while the other sign-in and the suite's shared session both still open
+the console and read the fleet (200).
+
+**Redaction runs whatever the reporters** (§12.86). Stage 0's report run used
+`--reporter=json`, which replaces the configured reporters and so dropped the
+redact reporter: a trace kept the e2e password. The global teardown — which
+runs after every test, whatever the reporters — now scrubs every project's
+output folder before it signs out, and fails the run if a copy survives. The
+reporter still runs a second pass when it is in the list. Proved with a
+throwaway spec that typed the password and failed on purpose, run with
+`--reporter=dot`: the teardown redacted 7 occurrences from 2 artifacts, and a
+scan of every file (zips entry by entry, raw and base64) found 0.
+
+**Checks.** Unmarked and passing at every size: the tiles, the Today strip and
+density off the first screen, search, the tour, the login card, back from the
+background, sign-out at 390 — and "no control is cut off", which the plan gave
+to stages 1 and 2 and which stage 1 finished. Still expected to fail, for
+their stages: 44px (left: Hide map, the map's zoom and style buttons —
+stages 2–3), feed down (the top bar passes; the banner's sentence is still cut
+— stage 4), row fields, the map mounted once, the sheet, the marker key, the
+timeline, the scope menu's width, and 12px.
+
+**Existing tests changed by stage 1:** none. One harness fix, in stage 0's
+own spec: the popup content shot at 1920 failed twice in five runs (574 and
+860 pixels, the top three rows only, content identical). The camera had left
+the popup's top edge a few pixels past the map's, and the map's frame clipped
+it, so the shot pictured what lies outside the map instead of the popup's
+border. Stage 0's two clean runs were luck. `desktop-baseline.spec.ts` now
+nudges the popup wholly inside the map, onto whole pixels, before that one
+shot. It moves the popup, nothing in it, and the tolerance stays zero. Three
+passes at all six widths after it: 18 of 18 identical.
 
 # 13. Still open
 

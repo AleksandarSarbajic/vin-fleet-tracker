@@ -1,5 +1,5 @@
 import type { FullConfig, FullResult, Reporter } from '@playwright/test/reporter';
-import { redactTree, secretsFromEnv } from './redact';
+import { redactRun, secretsFromEnv } from './redact';
 
 /**
  * §12.86. Runs after every test has written its artifacts, and scrubs the
@@ -9,6 +9,10 @@ import { redactTree, secretsFromEnv } from './redact';
  * guaranteed to come after every worker has written its trace and its
  * `error-context.md`. If anything survives the pass the run FAILS: a gate
  * that passes while leaving a credential on disk is not one to trust.
+ *
+ * Not the only pass any more (§12.96): a run given its own `--reporter`
+ * drops this one, so the global teardown scrubs the same folders first,
+ * whatever the reporters. This second pass costs a walk of a few files.
  */
 export default class RedactReporter implements Reporter {
   private outputDirs: string[] = [];
@@ -18,16 +22,7 @@ export default class RedactReporter implements Reporter {
   }
 
   async onEnd(result: FullResult): Promise<{ status: FullResult['status'] } | undefined> {
-    const secrets = secretsFromEnv();
-    let replaced = 0;
-    const files: string[] = [];
-    const remaining: string[] = [];
-    for (const dir of this.outputDirs) {
-      const r = redactTree(dir, secrets);
-      replaced += r.replaced;
-      files.push(...r.files);
-      remaining.push(...r.remaining);
-    }
+    const { replaced, files, remaining } = redactRun(this.outputDirs, secretsFromEnv());
     if (replaced > 0) {
       console.info(
         `e2e: redacted the e2e password (${replaced} occurrence${replaced === 1 ? '' : 's'}) from ${files.length} artifact${files.length === 1 ? '' : 's'}`,

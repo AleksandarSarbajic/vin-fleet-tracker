@@ -40,15 +40,8 @@ const ANA_PHONE = '3125550101';
 
 /** The checks the current app cannot pass, and the stage that makes them pass. */
 const NOT_YET: Record<string, string> = {
-  'no control is cut off by the screen edge': 'stage 1 (top bar, tiles) and 2 (cards)',
   'every control used is at least 44px': 'stages 1–3',
-  'Late and At risk tiles are visible without scrolling': 'stage 1',
-  'the Today strip and density are off the first screen': 'stage 1',
-  'search opens a full-width field from the top bar': 'stage 1',
-  'the tour does not open on a phone': 'stage 1',
-  'the login card fits the screen': 'stage 1',
   'feed down is visible, its sentence whole': 'stage 1 (top bar) and 4 (banner)',
-  'returning from the background refetches and says Updating…': 'stage 1',
   'every row field is readable without sideways scrolling': 'stage 2',
   'the map mounts once across List/Map switches': 'stage 2',
   'the truck sheet fits and calls only a dialable number': 'stage 3',
@@ -102,7 +95,11 @@ async function onPhone(
 
 async function board(page: Page, path = '/'): Promise<void> {
   await page.goto(path);
-  await page.locator('[data-console-header], [data-phone-topbar]').first().waitFor();
+  // Both are in the page from stage 1 on; the one CSS shows is the one to wait for.
+  await page
+    .locator('[data-console-header]:visible, [data-phone-topbar]:visible')
+    .first()
+    .waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(800);
 }

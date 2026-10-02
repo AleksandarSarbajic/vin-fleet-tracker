@@ -26,7 +26,13 @@ export interface AccountUser {
 
 const EMPTY: RenameState = { error: null, savedName: null };
 
-export function AccountMenu({ user }: { user: AccountUser }) {
+/**
+ * `phone` is the phone top bar's copy (§12.96): a 44px button and 44px menu
+ * items, no Esc listener (the phone copies handle no keys; a tap outside
+ * closes it), and `data-phone-account`, which the desktop copy does not
+ * carry — the one hook that tells the two apart.
+ */
+export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?: boolean }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -71,7 +77,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
       }, 0);
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    if (!phone) document.addEventListener('keydown', onKey);
     box.current?.addEventListener('focusout', onFocusOut);
     const node = box.current;
     return () => {
@@ -79,7 +85,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
       document.removeEventListener('keydown', onKey);
       node?.removeEventListener('focusout', onFocusOut);
     };
-  }, [open]);
+  }, [open, phone]);
 
   // Opening always starts from the summary, never mid-edit from last time.
   const toggle = () => {
@@ -100,7 +106,12 @@ export function AccountMenu({ user }: { user: AccountUser }) {
         aria-controls={open ? menuId : undefined}
         aria-label={`Account: ${user.fullName}`}
         onClick={toggle}
-        className="inline-flex h-[30px] w-[30px] items-center justify-center border border-line-control font-cond text-[11px] font-semibold text-text-secondary hover:bg-row-hover"
+        {...(phone ? { 'data-phone-account': '' } : {})}
+        className={
+          phone
+            ? 'inline-flex h-11 w-11 items-center justify-center border border-line-control font-cond text-[13px] font-semibold text-text-secondary'
+            : 'inline-flex h-[30px] w-[30px] items-center justify-center border border-line-control font-cond text-[11px] font-semibold text-text-secondary hover:bg-row-hover'
+        }
       >
         {initials(user.fullName)}
       </button>
@@ -110,7 +121,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
           id={menuId}
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[38px] z-30 w-[260px] border border-line-hair bg-surface-raised py-2 text-left"
+          className={`absolute right-0 ${phone ? 'top-[52px]' : 'top-[38px]'} z-30 w-[260px] border border-line-hair bg-surface-raised py-2 text-left`}
         >
           <div className="border-b border-line-hair px-3 pb-2">
             {editing ? (
@@ -169,7 +180,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
               type="button"
               role="menuitem"
               onClick={() => setEditing(true)}
-              className="w-full px-3 py-1.5 text-left text-body text-text hover:bg-row-hover"
+              className={`w-full px-3 text-left text-body text-text hover:bg-row-hover ${phone ? 'min-h-11' : 'py-1.5'}`}
             >
               Edit display name
             </button>
@@ -179,7 +190,7 @@ export function AccountMenu({ user }: { user: AccountUser }) {
             <button
               type="submit"
               role="menuitem"
-              className="w-full px-3 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover"
+              className={`w-full px-3 text-left text-body text-text-secondary hover:bg-row-hover ${phone ? 'min-h-11' : 'py-1.5'}`}
             >
               Sign out
             </button>

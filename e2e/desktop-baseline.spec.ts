@@ -192,6 +192,28 @@ async function shoot(page: Page, name: string, width: number) {
   const popup = page.locator('.mapboxgl-popup-content');
   if ((await popup.count()) > 0 && name === '4-selected-with-popup') {
     await hideLiveValues(page, { mapControls: true });
+    /*
+     * Wholly inside the map, on whole pixels, first. Where the popup sits is
+     * the camera's call and is not held (above) — and at 1920 the camera
+     * sometimes leaves its top edge a few pixels past the map's, where the
+     * map's frame clips it: the content shot then pictured three rows of what
+     * lies outside the map instead of the popup's border (574 and 860
+     * pixels, top three rows only, content identical). The nudge moves the
+     * popup, never anything inside it.
+     */
+    await popup.evaluate((el) => {
+      const host = el.closest<HTMLElement>('.mapboxgl-popup');
+      const frame = el.closest('.mapboxgl-map')?.getBoundingClientRect();
+      if (!host || !frame) return;
+      const box = el.getBoundingClientRect();
+      const into = (start: number, end: number, from: number, to: number) =>
+        start < from ? from - start : end > to ? to - end : 0;
+      const dx = into(box.left, box.right, frame.left, frame.right);
+      const dy = into(box.top, box.bottom, frame.top, frame.bottom);
+      const x = Math.round(box.left + dx) - box.left;
+      const y = Math.round(box.top + dy) - box.top;
+      host.style.translate = `${x}px ${y}px`;
+    });
     await expect.soft(popup).toHaveScreenshot(`${name}-${width}-popup.png`, {
       stylePath: 'e2e/screenshot.css',
     });

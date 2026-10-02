@@ -58,6 +58,10 @@ import { TruckListEditor, type EditorMode } from './TruckListEditor';
 import { AddToListModal } from './AddToListModal';
 import { useEditingAllowed } from '@/hooks/useEditingAllowed';
 import { editingAllowedNow } from '@/lib/editing';
+import { useResumeRefetch } from '@/hooks/useResumeRefetch';
+import { PhoneTopBar } from './phone/PhoneTopBar';
+import { PhoneNotes, PhoneTiles } from './phone/PhoneTiles';
+import { PhoneMoreSheet } from './phone/PhoneMoreSheet';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -146,6 +150,12 @@ export function Console({
   );
 
   const { data, refetch, isFetching, isError } = useFleet(initial);
+  /**
+   * §12.96. Back from the background: refetch now, and say so until it
+   * lands. The phone's top bar shows the marker; the desktop draws nothing
+   * new, and the refetch joins the one React Query sends on focus anyway.
+   */
+  const updating = useResumeRefetch(refetch);
   /**
    * Every truck, inactive included, so the Inactive chip (§12.14) has
    * something to filter to. The default view is active only — applied on the
@@ -686,6 +696,40 @@ export function Console({
     return notes;
   }, [listInactiveHidden, outside, chips, hiddenDriverless, toggleChip, applyList]);
 
+  /** §12.96. The phone's More sheet: the filters, Today and density off the first screen. */
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  /** The scope menu's lists and views, for the desktop header and the phone's top bar. */
+  const headerViews = {
+    saved: savedViews.views,
+    active: savedViews.active,
+    onApply: applyView,
+    onSave: saveView,
+    onRemove: savedViews.remove,
+    onRename: (id: string, name: string) => {
+      const refusal = savedViews.rename(id, name);
+      return refusal === null ? null : refusalMessage(refusal, name);
+    },
+    // Nothing to save when the board already IS a saved view; the
+    // save would only be refused as a duplicate a moment later.
+    canSaveCurrent: savedViews.active === null,
+    lists: {
+      items: lists,
+      activeId: activeList?.id ?? null,
+      canEdit: canEditLists,
+      onApply: applyList,
+      onNew: () =>
+        setListEditor({
+          kind: 'create',
+          initialIds: [],
+        }),
+      onEdit: (id: string) => {
+        const list = lists.find((l) => l.id === id);
+        if (list) setListEditor({ kind: 'edit', list });
+      },
+    },
+  };
+
   /** Bumped on split drag-end; the map reflows then and only then. */
   const [resizeSignal, setResizeSignal] = useState(0);
   const onResizeEnd = useCallback(() => setResizeSignal((n) => n + 1), []);
@@ -732,36 +776,48 @@ export function Console({
           scope={{ count: scopeCount, fleetCount, viewCount, onClear: clearScope }}
           notes={headerNotes}
           selected={selectedId !== null}
-          views={{
-            saved: savedViews.views,
-            active: savedViews.active,
-            onApply: applyView,
-            onSave: saveView,
-            onRemove: savedViews.remove,
-            onRename: (id: string, name: string) => {
-              const refusal = savedViews.rename(id, name);
-              return refusal === null ? null : refusalMessage(refusal, name);
-            },
-            // Nothing to save when the board already IS a saved view; the
-            // save would only be refused as a duplicate a moment later.
-            canSaveCurrent: savedViews.active === null,
-            lists: {
-              items: lists,
-              activeId: activeList?.id ?? null,
-              canEdit: canEditLists,
-              onApply: applyList,
-              onNew: () =>
-                setListEditor({
-                  kind: 'create',
-                  initialIds: [],
-                }),
-              onEdit: (id: string) => {
-                const list = lists.find((l) => l.id === id);
-                if (list) setListEditor({ kind: 'edit', list });
-              },
-            },
-          }}
+          views={headerViews}
         />
+
+        {/*
+          §12.96, stage 1. The phone's own top bar, tiles and notes: `md:hidden`
+          each, beside the desktop header (`max-md:hidden`). The server sends
+          both and CSS shows one. They read and write the same state as the
+          desktop's, and handle no keys.
+        */}
+        <PhoneTopBar
+          query={typed}
+          onQueryChange={setTyped}
+          matchCount={filtered.length}
+          totalCount={rows.length}
+          fetchedAt={data?.fetchedAt ?? null}
+          feedNewestAt={data?.feedNewestAt ?? null}
+          feedStale={feedStale}
+          updating={updating}
+          user={user}
+          views={headerViews}
+          scope={{ count: scopeCount, fleetCount, viewCount, onClear: clearScope }}
+        />
+        <PhoneTiles
+          rows={scoped}
+          chips={chips}
+          onToggle={toggleChip}
+          onReset={resetChips}
+          onMore={() => setMoreOpen(true)}
+          moreOpen={moreOpen}
+        />
+        <PhoneNotes notes={headerNotes} />
+        {moreOpen ? (
+          <PhoneMoreSheet
+            rows={scoped}
+            chips={chips}
+            onToggle={toggleChip}
+            health={health}
+            density={density}
+            onDensity={setDensity}
+            onClose={() => setMoreOpen(false)}
+          />
+        ) : null}
 
         {/**
          * §9.8. The half that makes §5.9's dimming legible: the board going

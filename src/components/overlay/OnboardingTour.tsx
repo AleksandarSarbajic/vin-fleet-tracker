@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Overlay, useOverlay } from './OverlayLayer';
 import { TOUR, markTourSeen, shouldAutoOpen, stepKeys } from '@/lib/tour';
+import { isPhoneNow } from '@/lib/phone';
 
 /**
  * §14 feature 12 — the onboarding tour. **Interpretation**: turn 5 listed it
@@ -30,6 +31,9 @@ export function OnboardingTour() {
    * rendering is a hydration mismatch and not a preference.
    */
   useEffect(() => {
+    // §12.96. Not on a phone: it teaches keys a phone does not have. It stays
+    // unseen there, so the desktop still offers it.
+    if (isPhoneNow()) return;
     if (shouldAutoOpen()) show('tour');
   }, [show]);
 
@@ -46,6 +50,9 @@ export function OnboardingTour() {
    */
   useEffect(() => {
     if (isOpen) return;
+    // §12.96. Never from a phone, where it does not open: that would spend
+    // the desktop's tour on a visit that never showed it.
+    if (isPhoneNow()) return;
     markTourSeen();
   }, [isOpen]);
 

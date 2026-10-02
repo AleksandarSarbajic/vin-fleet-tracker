@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { REDACTED, redactBuffer, redactTree, secretsFromEnv } from '../../e2e/redact';
+import { redactOutputs } from '../../e2e/global-teardown';
 
 /**
  * §12.86. The e2e password left on disk by a failed sign-in, and the pass
@@ -87,5 +88,40 @@ describe('redactTree', () => {
     writeFileSync(join(dir, 'a.md'), 'clean');
     expect(redactTree(dir, [SECRET])).toEqual({ replaced: 0, files: [], remaining: [] });
     expect(redactTree(join(dir, 'missing'), [SECRET]).remaining).toEqual([]);
+  });
+});
+
+/**
+ * §12.96. The teardown's pass, which runs whatever reporters a run was given:
+ * a run with its own `--reporter` dropped the redact reporter and kept the
+ * password in a trace.
+ */
+describe('the global teardown scrubs every project folder', () => {
+  it('leaves no copy in any project, and says what it scrubbed', () => {
+    dir = mkdtempSync(join(tmpdir(), 'redact-test-'));
+    const a = join(dir, 'chromium');
+    const b = join(dir, 'phone-signout');
+    mkdirSync(join(a, 'one-test'), { recursive: true });
+    mkdirSync(join(b, 'other-test'), { recursive: true });
+    writeFileSync(join(a, 'one-test', 'error-context.md'), `textbox "Password": ${SECRET}\n`);
+    writeFileSync(join(b, 'other-test', 'note.txt'), `password=${encodeURIComponent(SECRET)}`);
+
+    const report = redactOutputs(
+      // Two projects sharing a folder count it once.
+      { projects: [{ outputDir: a }, { outputDir: b }, { outputDir: a }] },
+      { E2E_PASSWORD: SECRET },
+    );
+
+    expect(report.remaining).toEqual([]);
+    expect(report.replaced).toBe(2);
+    expect(readFileSync(join(a, 'one-test', 'error-context.md'), 'utf8')).not.toContain(SECRET);
+    expect(readFileSync(join(b, 'other-test', 'note.txt'), 'utf8')).toBe(`password=${REDACTED}`);
+  });
+
+  it('does nothing without a password to look for', () => {
+    dir = mkdtempSync(join(tmpdir(), 'redact-test-'));
+    writeFileSync(join(dir, 'a.md'), SECRET);
+    const report = redactOutputs({ projects: [{ outputDir: dir }] }, {});
+    expect(report).toEqual({ replaced: 0, files: [], remaining: [] });
   });
 });

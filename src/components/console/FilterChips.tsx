@@ -69,7 +69,7 @@ export function chipLabel(key: string): string {
  * so a count reads in its status colour at a glance. Selected adds the
  * overlay ground and the accent edge. Tokens, never a colour value.
  */
-const INK: Record<FilterKey, string> = {
+export const CHIP_INK: Record<FilterKey, string> = {
   late: 'text-status-late-fg border-status-late-bd',
   risk: 'text-status-risk-fg border-status-risk-bd',
   ontime: 'text-status-ontime-fg border-status-ontime-bd',
@@ -201,7 +201,7 @@ export function FilterChips({
           label={LABEL[key]}
           count={counts[key]}
           selected={selected.has(key)}
-          ink={INK[key]}
+          ink={CHIP_INK[key]}
           keyName={KEY_OF[key]}
           onClick={() => onToggle(key)}
         />
@@ -216,7 +216,7 @@ export function FilterChips({
         label={LABEL.drivers}
         count={counts.drivers}
         selected={selected.has('drivers')}
-        ink={INK.drivers}
+        ink={CHIP_INK.drivers}
         keyName={KEY_OF.drivers}
         onClick={() => onToggle('drivers')}
       />

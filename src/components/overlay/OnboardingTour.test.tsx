@@ -6,6 +6,7 @@ import { OnboardingTour } from './OnboardingTour';
 import { ShortcutSheet } from './ShortcutSheet';
 import { OverlayProvider } from './OverlayLayer';
 import { TOUR, TOUR_STORAGE_KEY, TOUR_VERSION } from '@/lib/tour';
+import { PHONE_MEDIA } from '@/lib/phone';
 
 /**
  * §14 feature 12. `tour.test.ts` owns the content and the auto-open rule;
@@ -91,6 +92,32 @@ describe('showing itself', () => {
     for (let i = 0; i < TOUR.length - 1; i += 1) click(button('Next'));
     click(button('Done'));
     expect(store.get(TOUR_STORAGE_KEY)).toBe(String(TOUR_VERSION));
+  });
+
+  /**
+   * §12.96. Not on a phone — it teaches keys a phone does not have — and NOT
+   * marked seen there, so the first desktop visit still gets it. On the
+   * desktop it is marked seen on mount, as it always was.
+   */
+  it('stays shut on a phone, and still unseen for the desktop', () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === PHONE_MEDIA,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      render();
+      expect(panel()).toBeNull();
+      expect(store.get(TOUR_STORAGE_KEY)).not.toBe(String(TOUR_VERSION));
+    } finally {
+      window.matchMedia = real;
+    }
+    act(() => root.unmount());
+    root = createRoot(container);
+    render();
+    expect(panel()).not.toBeNull();
   });
 });
 

@@ -58,6 +58,7 @@ export function ScopeMenu({
   fleetCount,
   viewCount,
   onClear,
+  phone = false,
 }: {
   views: SavedView[];
   active: SavedView | null;
@@ -82,6 +83,13 @@ export function ScopeMenu({
   viewCount: (view: SavedView) => number;
   /** Back to the full fleet: clears the list (keeping the chips) and the view (chips and search). */
   onClear: () => void;
+  /**
+   * §12.96. The phone top bar's copy: 44px, as wide as the bar allows, and no
+   * `V` — the desktop copy, hidden but mounted, already listens for it, and a
+   * second listener would open both. It carries none of the desktop copy's
+   * `data-*` hooks, so a selector finds one scope button, not two.
+   */
+  phone?: boolean;
 }) {
   const activeList = lists?.items.find((l) => l.id === lists.activeId) ?? null;
   const scoped = activeList !== null || active !== null;
@@ -130,6 +138,7 @@ export function ScopeMenu({
 
   /** §12.91: `V` opens the menu. Nothing else in the console binds it. */
   useEffect(() => {
+    if (phone) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'v' && event.key !== 'V') return;
       if (isTypingTarget(event.target)) return;
@@ -140,7 +149,7 @@ export function ScopeMenu({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, toggle]);
+  }, [open, toggle, phone]);
 
   useEffect(() => {
     if (!open) return;
@@ -169,7 +178,8 @@ export function ScopeMenu({
     const onMove = () => setOpen(false);
     window.addEventListener('resize', onMove);
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    // The phone copy handles no keys (§12.96); a tap outside closes it.
+    if (!phone) document.addEventListener('keydown', onKey);
     const node = box.current;
     node?.addEventListener('focusout', onFocusOut);
     return () => {
@@ -178,7 +188,7 @@ export function ScopeMenu({
       document.removeEventListener('keydown', onKey);
       node?.removeEventListener('focusout', onFocusOut);
     };
-  }, [open, naming, renaming]);
+  }, [open, naming, renaming, phone]);
 
   // The field is only there once, and focus belongs in it the moment it is.
   useEffect(() => {
@@ -212,10 +222,14 @@ export function ScopeMenu({
   const described = fullName || 'Fleet: All trucks';
 
   return (
-    <div ref={box} className="relative flex shrink-0">
+    <div
+      ref={box}
+      className={phone ? 'relative flex min-w-0 flex-1' : 'relative flex shrink-0'}
+    >
       <div
-        data-scope=""
-        className={`flex h-8 min-w-0 items-stretch border ${
+        {...(phone ? { 'data-phone-scope': '' } : { 'data-scope': '' })}
+        // 46px on a phone: 44px of button inside the 1px border.
+        className={`flex ${phone ? 'h-[46px] flex-1' : 'h-8'} min-w-0 items-stretch border ${
           scoped ? 'border-accent bg-surface-overlay' : 'border-line-control'
         }`}
       >
@@ -228,30 +242,42 @@ export function ScopeMenu({
           aria-label={`Scope — ${described} · ${scopeCount} trucks`}
           title={described}
           onClick={toggle}
-          className={`flex min-w-0 items-center gap-2 px-[10px] ${
-            scoped ? '' : 'hover:bg-row-hover'
-          } min-[1280px]:max-w-[260px] min-[1440px]:max-w-[320px] min-[1680px]:max-w-[340px] min-[1920px]:max-w-[360px]`}
+          className={
+            phone
+              ? 'flex min-w-0 flex-1 items-center gap-2 px-[10px] text-left'
+              : `flex min-w-0 items-center gap-2 px-[10px] ${
+                  scoped ? '' : 'hover:bg-row-hover'
+                } min-[1280px]:max-w-[260px] min-[1440px]:max-w-[320px] min-[1680px]:max-w-[340px] min-[1920px]:max-w-[360px]`
+          }
         >
           {activeList ? (
             <>
-              <KindTag active>List</KindTag>
-              <ScopeName data-list-title="">{activeList.name}</ScopeName>
+              <KindTag active phone={phone}>
+                List
+              </KindTag>
+              <ScopeName {...(phone ? {} : { 'data-list-title': '' })}>
+                {activeList.name}
+              </ScopeName>
             </>
           ) : null}
           {active ? (
             <>
-              <KindTag active>View</KindTag>
-              <ScopeName data-view-title="">{active.name}</ScopeName>
+              <KindTag active phone={phone}>
+                View
+              </KindTag>
+              <ScopeName {...(phone ? {} : { 'data-view-title': '' })}>
+                {active.name}
+              </ScopeName>
             </>
           ) : null}
           {!scoped ? (
             <>
-              <KindTag>Fleet</KindTag>
+              <KindTag phone={phone}>Fleet</KindTag>
               <ScopeName>All trucks</ScopeName>
             </>
           ) : null}
           <span
-            data-scope-count=""
+            {...(phone ? {} : { 'data-scope-count': '' })}
             className="shrink-0 font-sans text-[13px] font-medium leading-none tabular-nums text-text-secondary"
           >
             {scopeCount}
@@ -273,14 +299,14 @@ export function ScopeMenu({
         {scoped ? (
           <button
             type="button"
-            data-scope-clear=""
+            {...(phone ? {} : { 'data-scope-clear': '' })}
             aria-label="Show the full fleet"
             title="Show the full fleet"
             onClick={() => {
               setOpen(false);
               onClear();
             }}
-            className="flex w-7 shrink-0 items-center justify-center border-l border-accent/40 text-text hover:bg-row-hover"
+            className={`flex ${phone ? 'w-11' : 'w-7'} shrink-0 items-center justify-center border-l border-accent/40 text-text hover:bg-row-hover`}
           >
             <svg
               width="12"
@@ -326,7 +352,9 @@ export function ScopeMenu({
             </svg>
             <input
               ref={findField}
-              autoFocus
+              // Not on a phone: it would raise the keyboard over the menu, and
+              // the resize that follows on Android closes it (onMove, above).
+              autoFocus={!phone}
               value={find}
               onChange={(e) => setFind(e.target.value)}
               placeholder="Find a list or view"
@@ -519,10 +547,18 @@ export function ScopeMenu({
 }
 
 /** FLEET / LIST / VIEW — never collapses (§12.91). */
-function KindTag({ children, active }: { children: string; active?: boolean }) {
+function KindTag({
+  children,
+  active,
+  phone = false,
+}: {
+  children: string;
+  active?: boolean;
+  phone?: boolean;
+}) {
   return (
     <span
-      data-kind-tag=""
+      {...(phone ? {} : { 'data-kind-tag': '' })}
       className={`shrink-0 border px-[5px] py-[3px] font-cond text-[10px] font-semibold uppercase leading-none tracking-[.1em] ${
         active ? 'border-accent text-accent' : 'border-line-tag text-text-secondary'
       }`}

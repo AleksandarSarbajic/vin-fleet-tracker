@@ -17,7 +17,7 @@ export const act = reactAct;
 export function renderHook<A, T>(
   hook: (arg: A) => T,
   initial?: A,
-): { current: () => T; rerender: (arg: A) => void } {
+): { current: () => T; rerender: (arg: A) => void; unmount: () => void } {
   let value: T;
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -28,5 +28,14 @@ export function renderHook<A, T>(
   };
   const render = (arg: A) => reactAct(() => root.render(createElement(Probe, { arg })));
   render(initial as A);
-  return { current: () => value, rerender: render };
+  return {
+    current: () => value,
+    rerender: render,
+    // For a hook that listens on the window: a test that leaves it mounted
+    // leaves its listeners answering the next test's events.
+    unmount: () => {
+      reactAct(() => root.unmount());
+      container.remove();
+    },
+  };
 }

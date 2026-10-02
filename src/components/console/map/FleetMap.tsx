@@ -358,7 +358,9 @@ export function FleetMap({
 
   return (
     <div className="relative flex h-full w-full flex-col bg-surface-sunken">
-      <div ref={frameRef} className="relative min-h-0 flex-1">
+      {/* §12.96: on a phone the pane can be shorter than the marker key, which
+          then spilled up over the tiles and took their taps. Clipped there. */}
+      <div ref={frameRef} className="relative min-h-0 flex-1 max-md:overflow-hidden">
         <ZoomControl onZoom={zoom} />
         <BasemapToggle basemap={basemap} onChange={setBasemap} />
         <MarkerKey />

@@ -11,10 +11,16 @@ export default function LoginPage() {
   const [state, action, pending] = useActionState(signIn, initial);
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-surface-sunken p-6">
+    /*
+     * §12.96. Below 768px the grid's one column is held to the screen. Left to
+     * itself the track grows to fit the 420px card, and the card's
+     * `max-w-full` then measures against that track and fits nothing: it ran
+     * off a 320px phone. Desktop is unchanged.
+     */
+    <main className="grid min-h-dvh place-items-center bg-surface-sunken p-6 max-md:grid-cols-[minmax(0,1fr)] max-md:p-4">
       <form
         action={action}
-        className="w-[420px] max-w-full border border-line-hair bg-surface-base p-8"
+        className="w-[420px] max-w-full border border-line-hair bg-surface-base p-8 max-md:p-6"
       >
         {/* §9.12 / 3f: the knockout lockup at 54px tall, 22px above the title. */}
         <Image

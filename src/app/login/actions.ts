@@ -33,8 +33,19 @@ export async function signIn(_prev: LoginState, formData: FormData): Promise<Log
   redirect('/');
 }
 
+/**
+ * Ends THIS device's session only (§12.96). Supabase's default is `global`,
+ * which ended every session of the account: signing out on a phone signed the
+ * dispatcher out of their desktop console too.
+ *
+ * The cookies are cleared either way. A refusal from the auth server is
+ * reported, not swallowed — the session it failed to revoke stays valid
+ * there until it expires, and that is worth knowing.
+ */
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error)
+    console.error('sign-out failed', { message: error.message, status: error.status });
   redirect('/login');
 }

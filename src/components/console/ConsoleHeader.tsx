@@ -186,7 +186,8 @@ export function ConsoleHeader({
   const localTime = `${timeInZone(now, viewerZone).split(' ')[0] ?? ''} ${zoneAbbreviation(now, viewerZone)} · you`;
 
   return (
-    <header data-console-header="" className="shrink-0">
+    // §12.96: below 768px the phone's top bar and tiles stand in for this.
+    <header data-console-header="" className="shrink-0 max-md:hidden">
       <div
         data-header-row="1"
         className="flex h-12 items-center gap-3 border-b border-line-soft bg-surface-raised px-4"

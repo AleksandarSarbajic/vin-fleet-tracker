@@ -32,7 +32,8 @@ export function ListToolbar({
        * a 26px one needs 3px of clearance either side to sit in it rather
        * than against it.
        */
-      className="flex h-8 items-center justify-between gap-3 border-b border-line-soft bg-surface-base px-2">
+      // §12.96: below 768px the Today summary and density are in the phone's More sheet.
+      className="flex h-8 items-center justify-between gap-3 border-b border-line-soft bg-surface-base px-2 max-md:hidden">
       <FleetHealthStrip health={health} />
 
       <div className="flex shrink-0 items-center gap-2">

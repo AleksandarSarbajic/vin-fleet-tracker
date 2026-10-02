@@ -159,3 +159,19 @@ export function redactTree(root: string, secrets: string[]): RedactReport {
   }
   return report;
 }
+
+/**
+ * Every project's output folder, scrubbed — one report for the run. Called
+ * from the global teardown, which runs whatever reporters a run was given
+ * (§12.96), and again from the redact reporter when it is in the list.
+ */
+export function redactRun(outputDirs: string[], secrets: string[]): RedactReport {
+  const total: RedactReport = { replaced: 0, files: [], remaining: [] };
+  for (const dir of new Set(outputDirs)) {
+    const r = redactTree(dir, secrets);
+    total.replaced += r.replaced;
+    total.files.push(...r.files);
+    total.remaining.push(...r.remaining);
+  }
+  return total;
+}
