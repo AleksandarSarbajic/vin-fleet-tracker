@@ -7918,6 +7918,16 @@ phone. Screenshots mask the number and the field. Returning the input
 unnormalised fails seven tests. Test numbers are made-up 555 numbers and are
 compared by equality, so a failure prints no stored number.
 
+**Below 768px, the page itself** (2026-10-04). The assignment board has no
+phone layout. Nothing on the phone view links to it — the header's
+Assignments button is in the desktop header (`max-md:hidden`) and the palette
+has no entry — but the address typed on a phone opened the desktop board,
+overlapping and unusable. Below 768px the page now says "Assignments are on
+the desktop console." with a Back to the board link, in CSS (`md:hidden` /
+`max-md:hidden`), so the server's first paint is already right.
+`e2e/driver-phone.spec.ts` checks: no visible link on the phone board, the
+message and the link on `/assignments`, no visible control or field.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -124,7 +124,7 @@ test('a viewer sees the control disabled with the reason, and the route refuses 
   }
 });
 
-test('on a phone the number is read-only', async ({ browser }, info) => {
+test('on a phone the page says where assignments are, and offers no edit', async ({ browser }, info) => {
   const sql = connect();
   try {
     await sql`update drivers set phone = '7085550123' where id = ${IDS.driverAna}`;
@@ -133,11 +133,19 @@ test('on a phone the number is read-only', async ({ browser }, info) => {
   }
   const { context, page } = await onPhone(browser, SIZES[3]);
   try {
+    // Nothing on the phone board links here (the header that does is desktop-only).
+    await page.goto('/');
+    await page.locator('[data-phone-topbar]').waitFor();
+    await expect(page.locator('a[href="/assignments"]').filter({ visible: true })).toHaveCount(0);
+
+    // Typed by hand: the message, a way back, and no board.
     await page.goto('/assignments');
-    await expect(anaPhone(page).locator('[data-driver-phone-value]')).toHaveText(/^\d{3}-\d{3}-\d{4}$/);
-    await expect(anaPhone(page).getByRole('button')).toHaveCount(0);
-    await expect(page.locator('input[type="tel"]')).toHaveCount(0);
-    await shot(page, info, '6-phone-read-only');
+    await expect(page.getByText('Assignments are on the desktop console.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Back to the board' })).toBeVisible();
+    await expect(anaPhone(page)).toBeHidden();
+    await expect(page.locator('input[type="tel"]').filter({ visible: true })).toHaveCount(0);
+    await expect(page.getByRole('button').filter({ visible: true })).toHaveCount(0);
+    await shot(page, info, '6-phone-desktop-only');
   } finally {
     await context.close();
   }

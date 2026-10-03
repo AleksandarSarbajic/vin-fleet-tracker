@@ -231,7 +231,25 @@ export function AssignmentBoard({ board, role }: Props) {
 
   return (
     <main className="flex min-h-dvh flex-col bg-surface-base">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-line-hair bg-surface-raised px-[18px]">
+      {/*
+        §12.106. Assignments are a desktop job (§12.94), and this page has no
+        phone layout: nothing on the phone view links here, and an address
+        typed on a phone gets this instead of a board it cannot use. CSS, not
+        a width read, so the server's first paint is already the right one.
+      */}
+      <div
+        data-assignments-desktop-only=""
+        className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center md:hidden"
+      >
+        <p className="text-body text-text">Assignments are on the desktop console.</p>
+        <Link
+          href="/"
+          className="inline-flex h-11 items-center border border-line-rule px-4 font-cond text-[13px] font-semibold uppercase leading-none tracking-[.08em] text-text"
+        >
+          Back to the board
+        </Link>
+      </div>
+      <header className="flex h-14 shrink-0 max-md:hidden items-center justify-between border-b border-line-hair bg-surface-raised px-[18px]">
         <div className="flex items-baseline gap-4">
           <h1 className="font-cond text-header font-semibold uppercase tracking-[.14em] text-text">
             Assignments
@@ -248,7 +266,7 @@ export function AssignmentBoard({ board, role }: Props) {
         </Link>
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-5 overflow-auto p-5">
+      <div className="flex min-h-0 flex-1 gap-5 overflow-auto p-5 max-md:hidden">
         <section className="min-w-0 flex-1">
           {/* §12.37: above the board, where a dispatcher is already thinking
               about who is on what. Renders nothing when there is nothing to
@@ -385,7 +403,7 @@ export function AssignmentBoard({ board, role }: Props) {
         </aside>
       </div>
 
-      <footer className="shrink-0 border-t border-line-hair bg-surface-bar px-5 py-3">
+      <footer className="shrink-0 border-t border-line-hair bg-surface-bar px-5 py-3 max-md:hidden">
         {conflicts.length > 0 ? (
           <ul className="mb-3 border border-status-late-bd bg-status-late-bg px-3 py-2">
             <li className="mb-1 font-cond text-micro uppercase tracking-[.11em] text-status-late-fg">
