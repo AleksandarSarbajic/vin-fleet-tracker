@@ -8,7 +8,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
-import { DriverCreate } from '@/lib/driver';
+import { DriverCreate, DriverPhoneUpdate } from '@/lib/driver';
 import {
   DriverError,
   createDriver,
@@ -16,6 +16,7 @@ import {
   linkDriver,
   openMergeCandidates,
   retireDriver,
+  updateDriverPhone,
 } from '@/server/drivers';
 
 export const dynamic = 'force-dynamic';
@@ -58,6 +59,9 @@ export async function GET(request: Request) {
  * to be able to hold them before an admin is awake. Gating it on admin means
  * the board cannot represent the real fleet for hours.
  *
+ * PHONE is a dispatcher's too (§12.106): for a driver with no ELD the number
+ * is the only way to reach them, and it is entered when the driver is.
+ *
  * LINK and RETIRE are admin-only. Linking rewrites which driver row past
  * assignments point at; retiring takes someone off the board. Both are rare,
  * both are hard to notice afterwards, and neither is urgent at 6am.
@@ -75,6 +79,7 @@ const Action = z.discriminatedUnion('action', [
     samsaraDriverId: z.string().uuid(),
   }),
   z.object({ action: z.literal('dismiss'), candidateId: z.string().uuid() }),
+  z.object({ action: z.literal('phone') }).merge(DriverPhoneUpdate),
   z.object({
     action: z.literal('retire'),
     driverId: z.string().uuid(),
@@ -127,6 +132,17 @@ export async function POST(request: Request) {
           candidateId: parsed.data.candidateId,
         });
         return NextResponse.json({ ok: true });
+      }
+      case 'phone': {
+        const user = await requireRole('dispatcher');
+        await enforceRateLimit('write', user.id);
+        const result = await updateDriverPhone(db, {
+          actorUserId: user.id,
+          driverId: parsed.data.driverId,
+          // Already normalised by the schema; the server function parses again.
+          phone: parsed.data.phone ?? '',
+        });
+        return NextResponse.json(result);
       }
       case 'retire': {
         const user = await requireRole('admin');

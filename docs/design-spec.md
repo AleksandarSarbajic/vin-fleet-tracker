@@ -7865,6 +7865,59 @@ new list) fails all three widths at the post-poll check. The console
 baseline's feed-down step forgets the stored choice first, because the bulk
 bar step before it chooses the list; its pictures are unchanged.
 
+## 12.106 A driver's phone is set, changed and cleared on the assignment board
+
+**Before.** A number could be typed only when a dispatcher **added** a driver
+(the picker's "Add a driver", free text up to 40 characters). Nothing could
+change or clear an existing number, and a Samsara driver could never get one.
+On 2026-10-03: 33 drivers, 18 not retired, 8 with a number — all 8 added
+here, all dialable, all already ten bare digits; none of the Samsara drivers.
+
+**The field.** A "Driver's phone" column on the assignment board, for the
+driver in each truck's picker, and the same control under each driver in
+"Drivers with no truck": the number as `708-555-0123`, or "No phone", with
+Edit / Add. Inline: the field, Save, Cancel; Enter saves, Esc cancels; "Blank
+clears the number." A viewer sees Add/Edit disabled with "Your role is viewer.
+Phone numbers need dispatcher." (never hidden, §12.14). Below 768px the number
+is read-only and there is no control (§12.94). Nothing is sent to anyone.
+
+**The rule** (`normalizePhone`, `lib/dial.ts`). Takes `708-555-0123`,
+`(708) 555 0123`, `+1 708 555 0123`, `708.555.0123`, a leading 1; stores ten
+digits (`7085550123`), the form every number on file was already in. Blank
+stores null. Refused, each with a reason that never repeats the input: fewer
+or more than ten digits, an area code or exchange starting 0 or 1, an N11
+code, a country code other than +1, letters (extensions, notes), other
+characters. It is the same `usDigits` the Call driver link dials by, so a
+number the board accepts is one it can dial. Adding a driver now uses the same
+field (`DriverCreate`), so a number is stored one way however it arrived.
+
+**The write** (`updateDriverPhone`, `POST /api/drivers` `action: 'phone'`,
+dispatcher). One transaction, the driver row locked; a retired driver is
+refused; the same number again writes nothing. Audit: entity `driver`, the
+actor, `before: { name, phone }`, `after: { name, phone, source:
+'operator-driver-phone' }`, both numbers masked to the last three digits
+(`•••••••123`). Adding a driver now audits its number masked too.
+
+**Not changed, and why.** The merge's audit row (§12.35) still records the
+app driver's whole number: it is the only way back from a wrong link, and the
+number is lost if the Samsara driver already had one. Audit rows written
+before today hold whole numbers for the 8 drivers added with one; masking them
+is a data migration and was not done.
+
+**Tests.** `lib/dial.test.ts`: the formats, the refusals and their reasons, no
+digits of the input in a message, agreement with `dialableTel`. Database:
+stored form for a Samsara driver; audit actor, source and masked pairs with
+no run of four digits anywhere; blank clears; unchanged writes nothing;
+refusals write nothing; retired refused; create stores and audits the same
+way. Route: a viewer gets 403; an undialable number 400 with the reason and
+without the number. Component: read, add, viewer disabled with the reason,
+nothing below 768px, refusal before any request, blank sent as a clear.
+`e2e/driver-phone.spec.ts`: add, refuse twice, change, clear, the three
+masked audit rows; viewer disabled and 403 from the route; read-only on a
+phone. Screenshots mask the number and the field. Returning the input
+unnormalised fails seven tests. Test numbers are made-up 555 numbers and are
+compared by equality, so a failure prints no stored number.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

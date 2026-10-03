@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { assignments, driverMergeCandidates, drivers } from '@/db/schema';
+import { assignments, auditLog, driverMergeCandidates, drivers } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
-import { assign, makeDriver, makeFullFleetRow, makeTruck } from '@/test/fleet';
+import { assign, makeDispatcher, makeDriver, makeFullFleetRow, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { upsertDrivers } from '@/worker/ingest';
 import {
@@ -10,9 +10,11 @@ import {
   createDriver,
   detectMergeCandidates,
   dismissMergeCandidate,
+  PHONE_AUDIT_SOURCE,
   linkDriver,
   openMergeCandidates,
   retireDriver,
+  updateDriverPhone,
 } from './drivers';
 import type { Db, Tx } from './audit';
 
@@ -36,7 +38,7 @@ describeDb('the roster sync never touches a driver it did not create', () => {
     const seen = await rolledBack(async (tx) => {
       const { driverId } = await createDriver(as(tx), {
         actorUserId: null,
-        driver: { name: 'Hand Entered', phone: '555-0100' },
+        driver: { name: 'Hand Entered', phone: '312-555-0100' },
       });
       await upsertDrivers(as(tx), [samsaraRow('sam-1', 'Somebody Else')]);
       const [row] = await tx.select().from(drivers).where(eq(drivers.id, driverId));
@@ -45,7 +47,8 @@ describeDb('the roster sync never touches a driver it did not create', () => {
 
     expect(seen).toBeDefined();
     expect(seen?.name).toBe('Hand Entered');
-    expect(seen?.phone).toBe('555-0100');
+    // Stored in the one form (§12.106).
+    expect(seen?.phone === '3125550100').toBe(true);
     expect(seen?.source).toBe('app');
     expect(seen?.samsaraDriverId).toBeNull();
   });
@@ -82,7 +85,7 @@ describeDb('the roster sync never touches a driver it did not create', () => {
     const seen = await rolledBack(async (tx) => {
       const { driverId } = await createDriver(as(tx), {
         actorUserId: null,
-        driver: { name: 'Merged Person', phone: '555-0199' },
+        driver: { name: 'Merged Person', phone: '312-555-0199' },
       });
       // Simulate the post-merge state: our row, carrying Samsara's id.
       await tx
@@ -196,7 +199,7 @@ describeDb('linking', () => {
       const truck = await makeTruck(tx);
       const { driverId: appId } = await createDriver(as(tx), {
         actorUserId: null,
-        driver: { name: 'New Hire', phone: '555-0123' },
+        driver: { name: 'New Hire', phone: '312-555-0123' },
       });
       // History accrues against the row we created.
       const a = await assign(tx, truck.id, appId);
@@ -229,7 +232,7 @@ describeDb('linking', () => {
     expect(seen.remaining).toHaveLength(1);
     expect(seen.remaining[0]?.id).toBe(seen.samId);
     // The phone was ours and Samsara has none for this org, so it carries over.
-    expect(seen.merged?.phone).toBe('555-0123');
+    expect(seen.merged?.phone === '3125550123').toBe(true);
   });
 
   it('writes an audit entry naming BOTH ids — the only way back from a wrong link', async () => {
@@ -390,7 +393,7 @@ describeDb('a truck with an app-created driver reports position normally', () =>
         .where(eq(assignments.truckId, fixture.truck.id));
       const { driverId } = await createDriver(as(tx), {
         actorUserId: null,
-        driver: { name: 'No ELD Driver', phone: '555-0150' },
+        driver: { name: 'No ELD Driver', phone: '312-555-0150' },
       });
       await assign(tx, fixture.truck.id, driverId);
 
@@ -482,5 +485,132 @@ describeDb('creating and assigning in one transaction (§12.38)', () => {
       return { after: rows[0]?.after, truckId: truck.id };
     });
     expect(entry.after?.assignedTruckId).toBe(entry.truckId);
+  });
+});
+
+/**
+ * §12.106. A driver's phone, set, changed and cleared from the assignment
+ * board. Made-up 555 numbers; no assertion prints one whole — stored values
+ * are compared by equality, and the audit is checked for any run of digits
+ * longer than the three it may keep.
+ */
+describeDb("a driver's phone", () => {
+  /** A dispatcher's profile, so the audit row can name the actor. */
+  const withActor = async (tx: Tx) => (await makeDispatcher(tx, 'Dee Dispatcher')).id;
+  const phoneOf = async (tx: Tx, id: string) =>
+    (await tx.select({ phone: drivers.phone }).from(drivers).where(eq(drivers.id, id)))[0]?.phone;
+  const auditFor = (tx: Tx, id: string) =>
+    tx
+      .select({ actor: auditLog.actorUserId, entity: auditLog.entity, before: auditLog.before, after: auditLog.after })
+      .from(auditLog)
+      .where(eq(auditLog.entityId, id));
+
+  it('stores what was typed in the one form, for a Samsara driver too', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const driver = await makeDriver(tx);
+      const stored: (string | null | undefined)[] = [];
+      for (const typed of ['708-555-0123', '(708) 555 0124', '+1 708 555 0125']) {
+        await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: typed });
+        stored.push(await phoneOf(tx, driver.id));
+      }
+      return stored;
+    });
+    expect(seen[0] === '7085550123' && seen[1] === '7085550124' && seen[2] === '7085550125').toBe(true);
+  });
+
+  it('audits the driver, the actor, and masked old and new numbers', async () => {
+    const entries = await rolledBack(async (tx) => {
+      const actor = await withActor(tx);
+      const driver = await makeDriver(tx);
+      await updateDriverPhone(as(tx), { actorUserId: actor, driverId: driver.id, phone: '708-555-0123' });
+      await updateDriverPhone(as(tx), { actorUserId: actor, driverId: driver.id, phone: '708-555-0456' });
+      await updateDriverPhone(as(tx), { actorUserId: actor, driverId: driver.id, phone: '' });
+      return { rows: await auditFor(tx, driver.id), actor, driverName: driver.name };
+    });
+    expect(entries.rows).toHaveLength(3);
+    for (const row of entries.rows) {
+      expect(row.actor).toBe(entries.actor);
+      expect(row.entity).toBe('driver');
+      expect((row.after as { source: string }).source).toBe(PHONE_AUDIT_SOURCE);
+      expect((row.after as { name: string }).name).toBe(entries.driverName);
+      // Never more than three digits in a row, anywhere in the entry.
+      expect(JSON.stringify([row.before, row.after]).match(/\d{4,}/)).toBeNull();
+    }
+    const pairs = entries.rows.map((r) => [
+      (r.before as { phone: string | null }).phone,
+      (r.after as { phone: string | null }).phone,
+    ]);
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        [null, '•••••••123'],
+        ['•••••••123', '•••••••456'],
+        ['•••••••456', null],
+      ]),
+    );
+  });
+
+  it('an empty value clears the number', async () => {
+    const phone = await rolledBack(async (tx) => {
+      const driver = await makeDriver(tx);
+      await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: '708-555-0123' });
+      await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: '   ' });
+      return phoneOf(tx, driver.id);
+    });
+    expect(phone).toBeNull();
+  });
+
+  it('the same number again writes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const driver = await makeDriver(tx);
+      await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: '708-555-0123' });
+      const again = await updateDriverPhone(as(tx), {
+        actorUserId: null,
+        driverId: driver.id,
+        phone: '(708) 555-0123',
+      });
+      return { again, audits: (await auditFor(tx, driver.id)).length };
+    });
+    expect(seen.again.changed).toBe(false);
+    expect(seen.audits).toBe(1);
+  });
+
+  it('refuses a number it cannot dial, and changes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const driver = await makeDriver(tx);
+      await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: '708-555-0123' });
+      const refusals: string[] = [];
+      for (const typed of ['555-0123', '+44 20 7946 0958', '708-555-0123 ext 4', '911-555-0123']) {
+        await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: typed }).then(
+          () => refusals.push('saved'),
+          (error: unknown) => refusals.push(error instanceof DriverError ? error.field : 'other'),
+        );
+      }
+      return { refusals, phone: await phoneOf(tx, driver.id), audits: (await auditFor(tx, driver.id)).length };
+    });
+    expect(seen.refusals).toEqual(['phone', 'phone', 'phone', 'phone']);
+    expect(seen.phone === '7085550123').toBe(true);
+    expect(seen.audits).toBe(1);
+  });
+
+  it('refuses a retired driver', async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const driver = await makeDriver(tx);
+        await tx.update(drivers).set({ retiredAt: sql`now()` }).where(eq(drivers.id, driver.id));
+        await updateDriverPhone(as(tx), { actorUserId: null, driverId: driver.id, phone: '708-555-0123' });
+      }),
+    ).rejects.toThrow('That driver is retired.');
+  });
+
+  it('creating a driver stores the same form and audits the number masked', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { driverId } = await createDriver(as(tx), {
+        actorUserId: null,
+        driver: { name: 'Typed Phone', phone: '(708) 555 0199' },
+      });
+      return { phone: await phoneOf(tx, driverId), audit: await auditFor(tx, driverId) };
+    });
+    expect(seen.phone === '7085550199').toBe(true);
+    expect((seen.audit[0]?.after as { phone: string }).phone).toBe('•••••••199');
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePhone } from './dial';
 
 /**
  * Drivers a dispatcher creates (§12.35).
@@ -22,6 +23,24 @@ import { z } from 'zod';
  * an employee number: a field with no consumer is a field that goes stale
  * while looking authoritative.
  */
+/**
+ * §12.106. A phone as typed, stored as ten digits or null (blank clears it).
+ * Anything that is not a dialable US number is refused with a message that
+ * does not repeat it. One rule (`normalizePhone`) for create and edit, and
+ * the same one the Call driver link dials by.
+ */
+const PhoneField = z
+  .string()
+  .max(40, 'That is too long for a phone number.')
+  .transform((value, ctx) => {
+    const parsed = normalizePhone(value);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.message });
+      return z.NEVER;
+    }
+    return parsed.phone;
+  });
+
 export const DriverCreate = z
   .object({
     name: z
@@ -29,17 +48,25 @@ export const DriverCreate = z
       .trim()
       .min(1, 'A name is required.')
       .max(120, 'Name is too long (120 characters).'),
-    phone: z
-      .string()
-      .trim()
-      .max(40)
-      .transform((value) => (value === '' ? null : value))
-      .nullable()
-      .optional(),
+    phone: PhoneField.nullable().optional(),
   })
   .strict();
 
 export type DriverCreate = z.infer<typeof DriverCreate>;
+
+/**
+ * §12.106. A driver's number, changed or cleared from the assignment board.
+ * The same field as on create, so a number is stored one way however it
+ * arrived.
+ */
+export const DriverPhoneUpdate = z
+  .object({
+    driverId: z.string().uuid(),
+    phone: PhoneField,
+  })
+  .strict();
+
+export type DriverPhoneUpdate = z.infer<typeof DriverPhoneUpdate>;
 
 /**
  * How two names are compared when looking for a merge candidate.
@@ -51,14 +78,16 @@ export type DriverCreate = z.infer<typeof DriverCreate>;
  * outcome that silently rewrites assignment history.
  */
 export function normalizeDriverName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFKD')
-    // Strip accents, so "José" and "Jose" are the same person.
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[.,'`’-]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      // Strip accents, so "José" and "Jose" are the same person.
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[.,'`’-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /** True when two names are close enough to ASK about. Never to act on. */
@@ -80,6 +109,9 @@ export type DriverSource = 'samsara' | 'app';
  */
 export const NO_ELD_LABEL = 'No ELD';
 
-export function isEldBacked(driver: { source: DriverSource; samsaraDriverId: string | null }): boolean {
+export function isEldBacked(driver: {
+  source: DriverSource;
+  samsaraDriverId: string | null;
+}): boolean {
   return driver.source === 'samsara' || driver.samsaraDriverId !== null;
 }

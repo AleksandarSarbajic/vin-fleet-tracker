@@ -46,7 +46,9 @@ describe('what a dispatcher must supply', () => {
   it('treats a blank phone as null, like every other free-text field (§12.21)', () => {
     expect(DriverCreate.parse({ name: 'Ada', phone: '' }).phone).toBeNull();
     expect(DriverCreate.parse({ name: 'Ada', phone: '  ' }).phone).toBeNull();
-    expect(DriverCreate.parse({ name: 'Ada', phone: ' 555-0100 ' }).phone).toBe('555-0100');
+    // §12.106: stored as ten digits, and a number that cannot be dialled is refused.
+    expect(DriverCreate.parse({ name: 'Ada', phone: ' 312-555-0100 ' }).phone === '3125550100').toBe(true);
+    expect(DriverCreate.safeParse({ name: 'Ada', phone: '555-0100' }).success).toBe(false);
   });
 
   it('accepts nothing else — a field with no consumer goes stale', () => {

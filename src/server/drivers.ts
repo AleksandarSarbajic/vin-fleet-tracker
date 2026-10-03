@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { assignments, driverMergeCandidates, drivers } from '@/db/schema';
 import { DriverCreate, namesMatch } from '@/lib/driver';
+import { maskPhone, normalizePhone } from '@/lib/dial';
 import { writeAudit, type Db, type Tx } from './audit';
 
 /**
@@ -128,7 +129,8 @@ export async function createDriver(
       before: null,
       after: {
         name: driver.name,
-        phone: driver.phone ?? null,
+        // §12.106: the audit never holds a whole number — the last three digits.
+        phone: driver.phone ? maskPhone(driver.phone) : null,
         source: 'app',
         assignedTruckId,
       },
@@ -186,6 +188,58 @@ export async function retireDriver(
       before: { name: existing.name, retiredAt: existing.retiredAt?.toISOString() ?? null },
       after: { name: existing.name, retired: input.retired },
     });
+  });
+}
+
+/* --------------------------------- phone -------------------------------- */
+
+/** The audit entry's source for a number changed on the assignment board. */
+export const PHONE_AUDIT_SOURCE = 'operator-driver-phone';
+
+/**
+ * §12.106. Sets, changes or clears a driver's phone. A DISPATCHER's job, like
+ * adding the driver: the number is how a driver with no ELD is reached at all.
+ *
+ * Any driver, Samsara-backed or added here — Samsara returns no numbers for
+ * this org, so every number on file is ours. Not a retired one: they are off
+ * the board, and a number changed there would be changed where nobody looks.
+ *
+ * Audited with the driver, the actor and the old and new numbers MASKED to
+ * their last three digits: enough to tell which number replaced which, and
+ * nothing a reader of the log could dial. An unchanged number writes nothing.
+ */
+export async function updateDriverPhone(
+  db: Db,
+  input: { actorUserId: string | null; driverId: string; phone: string },
+): Promise<{ changed: boolean; phone: string | null }> {
+  // Re-parsed here, not trusted from the caller (§9.9).
+  const parsed = normalizePhone(input.phone);
+  if (!parsed.ok) throw new DriverError(parsed.message, 'phone');
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: drivers.id, name: drivers.name, phone: drivers.phone, retiredAt: drivers.retiredAt })
+      .from(drivers)
+      .where(eq(drivers.id, input.driverId))
+      .for('update')
+      .limit(1);
+    if (!existing) throw new DriverError('That driver no longer exists.', 'driverId');
+    if (existing.retiredAt !== null) throw new DriverError('That driver is retired.', 'driverId');
+    if (existing.phone === parsed.phone) return { changed: false, phone: parsed.phone };
+
+    await tx.update(drivers).set({ phone: parsed.phone }).where(eq(drivers.id, existing.id));
+    await writeAudit(tx, {
+      actorUserId: input.actorUserId,
+      entity: 'driver',
+      entityId: existing.id,
+      before: { name: existing.name, phone: existing.phone ? maskPhone(existing.phone) : null },
+      after: {
+        name: existing.name,
+        phone: parsed.phone ? maskPhone(parsed.phone) : null,
+        source: PHONE_AUDIT_SOURCE,
+      },
+    });
+    return { changed: true, phone: parsed.phone };
   });
 }
 

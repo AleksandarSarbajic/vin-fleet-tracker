@@ -10,6 +10,7 @@ import type { AssignmentBoard as Board } from '@/server/assignments';
 import { DriverSelect } from './DriverSelect';
 import { DriverName } from '@/components/DriverName';
 import { MergePrompt } from './MergePrompt';
+import { DriverPhone } from './DriverPhone';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -200,6 +201,11 @@ export function AssignmentBoard({ board, role }: Props) {
   }, [dirty, mayEdit, saving, save]);
 
   const driversWithoutTruck = board.drivers.filter((d) => !claimedBy.has(d.id));
+  const driversById = useMemo(
+    () => new Map(board.drivers.map((d) => [d.id, d])),
+    [board.drivers],
+  );
+  const phoneLockedReason = `Your role is ${role}. Phone numbers need dispatcher.`;
   const canRetire = can(role, 'admin');
 
   /**
@@ -248,20 +254,23 @@ export function AssignmentBoard({ board, role }: Props) {
               about who is on what. Renders nothing when there is nothing to
               ask. */}
           <MergePrompt role={role} />
-          <div className="grid grid-cols-[92px_1fr_200px] items-center gap-x-4 border-b border-line-hair pb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+          <div className="grid grid-cols-[92px_1fr_200px_220px] items-center gap-x-4 border-b border-line-hair pb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
             <span>Truck</span>
             <span>Driver</span>
             <span>Currently</span>
+            <span>Driver&rsquo;s phone</span>
           </div>
 
           {board.trucks.map((truck) => {
             const value = draft.get(truck.id) ?? null;
             const isChanged = value !== truck.driverId;
             const isConflicted = conflictedTrucks.has(truck.id);
+            /** §12.106. The phone of the driver in the picker — the number is theirs, not the truck's. */
+            const driver = value === null ? null : (driversById.get(value) ?? null);
             return (
               <div
                 key={truck.id}
-                className={`grid grid-cols-[92px_1fr_200px] items-center gap-x-4 border-b border-line-soft py-2 ${
+                className={`grid grid-cols-[92px_1fr_200px_220px] items-center gap-x-4 border-b border-line-soft py-2 ${
                   isConflicted ? 'bg-status-late-bg' : isChanged ? 'bg-row-selected' : ''
                 }`}
               >
@@ -307,6 +316,19 @@ export function AssignmentBoard({ board, role }: Props) {
                     fallback="Unassigned"
                   />
                 </span>
+                {driver ? (
+                  <DriverPhone
+                    key={driver.id}
+                    driverId={driver.id}
+                    driverName={driver.name}
+                    phone={driver.phone}
+                    mayEdit={mayEdit}
+                    lockedReason={phoneLockedReason}
+                    onSaved={() => router.refresh()}
+                  />
+                ) : (
+                  <span />
+                )}
               </div>
             );
           })}
@@ -319,28 +341,38 @@ export function AssignmentBoard({ board, role }: Props) {
             items={driversWithoutTruck.map((d) => ({
               key: d.id,
               node: (
-                <span className="flex items-baseline justify-between gap-2">
-                  <DriverName
-                    name={d.name}
-                    source={d.source}
-                    samsaraDriverId={d.samsaraDriverId}
+                <span className="flex flex-col gap-1">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <DriverName
+                      name={d.name}
+                      source={d.source}
+                      samsaraDriverId={d.samsaraDriverId}
+                    />
+                    {/**
+                     * §12.37: ADMIN only — it takes someone off the board.
+                     * Offered only for a driver with no truck, because retiring
+                     * one that is assigned is refused server-side anyway and a
+                     * control that always errors is worse than no control.
+                     */}
+                    {canRetire ? (
+                      <button
+                        type="button"
+                        onClick={() => void retire(d.id, d.name)}
+                        title={`Retire ${d.name} — keeps their history, removes them from the board.`}
+                        className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
+                      >
+                        Retire
+                      </button>
+                    ) : null}
+                  </span>
+                  <DriverPhone
+                    driverId={d.id}
+                    driverName={d.name}
+                    phone={d.phone}
+                    mayEdit={mayEdit}
+                    lockedReason={phoneLockedReason}
+                    onSaved={() => router.refresh()}
                   />
-                  {/**
-                   * §12.37: ADMIN only — it takes someone off the board.
-                   * Offered only for a driver with no truck, because retiring
-                   * one that is assigned is refused server-side anyway and a
-                   * control that always errors is worse than no control.
-                   */}
-                  {canRetire ? (
-                    <button
-                      type="button"
-                      onClick={() => void retire(d.id, d.name)}
-                      title={`Retire ${d.name} — keeps their history, removes them from the board.`}
-                      className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
-                    >
-                      Retire
-                    </button>
-                  ) : null}
                 </span>
               ),
             }))}
