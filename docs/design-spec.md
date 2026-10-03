@@ -7819,6 +7819,52 @@ to `/` with the full fleet and no notice; a fresh tab on `/history` goes to
 `syncUrl` the first test fails (list `null`); with the deleted-list check
 removed the unit test fails. Baselines unchanged.
 
+## 12.105 The 768–1085 map/list toggle remembers, and a click on it holds
+
+**The faults.** Below 1086px the toggle opened on the map on every load
+(`useState(true)`, nothing stored). And the specs that used it retried their
+clicks until they stuck (`toPass`), on the theory that "Hide map" was lost to
+the render the first data triggered.
+
+**What was actually happening.** A click on "Hide map" was never lost: clicked
+the moment it appeared, at 768, 900 and 1023, it held every time (a probe that
+logged the toggle every frame, the fetches and the clicks). Two other things
+were real:
+- The server renders the split (unmeasured means "assume the split", §3.2),
+  and below 1086 the first measurement turns it into the toggle. The two
+  layouts were two element trees, so that switch **unmounted the list and the
+  map and built both again**, about 200ms after the first paint: the rows
+  went to zero and came back, and every narrow load built the map twice.
+- The specs waited for "the toggle **or** a row". The server's split paints
+  rows before the toggle exists, so the wait passed early, the toggle was
+  skipped, and a row clicked in the remount window was a detached element.
+  The retry loop then clicked until it passed.
+
+**The fix.**
+- One element tree for both layouts. Every child keeps its slot (the toggle
+  and the handle are `null` when absent) and only class names change. At
+  1086 and up the list's wrapper is `display: contents`, so the list is the
+  grid item it was and the wide layout paints unchanged.
+- The choice is stored per browser (`ft.narrowPane`: `map` | `list`) on
+  every click, and read in a **layout** effect, before the first paint and so
+  before anyone can click; once the toggle has been used, storage is never
+  read again, so a stored value can never undo a click.
+- The phone's List | Map tabs are separate state and untouched: list first,
+  not remembered.
+
+**Tests.** `Split.test.tsx`: stored list opens on the list; each click
+stored; junk ignored; the phone's tabs ignore it; the split → toggle → split
+switch keeps the same list and map elements. `e2e/narrow-toggle.spec.ts`, no
+retries anywhere: at 768, 900 and 1023, one click the moment the toggle
+appears holds through the first `/api/fleet` poll with the same row element
+still connected; the choice survives a reload and a new tab; at 1086 the
+stored choice changes nothing; the phone opens on the list whatever is
+stored. `header.spec.ts`'s two `toPass` loops are now one click each and an
+assertion. A toggle that resets on new data (`setMapVisible(true)` on each
+new list) fails all three widths at the post-poll check. The console
+baseline's feed-down step forgets the stored choice first, because the bulk
+bar step before it chooses the list; its pictures are unchanged.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

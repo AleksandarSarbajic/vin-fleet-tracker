@@ -14,20 +14,39 @@ import { Split } from './Split';
 let root: Root;
 let container: HTMLDivElement;
 const realObserver = globalThis.ResizeObserver;
+/** The width the observer reports first; `observed` reports a new one. */
+let observedWidth = 900;
+let observed: ((width: number) => void) | null = null;
+const store = new Map<string, string>();
 
 beforeEach(() => {
   // Measured at 900px: under 1086, so the toggle layout.
+  observedWidth = 900;
   globalThis.ResizeObserver = class {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe() {
-      this.callback(
-        [{ contentRect: { width: 900 } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
+      observed = (width) =>
+        this.callback(
+          [{ contentRect: { width } } as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      observed(observedWidth);
     }
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+  store.clear();
+  Object.defineProperty(window, 'localStorage', {
+    value: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+      key: () => null,
+      length: 0,
+    } as unknown as Storage,
+    configurable: true,
+  });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -95,5 +114,63 @@ describe('below 1086px', () => {
   it('the desktop toggle is not drawn on a phone', () => {
     render('list');
     expect(toggle().className.split(/\s+/)).toContain('max-md:hidden');
+  });
+});
+
+/**
+ * §12.105. The 768–1085 choice is remembered per browser, and the switch from
+ * the server's split to the measured toggle rebuilds nothing.
+ */
+describe('the toggle remembers, and the layout switch keeps both panes', () => {
+  it('opens on the map when nothing is stored', () => {
+    render('list');
+    expect(toggle().textContent).toBe('Hide map');
+    expect(pane('list')).toContain('md:hidden');
+  });
+
+  it('opens on the list when the list was chosen last time', () => {
+    store.set('ft.narrowPane', 'list');
+    render('list');
+    expect(toggle().textContent).toBe('Show map');
+    expect(pane('list')).not.toContain('md:hidden');
+    expect(pane('map')).toContain('md:hidden');
+  });
+
+  it('stores each click', () => {
+    render('list');
+    act(() => toggle().click());
+    expect(store.get('ft.narrowPane')).toBe('list');
+    act(() => toggle().click());
+    expect(store.get('ft.narrowPane')).toBe('map');
+  });
+
+  it('ignores anything else in storage', () => {
+    store.set('ft.narrowPane', 'sideways');
+    render('list');
+    expect(toggle().textContent).toBe('Hide map');
+  });
+
+  it("leaves the phone's tabs alone: list first whatever is stored", () => {
+    store.set('ft.narrowPane', 'map');
+    render('list');
+    expect(pane('list')).not.toContain('max-md:hidden');
+    expect(pane('map')).toContain('max-md:hidden');
+  });
+
+  it('switching from the split to the toggle keeps the same list and map elements', () => {
+    observedWidth = 1400;
+    render('list');
+    expect(container.querySelector('[role="separator"]')).not.toBeNull();
+    expect(pane('list')).toEqual(['contents']);
+    const list = container.querySelector('[data-list]');
+    const map = container.querySelector('[data-map]');
+    act(() => observed!(900));
+    expect(container.querySelector('[role="separator"]')).toBeNull();
+    expect(toggle().textContent).toBe('Hide map');
+    expect(container.querySelector('[data-list]')).toBe(list);
+    expect(container.querySelector('[data-map]')).toBe(map);
+    act(() => observed!(1400));
+    expect(container.querySelector('[data-list]')).toBe(list);
+    expect(container.querySelector('[data-map]')).toBe(map);
   });
 });

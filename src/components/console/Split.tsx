@@ -33,6 +33,30 @@ function writeStored(pct: number): void {
   }
 }
 
+/**
+ * §12.105. The 768–1085 toggle's choice, per browser. The phone's List | Map
+ * tabs are separate state and always open on the list (§12.96).
+ */
+const PANE_STORAGE_KEY = 'ft.narrowPane';
+
+function readStoredMapVisible(): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(PANE_STORAGE_KEY);
+    return raw === 'map' ? true : raw === 'list' ? false : null;
+  } catch {
+    // Storage unavailable: the map first, as before.
+    return null;
+  }
+}
+
+function writeStoredMapVisible(visible: boolean): void {
+  try {
+    window.localStorage.setItem(PANE_STORAGE_KEY, visible ? 'map' : 'list');
+  } catch {
+    // The choice is lost on reload. Nothing else is.
+  }
+}
+
 interface Props {
   list: React.ReactNode;
   map: React.ReactNode;
@@ -71,6 +95,17 @@ export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
   const [dragging, setDragging] = useState(false);
   const [width, setWidth] = useState(0);
   const [mapVisible, setMapVisible] = useState(true);
+  /**
+   * §12.105. Read in a LAYOUT effect, before the first paint and so before
+   * anyone can click: a stored choice applied after a click would undo it.
+   * The ref is the belt to that: once the toggle has been used, storage never
+   * speaks again.
+   */
+  const paneChosen = useRef(false);
+  useLayoutEffect(() => {
+    const stored = readStoredMapVisible();
+    if (stored !== null && !paneChosen.current) setMapVisible(stored);
+  }, []);
 
   // Read on mount, not during render — the server has no localStorage and a
   // mismatch would hydrate wrong.
@@ -166,45 +201,22 @@ export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
     [commit, pct, splitEnabled],
   );
 
-  // Below 1086px the split is off: the list runs full width and the map is a
-  // toggle.
-  if (!splitEnabled) {
-    /*
-     * §12.96. Both panes stay MOUNTED and CSS hides one. The toggle used to
-     * render one or the other, so every switch threw the map away and built
-     * a new one — tiles, markers, camera and all. Each pane carries two
-     * rules: the desktop toggle's (`md:`) and the phone tab's (`max-md:`).
-     */
-    return (
-      <div ref={boxRef} className="relative flex min-h-0 flex-1 flex-col">
-        <button
-          type="button"
-          onClick={() => {
-            const next = !mapVisible;
-            setMapVisible(next);
-            // Hidden, it kept the size it had; shown, it measures again.
-            if (next) onResizeEnd();
-          }}
-          className="flex h-8 shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent max-md:hidden"
-        >
-          {mapVisible ? 'Hide map' : 'Show map'}
-        </button>
-        <div
-          data-pane="map"
-          className={`min-h-0 flex-1 ${mapVisible ? '' : 'md:hidden'} ${phonePane === 'map' ? '' : 'max-md:hidden'}`}
-        >
-          {map}
-        </div>
-        <div
-          data-pane="list"
-          className={`min-h-0 flex-1 ${mapVisible ? 'md:hidden' : ''} ${phonePane === 'list' ? '' : 'max-md:hidden'}`}
-        >
-          {list}
-        </div>
-      </div>
-    );
-  }
-
+  /*
+   * ONE element tree for both layouts (§12.105). The server renders the split
+   * (unmeasured means "assume the split", above), and below 1086px the first
+   * measurement turns it into the toggle. With a tree per layout that switch
+   * unmounted the list and the map and built them again, ~200ms after the
+   * first paint: the rows vanished under a click, and the map was built twice
+   * on every narrow load. Every child keeps its slot now — the toggle and the
+   * handle are `null` when absent — so only class names change.
+   *
+   * At 1086px and up the list's wrapper is `display: contents`, so the list is
+   * the grid item exactly as before and the wide layout paints unchanged.
+   *
+   * Below 1086px: the list runs full width and the map is a toggle. Both panes
+   * stay MOUNTED and CSS hides one (§12.96). Each pane carries two rules: the
+   * desktop toggle's (`md:`) and the phone tab's (`max-md:`).
+   */
   return (
     <div
       ref={boxRef}
@@ -224,39 +236,80 @@ export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
        * The `0` minimum is the half that matters: a bare `1fr` has an `auto`
        * minimum and grows to fit content exactly as before.
        */
-      className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
-      style={{ gridTemplateColumns: `${pct}% ${HANDLE_PX}px 1fr` }}
+      className={
+        splitEnabled
+          ? 'grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]'
+          : 'relative flex min-h-0 flex-1 flex-col'
+      }
+      style={splitEnabled ? { gridTemplateColumns: `${pct}% ${HANDLE_PX}px 1fr` } : undefined}
     >
-      {list}
+      {splitEnabled ? null : (
+        <button
+          type="button"
+          onClick={() => {
+            const next = !mapVisible;
+            paneChosen.current = true;
+            setMapVisible(next);
+            writeStoredMapVisible(next);
+            // Hidden, it kept the size it had; shown, it measures again.
+            if (next) onResizeEnd();
+          }}
+          className="flex h-8 shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent max-md:hidden"
+        >
+          {mapVisible ? 'Hide map' : 'Show map'}
+        </button>
+      )}
 
       <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-valuenow={Math.round(pct)}
-        aria-label="Resize list and map"
-        tabIndex={0}
-        onPointerDown={onPointerDown}
-        onKeyDown={onKeyDown}
-        onDoubleClick={() => commit(DEFAULT_PCT)}
-        title="Drag to resize · double-click to reset to 60/40"
-        className={[
-          'relative flex cursor-col-resize items-center justify-center',
-          // 12px grab margin on a 6px handle, without changing the layout.
-          'after:absolute after:inset-y-0 after:-left-[12px] after:-right-[12px] after:content-[""]',
-          dragging ? 'bg-accent outline outline-1 outline-accent-hover' : 'bg-line-hair hover:bg-accent',
-        ].join(' ')}
+        data-pane="list"
+        className={
+          splitEnabled
+            ? 'contents'
+            : `min-h-0 flex-1 ${mapVisible ? 'md:hidden' : ''} ${phonePane === 'list' ? '' : 'max-md:hidden'}`
+        }
       >
-        <span className="flex flex-col gap-[3px]" aria-hidden="true">
-          {Array.from({ length: 6 }, (_, i) => (
-            <span
-              key={i}
-              className={`h-[2px] w-[2px] ${dragging ? 'bg-text-inverse' : 'bg-line-grip'}`}
-            />
-          ))}
-        </span>
+        {list}
       </div>
 
-      <div className="relative min-h-0 min-w-0">{map}</div>
+      {splitEnabled ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuenow={Math.round(pct)}
+          aria-label="Resize list and map"
+          tabIndex={0}
+          onPointerDown={onPointerDown}
+          onKeyDown={onKeyDown}
+          onDoubleClick={() => commit(DEFAULT_PCT)}
+          title="Drag to resize · double-click to reset to 60/40"
+          className={[
+            'relative flex cursor-col-resize items-center justify-center',
+            // 12px grab margin on a 6px handle, without changing the layout.
+            'after:absolute after:inset-y-0 after:-left-[12px] after:-right-[12px] after:content-[""]',
+            dragging ? 'bg-accent outline outline-1 outline-accent-hover' : 'bg-line-hair hover:bg-accent',
+          ].join(' ')}
+        >
+          <span className="flex flex-col gap-[3px]" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, i) => (
+              <span
+                key={i}
+                className={`h-[2px] w-[2px] ${dragging ? 'bg-text-inverse' : 'bg-line-grip'}`}
+              />
+            ))}
+          </span>
+        </div>
+      ) : null}
+
+      <div
+        data-pane="map"
+        className={
+          splitEnabled
+            ? 'relative min-h-0 min-w-0'
+            : `min-h-0 flex-1 ${mapVisible ? '' : 'md:hidden'} ${phonePane === 'map' ? '' : 'max-md:hidden'}`
+        }
+      >
+        {map}
+      </div>
     </div>
   );
 }

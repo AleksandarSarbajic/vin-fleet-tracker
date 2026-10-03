@@ -299,6 +299,12 @@ for (const width of WIDTHS) {
     await shoot(page, '8-bulk-bar', width);
 
     await feedDown();
+    /*
+     * §12.105. The bulk bar above chose the list, and below 1086 that choice
+     * is now remembered. The feed-down state is pictured as a dispatcher first
+     * meets it — map first — so the remembered choice is forgotten here.
+     */
+    await page.evaluate(() => localStorage.removeItem('ft.narrowPane'));
     await open(page);
     await shoot(page, '3-feed-down', width);
   });

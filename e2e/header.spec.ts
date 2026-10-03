@@ -492,15 +492,17 @@ async function openNarrow(page: Page, width: number, down: boolean): Promise<voi
   const hideMap = page.getByRole('button', { name: /^Hide map$/ });
   const rows = page.locator('[data-row-id]').first();
   if (down) await expect(page.locator('[data-console-header] [data-feed-down]')).toBeVisible({ timeout: 15_000 });
-  await expect(hideMap.or(rows).first()).toBeVisible({ timeout: 15_000 });
-  // Clicked straight after the first fetch lands, the toggle and the row
-  // click can each be lost to the render it triggers; retried until the list
-  // shows and a truck is selected.
-  await expect(async () => {
-    if (await hideMap.isVisible()) await hideMap.click();
-    await rows.click({ timeout: 2_000 });
-    await expect(rows).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
-  }).toPass({ timeout: 20_000 });
+  /*
+   * §12.105. One click each, never retried: the toggle is waited for itself
+   * (not "the toggle or a row" — the server's split paints rows before the
+   * toggle exists), and a lost click fails here instead of being clicked
+   * again until it sticks.
+   */
+  await expect(hideMap).toBeVisible({ timeout: 15_000 });
+  await hideMap.click();
+  await expect(page.getByRole('button', { name: /^Show map$/ })).toBeVisible();
+  await rows.click();
+  await expect(rows).toHaveAttribute('aria-selected', 'true');
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -570,13 +572,11 @@ test.describe('below 1024px the search is an icon', () => {
     await page.setViewportSize({ width: 900, height: 800 });
     await page.goto('/');
     const hideMap = page.getByRole('button', { name: /^Hide map$/ });
-    await expect(hideMap.or(rows(page).first()).first()).toBeVisible({ timeout: 15_000 });
-    // As in the narrow states: the toggle can be lost to the first fetch's render.
-    await expect(async () => {
-      if (await hideMap.isVisible()) await hideMap.click();
-      await expect(page.getByRole('button', { name: /^Show map$/ })).toBeVisible({ timeout: 1_000 });
-      await expect(rows(page).first()).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    // §12.105. One click, never retried (see openNarrow).
+    await expect(hideMap).toBeVisible({ timeout: 15_000 });
+    await hideMap.click();
+    await expect(page.getByRole('button', { name: /^Show map$/ })).toBeVisible();
+    await expect(rows(page).first()).toBeVisible();
   });
 
   test('opens on a tap or "/", closes on Esc to the icon, and the query survives', async ({
