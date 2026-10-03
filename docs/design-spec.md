@@ -7787,6 +7787,38 @@ the row check. Baselines unchanged: the console's 54, `history-W40-*`,
 `history-phone-W40-*`. The console's timeline shot now waits for "Loading…"
 to clear: one baseline run caught it mid-request.
 
+## 12.104 The Board button goes back to the board as it was left
+
+**The fault.** The history page's Board button, G B and the phone's Board link
+all went to a bare `/`. A dispatcher who left a list, a search and a selected
+truck for Driver history came back to the whole fleet with nothing selected.
+
+**The rule.** The board's view is its address — `?list=`, `?chips=`, `?q=`,
+`?truck=` — so the address is what is remembered. The board writes it to the
+tab's `sessionStorage` (`ft.boardReturn`) on mount and on every change, not at
+the moment of leaving: there are several ways off the board (account menu,
+G H, the phone menu, the address bar) and a save hung on each is a save one of
+them forgets. Only those four parameters are kept.
+
+- `sessionStorage`, so a tab's board is that tab's. A fresh tab has nothing
+  saved and goes to `/`.
+- The history page reads it after hydration (`/` on the server render) and
+  checks it against what exists now: a list deleted since (the history page
+  loads the list ids) or a chip that is no longer a chip sends the button to
+  a plain `/` — the full fleet, no "no longer exists" notice. A stale view is
+  dropped whole, never opened half-applied.
+- The map's camera is not part of the address and is not restored; selecting
+  the truck brings its popup back.
+
+**Tests.** `src/lib/board-return.test.ts` (saved, latest, deleted list, stale
+chip, foreign parameters, storage that throws). `e2e/board-return.spec.ts`:
+a list, a search and 101 selected, out to history and back by the button and
+by G B — same list, rows, search and selection; a list deleted while away goes
+to `/` with the full fleet and no notice; a fresh tab on `/history` goes to
+`/`; the phone's Board link returns to the list. With the save removed from
+`syncUrl` the first test fails (list `null`); with the deleted-list check
+removed the unit test fails. Baselines unchanged.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

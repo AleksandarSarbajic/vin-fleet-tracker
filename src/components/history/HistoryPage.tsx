@@ -9,6 +9,7 @@ import { AccountMenu, type AccountUser } from '@/components/console/AccountMenu'
 import { HeaderClocks, HeaderSync, useHeaderNow } from '@/components/console/HeaderStatus';
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { useGoKeys } from '@/hooks/useGoKeys';
+import { FILTER_KEYS } from '@/components/console/FilterChips';
 import { palette } from '@/design/tokens';
 import { BRAND } from '@/lib/brand';
 import { timeInZone } from '@/lib/format';
@@ -27,6 +28,7 @@ import {
   type CivilDate,
   type IsoWeek,
 } from '@/lib/history-week';
+import { boardReturnHref } from '@/lib/board-return';
 import { httpErrorFrom } from '@/lib/http-error';
 import { isTypingTarget } from '@/lib/keymap';
 import { markHistorySeen } from '@/lib/whats-new';
@@ -65,6 +67,7 @@ export function HistoryPage({
   initialView,
   initialQ,
   initialFleet,
+  listIds,
   dispatchTz,
   user,
 }: {
@@ -72,6 +75,8 @@ export function HistoryPage({
   initialView: HistoryWeekView;
   initialQ: string;
   initialFleet: FleetResponse;
+  /** §12.104. The lists that exist now, so the way back never opens a deleted one. */
+  listIds: string[];
   dispatchTz: string;
   user: AccountUser;
 }) {
@@ -82,8 +87,15 @@ export function HistoryPage({
   const [q, setQ] = useState(initialQ);
   const filter = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * §12.104. The board as it was left: its list, chips, search and truck.
+   * `/` until read — storage is invisible to the server, so it is read after
+   * hydration, not while rendering.
+   */
+  const [boardHref, setBoardHref] = useState('/');
+  useEffect(() => setBoardHref(boardReturnHref({ listIds, chips: FILTER_KEYS })), [listIds]);
   // G B — back to the board (does nothing below 768px, useGoKeys).
-  useGoKeys({ b: () => router.push('/') });
+  useGoKeys({ b: () => router.push(boardHref) });
   // The account menu's "New" tag drops after the first visit.
   useEffect(() => markHistorySeen(), []);
   // "/" — the filter, as on the board.
@@ -201,6 +213,7 @@ export function HistoryPage({
         onQ={setQ}
         onWeek={phoneWeek}
         onRetry={() => void query.refetch()}
+        boardHref={boardHref}
         oldWeekNotice={oldWeek ? OLD_WEEK_NOTICE : null}
         fleet={{
           fetchedAt: fleet.data?.fetchedAt ?? null,
@@ -236,7 +249,7 @@ export function HistoryPage({
           <div aria-hidden="true" className="h-6 w-px shrink-0 bg-line-hair" />
           {/* The chip slot: board-only controls are replaced by the way back and the page name. */}
           <Link
-            href="/"
+            href={boardHref}
             data-board-link=""
             className="inline-flex h-[30px] shrink-0 items-center gap-[7px] border border-line-rule px-2 font-cond text-[12px] font-semibold uppercase leading-none tracking-[.08em] text-text hover:bg-surface-overlay"
           >

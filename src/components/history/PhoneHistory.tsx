@@ -76,6 +76,7 @@ export function PhoneHistory({
   onQ,
   onWeek,
   onRetry,
+  boardHref,
   oldWeekNotice,
   fleet,
   dispatchTz,
@@ -95,6 +96,8 @@ export function PhoneHistory({
   onQ: (q: string) => void;
   onWeek: (week: IsoWeek | 'previous' | 'next' | 'current' | string) => void;
   onRetry: () => void;
+  /** §12.104. The board as it was left, or `/`. */
+  boardHref: string;
   oldWeekNotice: string | null;
   fleet: { fetchedAt: string | null; feedNewestAt: string | null; feedStale: boolean };
   dispatchTz: string;
@@ -122,7 +125,8 @@ export function PhoneHistory({
       {/* The way back and the page name, 48. */}
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-line-soft bg-surface-base px-1">
         <Link
-          href="/"
+          href={boardHref}
+          data-phone-board-link=""
           className="inline-flex h-11 items-center gap-[5px] px-2.5 font-cond text-[13px] font-semibold uppercase leading-none tracking-[.08em] text-text"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

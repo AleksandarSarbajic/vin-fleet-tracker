@@ -67,6 +67,7 @@ import { PhoneCardList } from './phone/PhoneCardList';
 import { TruckSheet } from './phone/TruckSheet';
 import { dialableTel } from '@/lib/dial';
 import { isPhoneNow } from '@/lib/phone';
+import { rememberBoard } from '@/lib/board-return';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -141,10 +142,13 @@ export function Console({
         else search.delete('truck');
       }
       const qs = search.toString();
+      rememberBoard(qs);
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [pathname, router],
   );
+  // §12.104. The address the board opened on is the way back, until it changes.
+  useEffect(() => rememberBoard(window.location.search), []);
 
   /**
    * §12.29: the chips own their state and write the URL FROM THE CLICK. The

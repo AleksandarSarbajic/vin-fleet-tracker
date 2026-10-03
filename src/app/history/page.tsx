@@ -6,6 +6,7 @@ import { getSessionUser } from '@/lib/auth';
 import { currentIsoWeek, parseIsoWeek } from '@/lib/history-week';
 import { loadFleet } from '@/server/fleet';
 import { loadHistoryWeek } from '@/server/history';
+import { loadTruckLists } from '@/server/truck-lists';
 
 /**
  * §12.101 — /history?week=2026-W40&q=name. A record, read by any role; the
@@ -28,7 +29,12 @@ export default async function HistoryRoute({
   const params = await searchParams;
   const asked = first(params['week']);
   const week = (asked ? parseIsoWeek(asked) : null) ?? currentIsoWeek(new Date(), serverEnv.DISPATCH_TZ);
-  const [fleet, view] = await Promise.all([loadFleet(), loadHistoryWeek(db, week, serverEnv.DISPATCH_TZ)]);
+  const [fleet, view, lists] = await Promise.all([
+    loadFleet(),
+    loadHistoryWeek(db, week, serverEnv.DISPATCH_TZ),
+    // §12.104. So the Board button never goes back to a list that was deleted.
+    loadTruckLists(db),
+  ]);
 
   return (
     <HistoryPage
@@ -36,6 +42,7 @@ export default async function HistoryRoute({
       initialView={view}
       initialQ={first(params['q']) ?? ''}
       initialFleet={fleet}
+      listIds={lists.map((l) => l.id)}
       dispatchTz={serverEnv.DISPATCH_TZ}
       user={{ fullName: user.fullName, email: user.email, role: user.role }}
     />
