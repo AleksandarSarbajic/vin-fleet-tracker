@@ -182,15 +182,15 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
             )}
           </div>
 
-          {/* §12.101. The way in to Driver history. Desktop only until the
-              phone layout is built (stage 3). */}
-          {!editing && !phone ? (
+          {/* §12.101 / §12.102. The way in to Driver history — on the phone
+              too, 44px, without the key cap a phone has no keys for. */}
+          {!editing ? (
             <Link
               href="/history"
               role="menuitem"
               data-menu-history=""
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-body text-text hover:bg-row-hover"
+              className={`flex w-full items-center gap-2.5 px-3 text-left text-body text-text hover:bg-row-hover ${phone ? 'min-h-11' : 'py-1.5'}`}
             >
               <svg
                 width="15"
@@ -209,9 +209,13 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
                 <path d="M12 7v5l3 2" />
               </svg>
               Driver history
-              <span className="ml-auto border border-line-tag px-1 py-px font-mono text-[10.5px] text-text-secondary">
-                G H
-              </span>
+              {phone ? (
+                <span className="ml-auto" />
+              ) : (
+                <span className="ml-auto border border-line-tag px-1 py-px font-mono text-[10.5px] text-text-secondary">
+                  G H
+                </span>
+              )}
               {historyNew ? (
                 <span
                   data-new-tag=""

@@ -42,6 +42,8 @@ async function setRole(role: 'viewer' | 'dispatcher') {
 }
 
 const row = (page: Page, name: string) => page.locator(`[data-driver-row="${name}"]`);
+/** The desktop page's content — the phone layout (§12.102) is in the page too, hidden. */
+const desk = (page: Page) => page.locator('main');
 
 test.beforeEach(async ({ page }) => {
   await seedHistory();
@@ -162,7 +164,7 @@ for (const width of WIDTHS) {
       expect(measured.scroll, 'a bar scrolls sideways').toEqual([0, 0]);
       expect(measured.overlaps, 'overlaps').toEqual([]);
       expect(measured.heights).toEqual([48, 52]);
-      if (down) await expect(page.locator('[data-feed-down]')).toContainText(/Last sync \d{2}:\d{2}/);
+      if (down) await expect(page.locator('[data-history-header] [data-feed-down]')).toContainText(/Last sync \d{2}:\d{2}/);
     });
   }
 }
@@ -193,12 +195,12 @@ test('the tooltip: on hover after a beat, at once on focus, gone on Esc', async 
 test('the filter narrows the drivers and rides in the address', async ({ page }) => {
   await openWeek(page, '2026-W40');
   await page.keyboard.press('/');
-  await expect(page.getByLabel('Filter drivers')).toBeFocused();
+  await expect(page.locator('[data-history-toolbar]').getByLabel('Filter drivers')).toBeFocused();
   await page.keyboard.type('dana');
   await expect(page.locator('[data-driver-row]')).toHaveCount(1);
   await expect(page.locator('[data-history-summary]')).toHaveText('1 of 9 drivers match “dana”');
   await expect(page).toHaveURL(/q=dana/);
-  await page.getByLabel('Filter drivers').fill('nobody');
+  await page.locator('[data-history-toolbar]').getByLabel('Filter drivers').fill('nobody');
   await page.getByRole('button', { name: 'Clear filter' }).click();
   await expect(page.locator('[data-driver-row]')).toHaveCount(9);
 });
@@ -213,7 +215,7 @@ test('the calendar picks a day’s week; a typed date jumps to its week', async 
   await page.getByRole('button', { name: /choose a week/ }).click();
   await page.getByLabel('Jump to a date').fill('2026-09-16');
   await expect(page).toHaveURL(/week=2026-W38/);
-  await expect(page.getByText('No loads recorded this week')).toBeVisible();
+  await expect(desk(page).getByText('No loads recorded this week')).toBeVisible();
 });
 
 test('states A–F at 1440 and 1920, the old-week notice, and 768 once', async ({ page }, info) => {
@@ -227,7 +229,7 @@ test('states A–F at 1440 and 1920, the old-week notice, and 768 once', async (
     await shot(page, info, `A-normal-${width}`);
     // B — drivers, no loads.
     await openWeek(page, '2026-W38', width, 1700);
-    await expect(page.getByText('No loads recorded this week')).toBeVisible();
+    await expect(desk(page).getByText('No loads recorded this week')).toBeVisible();
     await shot(page, info, `B-empty-${width}`);
     // C — a busy week: 4 on Andre's Tuesday folds to 2 + "+2 more".
     await openWeek(page, '2026-W39', width, 1700);
@@ -237,7 +239,7 @@ test('states A–F at 1440 and 1920, the old-week notice, and 768 once', async (
     await openWeek(page, '2026-W40', width);
     await page.route('**/api/history?week=2026-W39', () => {});
     await page.getByRole('button', { name: 'Previous week' }).click();
-    await expect(page.getByLabel('Loading this week')).toBeVisible();
+    await expect(desk(page).getByLabel('Loading this week')).toBeVisible();
     await shot(page, info, `D-loading-${width}`);
     await page.unroute('**/api/history?week=2026-W39');
     // E — the week's request fails.
@@ -246,12 +248,12 @@ test('states A–F at 1440 and 1920, the old-week notice, and 768 once', async (
       route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"down"}' }),
     );
     await page.getByRole('button', { name: 'Previous week' }).click();
-    await expect(page.getByText('Could not load this week')).toBeVisible({ timeout: 20_000 });
+    await expect(desk(page).getByText('Could not load this week')).toBeVisible({ timeout: 20_000 });
     await shot(page, info, `E-error-${width}`);
     await page.unroute('**/api/history?week=2026-W39');
     // F — before the first record.
     await openWeek(page, '2026-W37', width, 1700);
-    await expect(page.getByText('No records for this week')).toBeVisible();
+    await expect(desk(page).getByText('No records for this week')).toBeVisible();
     await shot(page, info, `F-before-records-${width}`);
   }
   await openWeek(page, '2026-W40', 1440);

@@ -33,6 +33,7 @@ import { HistoryLists } from './HistoryLists';
 import { BeforeRecords, EmptyWeek, LoadingRows, WeekError } from './HistoryStates';
 import { HeadRow, HistoryTable, PAD } from './HistoryTable';
 import { HistoryToolbar } from './HistoryToolbar';
+import { PhoneHistory } from './PhoneHistory';
 import { LEGEND, StatusIcon, STATUS_INK } from './StatusMark';
 
 /**
@@ -48,6 +49,9 @@ export const FIRST_DAY: CivilDate = { y: 2026, m: 9, d: 14 };
  */
 export const RELIABLE_FROM: CivilDate = { y: 2026, m: 10, d: 2 };
 const RELIABLE_FROM_LABEL = 'Oct 2, 2026';
+const OLD_WEEK_NOTICE = `Before ${RELIABLE_FROM_LABEL}, a load row was sometimes reused for the next trip, so this week may be missing trips.`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const isoOf = (c: CivilDate) => `${c.y}-${pad2(c.m)}-${pad2(c.d)}`;
 
 async function fetchWeek(week: string): Promise<HistoryWeekView> {
   const response = await fetch(`/api/history?week=${week}`, { cache: 'no-store' });
@@ -84,6 +88,8 @@ export function HistoryPage({
   // "/" — the filter, as on the board.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // No keyboard handling on a phone (§12.96): the listener stays, inert.
+      if (window.matchMedia('(max-width: 767px)').matches) return;
       if (event.key !== '/' || event.metaKey || event.ctrlKey || isTypingTarget(event.target)) return;
       event.preventDefault();
       filter.current?.focus();
@@ -122,6 +128,32 @@ export function HistoryPage({
   );
   const driverCount = view?.rows.filter((r) => r.driverId !== null).length ?? 0;
 
+  // §12.102. The phone layout shows the same states as the table frame.
+  const phoneState = beforeRecords
+    ? ('before' as const)
+    : view
+      ? view.counts.loads > 0 && rows.length > 0
+        ? ('table' as const)
+        : needle && rows.length === 0 && view.counts.loads > 0
+          ? ('noMatch' as const)
+          : ('empty' as const)
+      : query.isError
+        ? ('error' as const)
+        : ('loading' as const);
+  const phoneWeek = (to: IsoWeek | 'previous' | 'next' | 'current' | string) => {
+    if (to === 'previous') return setWeek(shiftWeek(week, -1));
+    if (to === 'next') return setWeek(shiftWeek(week, 1));
+    if (to === 'current') return setWeek(current);
+    if (typeof to === 'string') {
+      const [y, m, d] = to.split('-').map(Number);
+      if (!y || !m || !d) return;
+      const day = { y, m, d };
+      if (daysBetween(FIRST_DAY, day) >= 0 && daysBetween(day, today) >= 0) setWeek(isoWeekOf(day));
+      return;
+    }
+    setWeek(to);
+  };
+
   const summary = !view
     ? query.isError
       ? ''
@@ -151,16 +183,31 @@ export function HistoryPage({
 
   return (
     <div className="flex h-dvh flex-col bg-surface-base text-text print:block print:h-auto print:bg-print-paper print:text-print-ink">
-      {/* Below 768: the phone layout is stage 3. */}
-      <div data-history-phone="" className="flex flex-1 flex-col items-start gap-4 p-4 md:hidden print:hidden">
-        <Link href="/" className="inline-flex h-11 items-center gap-2 border border-line-rule px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text">
-          ← Board
-        </Link>
-        <h1 className="font-cond text-[15px] font-semibold uppercase tracking-[.12em]">Driver history</h1>
-        <p className="font-sans text-[13px] leading-[1.55] text-text-secondary">
-          Driver history is not on phones yet. Open it on a tablet or a computer.
-        </p>
-      </div>
+      {/* §12.102. Below 768: the design's phone layout. */}
+      <PhoneHistory
+        week={week}
+        current={current}
+        isCurrent={isCurrent}
+        view={view}
+        rows={rows}
+        todayIndex={todayIndex}
+        state={phoneState}
+        q={q}
+        onQ={setQ}
+        onWeek={phoneWeek}
+        onRetry={() => void query.refetch()}
+        oldWeekNotice={oldWeek ? OLD_WEEK_NOTICE : null}
+        fleet={{
+          fetchedAt: fleet.data?.fetchedAt ?? null,
+          feedNewestAt: fleet.data?.feedNewestAt ?? null,
+          feedStale: fleet.data?.feedStale ?? false,
+        }}
+        dispatchTz={dispatchTz}
+        now={now}
+        firstDayIso={isoOf(FIRST_DAY)}
+        todayIso={isoOf(today)}
+        atFirst={weeksFrom(isoWeekOf(FIRST_DAY), week) <= 0}
+      />
 
       <header data-history-header="" className="shrink-0 max-md:hidden print:hidden">
         <div
@@ -254,6 +301,8 @@ export function HistoryPage({
                 <path d="M12 3 2 21h20Z" />
                 <path d="M12 10v5M12 18h.01" />
               </svg>
+              {/* Written out, not OLD_WEEK_NOTICE: one text run kerns "2026," differently
+                  from three, and the desktop baselines hold these pixels. */}
               Before {RELIABLE_FROM_LABEL}, a load row was sometimes reused for the next trip, so this week may be
               missing trips.
             </div>

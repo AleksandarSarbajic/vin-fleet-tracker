@@ -7687,6 +7687,45 @@ narrow toolbar fails 768 and 800); the tooltip; the filter; the calendar.
 Baselines: `history-W40-*` at the six widths, frozen clock, fixed seed. The
 console's 54 baselines are unchanged.
 
+## 12.102 Driver history on a phone
+
+Stage 3: the design's phone layout for §12.101, below 768px only. Desktop
+and the console are unchanged (their baselines held at zero).
+
+- **Top:** a 44px bar with the brand and the sync state (the shared
+  `HeaderSync`), then a 48px bar with a 44px **Board** link, the page name and
+  Read-only (its word drops below 360, the lock stays). Then the week: 44px
+  ‹ and ›, the range and its tag in a 52px button that opens a week chooser
+  sheet (a typed date jumps to its week; This week; Close), and "Jump to this
+  week" when it is another week. The filter is a 44px field.
+- **Cards:** one per driver, its trucks under the name ("Trucks 1162
+  (Mon–Wed), 1188 (Wed–Sun)"). Days are listed inside; a run of days with
+  nothing on them folds into one line — "Thu 1 – Fri 2 · No truck",
+  "Sat 3 – Sun 4 · Upcoming", "No loads". Every load is a row of at least
+  48px; tapping it opens the tooltip's details (§12.101) in a bottom sheet
+  that never outgrows the screen, closed by a 44px Close or a tap on the
+  scrim.
+- **States and lists:** empty, before the first record, no filter match,
+  error with a 44px Retry, loading; the two lists under the cards as rows of
+  at least 48px. The old-week notice sits under the filter.
+- **The way in:** the phone top bar's account menu has the Driver history
+  row, 44px, without the G H key cap.
+- **No keyboard handling on a phone.** G H, G B and "/" keep one listener at
+  every width and do nothing below 768, so the phone's keydown listener
+  count equals the desktop's (checked on the history page as on the board).
+- Read-only, as on the desktop: nothing edits, messages or ranks.
+
+**Tests.** `e2e/history-phone.spec.ts` at 320×568, 360×640, 375×667,
+390×844, 430×932 and 667×375, with the board's phone helpers, moved to
+`e2e/phone-helpers.ts` so both pages are measured by the same code: the
+cards and folding, every load row 48px, nothing cut off, every control 44px,
+no sideways scroll (list, lists, sheet, empty, error), no text under 12px,
+the sheet inside the screen with the tooltip's details and a 44px Close, the
+empty and error states, the week controls, filter and way back, the phone
+account menu's row, and the listener count. Against the old placeholder all
+nine failed; all pass now. Moving the phone breakpoint from `md` to `sm`
+fails them at 667×375. Baselines: `history-phone-W40-*` at the six sizes.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
