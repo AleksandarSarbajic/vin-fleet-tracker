@@ -1,6 +1,8 @@
 'use client';
 
 import { useActionState, useEffect, useId, useRef, useState } from 'react';
+import Link from 'next/link';
+import { historyIsNew } from '@/lib/whats-new';
 import { signOut } from '@/app/login/actions';
 import { updateDisplayName, type RenameState } from '@/app/actions/profile';
 import { initials } from '@/lib/profile';
@@ -40,6 +42,11 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
   const menuId = useId();
 
   const [state, submit, pending] = useActionState(updateDisplayName, EMPTY);
+  /** §12.101. Read when the menu opens: storage is the browser's, not the server's. */
+  const [historyNew, setHistoryNew] = useState(false);
+  useEffect(() => {
+    if (open) setHistoryNew(historyIsNew());
+  }, [open]);
 
   /**
    * Focus goes back to the circle when the menu closes — the shared hook, not
@@ -174,6 +181,47 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
               </>
             )}
           </div>
+
+          {/* §12.101. The way in to Driver history. Desktop only until the
+              phone layout is built (stage 3). */}
+          {!editing && !phone ? (
+            <Link
+              href="/history"
+              role="menuitem"
+              data-menu-history=""
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-body text-text hover:bg-row-hover"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0"
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              Driver history
+              <span className="ml-auto border border-line-tag px-1 py-px font-mono text-[10.5px] text-text-secondary">
+                G H
+              </span>
+              {historyNew ? (
+                <span
+                  data-new-tag=""
+                  className="bg-accent px-1 py-0.5 font-cond text-[10px] font-semibold uppercase leading-none tracking-[.1em] text-text-inverse"
+                >
+                  New
+                </span>
+              ) : null}
+            </Link>
+          ) : null}
 
           {!editing ? (
             <button

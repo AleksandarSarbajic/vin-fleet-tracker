@@ -124,6 +124,43 @@ export const palette = {
     neutral: { fg: '#b3bac0', bg: '#262a2f', bd: '#6e767d' },
   },
   /**
+   * §12.101. The driver history page's grounds: the narrower weekend columns,
+   * and today's column (a 5% accent tint on the cells, 8% on its head, 12%
+   * behind the "Current week" tag).
+   */
+  history: {
+    /**
+     * A cancelled (or TONU) load: the design's one new value, kept apart from
+     * `status.late.fg`, which means something live. 7.10 on `surface.raised`,
+     * the load block's fill. Here and not under `status`: it is a load's
+     * state, not one the status engine emits for a truck.
+     */
+    cancelled: '#e3998e',
+    weekend: '#131619',
+    weekendHead: '#1a1e22',
+    today: 'rgba(148,188,227,.05)',
+    todayHead: 'rgba(148,188,227,.08)',
+    currentTag: 'rgba(148,188,227,.12)',
+  },
+  /**
+   * §12.101. The printed driver history: light, on paper, with every status
+   * a darker ink of its screen colour so a black-and-white printer still
+   * tells them apart (each also keeps its shape icon).
+   */
+  print: {
+    paper: '#ffffff',
+    ink: '#1d1f20',
+    inkSecondary: '#4b4f53',
+    inkMuted: '#6a6f74',
+    rule: '#9ea3a8',
+    ruleSoft: '#c9cccf',
+    head: '#eceded',
+    weekend: '#f6f6f7',
+    delivered: '#12603a',
+    cancelled: '#8e2c1d',
+    progress: '#2c455d',
+  },
+  /**
    * §12.91. The header's feed-down block: a brighter square than `late.fg`,
    * so it reads as a light rather than as text, on a late-tinted ground. Its
    * text and border are `status.late.fg` and `status.late.bd`.

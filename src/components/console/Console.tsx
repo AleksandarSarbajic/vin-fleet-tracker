@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useGoKeys } from '@/hooks/useGoKeys';
 import { FLEET_POLL_MS, useFleet, type FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
@@ -114,6 +115,8 @@ export function Console({
   role,
 }: Props) {
   const router = useRouter();
+  // §12.101. G H — Driver history. Does nothing below 768px (useGoKeys).
+  useGoKeys({ h: () => router.push('/history') });
   const pathname = usePathname();
   const reducedMotion = useReducedMotion();
 

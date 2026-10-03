@@ -191,3 +191,36 @@ describe('the header (§12.91)', () => {
     expect(contrast(text.secondary, surface.bar)).toBe(7.48);
   });
 });
+
+/**
+ * §12.101 — the driver history page. Every text pair it adds, on its own
+ * ground, measured; the print pairs on paper. The lowest is print's muted
+ * ink (the "—" in an empty day) at 5.07.
+ */
+describe('the driver history page clears the floor (§12.101)', () => {
+  const { surface, text, accent, status, history, print } = palette;
+  const measured: [string, string, string, number][] = [
+    ['Delivered on load block', status.ontime.fg, surface.raised, 8.91],
+    ['Cancelled, TONU on load block', history.cancelled, surface.raised, 7.1],
+    ['In progress on load block', status.arrived.fg, surface.raised, 8.84],
+    ['muted on weekend cell (dash, No truck)', text.muted, history.weekend, 5.39],
+    ['muted on page', text.muted, surface.base, 5.29],
+    ['secondary on tooltip', text.secondary, surface.overlay, 6.59],
+    ['Today pill', text.inverse, accent.DEFAULT, 8.96],
+    ['weekend head label', text.secondary, history.weekendHead, 7.64],
+    ['print ink', print.ink, print.paper, 16.55],
+    ['print secondary', print.inkSecondary, print.paper, 8.26],
+    ['print muted', print.inkMuted, print.paper, 5.07],
+    ['print delivered', print.delivered, print.paper, 7.61],
+    ['print cancelled', print.cancelled, print.paper, 8.31],
+    ['print in progress', print.progress, print.paper, 9.92],
+    ['print ink on head', print.ink, print.head, 14.11],
+    ['print secondary on weekend', print.inkSecondary, print.weekend, 7.65],
+  ];
+  for (const [what, fg, bg, expected] of measured) {
+    it(`${what}: ${expected}`, () => {
+      expect(contrast(fg, bg)).toBe(expected);
+      expect(contrast(fg, bg)).toBeGreaterThanOrEqual(FLOOR);
+    });
+  }
+});

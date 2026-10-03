@@ -47,7 +47,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /** Which surface a binding belongs to, and the order groups are shown in. */
-export const KEY_GROUPS = ['list', 'filters', 'search', 'overlays'] as const;
+export const KEY_GROUPS = ['list', 'filters', 'search', 'overlays', 'pages'] as const;
 export type KeyGroup = (typeof KEY_GROUPS)[number];
 
 export interface Binding {
@@ -116,6 +116,9 @@ export const KEYMAP: readonly Binding[] = [
   { keys: ['P'], label: 'Pin the selected truck', group: 'list', owner: 'usePinned' },
   { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'Console' },
   { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },
+  /** §12.101. Two keys in turn, not together. Neither clashed with a binding. */
+  { keys: ['G', 'H'], label: 'Open driver history', group: 'pages', owner: 'useGoKeys' },
+  { keys: ['G', 'B'], label: 'Back to the board', group: 'pages', owner: 'useGoKeys' },
 ];
 
 /** Group label as the sheet prints it. */
@@ -124,6 +127,7 @@ export const GROUP_LABEL: Record<KeyGroup, string> = {
   filters: 'Filters',
   search: 'Search',
   overlays: 'Overlays',
+  pages: 'Pages',
 };
 
 /** The bindings of one group, in declaration order. */

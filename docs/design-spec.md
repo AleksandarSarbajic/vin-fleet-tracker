@@ -7612,6 +7612,81 @@ Found along the way, not changed: below 1086 the map/list toggle is component
 state, not stored, so a test's "Hide map" clicked as the first fetch lands can
 be lost; the narrow tests retry until the list shows.
 
+## 12.101 Driver history — a weekly record of loads, by driver
+
+Stage 2 of the plan, desktop first; the phone layout is stage 3. Built from
+the design's layout **1a** (artifact "Driver history", read from its file):
+one row per driver, one column per day, Monday to Sunday in America/Chicago.
+Read-only for every role. Address: `/history?week=2026-W40&q=name`.
+
+**Where the data comes from.** `loads`, `stops`, `assignments`, `drivers`,
+`trucks` — never `audit_log` (§12.15). `server/history.ts` reads the week
+with two weeks either side; `lib/history.ts` turns the rows into the page and
+is where every rule below is unit-tested.
+
+- **The day.** A load sits on the day of its first arrival, falling back to
+  its first departure, in dispatch time (`lib/history-week.ts`: ISO weeks,
+  week bounds from Chicago midnight, so the fall-back week is 169 hours and
+  the spring week 167). A Sunday 23:30 arrival is Sunday, though it is
+  Monday in UTC.
+- **The cell.** The stop as entered: `DEL Fargo, ND`, `PU Joliet, IL`,
+  `DEL, no place entered`. A load with a pickup and a delivery reads
+  `Joliet, IL → Fargo, ND`.
+- **Pairing.** A pickup load and a delivery load show as one `A → B` entry
+  only when all four hold: the same non-empty load number, the same truck,
+  both reached, the pickup first. The entry sits on the pickup's day; the
+  tooltip has both dates. Anything less stays two entries.
+- **The driver.** Whoever was assigned to the load's truck at that instant.
+  A driver who changed trucks keeps one row; their trucks are listed with
+  the days ("1162 · Mon–Wed"), and each load names its truck. "No truck" on
+  days without an assignment; loads on an unassigned truck go under
+  "No driver assigned".
+- **Status.** Delivered, Cancelled, TONU (cancelled's colour), In progress
+  (every open status). Each keeps a shape icon for black-and-white print.
+- **Lists.** "Not reached this week": loads created this week with no stop
+  reached, each "created Mon Sep 28, no arrival recorded". "No load number":
+  the table's loads without one.
+- **Old weeks.** Weeks that start before 2026-10-02, when §12.97 shipped,
+  say: "Before Oct 2, 2026, a load row was sometimes reused for the next
+  trip, so this week may be missing trips." Weeks before the first record
+  (Sep 14, 2026) show the design's state F.
+
+**The page.** The header is the board's first row (§12.91, sync and clocks
+now shared in `HeaderStatus.tsx`) with the Board link and the page name in
+the chip slot. Toolbar: ‹ This week ›, the range opening a month calendar
+(a day picks its week, a typed date jumps to its week, days before Sep 14
+and after today disabled), the week tag, the filter ("/"), Read-only, Print.
+Below 1024 the tag goes and Read-only and Print keep their icons. States A–F
+as designed. Print drops the console chrome, prints a title block with the
+signed-in user's name, never truncates, and keeps rows whole.
+
+**Getting there.** An account-menu row "Driver history" with a "New" tag,
+stored as a version in local storage and dropped after the first visit;
+`G H` from the board and `G B` back, in the keymap and the `?` sheet under
+"Pages". Neither key was bound. The listener is registered at every width
+and does nothing below 768, so the phone adds no keyboard handling.
+
+**Departures from the design, each on purpose.** Cell text is the stop as
+entered rather than the city alone; the lists are named as the plan named
+them; TONU is shown (the design had no TONU and an "Unknown" no load can
+have); the design's `[`, `]` and `T` page keys are not added (not approved);
+the account-menu row is desktop only until stage 3.
+
+**Tests.** Unit: the week maths (DST weeks derived in code, the Sunday 23:30
+arrival, Monday 00:00), the day rule, the stop text, each pairing rule
+alone, a mid-week truck change, "No truck", no driver, both lists, status.
+Database: an empty week, a truck change, a never-reached load, Sunday 23:30
+through `timestamptz`, a pair across the week edge shown once. Route: a
+viewer 200, nobody 401, a bad week 400, 429 after 40 reads. Breaking the
+week maths to UTC fails three; dropping the number, truck and order rules
+fails three. E2E: from the account menu through a week change and back with
+G B; a viewer and an anonymous request; header and toolbar at 768, 800,
+900, 1023, 1024, 1280, 1440, 1680 and 1920, feed healthy and down (every
+control inside the bar and the screen, nothing overlapping — undoing the
+narrow toolbar fails 768 and 800); the tooltip; the filter; the calendar.
+Baselines: `history-W40-*` at the six widths, frozen clock, fixed seed. The
+console's 54 baselines are unchanged.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
