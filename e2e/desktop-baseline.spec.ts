@@ -259,7 +259,10 @@ for (const width of WIDTHS) {
     await shoot(page, '4-selected-with-popup', width);
 
     await page.getByRole('button', { name: 'Timeline' }).click();
-    await page.getByRole('dialog', { name: /Timeline for truck 101/ }).waitFor();
+    const timeline = page.getByRole('dialog', { name: /Timeline for truck 101/ });
+    await timeline.waitFor();
+    // The timeline is its own request: a fixed wait alone once shot "Loading…" (§12.103).
+    await expect(timeline.getByText('Loading…')).toHaveCount(0, { timeout: 15_000 });
     await page.waitForTimeout(600);
     await page.mouse.move(2, HEIGHT - 2);
     await shoot(page, '6-timeline', width);

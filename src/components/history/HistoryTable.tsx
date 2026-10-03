@@ -19,7 +19,7 @@ export const GRID =
   'min-[1440px]:grid-cols-[200px_repeat(5,minmax(0,1fr))_repeat(2,minmax(0,.72fr))] ' +
   'min-[1680px]:grid-cols-[208px_repeat(5,minmax(0,1fr))_repeat(2,minmax(0,.72fr))] ' +
   'min-[1920px]:grid-cols-[224px_repeat(5,minmax(0,1fr))_repeat(2,minmax(0,.72fr))] ' +
-  'print:grid-cols-[150px_repeat(5,minmax(0,1fr))_repeat(2,minmax(0,.72fr))]';
+  'print:!grid-cols-[150px_repeat(5,minmax(0,1fr))_repeat(2,minmax(0,.72fr))]';
 
 /** Side padding: 16, 20 from 1440, 24 from 1680. */
 export const PAD = 'px-4 min-[1440px]:px-5 min-[1680px]:px-6 print:px-0';
@@ -44,12 +44,20 @@ export function HistoryTable({
     <div
       role="table"
       aria-label={`Driver history, ${view.range}`}
-      className="border border-line-hair print:border-print-rule"
+      className="border border-line-hair print:table print:w-full print:border-print-rule"
     >
-      <HeadRow view={view} todayIndex={todayIndex} />
-      {rows.map((row) => (
-        <DriverRow key={row.driverId ?? 'none'} row={row} view={view} todayIndex={todayIndex} />
-      ))}
+      {/* §12.103. On paper the head is a table head, so it repeats on every
+          page the table runs onto; on screen these wrappers are not boxes.
+          Chromium repeats a head group only when it cannot break — a real
+          <thead> gets that from the browser; this one needs it said. */}
+      <div className="contents print:table-header-group print:break-inside-avoid">
+        <HeadRow view={view} todayIndex={todayIndex} />
+      </div>
+      <div className="contents print:table-row-group">
+        {rows.map((row) => (
+          <DriverRow key={row.driverId ?? 'none'} row={row} view={view} todayIndex={todayIndex} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -120,7 +128,7 @@ function DriverRow({ row, view, todayIndex }: { row: HistoryRow; view: HistoryWe
       <div role="rowheader" className="flex min-w-0 flex-col gap-1 px-3 py-2.5 print:gap-0.5 print:px-2 print:py-1.5">
         <span
           title={row.name}
-          className={`truncate font-sans text-[13px] font-medium leading-[1.3] print:text-[12px] print:font-semibold print:text-print-ink ${
+          className={`truncate font-sans text-[13px] font-medium leading-[1.3] print:overflow-visible print:whitespace-normal print:text-[12px] print:font-semibold print:text-print-ink ${
             row.name === NO_DRIVER ? 'text-text-secondary' : 'text-text'
           }`}
         >
@@ -129,7 +137,7 @@ function DriverRow({ row, view, todayIndex }: { row: HistoryRow; view: HistoryWe
         {row.trucks.map((t) => (
           <span
             key={t.label}
-            className="truncate font-sans text-[11.5px] leading-[1.35] text-text-secondary print:text-[11px] print:text-print-inkSecondary"
+            className="truncate font-sans text-[11.5px] leading-[1.35] text-text-secondary print:overflow-visible print:whitespace-normal print:text-[11px] print:text-print-inkSecondary"
           >
             {multi ? '' : 'Truck '}
             <span className="font-medium text-text print:text-print-inkSecondary">{t.label}</span>

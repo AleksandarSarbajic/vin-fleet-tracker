@@ -9,6 +9,7 @@ import { AccountMenu, type AccountUser } from '@/components/console/AccountMenu'
 import { HeaderClocks, HeaderSync, useHeaderNow } from '@/components/console/HeaderStatus';
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { useGoKeys } from '@/hooks/useGoKeys';
+import { palette } from '@/design/tokens';
 import { BRAND } from '@/lib/brand';
 import { timeInZone } from '@/lib/format';
 import { ENTRY_STATUS_LABEL, type HistoryWeekView } from '@/lib/history';
@@ -182,7 +183,11 @@ export function HistoryPage({
   })();
 
   return (
-    <div className="flex h-dvh flex-col bg-surface-base text-text print:block print:h-auto print:bg-print-paper print:text-print-ink">
+    <div
+      data-history-root=""
+      className="flex h-dvh flex-col bg-surface-base text-text print:block print:h-auto print:bg-print-paper print:text-print-ink"
+    >
+      <style>{PRINT_CSS}</style>
       {/* §12.102. Below 768: the design's phone layout. */}
       <PhoneHistory
         week={week}
@@ -259,7 +264,10 @@ export function HistoryPage({
         </div>
       </header>
 
-      <div className="contents max-md:hidden">
+      {/* Below 768 on screen the phone layout replaces this; on paper it is
+          always this one. The printed page is narrower than 768 in portrait,
+          and `print:` alone loses to `max-md:` on source order (§12.103). */}
+      <div className="contents max-md:hidden print:!contents">
         <HistoryToolbar
           ref={filter}
           week={week}
@@ -310,7 +318,7 @@ export function HistoryPage({
           <div
             className={`flex h-[34px] items-center justify-between gap-4 font-sans text-[12px] text-text-secondary print:px-0 print:text-[11px] print:text-print-inkSecondary ${PAD}`}
           >
-            <span data-history-summary="" className="truncate">{summary}</span>
+            <span data-history-summary="" className="truncate print:overflow-visible print:whitespace-normal">{summary}</span>
             <div className="flex shrink-0 gap-3.5">
               {LEGEND.map((status) => (
                 <span
@@ -389,6 +397,29 @@ export function HistoryPage({
   );
 }
 
+/**
+ * §12.103. The printed page, whatever opened the print dialog — the Print
+ * button or Ctrl/Cmd+P: landscape on the reader's paper (Letter or A4),
+ * numbered "Page 1 of 2", on white even with background graphics on, and
+ * with the table head's ground and the weekend shading printed as designed
+ * when they are off. Rendered by this page only, so it leaves with it: the
+ * board prints as it always has.
+ */
+const PRINT_CSS = `
+@page {
+  size: landscape;
+  margin: 0.45in 0.4in 0.5in;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 500 9.5px/1 var(--font-barlow), sans-serif;
+    color: ${palette.print.inkSecondary};
+  }
+}
+@media print {
+  html, body { background: ${palette.print.paper} !important; }
+  [data-history-root] { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}`;
+
 /** The table frame with its head, for the states that have no rows. */
 function Frame({
   view,
@@ -402,7 +433,7 @@ function Frame({
   children: React.ReactNode;
 }) {
   return (
-    <div role="table" aria-label={`Driver history, ${rangeLabel(week)}`} className="border border-line-hair">
+    <div role="table" aria-label={`Driver history, ${rangeLabel(week)}`} className="border border-line-hair print:border-print-rule">
       <HeadRow view={view ?? headOnly(week)} todayIndex={todayIndex} />
       {children}
     </div>

@@ -7726,6 +7726,67 @@ account menu's row, and the listener count. Against the old placeholder all
 nine failed; all pass now. Moving the phone breakpoint from `md` to `sm`
 fails them at 667×375. Baselines: `history-phone-W40-*` at the six sizes.
 
+## 12.103 Driver history prints a blank page — fixed
+
+**The fault.** Print gave one blank page. The print layout was hidden: the
+page had no `@page` rule, so the print dialog opened in portrait, and Letter
+portrait is about 740 CSS px inside its margins — under the 768px phone
+breakpoint. Below 768 the desktop table's wrapper is `max-md:hidden` and the
+phone cards are `print:hidden`, so nothing was laid out. Not white on white,
+not a scroll container. It shipped broken in §12.101: that stage's print
+"check" was a screenshot in print media on a 1056px window, which is not how
+a browser prints — it never measured the paper.
+
+Landscape printed, with three faults of its own: with background graphics on,
+the console's dark ground filled the margins; the column head did not repeat
+on page 2; the lists truncated ("DEL…"). The empty, error and
+before-records states kept their screen inks, so on paper "No loads recorded
+this week" was 1.2:1 against white, and their buttons printed.
+
+**The fix.**
+- The desktop wrapper is `print:!contents`: on paper it is always the table,
+  at any width (`print:` alone loses to `max-md:` on Tailwind's variant
+  order, hence the `!`). The print grid is `print:!grid-cols-…` for the
+  same reason, so A4's extra width does not pick up a screen step.
+- An `@page` rule, rendered by the history page only (it leaves with the
+  page; the board prints as before): `size: landscape` on the reader's paper,
+  Letter or A4; margins 0.45 / 0.4 / 0.5in; "Page 1 of 2" in the bottom-right
+  margin box. White paper with background graphics on; head ground and
+  weekend shading printed as designed with them off
+  (`print-color-adjust: exact`). Colours from `print.*` tokens.
+- The head and the rows sit in `print:table-header-group` /
+  `print:table-row-group` wrappers (`display: contents` on screen, so screen
+  pixels are unchanged). Chromium repeats a head group only when it cannot
+  break, as a real `<thead>` cannot, so the head group is
+  `break-inside-avoid`. Rows keep `break-inside-avoid` and are never split.
+- Nothing truncates on paper: `print:overflow-visible print:whitespace-normal`
+  wherever the screen truncates. The states print in `print.*` inks and
+  their buttons are not printed.
+- The Print button calls `window.print()`. Ctrl/Cmd+P is the browser's own
+  Print and prints the same document with the same rules — nothing is
+  bound, and nothing on the page may swallow it.
+
+**Tests.** `e2e/history-print.spec.ts` prints through the browser's own
+print to PDF (`page.pdf` with `preferCSSPageSize`, so the page's `@page`
+decides) and reads the PDF back with pdf.js (`e2e/pdf.ts`, a dev dependency):
+a normal, an empty and a busy week, on Letter and A4 — every page landscape
+and labelled "Page i of n", the title block with the week, "printed Fri, Oct
+2, 2026 10:42 CDT by" the signed-in user's name from `profiles`, every load
+number in the table (folded ones included), no "+N more", no ellipsis, no
+console chrome. The normal week is exactly two pages. A seeded long week
+(`seedLongWeek`, four loads a day Thursday to Sunday for six drivers) runs to
+four pages: the head on every table page, and each driver's page holds all
+of their loads. In print media at the paper's width every visible word is at
+least 4.5:1 on white and no button shows (normal, empty, busy, before
+records, error). Every load keeps its status icon. A phone-sized window
+(320, 390) prints the same text as the desktop. Against the old code the
+PDFs were portrait with no page label (and blank at the dialog's margins);
+hiding the print layout fails seven tests on "no text"; dropping the head
+group's `break-inside-avoid` fails the head check; dropping the rows' fails
+the row check. Baselines unchanged: the console's 54, `history-W40-*`,
+`history-phone-W40-*`. The console's timeline shot now waits for "Loading…"
+to clear: one baseline run caught it mid-request.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

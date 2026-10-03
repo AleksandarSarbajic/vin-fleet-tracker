@@ -28,20 +28,22 @@ function Panel({ children, role }: { children: React.ReactNode; role?: 'alert' }
   );
 }
 
-const TITLE = 'font-cond text-[22px] font-semibold uppercase leading-[1.1] tracking-[.04em] text-text';
-const BODY = 'max-w-[520px] font-sans text-[12.5px] leading-[1.55] text-text-secondary';
+const TITLE = 'font-cond text-[22px] font-semibold uppercase leading-[1.1] tracking-[.04em] text-text print:text-print-ink';
+const BODY = 'max-w-[520px] font-sans text-[12.5px] leading-[1.55] text-text-secondary print:text-print-inkSecondary';
+/** §12.103. Paper cannot be clicked: the state's buttons are not printed. */
+const ACTIONS = 'mt-2 flex gap-2 print:hidden';
 
 /** B. A week with nothing in it — the toolbar, head and lists stay. */
 export function EmptyWeek({ range, drivers, onPrevious }: { range: string; drivers: number; onPrevious: () => void }) {
   return (
     <Panel>
-      <Calendar className="text-text-muted" />
+      <Calendar className="text-text-muted print:text-print-inkMuted" />
       <div className={TITLE}>No loads recorded this week</div>
       <div className={BODY}>
         {range} has no loads yet for any of the {drivers} drivers. Loads appear here when they are assigned or a
         stop is reached.
       </div>
-      <div className="mt-2 flex gap-2">
+      <div className={ACTIONS}>
         <button type="button" onClick={onPrevious} className={GHOST}>
           ‹ Previous week
         </button>
@@ -62,12 +64,12 @@ export function BeforeRecords({
 }) {
   return (
     <Panel>
-      <Calendar className="text-text-muted" />
+      <Calendar className="text-text-muted print:text-print-inkMuted" />
       <div className={TITLE}>No records for this week</div>
       <div className={BODY}>
         Fleet Tracker started keeping load history on Sep 14, 2026. Weeks before that have no data.
       </div>
-      <div className="mt-2 flex gap-2">
+      <div className={ACTIONS}>
         <button type="button" onClick={onFirstWeek} className={PRIMARY}>
           Go to {firstWeekLabel}
         </button>
@@ -93,14 +95,14 @@ export function WeekError({
 }) {
   return (
     <Panel role="alert">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-status-late-fg">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-status-late-fg print:text-print-cancelled">
         <path d="M12 3 2 21h20Z" />
         <path d="M12 10v5M12 18h.01" />
       </svg>
       <div className={TITLE}>Could not load this week</div>
       <div className={BODY}>{range} did not load. The board and live tracking are not affected.</div>
-      <div className="font-sans text-[11.5px] text-text-muted">{detail}</div>
-      <div className="mt-2 flex gap-2">
+      <div className="font-sans text-[11.5px] text-text-muted print:text-print-inkSecondary">{detail}</div>
+      <div className={ACTIONS}>
         <button type="button" onClick={onRetry} className={`${PRIMARY} inline-flex items-center gap-[7px] px-3.5`}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />

@@ -12,7 +12,7 @@ import { StatusMark } from './StatusMark';
 function Route({ route }: { route: RouteText }) {
   const rest = route.pre ? route.full.slice(route.pre.length) : route.full;
   return (
-    <span title={route.full} className="truncate">
+    <span title={route.full} className="truncate print:overflow-visible print:whitespace-normal">
       {route.pre ? (
         <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[.08em] text-text-secondary print:text-print-inkSecondary">
           {route.pre}
@@ -79,7 +79,7 @@ export function HistoryLists({ view }: { view: HistoryWeekView }) {
           <div key={x.loadId} className={`${ROW} ${notReachedCols}`}>
             <span className={`font-semibold ${x.number ? '' : 'text-text-secondary'}`}>{x.number ?? '—'}</span>
             <Route route={x.route} />
-            <span className={`truncate ${x.driver ? '' : 'text-text-secondary'}`}>{x.driver ?? 'Not assigned'}</span>
+            <span className={`truncate print:overflow-visible print:whitespace-normal ${x.driver ? '' : 'text-text-secondary print:text-print-inkSecondary'}`}>{x.driver ?? 'Not assigned'}</span>
             <span className="text-text-secondary print:text-print-inkSecondary">{x.truck ?? '—'}</span>
             <span className="text-[11.5px] leading-[1.35] text-text-secondary print:text-print-inkSecondary">{x.created}</span>
           </div>
@@ -95,7 +95,7 @@ export function HistoryLists({ view }: { view: HistoryWeekView }) {
           <div key={k} className={`${ROW} ${noNumberCols}`}>
             <span className="font-semibold text-text-secondary print:text-print-inkSecondary">{x.day}</span>
             <Route route={x.route} />
-            <span className={`truncate ${x.driver ? '' : 'text-text-secondary'}`}>{x.driver ?? 'No driver assigned'}</span>
+            <span className={`truncate print:overflow-visible print:whitespace-normal ${x.driver ? '' : 'text-text-secondary print:text-print-inkSecondary'}`}>{x.driver ?? 'No driver assigned'}</span>
             <span className="text-text-secondary print:text-print-inkSecondary">{x.truck ?? '—'}</span>
             <StatusMark status={x.status} />
           </div>

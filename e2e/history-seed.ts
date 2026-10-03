@@ -176,3 +176,45 @@ export async function seedHistory(): Promise<void> {
 
 /** The browser's frozen "now" for the history shots: Fri Oct 2, 2026, 10:42 CDT. */
 export const HISTORY_NOW = zonedWallToUtc({ y: 2026, m: 10, d: 2 }, 10, 42, TZ);
+
+/**
+ * §12.103 — a week too long for one printed page: week 38 (otherwise empty)
+ * with four loads a day — more than the screen shows before "+2 more" — on
+ * Thursday to Sunday, the days the drivers have their trucks (`SINCE`), for
+ * six drivers. Added on top of
+ * `seedHistory()`, for the print tests only; every other spec keeps week 38
+ * empty.
+ */
+export const LONG_WEEK = '2026-W38';
+export const LONG_WEEK_DRIVERS = [
+  ['Marcus Reyes', 1147], ['Dana Kowalski', 1162], ['Luis Ortega', 1131],
+  ['Priya Natarajan', 1176], ['Andre Baptiste', 1140], ['Samuel Okafor', 1158],
+] as const;
+/** The load numbers seeded for one driver's row, in day order. */
+export const longWeekNumbers = (row: number) =>
+  Array.from({ length: 16 }, (_, i) => String(38_000 + row * 100 + i));
+
+export async function seedLongWeek(): Promise<void> {
+  const sql = connect();
+  const W38 = { year: 2026, week: 38 };
+  const places = [['Joliet', 'IL'], ['Gary', 'IN'], ['Peoria', 'IL'], ['Rockford', 'IL'], ['Toledo', 'OH']] as const;
+  try {
+    for (const [row, [, truck]] of LONG_WEEK_DRIVERS.entries()) {
+      const [t] = await sql<{ id: string }[]>`select id from trucks where truck_number = ${truck}`;
+      for (const [i, number] of longWeekNumbers(row).entries()) {
+        const day = 3 + Math.floor(i / 4);
+        const hour = 9 + (i % 4) * 3;
+        const [city, state] = places[(row + i) % places.length]!;
+        const [l] = await sql<{ id: string }[]>`
+          insert into loads (truck_id, load_number, status, created_at)
+          values (${t!.id}, ${number}, 'DELIVERED', ${at(W38, day, hour - 2)}) returning id`;
+        await sql`
+          insert into stops (load_id, type, sequence, city, state, arrived_at, arrived_source, departed_at)
+          values (${l!.id}, ${i % 2 ? 'DEL' : 'PU'}, 1, ${city}, ${state}, ${at(W38, day, hour, 10)},
+                  'detected', ${at(W38, day, hour + 1, 5)})`;
+      }
+    }
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
