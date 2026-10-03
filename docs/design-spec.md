@@ -7928,6 +7928,96 @@ the desktop console." with a Back to the board link, in CSS (`md:hidden` /
 `e2e/driver-phone.spec.ts` checks: no visible link on the phone board, the
 message and the link on `/assignments`, no visible control or field.
 
+## 12.107 Reopen load
+
+A close made by mistake — Clear stop, Next trip answered wrongly, a terminal
+status saved in the edit modal — could not be undone: `canTransition` refuses
+closed → open, and said it should go "through an explicit reopen with an audit
+entry rather than a quiet edit". This is that reopen.
+
+**Where, and who.** "Recently closed on this truck · N", a collapsed section at
+the foot of the Edit Stop modal, one row per load closed in the last **7
+days** (`12120640 · Delivered · Sat 08:04 CDT by Dee Dispatcher`, Reopen…).
+Not drawn when there is none. Dispatcher and admin (`POST /api/stops/reopen`,
+`requireRole('dispatcher')`); a viewer sees the rows with Reopen disabled and
+the reason (§12.14). Off phones: the modal never opens below 768px (§12.94),
+and a reopen changes which load drives the truck — a decision with up to five
+sentences to read.
+
+**What is known about a close.** `loads` has no close time and no version, so
+the close is its audit entry: Clear stop's (entity `load`, source
+`operator-clear-stop`, each stop's anchor in `before.stops[]` since it shipped
+on 2026-09-30) or the edit modal's (entity `stop`, a terminal `after.loadStatus`
+over a non-terminal one). The newest such entry is the close; its time is the
+window, its `before.loadStatus` the status the load returns to. When that is
+not recorded (a load created closed), the confirm step asks — "The record of
+this close does not say what status the load had. Choose one:" — with nothing
+preselected. A load whose close left no entry cannot be dated and is not
+offered. This is a write path reading its own precondition, not the audit
+view §12.15 defers.
+
+**The anchor** (`planAnchors`). Restored only for a stop marked arrived by
+hand, not departed, and area-level (`block`, `zip`) or unlocated — the stops
+whose departure can only be measured from one (§12.85) — and only from the
+close's own record. None recorded: reopened anyway, left empty, and the
+confirm step says "This stop's arrival won't clear by itself; you can untick
+it." Never guessed from where the truck is now. A street stop is measured from
+its own point and is not touched. An edit-modal close never cleared an anchor,
+so its stops still hold theirs. `arrived_at`, `departed_at`, `arrived_source`,
+the address and every geocode column are never written.
+
+**Late departure** (`lateDepartures`). An arrived, undeparted stop with a
+departure centre (after the restore) whose truck's newest position is outside
+the 0.35 mi radius: "Truck 141 has left Joliet, IL since. Its departure will be
+recorded from the first position after this reopen, so it can be much later
+than the real one." Warned, not acted on.
+
+**Other loads.** The truck's other open loads are named — "Truck 141 will hold
+2 open loads: 12120640 and 200584. The board follows the earlier deadline and
+tags the row +1 load." — and one entered after the close (Next trip) gets
+"200584, entered 08:05 CDT, is not changed." Nothing is undone automatically.
+
+**The write** (`reopenLoad`). One transaction: the load row locked; refused
+unless it is still closed ("Already reopened by Dee Dispatcher at 09:12 CDT.
+Nothing was changed."), the close the dispatcher saw (`closeAuditId`) is still
+its newest ("This load was closed again since you opened this."), the close is
+within 7 days, and the truck is active. Then the status, the restored anchors,
+and one audit entry: entity `load`, `before { truckId, loadNumber, loadStatus,
+closeAuditId }`, `after { truckId, loadStatus, statusFrom, source:
+'operator-reopen-load', reopenOf, anchorsRestored, anchorsMissing,
+lateDepartureWarned, otherOpenLoads }`.
+
+**The confirm step.** "Reopen load 12120640?"; the status line ("…before Dee
+Dispatcher closed it as Delivered at 08:04 CDT" today, "on Sat 08:04 CDT"
+otherwise); the lines above where they apply; "Arrival and departure times and
+addresses are not changed." Back and Reopen load; focus on Back; Esc goes back.
+Whole at 1280×720 in each shape, without scrolling.
+
+**What reads it.** Everything that reads open loads counts it again — the
+board's status and chips, the "+1 load" tag, the strip's "remaining", the
+timeline (as open, with no 24-hour limit). The history page reads `loads`, so
+the entry reads In progress in the same day cell (its arrivals are unchanged).
+The strip's on-time count is made of arrivals, which the close kept, so it does
+not move either way.
+
+**Tests.** Unit (`lib/reopen-load.test.ts`): reading both kinds of close and
+what is not one; which stops need an anchor; restored, missing, kept; late or
+not; every confirm sentence. Database (`server/reopen-load.test.ts`): status
+back and every other stop column identical; anchor restored for a ZIP and an
+unlocated stop; none in the entry; a departed stop; a street stop; the late
+warning and its absence; an edit-modal close keeps its anchor; reopened twice;
+closed again since; older than 7 days (and not listed); inactive truck; no
+recorded status, then chosen; the +1 load and new-load case; nothing listed for
+a truck with nothing closed; **rollback** — a trigger raising on the audit
+insert after the status and the anchor were written, leaving the load closed,
+the anchor empty and no entry. Route: a viewer gets 403 and may read the list.
+Component: the modal's existing tests. E2E (`e2e/reopen-load.spec.ts`): the
+four confirm shapes at 1280×720, readable whole, with screenshots; the history
+cell Delivered → In progress; the Arrived chip and "remaining" back to what
+they were; the section gone once reopened and absent for a truck with nothing
+closed; a viewer disabled and refused; no way to reopen on a phone. Skipping
+the restore fails three database tests.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

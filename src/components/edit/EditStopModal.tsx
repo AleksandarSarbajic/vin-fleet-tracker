@@ -24,6 +24,7 @@ import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
+import { RecentlyClosed } from './RecentlyClosed';
 import { PreviousLoadQuestion } from './PreviousLoadQuestion';
 import { ReachedStopQuestion } from './ReachedStopQuestion';
 import { needsReachedAnswer, type ReachedAnswer } from '@/lib/reached-stop';
@@ -1088,6 +1089,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
                 {errorFor('*')}
               </p>
             ) : null}
+
+            {/* §12.107. Drawn only when this truck closed a load in the last 7 days. */}
+            <RecentlyClosed
+              truckId={row.id}
+              truckName={truckName}
+              dispatchTz={dispatchTz}
+              mayEdit={mayEdit}
+              lockedReason={lockedReason}
+              onReopened={onClose}
+            />
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">

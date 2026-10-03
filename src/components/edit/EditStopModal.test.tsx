@@ -933,8 +933,9 @@ describe('a reached stop given a new city or number asks first', () => {
   it('asks when the server says the stop was reached after the modal opened', async () => {
     const reachedMeanwhile = new Date('2026-09-18T12:05:00.000Z').toISOString();
     let call = 0;
-    globalThis.fetch = vi.fn(async () =>
-      call++ === 0
+    // Counted on the save's own URL: the modal also reads its recently closed loads (§12.107).
+    globalThis.fetch = vi.fn(async (url: string) =>
+      url === '/api/stops' && call++ === 0
         ? {
             ok: false,
             status: 409,
