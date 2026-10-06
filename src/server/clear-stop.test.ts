@@ -710,7 +710,10 @@ describeDb('a new load that closes the previous one (§12.92)', () => {
       .select({ number: loads.loadNumber, status: loads.status })
       .from(loads)
       .where(eq(loads.truckId, truckId))
-      .orderBy(asc(loads.createdAt));
+      // Both loads are written in one transaction, so `created_at` (now())
+      // ties and Postgres may return either first — the closed load's UPDATE
+      // can move its row after the new one. The number breaks the tie.
+      .orderBy(asc(loads.createdAt), asc(loads.loadNumber));
 
   it.each(['DELIVERED', 'CANCELLED'] as const)(
     'closes it as %s with Clear stop’s own audit row, and creates the new load',
@@ -974,7 +977,10 @@ describeDb('a reached stop given a new city or number', () => {
       .select({ id: loads.id, number: loads.loadNumber, status: loads.status })
       .from(loads)
       .where(eq(loads.truckId, truckId))
-      .orderBy(asc(loads.createdAt));
+      // Both loads are written in one transaction, so `created_at` (now())
+      // ties and Postgres may return either first — the closed load's UPDATE
+      // can move its row after the new one. The number breaks the tie.
+      .orderBy(asc(loads.createdAt), asc(loads.loadNumber));
 
   const allAudit = (tx: Tx) =>
     tx.select({ entity: auditLog.entity, after: auditLog.after }).from(auditLog);
