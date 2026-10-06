@@ -1885,17 +1885,15 @@ The phase-1 constraint `stops_fcfs_has_no_window` is replaced by
   the window. Lateness is then history rather than a live problem, and the row
   stops competing for attention at the top of the list.
 
-### Overnight receiving — rejected for now, deliberately
+### Overnight receiving — built, see §12.114
 
-A window whose latest hour is at or before its earliest (`22:00–06:00`) is
-**refused with a field error**. Reading `06:00` as tomorrow would make a
-transposed typo look valid, and day-spanning logic belongs with the status
-engine rather than ahead of it.
-
-**This is a known gap, not a settled rule.** Overnight receiving is real —
-grocery and retail DCs routinely take trucks through the night, and this fleet
-runs to receivers that do. When a dispatcher hits it, the fix is an explicit
-**next-day control** on the latest hour, not a rethink of the model.
+A window whose latest hour is at or before its earliest (`22:00–06:00`) was
+refused here at first, on the worry that reading `06:00` as tomorrow would
+make a transposed typo look valid. Grocery and retail DCs receive through the
+night and this fleet runs to them, so the refusal only taught dispatchers to
+type a wrong time. **§12.114 supersedes it:** the latest hour is on the next
+day, the form says so in words with the window's length — the length is what
+gives a transposed `15:00–07:00` away — and equal hours are still refused.
 
 
 ## 12.23 An edit writes only the fields the form owns
@@ -8245,6 +8243,127 @@ finished day belongs to, so the line just after midnight on the 1st carries
 the previous month's final total — the number to set beside HERE's monthly
 report. Read-only; the routing job is unchanged. Ships with the next worker
 deploy.
+
+## 12.114 Overnight receiving hours
+
+**Supersedes the "rejected for now" subsection of §12.22.** An FCFS window
+whose latest hour is at or before its earliest is a night shift: the latest
+hour is on the **next** calendar day at the stop. `22:00–06:00` saves, and
+`appointment_end_utc` is the real next-morning instant. No migration — the
+columns, and both window constraints, already compare instants.
+
+### The rule, in one place
+
+`lib/appointment.ts`: `endsNextDay(time, endTime)` is `end ≤ start`, and
+`fcfsEndDate(date, time, endTime)` returns the start's date or the day after
+it. **Calendar arithmetic only** (`nextCalendarDay`, now in `lib/calendar.ts`
+beside `calendarDayInZone`); the window's length is never computed. The form's
+line and the server's conversion both call it, so the deadline a dispatcher
+reads and the one stored cannot disagree about which day `06:00` is.
+
+The server converts the end exactly as before — Postgres reading a wall time
+in the stop's zone — only on the end's own date. So a `22:00–06:00` window is
+**8 hours on an ordinary night, 7 on the spring-forward night and 9 on the
+fall-back night**, with no special case anywhere. The round-trip check that
+refuses a wall time the clocks skip now compares against the END's date: on
+the spring-forward morning a `22:00–02:30` window is refused on the latest
+hour, where checking against the start's date would have accepted it an hour
+late.
+
+**The repeated hour.** The latest hour now gets the start's ambiguity check
+(`endResolution`). On the fall-back morning `01:30` happens twice; Postgres
+keeps the second (standard time, the later deadline). The save goes through
+with a warning naming which one it kept, and the audit row records it.
+
+### Refusals
+
+- **Equal hours** — *"Earliest and latest are the same time. For hours that
+  run all day, enter 00:00 to 23:59."* Zero length is a typo, not a facility.
+- **Longer than a day** cannot be typed: two times on one date, the latest
+  read as the next day when it is not later, always spans under 24 wall-clock
+  hours. The one window that runs longer is the fall-back night's, by up to an
+  hour, and that is the true elapsed time.
+- APPT is unchanged: its window is still `start + N` from the dropdown. An
+  APPT at `23:30` with a 60-minute window has always crossed midnight.
+
+### The form
+
+Under the hours: **`Ends next day · Sat 06:00 CDT · 8 h`**, only when the
+window crosses midnight, and replaced by the field error when the hours are
+equal. Nothing extra to tick. The latest hour's abbreviation badge is the
+END's own — on the fall-back night the window opens `22:00 CDT` and closes
+`06:00 CST`.
+
+The form's display-only wall-time conversion (`wallTimeInstant`, moved to
+`lib/format.ts`) is now **two passes**. The old one-pass version measured the
+offset at a guess five or six hours from the target, which on the fall-back
+morning is still on daylight time: it turned `06:00` into `05:00 CST`. A
+server test asserts that the browser's conversion matches Postgres on an
+ordinary night and on both change nights.
+
+### Display — `+1`
+
+`windowEnd(start, end, tz)` prints a window's end with `+1` when it falls on a
+later calendar day **at the stop** — the receiver's night, not Belgrade's.
+
+| Surface | Reads |
+|---|---|
+| Row cell, phone card | `by 06:00 CDT +1` |
+| Row tooltip | `FCFS receiving hours Fri 22:00 CDT to Sat 06:00 CDT — no slot, the deadline is Sat 06:00 CDT` |
+| Popup, truck sheet | `Fri 22:00 CDT to 06:00 CDT +1` |
+| Timeline | `22:00 CDT – 06:00 CDT +1` (either type) |
+| History page | reads no appointment — unchanged |
+
+A window that ends on its own day prints exactly what it did; the desktop,
+history and phone-history baselines held at `threshold: 0, maxDiffPixels: 0`.
+
+### The status engine — no rule changed
+
+The deadline is still `end ?? start`; it is simply the right instant now.
+`LATE`, `AT_RISK` (never FCFS), `ARRIVED` and the no-ETA clock fallback all
+follow from it. `TOMORROW` stays keyed on the **start**'s dispatch day, so an
+LA window opening `22:00 PDT` is upcoming from `21:00 CDT`, because it starts
+at midnight in Chicago.
+
+### Known gap — the health strip's "remaining"
+
+**Decided, not overlooked.** "Remaining" counts stops whose **start** falls on
+the dispatch day, unchanged. An overnight window opened last night and not yet
+arrived therefore sits in **no** day's remaining between midnight and its
+close: yesterday's day is over, and today's strip does not count it because it
+started yesterday. Once it is arrived it counts as on time or late on the
+arrival's day, as any stop does. Keying "remaining" on a window overlapping
+the day would close the gap, but it is a rule change and was not made.
+`health.test.ts` pins the current behaviour under `KNOWN GAP`, so changing the
+rule fails that test and points here.
+
+### The audit row
+
+The stop's audit `before` and `after` now carry `appointmentEndUtc` and
+`appointmentType`, and `after` carries `appointmentEndResolution`. Until now
+the deadline was not in the log at all. That is why two production FCFS
+windows entered as `00:01–23:59` and `01:00–23:59` on 28 Sep could not be told
+apart, afterwards, from an overnight workaround or from a facility that
+receives all day.
+
+### Tests
+
+DST nights are derived (`src/test/dst.ts`, moved out of
+`appointment.test.ts`). They cover:
+
+- the builder, including month, year and leap-year rollover;
+- real-Postgres conversion: Chicago, Phoenix, and Belgrade's own change
+  dates; the skipped and the repeated latest hour; and agreement with the
+  form;
+- the engine on both sides of the next-day deadline, including a stop in a
+  different zone from dispatch;
+- the health strip, and the save path with its audit and warning;
+- the modal, including reopening a saved overnight stop (not dirty);
+- every display surface;
+- `e2e/overnight.spec.ts`, end to end.
+
+Breaking the rule on purpose (`fcfsEndDate` returning the start's date) fails
+26 tests across six files.
 
 # 13. Still open
 

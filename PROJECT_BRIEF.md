@@ -291,11 +291,12 @@ Stop at the end of each phase, show me what works, wait for a go-ahead.
    the deployed worker is what re-opens the stall question.
 
    **Carried onto this phase deliberately, not forgotten:**
-   - **Overnight receiving** (§12.22). A window like `22:00–06:00` is refused
-     with a field error. Grocery and retail DCs run through the night and this
-     fleet delivers to them, so a dispatcher WILL hit it and the workaround is
-     entering a wrong time. The fix is an explicit next-day control on the
-     latest hour, not a rethink of the model.
+   - ~~**Overnight receiving** (§12.22).~~ **Built — §12.114.** A latest
+     receiving hour at or before the earliest is the next morning; the form
+     says `Ends next day · Sat 06:00 CDT · 8 h`, the row `by 06:00 CDT +1`.
+     Equal hours are still refused. No status rule changed. The health strip's
+     "remaining" stays keyed on the start day, which leaves a known gap for a
+     window still open after midnight (recorded in §12.114).
    - **The two circle markers** (§13.4). `TOMORROW` and `UNASSIGNED` separate
      by fill and one step of grey — weaker than the rest of the set, which
      separates by silhouette. Never checked on real tiles.
