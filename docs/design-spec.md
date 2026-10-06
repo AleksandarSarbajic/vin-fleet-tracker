@@ -8214,6 +8214,28 @@ columns, RLS deny-all. Applied before the worker that writes it. The app never
 reads these columns; the running worker selects named columns, so the new
 column does not disturb it. Rollback: drop the table and the two columns.
 
+## 12.113 Hand-run routing calls are counted
+
+**The gap.** HERE's usage report for September matched the worker's routes
+to the call on eight of nine days (UTC). On 22 Sep HERE billed 154 truck
+transactions and the worker made 130: 24 calls came from scripts run by hand
+— `route:compare`, which deliberately counted nothing, and a scratch probe,
+`tmp-here.mts`. With the ceiling at exactly HERE's free 5,000 (§12.61), an
+uncounted call in a month the worker reaches the ceiling is billed overage.
+(The app's September total, 1,684, was higher than HERE's 1,353 for a
+different reason: it also counted 353 Mapbox calls before the swap.)
+
+**The fix.** `route:compare` counts each call in `routing_budget` with the
+worker's own `countCall`, immediately before making it, and refuses to start
+unless the month's remaining calls cover the whole run (two per lane, car and
+truck) — printing both numbers either way. A call that fails still counted,
+as in the worker; a call never made is never counted. `tmp-here.mts` is
+deleted. Nothing else in the repository calls HERE or Mapbox routing
+directly. **Test** (`hand-run.test.ts`): the count rises by exactly the calls
+made, a run is refused when too few are left, and a failure mid-run counts
+only the calls made. Skipping the count fails three tests; counting after the
+call instead of before fails the mid-run one.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -11,7 +11,7 @@ import {
   type CachedRoute,
   type RoutingConfig,
 } from '@/lib/routing';
-import type { Db } from '@/server/audit';
+import type { Db, Tx } from '@/server/audit';
 import type { EtaProvider } from '@/server/routing/provider';
 import { NEXT_STOP_ORDER } from '@/server/next-stop';
 
@@ -407,8 +407,11 @@ export async function sweepRouting(
  *
  * A call that times out still cost quota. Counting on success would let a
  * failing provider burn the whole month while the counter said zero.
+ *
+ * Exported for the hand-run scripts that call HERE (§12.113): one counter,
+ * one way to count, so a script's calls cannot go around it again.
  */
-async function countCall(db: Db, month: string): Promise<void> {
+export async function countCall(db: Db | Tx, month: string): Promise<void> {
   await db
     .insert(routingBudget)
     .values({ month, calls: 1 })

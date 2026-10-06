@@ -306,6 +306,16 @@ export const AppEnv = serverShape.pick({
 export const MigrateEnv = serverShape.pick({ DIRECT_URL: true });
 
 /**
+ * §12.113. What a hand-run script that calls HERE needs: the database, the
+ * key, and the same ceiling — with the same default — the worker guards.
+ */
+export const HandRunEnv = serverShape.pick({
+  DIRECT_URL: true,
+  HERE_API_KEY: true,
+  ROUTING_MONTHLY_CEILING: true,
+});
+
+/**
  * What the WORKER needs (phase 6, item 2).
  *
  * The worker's only database credential is `DIRECT_URL`, and it holds no

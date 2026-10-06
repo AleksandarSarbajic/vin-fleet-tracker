@@ -7,10 +7,13 @@
  * same question has to be asked again with the profile we actually bought —
  * otherwise the swap rests on a number measured against a third provider.
  *
- * Read-only. It writes nothing and it is NOT counted against
- * `routing_budget`, because it is not the board routing a lane: it is two
- * calls per lane for a measurement, run by hand. Keep that in mind — a run
- * over 10 lanes spends 20 of the month's 5,000 transactions.
+ * It writes one thing: `routing_budget`, one count per call, made just before
+ * the call with the worker's own `countCall` (§12.113). It used to count
+ * nothing — "not the board routing a lane" — and on 22 September that left the
+ * counter 24 below HERE's bill. With the ceiling at exactly HERE's free 5,000,
+ * an uncounted call is a billed one. Two calls per lane (car and truck): a
+ * run over 10 lanes spends 20, and it refuses to start if the month's
+ * remaining calls cannot cover the whole run.
  *
  * Lanes come from `route_samples`, which is the record of what this company
  * actually runs (§12.31) and holds the destination coordinates the row was
@@ -37,15 +40,20 @@
 import { config as loadEnv } from 'dotenv';
 import { sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
+import { HandRunEnv, report } from '../src/env/schema.ts';
+import { checkRunBudget, meteredCall } from '../src/worker/hand-run.ts';
 import { metresToMiles } from '../src/lib/routing.ts';
 import { haversineMiles } from '../src/lib/status.ts';
 
 loadEnv({ path: '.env.local' });
-const key = process.env['HERE_API_KEY'];
+const parsed = HandRunEnv.safeParse(process.env);
+if (!parsed.success) throw new Error(report('server', parsed.error));
+const env = parsed.data;
+const key = env.HERE_API_KEY;
 if (!key) throw new Error('HERE_API_KEY is not set — nothing to compare.');
 
 const limit = Number(process.argv.find((a) => a.startsWith('--limit='))?.split('=')[1] ?? 10);
-const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
+const { client, db } = createDirectDb(env.DIRECT_URL);
 
 interface Lane {
   truck: number | null;
@@ -82,6 +90,19 @@ const lanes = (await db.execute(sql`
            rs.measured_at desc`)) as unknown as Lane[];
 
 const work = lanes.sort((a, b) => b.straight_miles - a.straight_miles).slice(0, limit);
+
+// §12.113. Ask the month first: the whole run, car and truck, or nothing.
+const budget = await checkRunBudget(db, work.length * 2, env.ROUTING_MONTHLY_CEILING);
+console.log(
+  `routing budget ${budget.month}: this run needs ${budget.needed} calls ` +
+    `(${work.length} lanes × car + truck); ${budget.remaining} left ` +
+    `(${budget.spent} of ${budget.ceiling} spent)`,
+);
+if (!budget.ok) {
+  console.error(`REFUSED: ${budget.needed} needed, ${budget.remaining} left. Nothing was called.`);
+  await client.end();
+  process.exit(1);
+}
 console.log(`comparing ${work.length} distinct lanes, ${work.length * 2} HERE calls\n`);
 
 async function here(mode: 'car' | 'truck', lane: Lane) {
@@ -92,9 +113,12 @@ async function here(mode: 'car' | 'truck', lane: Lane) {
     return: 'summary',
     apiKey: key!,
   });
-  const r = await fetch(`https://router.hereapi.com/v8/routes?${q}`, {
-    headers: { accept: 'application/json' },
-  });
+  // Counted before it is made, like every worker call (§12.113).
+  const r = await meteredCall(db, budget.month, () =>
+    fetch(`https://router.hereapi.com/v8/routes?${q}`, {
+      headers: { accept: 'application/json' },
+    }),
+  );
   if (!r.ok) return null;
   const body = (await r.json()) as {
     routes?: { sections?: { summary?: { length: number; duration: number } }[] }[];
