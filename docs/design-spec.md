@@ -2975,8 +2975,8 @@ anyone reconciling against a rate confirmation has already gone deliberately.
 
 ```
 Accuracy   ZIP-code centre, ±4.6 mi — Census has no record of this street
-Distance   Routed road miles for a car; a truck-mile figure on a rate
-           confirmation will read longer
+Distance   Routed truck road miles, speed capped at 52 mph — driving only,
+           no rest stops                                  (§12.110)
 Route      Starts 379 m from the destination point, at the nearest road
 Lane       ×1.22 measured straight-line-to-road on this lane
 Measured   22s ago
@@ -8069,6 +8069,27 @@ menu closes on focus out only when another element has it. Tabbing out, a
 click outside and Esc close it as before. **Test** (`SavedViews.test.tsx`):
 focus and click Delete in one tick, then let timers run — the menu closed on
 the old code and stays open, reading "No saved views yet".
+
+## 12.110 The routed distance said "for a car"
+
+**The fault.** The `Distance` line in `etaDetails` (popup details, phone
+sheet, edit modal) read *"Routed road miles for a car; a truck-mile figure on
+a rate confirmation will read longer"*. True under Mapbox (§12.31); false since
+§12.59 moved routing to HERE's truck profile, two weeks before anyone noticed.
+It also left out the assumption doing most of the work: the speed is capped
+at 52 mph, and HERE's truck durations imply a median 64 mph across our lanes,
+so the cap sets the speed on 94% of routes over 25 mi (1,120 of 1,196,
+measured 2026-10-06).
+
+**The fix.** It now reads *"Routed truck road miles, speed capped at 52 mph —
+driving only, no rest stops"*. The number is read from
+`STATUS_DEFAULTS.avgSpeedMph`, not typed into the sentence, so the words
+cannot outlive the value. The tooltip is unchanged and still holds at two
+clauses (§12.33). The out-of-date "CAR duration" comments on
+`stop_routes.routed_duration_s` and `cappedSpeed` are corrected too. No
+number, cap or engine rule changed. **Test** (`eta-basis.test.ts`): the line
+names truck miles, the configured cap and no rest stops, and does not say
+"car" or "rate confirmation".
 
 # 13. Still open
 

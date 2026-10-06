@@ -594,7 +594,10 @@ export const stopRoutes = pgTable(
       .references(() => stops.id, { onDelete: 'cascade' }),
 
     routedMiles: doublePrecision('routed_miles').notNull(),
-    /** Seconds, as the provider gave them. A CAR duration — see §12.31. */
+    /**
+     * Seconds, as the provider gave them: HERE truck profile, with live
+     * traffic (§12.59). Used only through the speed cap — see §12.31.
+     */
     routedDurationS: doublePrecision('routed_duration_s').notNull(),
 
     /** Where the truck was when this was routed. The recompute rule's origin. */

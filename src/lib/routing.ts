@@ -255,10 +255,11 @@ export function projectDistance(
  *
  * Using the duration is better than distance ÷ 52 because the route knows
  * road classes — an interstate lane and a lane of county roads are not the
- * same hour. But it is a CAR duration: on the first live call it implied 65.5
- * mph, which no loaded truck sustains. Capping keeps the useful half (a route
- * that says 35 mph through a city is telling us something) and discards the
- * optimistic half.
+ * same hour. But it is optimistic: the first live (Mapbox car) call implied
+ * 65.5 mph, and HERE's truck profile (§12.59) still implies a median 64 mph
+ * across our lanes, which no loaded truck sustains. Capping keeps the useful
+ * half (a route that says 35 mph through a city is telling us something) and
+ * discards the optimistic half.
  *
  * NO break time is added. Hours of Service is on the brief's never-build
  * list, so this is a DRIVING-time estimate and the row says so — a long lane

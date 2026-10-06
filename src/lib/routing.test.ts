@@ -169,7 +169,7 @@ describe('projectDistance', () => {
   });
 
   /**
-   * The provider's duration is a CAR duration. The first live call implied
+   * The provider's duration is optimistic. The first live call implied
    * 65.5 mph, which no loaded truck sustains.
    */
   it('never travels faster than the configured average', () => {

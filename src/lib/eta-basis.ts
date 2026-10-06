@@ -1,6 +1,6 @@
 import { elapsed } from './format';
 import type { DistanceBasis } from './routing';
-import type { ArrivalSource, EtaAbsence } from './status';
+import { STATUS_DEFAULTS, type ArrivalSource, type EtaAbsence } from './status';
 
 /**
  * The words a dispatcher reads next to an ETA (§12.30, §12.31, §12.33).
@@ -148,9 +148,9 @@ export interface BasisDetail {
  * Everything the caution does not say, for a surface someone opens
  * deliberately — the popup's collapsed detail block and the edit modal.
  *
- * The car-profile caveat lives here rather than in the tooltip because it
- * matters when reconciling against a rate confirmation, which is not what
- * anyone is doing while hovering a row. The snap distance lives here because
+ * How a routed figure was built — truck profile, capped speed — lives here
+ * rather than in the tooltip because it explains the number rather than
+ * changing a decision about it (§12.110). The snap distance lives here because
  * it is already inside the ± above it, and it is the one line answering a
  * question nobody asks.
  */
@@ -234,8 +234,12 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
     case 'routed':
       details.push({
         label: 'Distance',
-        value:
-          'Routed road miles for a car; a truck-mile figure on a rate confirmation will read longer',
+        /**
+         * §12.110. This said "for a car" for two weeks after §12.59 moved
+         * routing to HERE's truck profile. The cap is read from the config,
+         * not written here, so the sentence cannot outlive the number.
+         */
+        value: `Routed truck road miles, speed capped at ${STATUS_DEFAULTS.avgSpeedMph} mph — driving only, no rest stops`,
       });
       break;
     case 'lane-estimate':
