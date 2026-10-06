@@ -8031,6 +8031,28 @@ they were; the section gone once reopened and absent for a truck with nothing
 closed; a viewer disabled and refused; no way to reopen on a phone. Skipping
 the restore fails three database tests.
 
+## 12.108 A truck selected before the server answers stays selected
+
+**The fault.** `phone.spec.ts`'s truck-sheet check failed in two full e2e runs
+out of about six: Close on 101's sheet, tap 102's card, and the sheet opened
+on 101. The trace shows the tap on 102's card, which had not moved, and the
+sheet opening with 101 — the selection went back.
+
+Selecting writes `?truck=` with `router.replace`, which re-renders the page on
+the server and hands the board a new `initialTruck`. The "open the truck the
+link names" effect read that prop and, on a board opened without a truck, was
+still waiting for one — so a late re-render for 101, landing around the tap on
+102, selected 101 again. A uniformly slow server does not show it (Next drops
+the older navigation); it needs the first answer to land in the gap, which
+load does. On a phone over a slow connection a dispatcher would meet it.
+
+**The fix.** The link's truck is read once, when the board opens
+(`useState(initialTruck)`); later values of the prop are the board's own
+writes coming back and select nothing. **Test** (`ConsoleKeys.test.tsx`): a
+board opened with no truck, 202 selected, then re-rendered with `initialTruck`
+101 — 202 stays selected (it went to 101 on the old code); a board opened with
+`?truck=202` still opens on it.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

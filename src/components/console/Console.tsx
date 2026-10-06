@@ -381,16 +381,25 @@ export function Console({
   const [timelineId, setTimelineId] = useState<string | null>(null);
   const [missingTruck, setMissingTruck] = useState<string | null>(null);
   const resolvedInitialTruck = useRef(false);
+  /**
+   * §12.108. The truck the address named when the board OPENED — read once.
+   * Selecting writes `?truck=`, and the server's re-render of that write
+   * arrives as a new `initialTruck`; on a board opened without one this effect
+   * was still waiting, so a late answer for the first truck re-selected it
+   * after the dispatcher had moved on (on a phone, the second truck's sheet
+   * opened on the first).
+   */
+  const [linkTruck] = useState(initialTruck);
 
   useEffect(() => {
-    if (!initialTruck || resolvedInitialTruck.current || rows.length === 0) return;
+    if (!linkTruck || resolvedInitialTruck.current || rows.length === 0) return;
     resolvedInitialTruck.current = true;
-    const match = rows.find((r) => String(r.truckNumber) === initialTruck);
+    const match = rows.find((r) => String(r.truckNumber) === linkTruck);
     if (match) setSelectedId(match.id);
     // Unknown or inactive: the console still loads, with a dismissible note.
     // A link a colleague sent you should never be a dead end.
-    else setMissingTruck(initialTruck);
-  }, [initialTruck, rows]);
+    else setMissingTruck(linkTruck);
+  }, [linkTruck, rows]);
 
   /**
    * The search box is debounced, so the URL follows the SETTLED query rather

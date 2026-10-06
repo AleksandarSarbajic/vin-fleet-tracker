@@ -642,3 +642,68 @@ describe('a truck going LATE raises a toast (§12.50)', () => {
     expect(toastEl()).toBeNull();
   });
 });
+
+/**
+ * §12.108. Selecting a truck writes `?truck=`, and the server's re-render of
+ * that address comes back as a new `initialTruck`. The link's truck is the one
+ * the board OPENED on; a re-render of the board's own write, arriving after the
+ * dispatcher has moved on, must not select the old truck again.
+ */
+describe('a late re-render of the board’s own address', () => {
+  it('does not re-select the truck the dispatcher has moved on from', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const props = (initialTruck: string | null) =>
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(Console, {
+          initial: INITIAL,
+          initialHealth: fleetHealth(),
+          dispatchTz: 'America/Chicago',
+          user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
+          initialQuery: '',
+          initialTruck,
+          initialChips: [],
+          drivers: [],
+          role: 'admin' as const,
+        }),
+      );
+    // Opened without a truck in the address.
+    await act(async () => root!.render(props(null)));
+    await act(async () => rowFor('202')!.click());
+    expect(rowFor('202')?.getAttribute('aria-selected')).toBe('true');
+
+    // The answer for an earlier `?truck=101` lands now.
+    await act(async () => root!.render(props('101')));
+    expect(rowFor('202')?.getAttribute('aria-selected')).toBe('true');
+    expect(rowFor('101')?.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('still opens on the truck a link names', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    await act(async () =>
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(Console, {
+            initial: INITIAL,
+            initialHealth: fleetHealth(),
+            dispatchTz: 'America/Chicago',
+            user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
+            initialQuery: '',
+            initialTruck: '202',
+            initialChips: [],
+            drivers: [],
+            role: 'admin' as const,
+          }),
+        ),
+      ),
+    );
+    expect(rowFor('202')?.getAttribute('aria-selected')).toBe('true');
+  });
+});
