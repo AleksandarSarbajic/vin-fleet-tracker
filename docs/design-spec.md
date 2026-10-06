@@ -8091,6 +8091,64 @@ number, cap or engine rule changed. **Test** (`eta-basis.test.ts`): the line
 names truck miles, the configured cap and no rest stops, and does not say
 "car" or "rate confirmation".
 
+## 12.111 ETA accuracy, measured — `npm run eta:score`
+
+The board has never kept a past ETA: it is computed on read from the newest
+fix and the cached route (§12.24), and nothing remembers what it said. This
+is the first measurement of how right it was. **Descriptive, not a verdict**
+— no stopping rule, no threshold, nothing in the engine changed.
+
+**How.** Read-only, one `begin read only` transaction. For each detected
+arrival at a real stop, and each of 200, 100, 50 and 25 straight-line miles,
+it finds the prediction the board made when the truck first came inside that
+distance and replays it through the engine's own `projectDistance`:
+
+- `pos` — from positions: the crossing fix, the route the board held once
+  that poll finished, the board's freshness rule. Exact. Seven days only, or a
+  saved copy passed with `--positions` (kept in the gitignored `.eta-data/`).
+- `rec` — from `route_samples`: the first recompute inside the distance, which
+  is always `routed`. It lands 3–30 mi under the mark.
+
+Error is **actual minus predicted**: positive means the truck arrived after the
+ETA, the board was optimistic. "Driving only" subtracts stationary episodes of
+10 min or more (the arrival sweep's 3 mph threshold), and needs positions for
+the whole stretch. Every basis and HERE's uncapped duration are replayed from
+the same inputs; the ZIP what-if moves the stop to its ZIP centre and nothing
+else. Every figure prints its n and its concentration (places, top-2, eff —
+the `shadow:analyse` measure). The pure parts live in `lib/eta-marks.ts`,
+shared with the prediction log.
+
+**`route_samples` must be matched on the destination point, not the stop
+id.** Three of twelve arrived stops (116, 138, 141) had been edited from an
+earlier destination to a new one — Wahpeton → West Fargo → Bismarck — and
+their samples to the old points read as 58–71-hour "waits". That is §12.54's
+rule ("provenance only, not a join key") and the first hand query broke it.
+
+**First run, 2026-10-06** (10 scorable arrivals, 9 destinations; 2 with
+positions):
+
+- **As the dispatcher saw it**, the median truck arrived **24–36 min after the
+  ETA** at 100, 50 and 25 mi (n = 9, 9, 10; eff 7.4–8.3); at 200 mi −1 (n = 7).
+  The worst trips are stops, not arithmetic: 146 waited ~17 h near Aurora, 136
+  ~2.5 h, 124 stopped 314 min on the way to Vernon Hills.
+- **Driving only** (n = 2: trucks 113 and 124) the board was **pessimistic**:
+  −46 to −51 min at 200 mi, −17 to −18 at 100, within ±7 at 50 and 25. HERE's
+  uncapped duration was within +18 at every distance.
+- **The 52 mph cap.** Between consecutive recomputes with positions showing no
+  stop of 5+ min (118 segments, 10 trips, 9 trucks, eff 5.5), trucks covered
+  road miles at a **median 69 mph** (p10 56, p90 71); 113 of 118 were faster
+  than 52. GPS path length agrees (median 68 mph, difference 0). Against
+  HERE's own truck speed, +5 mph. So while a truck is driving, the cap puts
+  the ETA a median **28 min per 100 road miles** after the truck.
+- The cap and the missing stops pull in opposite directions, and as seen the
+  stops win. Removing the cap alone would make the as-seen error worse.
+
+**What it cannot support.** n = 10, and driving-only n = 2. The four distances
+within a trip are not independent. No ZIP stop has an arrival (detection is
+street-only, none marked by hand), and no block stop has ever existed, so
+precision is a what-if on street trips. Nothing here is a reason to change the
+engine yet; it is the baseline the prediction log will be measured against.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

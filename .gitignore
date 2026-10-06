@@ -17,6 +17,10 @@ next-env.d.ts
 # local test cluster (scripts/test-db.sh)
 .testdb/
 
+# Saved copies of production positions for `npm run eta:score` (§12.111).
+# Real truck tracks: never committed.
+.eta-data/
+
 # Branding source under consideration, not an asset yet (§14 feature 13).
 # The file stays on disk to be looked at; it is not committed while it is
 # undecided. Today's copy is a 500x302 JPEG misnamed .png, which is too weak
