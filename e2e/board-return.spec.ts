@@ -91,6 +91,37 @@ test('leave with a list, a search and a truck selected; the Board button and G B
   await expectBoardAsLeft(page, listId);
 });
 
+/**
+ * The board's address is built from what the board last wrote, not from
+ * `window.location`: a `router.replace` on this dynamic page waits for the
+ * server before the address changes, so a second change made in that gap read
+ * the old address and wrote it back without the first. Slowed here on
+ * purpose — the full suite's load once made the gap wide enough by itself.
+ */
+test('a list, then a search typed before the server answers: the address keeps both', async ({ page }) => {
+  const listId = await seedList();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('[data-row-id]')).toHaveCount(3);
+  await page.route(
+    (url) => url.searchParams.has('_rsc'),
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await route.continue();
+    },
+  );
+  await page.getByRole('button', { name: /^Scope/ }).click();
+  await page.getByRole('menu').locator('[data-list-items]').getByRole('menuitem', { name: new RegExp(`^${LIST_NAME}`) }).click();
+  await page.getByLabel('Search the fleet').fill('10');
+  await expect(page).toHaveURL(/[?&]q=10/, { timeout: 15_000 });
+  await page.waitForTimeout(2_000);
+  const url = new URL(page.url());
+  expect(url.searchParams.get('list')).toBe(listId);
+  expect(url.searchParams.get('q')).toBe('10');
+  await toHistory(page);
+  await expect(page.locator('[data-board-link]')).toHaveAttribute('href', `/?list=${listId}&q=10`);
+});
+
 test('a list deleted while away: Board goes to the full fleet at /, with no notice', async ({ page }) => {
   const listId = await seedList();
   await page.setViewportSize({ width: 1440, height: 900 });

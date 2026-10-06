@@ -7819,6 +7819,19 @@ to `/` with the full fleet and no notice; a fresh tab on `/history` goes to
 `syncUrl` the first test fails (list `null`); with the deleted-list check
 removed the unit test fails. Baselines unchanged.
 
+**The address dropped a parameter under load** (2026-10-06). The full suite
+failed the round trip once: the Board button held `/?q=10&truck=101`, no list.
+Not the save — the board's own address. `syncUrl` built each write from
+`window.location`, and a `router.replace` on this dynamic page changes the
+address only after the server answers; a search typed in that gap read the
+address from before the list and wrote it back without it. The list stayed on
+screen and left the link, which predates §12.104 and is the same fault for
+anyone copying the address. `syncUrl` now builds from what the board last
+wrote (a ref, first read after hydration), and so does the search's
+already-written check. `e2e/board-return.spec.ts` holds the server's answer
+back 1.5 s, chooses a list, types a search, and expects both in the address
+and in the Board button: `list` was `null` on the old code.
+
 ## 12.105 The 768–1085 map/list toggle remembers, and a click on it holds
 
 **The faults.** Below 1086px the toggle opened on the map on every load

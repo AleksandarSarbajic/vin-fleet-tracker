@@ -121,10 +121,24 @@ export function Console({
   const pathname = usePathname();
   const reducedMotion = useReducedMotion();
 
+  /**
+   * §12.104. The board's address as it last WROTE it — the base for the next
+   * write, never `window.location`. A `router.replace` on this dynamic page
+   * waits for the server before the address changes, so a second change made
+   * in that gap (a list chosen, then a search typed) read the old address and
+   * wrote it back without the first: the list stayed on screen and left the
+   * link. Null until first read, after hydration.
+   */
+  const written = useRef<URLSearchParams | null>(null);
+  const boardAddress = useCallback(
+    () => (written.current ??= new URLSearchParams(window.location.search)),
+    [],
+  );
+
   /** Search and selection both live in the URL so a link carries the view. */
   const syncUrl = useCallback(
     (next: { q?: string; truck?: string | null; chips?: FilterKey[]; list?: string | null }) => {
-      const search = new URLSearchParams(window.location.search);
+      const search = new URLSearchParams(boardAddress());
       if (next.list !== undefined) {
         if (next.list) search.set('list', next.list);
         else search.delete('list');
@@ -141,14 +155,15 @@ export function Console({
         if (next.truck) search.set('truck', next.truck);
         else search.delete('truck');
       }
+      written.current = search;
       const qs = search.toString();
       rememberBoard(qs);
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
-    [pathname, router],
+    [boardAddress, pathname, router],
   );
   // §12.104. The address the board opened on is the way back, until it changes.
-  useEffect(() => rememberBoard(window.location.search), []);
+  useEffect(() => rememberBoard(boardAddress().toString()), [boardAddress]);
 
   /**
    * §12.29: the chips own their state and write the URL FROM THE CLICK. The
@@ -384,9 +399,9 @@ export function Console({
    * writing when the URL already says what it would say.
    */
   useEffect(() => {
-    const current = new URLSearchParams(window.location.search).get('q') ?? '';
+    const current = boardAddress().get('q') ?? '';
     if (current !== query) syncUrl({ q: query });
-  }, [query, syncUrl]);
+  }, [boardAddress, query, syncUrl]);
 
   const select = useCallback(
     (id: string | null) => {
