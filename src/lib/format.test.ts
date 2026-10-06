@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { compassPoint, elapsed, mph, timeInZone, zoneAbbreviation } from './format';
+import { eveningBefore, fallBack, springForward, YEAR } from '@/test/dst';
+import { nextCalendarDay } from './calendar';
+import {
+  compassPoint,
+  elapsed,
+  mph,
+  timeInZone,
+  wallTimeInstant,
+  windowEnd,
+  windowLength,
+  zoneAbbreviation,
+} from './format';
 
 describe('compassPoint', () => {
   it.each([
@@ -99,4 +110,99 @@ describe('mph', () => {
     expect(mph(0)).toBe('0 mph');
   });
   it('is null when unknown', () => expect(mph(null)).toBeNull());
+});
+
+/* ------------------------- §12.114 overnight windows --------------------- */
+
+const CHICAGO = 'America/Chicago';
+const next = (date: { y: number; m: number; d: number }) => {
+  const [y, m, d] = nextCalendarDay(
+    `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`,
+  ).split('-').map(Number) as [number, number, number];
+  return { y, m, d };
+};
+const span = (
+  date: { y: number; m: number; d: number },
+  from: number,
+  to: number,
+  tz: string,
+  endDate = to <= from ? next(date) : date,
+) => ({
+  start: wallTimeInstant(date, { h: from, min: 0 }, tz).toISOString(),
+  end: wallTimeInstant(endDate, { h: to, min: 0 }, tz).toISOString(),
+});
+
+describe('wallTimeInstant (display only)', () => {
+  const clock = (at: Date, tz: string) =>
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit',
+    }).format(at);
+
+  it('names the instant a wall time happens at the stop', () => {
+    const at = wallTimeInstant({ y: YEAR, m: 6, d: 12 }, { h: 14, min: 30 }, CHICAGO);
+    expect(clock(at, CHICAGO)).toBe('14:30');
+  });
+
+  it('is right on the fall-back morning, where one correction pass was an hour out', () => {
+    // The guess is five or six hours from the target, and on this morning it
+    // sits on daylight time while 06:00 is on standard: the old one-pass
+    // version returned 05:00 CST.
+    const morning = next(eveningBefore(CHICAGO, fallBack(CHICAGO, YEAR)));
+    const at = wallTimeInstant(morning, { h: 6, min: 0 }, CHICAGO);
+    expect(clock(at, CHICAGO)).toBe('06:00');
+    expect(zoneAbbreviation(at, CHICAGO)).toBe('CST');
+  });
+
+  it('is right on the spring-forward morning', () => {
+    const morning = next(eveningBefore(CHICAGO, springForward(CHICAGO, YEAR)));
+    const at = wallTimeInstant(morning, { h: 6, min: 0 }, CHICAGO);
+    expect(clock(at, CHICAGO)).toBe('06:00');
+    expect(zoneAbbreviation(at, CHICAGO)).toBe('CDT');
+  });
+});
+
+describe('windowLength', () => {
+  it.each([
+    [480, '8 h'], [420, '7 h'], [540, '9 h'], [450, '7 h 30 min'], [45, '45 min'],
+  ])('%i minutes reads %s', (minutes, text) => {
+    expect(windowLength(minutes)).toBe(text);
+  });
+});
+
+describe('windowEnd', () => {
+  const ordinary = { y: YEAR, m: 6, d: 12 };
+
+  it('is the plain end time for a window that closes the same day', () => {
+    const w = span(ordinary, 7, 15, CHICAGO);
+    expect(windowEnd(w.start, w.end, CHICAGO)).toBe(timeInZone(new Date(w.end), CHICAGO));
+    expect(windowEnd(w.start, w.end, CHICAGO)).toBe('15:00 CDT');
+  });
+
+  it('adds +1 when the window closes on the next day', () => {
+    const w = span(ordinary, 22, 6, CHICAGO);
+    expect(windowEnd(w.start, w.end, CHICAGO)).toBe('06:00 CDT +1');
+  });
+
+  it('names the END’s abbreviation on the fall-back night', () => {
+    const w = span(eveningBefore(CHICAGO, fallBack(CHICAGO, YEAR)), 22, 6, CHICAGO);
+    expect(timeInZone(new Date(w.start), CHICAGO)).toBe('22:00 CDT');
+    expect(windowEnd(w.start, w.end, CHICAGO)).toBe('06:00 CST +1');
+  });
+
+  it('counts the day at the STOP, not in the dispatch zone', () => {
+    // 22:00–06:00 in Los Angeles is 00:00–08:00 in Chicago: one day there,
+    // two days at the receiver. The receiver's night is what +1 describes.
+    const la = 'America/Los_Angeles';
+    const w = span(ordinary, 22, 6, la);
+    expect(windowEnd(w.start, w.end, la)).toBe('06:00 PDT +1');
+    // And a same-day LA window that crosses midnight in CHICAGO gets no +1.
+    const evening = span(ordinary, 21, 23, la);
+    expect(windowEnd(evening.start, evening.end, la)).toBe('23:00 PDT');
+  });
+
+  it('applies to an APPT window that runs past midnight', () => {
+    const start = wallTimeInstant(ordinary, { h: 23, min: 30 }, CHICAGO);
+    const end = new Date(start.getTime() + 60 * 60_000);
+    expect(windowEnd(start.toISOString(), end.toISOString(), CHICAGO)).toBe('00:30 CDT +1');
+  });
 });

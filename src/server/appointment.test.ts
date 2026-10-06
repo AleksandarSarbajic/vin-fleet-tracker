@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createPooledDb } from '@/db/connection';
-import { AppointmentInput, AppointmentTimeError } from '@/lib/appointment';
+import { AppointmentInput, AppointmentTimeError, fcfsEndDate } from '@/lib/appointment';
+import { wallTimeInstant } from '@/lib/format';
+import { eveningBefore, fallBack, localDateOf, springForward, transitions, YEAR } from '@/test/dst';
 import { resolveAppointment } from './appointment';
 
 /**
@@ -23,85 +25,6 @@ const connect = () => (handle ??= createPooledDb(url!));
 afterAll(async () => {
   await handle?.client.end({ timeout: 5 });
 });
-
-/* ----------------------------- DST derivation ---------------------------- */
-
-/** Minutes east of UTC in `zone` at `at`. */
-function offsetMinutes(zone: string, at: Date): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: zone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(at);
-  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
-  const asIfUtc = Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second'));
-  return (asIfUtc - at.getTime()) / 60_000;
-}
-
-/** Every UTC instant in `year` where `zone` changes offset, to the minute. */
-function transitions(zone: string, year: number): Date[] {
-  const found: Date[] = [];
-  const DAY = 86_400_000;
-  let cursor = Date.UTC(year, 0, 1);
-  const end = Date.UTC(year + 1, 0, 1);
-  let previous = offsetMinutes(zone, new Date(cursor));
-
-  while (cursor < end) {
-    const next = Math.min(cursor + DAY, end);
-    const offset = offsetMinutes(zone, new Date(next));
-    if (offset !== previous) {
-      // Narrow the day to the minute the offset actually moved.
-      let lo = cursor;
-      let hi = next;
-      while (hi - lo > 60_000) {
-        const mid = lo + Math.floor((hi - lo) / 2 / 60_000) * 60_000;
-        if (offsetMinutes(zone, new Date(mid)) === previous) lo = mid;
-        else hi = mid;
-      }
-      found.push(new Date(hi));
-      previous = offset;
-    }
-    cursor = next;
-  }
-  return found;
-}
-
-/** The local calendar date on which the clocks move, in that zone. */
-function localDateOf(zone: string, instant: Date): { y: number; m: number; d: number } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
-  const [y, m, d] = parts.split('-').map(Number);
-  return { y: y!, m: m!, d: d! };
-}
-
-const YEAR = new Date().getUTCFullYear();
-
-function springForward(zone: string, year: number): Date {
-  const forward = transitions(zone, year).find(
-    (t) => offsetMinutes(zone, new Date(t.getTime() + 60_000)) >
-           offsetMinutes(zone, new Date(t.getTime() - 60_000)),
-  );
-  if (!forward) throw new Error(`${zone} has no spring-forward in ${year}`);
-  return forward;
-}
-
-function fallBack(zone: string, year: number): Date {
-  const back = transitions(zone, year).find(
-    (t) => offsetMinutes(zone, new Date(t.getTime() + 60_000)) <
-           offsetMinutes(zone, new Date(t.getTime() - 60_000)),
-  );
-  if (!back) throw new Error(`${zone} has no fall-back in ${year}`);
-  return back;
-}
 
 const appt = (
   date: { y: number; m: number; d: number },
@@ -424,6 +347,161 @@ withDb('FCFS receiving hours, converted', () => {
       // Hung on the field the dispatcher typed it into.
       field: 'appointment.endTime',
     });
+  });
+});
+
+withDb('overnight receiving hours (§12.114), converted', () => {
+  const night = (
+    date: { y: number; m: number; d: number },
+    tz: string,
+    from: { h: number; min: number } = { h: 22, min: 0 },
+    to: { h: number; min: number } = { h: 6, min: 0 },
+  ) =>
+    AppointmentInput.parse({
+      type: 'FCFS',
+      date,
+      time: from,
+      tz,
+      windowMinutes: null,
+      endTime: to,
+    });
+
+  const hoursOf = (r: { startUtc: string; endUtc: string | null }) =>
+    (Date.parse(r.endUtc!) - Date.parse(r.startUtc)) / 3_600_000;
+
+  /** What the stop's own clock reads at an instant, as `YYYY-MM-DD HH:mm`. */
+  const wallAt = (iso: string, tz: string) =>
+    new Intl.DateTimeFormat('sv-SE', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date(iso));
+
+  /** A night well clear of both changes: mid-June. */
+  const ordinary = { y: YEAR, m: 6, d: 12 };
+
+  it('closes at 06:00 on the NEXT day, 8 hours after it opens', async () => {
+    const { db } = connect();
+    const r = await resolveAppointment(db, night(ordinary, 'America/Chicago'));
+    expect(wallAt(r.startUtc, 'America/Chicago')).toBe(`${YEAR}-06-12 22:00`);
+    expect(wallAt(r.endUtc!, 'America/Chicago')).toBe(`${YEAR}-06-13 06:00`);
+    expect(hoursOf(r)).toBe(8);
+    expect(r.endResolution).toBe('exact');
+  });
+
+  it('is 7 hours on the spring-forward night and 9 on the fall-back one', async () => {
+    const { db } = connect();
+    const tz = 'America/Chicago';
+    const spring = await resolveAppointment(db, night(eveningBefore(tz, springForward(tz, YEAR)), tz));
+    const autumn = await resolveAppointment(db, night(eveningBefore(tz, fallBack(tz, YEAR)), tz));
+
+    expect(hoursOf(spring)).toBe(7);
+    expect(hoursOf(autumn)).toBe(9);
+    // Both still CLOSE at 06:00 by the facility's own clock — the length
+    // moved because the clock did, not because the end did.
+    expect(wallAt(spring.endUtc!, tz).slice(11)).toBe('06:00');
+    expect(wallAt(autumn.endUtc!, tz).slice(11)).toBe('06:00');
+  });
+
+  it('is 8 hours on those same nights in Phoenix, which does not change', async () => {
+    const { db } = connect();
+    const chicago = 'America/Chicago';
+    for (const change of [springForward(chicago, YEAR), fallBack(chicago, YEAR)]) {
+      const r = await resolveAppointment(db, night(eveningBefore(chicago, change), 'America/Phoenix'));
+      expect(hoursOf(r)).toBe(8);
+    }
+  });
+
+  it('follows the stop zone’s OWN change dates, not the US ones', async () => {
+    // Belgrade changes on different weekends. On the US nights it is an
+    // ordinary 8 hours; on its own nights it is 7 and 9. Nothing in the
+    // builder knows a date, so nothing in it can be US-shaped.
+    const { db } = connect();
+    const us = 'America/Chicago';
+    const eu = 'Europe/Belgrade';
+    expect(localDateOf(eu, springForward(eu, YEAR))).not.toEqual(
+      localDateOf(us, springForward(us, YEAR)),
+    );
+
+    const onUsNight = await resolveAppointment(db, night(eveningBefore(us, springForward(us, YEAR)), eu));
+    expect(hoursOf(onUsNight)).toBe(8);
+
+    const euSpring = await resolveAppointment(db, night(eveningBefore(eu, springForward(eu, YEAR)), eu));
+    const euAutumn = await resolveAppointment(db, night(eveningBefore(eu, fallBack(eu, YEAR)), eu));
+    expect(hoursOf(euSpring)).toBe(7);
+    expect(hoursOf(euAutumn)).toBe(9);
+  });
+
+  it('refuses a latest hour the clocks skip, on the morning AFTER the start date', async () => {
+    // 22:00 the evening before, closing at the skipped 02:30. The check has
+    // to read back against the END's date — against the start's, 02:30 on
+    // the evening before exists and the hour would be stored an hour late.
+    const { db } = connect();
+    const tz = 'America/Chicago';
+    const moment = springForward(tz, YEAR);
+    const skipped = Number(
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit' }).format(
+        new Date(moment.getTime() - 60_000),
+      ),
+    ) + 1;
+    await expect(
+      resolveAppointment(db, night(eveningBefore(tz, moment), tz, { h: 22, min: 0 }, { h: skipped, min: 30 })),
+    ).rejects.toMatchObject({ name: 'AppointmentTimeError', field: 'appointment.endTime' });
+  });
+
+  it('flags a latest hour that happens twice, and keeps the second one', async () => {
+    const { db } = connect();
+    const tz = 'America/Chicago';
+    const moment = fallBack(tz, YEAR);
+    const repeated = Number(
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit' }).format(
+        new Date(moment.getTime() + 60_000),
+      ),
+    );
+    const r = await resolveAppointment(
+      db,
+      night(eveningBefore(tz, moment), tz, { h: 22, min: 0 }, { h: repeated, min: 30 }),
+    );
+    expect(r.endResolution).toBe('ambiguous');
+    // The start is an ordinary evening.
+    expect(r.resolution).toBe('exact');
+    // The SECOND: the instant an hour earlier reads the same wall time.
+    const anHourEarlier = new Date(Date.parse(r.endUtc!) - 3_600_000).toISOString();
+    expect(wallAt(anHourEarlier, tz)).toBe(wallAt(r.endUtc!, tz));
+  });
+
+  it('crosses the year', async () => {
+    const { db } = connect();
+    const r = await resolveAppointment(db, night({ y: YEAR, m: 12, d: 31 }, 'America/Chicago'));
+    expect(wallAt(r.endUtc!, 'America/Chicago')).toBe(`${YEAR + 1}-01-01 06:00`);
+  });
+
+  it('leaves a same-day window exactly as it was', async () => {
+    const { db } = connect();
+    const r = await resolveAppointment(
+      db,
+      night(ordinary, 'America/Chicago', { h: 7, min: 0 }, { h: 15, min: 0 }),
+    );
+    expect(wallAt(r.startUtc, 'America/Chicago')).toBe(`${YEAR}-06-12 07:00`);
+    expect(wallAt(r.endUtc!, 'America/Chicago')).toBe(`${YEAR}-06-12 15:00`);
+    expect(hoursOf(r)).toBe(8);
+  });
+
+  it('agrees with the form’s display-only conversion on every one of those nights', async () => {
+    // The "Ends next day · … · 9 h" line is computed in the browser by
+    // wallTimeInstant. If it ever disagreed with Postgres, the form would
+    // promise one deadline and store another.
+    const { db } = connect();
+    const tz = 'America/Chicago';
+    for (const date of [
+      ordinary,
+      eveningBefore(tz, springForward(tz, YEAR)),
+      eveningBefore(tz, fallBack(tz, YEAR)),
+    ]) {
+      const r = await resolveAppointment(db, night(date, tz));
+      const end = fcfsEndDate(date, { h: 22, min: 0 }, { h: 6, min: 0 });
+      expect(wallTimeInstant(date, { h: 22, min: 0 }, tz).toISOString()).toBe(r.startUtc);
+      expect(wallTimeInstant(end, { h: 6, min: 0 }, tz).toISOString()).toBe(r.endUtc);
+    }
   });
 });
 

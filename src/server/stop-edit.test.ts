@@ -7,6 +7,7 @@ import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
 import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
+import { eveningBefore, fallBack, YEAR } from '@/test/dst';
 import { saveStopEdit } from './stop-edit';
 import type { Tx } from './audit';
 
@@ -709,6 +710,116 @@ withDb('the edit modal save', () => {
     const second = rows.find((r) => r.before !== null);
     expect((second?.before as { zip: string }).zip).toBe('60451');
     expect((second?.after as { zip: string }).zip).toBe('60452');
+  });
+
+  describe('overnight receiving hours (§12.114)', () => {
+    const night = (
+      date: { y: number; m: number; d: number },
+      to: { h: number; min: number } = { h: 6, min: 0 },
+    ) => ({
+      type: 'FCFS' as const,
+      date,
+      time: { h: 22, min: 0 },
+      tz: 'America/Chicago',
+      windowMinutes: null,
+      endTime: to,
+    });
+    const wallAt = (at: Date) =>
+      new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(at);
+
+    it('stores the next-morning close, and audits the end and the type', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, appointment: night({ y: YEAR, m: 6, d: 12 }) }),
+        });
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t[0]!.id,
+            stopId: created.stopId,
+            appointment: night({ y: YEAR, m: 6, d: 12 }, { h: 5, min: 0 }),
+          }),
+        });
+        const [row] = await tx
+          .select({ start: stops.appointmentStartUtc, end: stops.appointmentEndUtc })
+          .from(stops)
+          .where(eq(stops.id, created.stopId));
+        const audit = await tx
+          .select({ before: auditLog.before, after: auditLog.after })
+          .from(auditLog)
+          .where(eq(auditLog.entityId, created.stopId));
+        return { row, audit };
+      });
+
+      // Passed the stops_fcfs_window_positive and stops_window_ordered checks.
+      expect(wallAt(seen.row!.start!)).toBe(`${YEAR}-06-12 22:00`);
+      expect(wallAt(seen.row!.end!)).toBe(`${YEAR}-06-13 05:00`);
+
+      type Logged = { appointmentEndUtc?: string | null; appointmentType?: string };
+      const second = seen.audit.find((r) => r.before !== null);
+      const before = second?.before as Logged;
+      const after = second?.after as Logged;
+      expect(before.appointmentType).toBe('FCFS');
+      expect(wallAt(new Date(before.appointmentEndUtc!))).toBe(`${YEAR}-06-13 06:00`);
+      expect(after.appointmentType).toBe('FCFS');
+      expect(after.appointmentEndUtc).toBe(seen.row!.end!.toISOString());
+    });
+
+    it('saves a latest hour that happens twice, and says which one it kept', async () => {
+      const tz = 'America/Chicago';
+      const moment = fallBack(tz, YEAR);
+      const repeated = Number(
+        new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit' })
+          .format(new Date(moment.getTime() + 60_000)),
+      );
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const result = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({
+            truckId: t[0]!.id,
+            appointment: night(eveningBefore(tz, moment), { h: repeated, min: 30 }),
+          }),
+        });
+        const [logged] = await tx
+          .select({ after: auditLog.after })
+          .from(auditLog)
+          .where(eq(auditLog.entityId, result.stopId));
+        // Only the appointment's: this suite's fixture address draws its own
+        // geocode warning, which is not what is under test here.
+        const warnings = result.warnings.filter((w) => w.field.startsWith('appointment'));
+        return { warnings, after: logged?.after };
+      });
+
+      expect(seen.warnings).toHaveLength(1);
+      expect(seen.warnings[0]!.field).toBe('appointment.endTime');
+      expect(seen.warnings[0]!.message).toMatch(/happens twice/);
+      expect(seen.warnings[0]!.message).toMatch(/second one \(CST\)/);
+      expect((seen.after as { appointmentEndResolution?: string }).appointmentEndResolution)
+        .toBe('ambiguous');
+    });
+
+    it('raises no appointment warning on an ordinary night', async () => {
+      const warnings = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        return (
+          await saveStopEdit(tx as never, {
+            actorUserId: null,
+            dispatchTz: DISPATCH_TZ,
+            edit: edit({ truckId: t[0]!.id, appointment: night({ y: YEAR, m: 6, d: 12 }) }),
+          })
+        ).warnings.filter((w) => w.field.startsWith('appointment'));
+      });
+      expect(warnings).toEqual([]);
+    });
   });
 
   it('saves the stop and the two-sided move in the same transaction', async () => {

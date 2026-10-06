@@ -13,6 +13,9 @@ import {
   type StopFacts,
   type TruckFacts,
 } from './status';
+import { eveningBefore, fallBack } from '@/test/dst';
+import { fcfsEndDate } from './appointment';
+import { wallTimeInstant } from './format';
 
 /**
  * The engine, which is the file that decides whether a dispatcher phones a
@@ -162,6 +165,137 @@ describe('FCFS (§12.22)', () => {
   it('uses the LATEST receiving hour as the deadline', () => {
     const facts = truck({ stop: receiving(-60, 120) });
     expect(evaluate(facts, config, NOW).deadlineUtc).toBe(at(120));
+  });
+});
+
+describe('overnight windows (§12.114) — no rule changed, the deadline is the next-day instant', () => {
+  /** The evening the window opens: NOW's own date at the stop. */
+  const EVENING = { y: 2026, m: 9, d: 18 };
+  expect(calendarDayInZone(NOW, DISPATCH_TZ)).toBe('2026-09-18');
+
+  /** The window as the server builds it: the end on its own day, converted from wall time. */
+  const overnight = (
+    tz = DISPATCH_TZ,
+    date = EVENING,
+    type: 'APPT' | 'FCFS' = 'FCFS',
+    from = { h: 22, min: 0 },
+    to = { h: 6, min: 0 },
+  ) =>
+    stop({
+      apptType: type,
+      apptStartUtc: wallTimeInstant(date, from, tz).toISOString(),
+      apptEndUtc: wallTimeInstant(fcfsEndDate(date, from, to), to, tz).toISOString(),
+    });
+  const morning = (h: number, min = 0, tz = DISPATCH_TZ, date = EVENING) =>
+    wallTimeInstant(fcfsEndDate(date, { h: 22, min: 0 }, { h: 6, min: 0 }), { h, min }, tz);
+  const evening = (h: number, min = 0, tz = DISPATCH_TZ, date = EVENING) =>
+    wallTimeInstant(date, { h, min }, tz);
+
+  /**
+   * How far ahead of its fix the engine projects this truck. Measured from
+   * the engine rather than recomputed, so the tests below can place an ETA
+   * exactly where they need it by moving `now`.
+   */
+  const lead = Date.parse(evaluate(truck(), config, NOW).etaUtc!) - NOW.getTime();
+  const arrivingAt = (eta: Date, s: StopFacts) => {
+    const now = new Date(eta.getTime() - lead);
+    const result = evaluate(
+      truck({ stop: s, recordedAtUtc: new Date(now.getTime() - 2 * 60_000).toISOString() }),
+      config,
+      now,
+    );
+    expect(Math.abs(Date.parse(result.etaUtc!) - eta.getTime())).toBeLessThan(60_000);
+    return result;
+  };
+
+  it('takes 06:00 the NEXT morning as the deadline', () => {
+    const s = overnight();
+    const { deadlineUtc } = evaluate(truck({ stop: s }), config, NOW);
+    expect(deadlineUtc).toBe(morning(6).toISOString());
+    // Independently of the builder the fixtures use: the 19th, 8 hours on.
+    // Without this, a builder that lost the next day would move the
+    // fixtures with it and every case below would still pass.
+    expect(calendarDayInZone(new Date(deadlineUtc!), DISPATCH_TZ)).toBe('2026-09-19');
+    expect(Date.parse(deadlineUtc!) - Date.parse(s.apptStartUtc!)).toBe(8 * 3_600_000);
+  });
+
+  it('is ON_TIME for a truck projected at 03:00 — inside the window, after midnight', () => {
+    // The case the old same-day reading got wrong: 06:00 on the START's day
+    // is before 22:00, so every arrival in the night would have been LATE.
+    expect(arrivingAt(morning(3), overnight()).status).toBe('ON_TIME');
+  });
+
+  it('is LATE for a truck projected at 06:30 the next morning', () => {
+    expect(arrivingAt(morning(6, 30), overnight()).status).toBe('LATE');
+  });
+
+  it('never reaches AT_RISK for FCFS, even 20 minutes before the close', () => {
+    expect(arrivingAt(morning(5, 40), overnight()).status).toBe('ON_TIME');
+  });
+
+  it('is AT_RISK, LATE and ON_TIME for an APPT that runs past midnight', () => {
+    // 23:30 with a 60-minute window: the deadline is 00:30 on the next day.
+    const appt = () => overnight(DISPATCH_TZ, EVENING, 'APPT', { h: 23, min: 30 }, { h: 0, min: 30 });
+    expect(arrivingAt(morning(0, 10), appt()).status).toBe('AT_RISK');
+    expect(arrivingAt(morning(0, 45), appt()).status).toBe('LATE');
+    expect(arrivingAt(evening(23, 30), appt()).status).toBe('ON_TIME');
+  });
+
+  it('with no ETA, is not LATE by the clock until the next-day close passes', () => {
+    const blind = { ...overnight(), lat: null, lng: null };
+    const at = (now: Date) =>
+      evaluate(
+        truck({ stop: blind, recordedAtUtc: new Date(now.getTime() - 2 * 60_000).toISOString() }),
+        config,
+        now,
+      ).status;
+    expect(at(morning(3))).toBe('ON_TIME');
+    expect(at(morning(6, 1))).toBe('LATE');
+  });
+
+  it('is ARRIVED once the truck is in, at 02:00, whatever the deadline says', () => {
+    const arrived = { ...overnight(), arrivedAt: morning(2).toISOString() };
+    expect(evaluate(truck({ stop: arrived }), config, morning(2, 5)).status).toBe('ARRIVED');
+  });
+
+  it('keeps 06:00 CST on the fall-back night, nine hours on', () => {
+    // An end built as start + 8 hours would close at 05:00 and call this LATE.
+    const date = eveningBefore(DISPATCH_TZ, fallBack(DISPATCH_TZ, 2026));
+    const s = overnight(DISPATCH_TZ, date);
+    expect(Date.parse(s.apptEndUtc!) - Date.parse(s.apptStartUtc!)).toBe(9 * 3_600_000);
+    expect(arrivingAt(morning(5, 30, DISPATCH_TZ, date), s).status).toBe('ON_TIME');
+  });
+
+  it('leaves a same-day window exactly as it was', () => {
+    const day = overnight(DISPATCH_TZ, EVENING, 'FCFS', { h: 7, min: 0 }, { h: 15, min: 0 });
+    expect(day.apptEndUtc).toBe(evening(15).toISOString());
+    expect(arrivingAt(evening(14), day).status).toBe('ON_TIME');
+    expect(arrivingAt(evening(15, 30), day).status).toBe('LATE');
+  });
+
+  describe('a stop in a different zone from dispatch', () => {
+    const LA = 'America/Los_Angeles';
+
+    it('is TOMORROW when its 22:00 is already tomorrow in dispatch time', () => {
+      // 22:00 PDT is 00:00 CDT the next day. TOMORROW asks the DISPATCH
+      // calendar (§12.1), so a night that starts tonight in LA is upcoming
+      // from 21:00 in Chicago.
+      const now = evening(21);
+      const la = overnight(LA);
+      expect(calendarDayInZone(new Date(la.apptStartUtc!), DISPATCH_TZ)).toBe('2026-09-19');
+      expect(evaluate(truck({ stop: la, recordedAtUtc: now.toISOString() }), config, now).status)
+        .toBe('TOMORROW');
+      // The same wall times in Chicago start tonight.
+      expect(
+        evaluate(truck({ stop: overnight(), recordedAtUtc: now.toISOString() }), config, now).status,
+      ).not.toBe('TOMORROW');
+    });
+
+    it('measures its deadline at 06:00 PDT, not 06:00 in dispatch time', () => {
+      const result = evaluate(truck({ stop: overnight(LA) }), config, NOW);
+      expect(result.deadlineUtc).toBe(morning(6, 0, LA).toISOString());
+      expect(Date.parse(result.deadlineUtc!) - morning(6).getTime()).toBe(2 * 3_600_000);
+    });
   });
 });
 

@@ -2,6 +2,9 @@ import { expect, it } from 'vitest';
 import { loads, stops } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeTruck } from '@/test/fleet';
+import { calendarDayInZone, nextCalendarDay } from '@/lib/calendar';
+import { wallTimeInstant } from '@/lib/format';
+import { dayBefore } from '@/test/dst';
 import { loadFleetHealth } from './health';
 import type { Tx } from './audit';
 
@@ -45,6 +48,7 @@ interface Leg {
   apptEnd?: Date | null;
   arrivedAt?: Date | null;
   departedAt?: Date | null;
+  type?: 'APPT' | 'FCFS';
 }
 
 async function addLoad(
@@ -71,7 +75,7 @@ async function addLoad(
       appointmentStartUtc: leg.apptStart ?? null,
       appointmentEndUtc: leg.apptEnd ?? null,
       appointmentTz: leg.apptStart ? TZ : null,
-      appointmentType: 'APPT',
+      appointmentType: leg.type ?? 'APPT',
       arrivedAt: leg.arrivedAt ?? null,
       // §12.57: the pair is enforced by a check constraint, both ways.
       arrivedSource: leg.arrivedAt ? ('detected' as const) : null,
@@ -251,6 +255,62 @@ describeDb('the day’s outcome (§14 feature 8)', () => {
         day: '2-digit',
       }).format(new Date());
       expect((await health(tx)).day).toBe(expected);
+    });
+  });
+});
+
+/**
+ * §12.114. An overnight window, opened on the previous dispatch day and closed
+ * this morning. The strip is unchanged: "done" is keyed off the arrival's
+ * day and "remaining" off the START's (see §12.114 for the gap that leaves).
+ */
+describeDb('overnight windows on the strip (§12.114)', () => {
+  const parts = (day: string) => {
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+    return { y, m, d };
+  };
+  const today = () => parts(calendarDayInZone(new Date(), TZ));
+  /** Last night 22:00 to this morning 06:00, as the server stores it. */
+  const lastNight = () => ({
+    apptStart: wallTimeInstant(dayBefore(today()), { h: 22, min: 0 }, TZ),
+    apptEnd: wallTimeInstant(today(), { h: 6, min: 0 }, TZ),
+    type: 'FCFS' as const,
+  });
+
+  it('counts an arrival at 03:00 this morning as on time, and 06:30 as late', async () => {
+    await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await addLoad(tx, truck.id, [
+        { seq: 1, ...lastNight(), arrivedAt: wallTimeInstant(today(), { h: 3, min: 0 }, TZ) },
+        { seq: 2, ...lastNight(), arrivedAt: wallTimeInstant(today(), { h: 6, min: 30 }, TZ) },
+      ]);
+      expect(await health(tx)).toMatchObject({ onTime: 1, late: 1 });
+    });
+  });
+
+  it('counts tonight’s window as remaining today', async () => {
+    await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await addLoad(tx, truck.id, [
+        {
+          seq: 1,
+          apptStart: wallTimeInstant(today(), { h: 22, min: 0 }, TZ),
+          apptEnd: wallTimeInstant(parts(nextCalendarDay(calendarDayInZone(new Date(), TZ))), { h: 6, min: 0 }, TZ),
+          type: 'FCFS',
+        },
+      ]);
+      expect(await health(tx)).toMatchObject({ remaining: 1 });
+    });
+  });
+
+  it('KNOWN GAP: last night’s window, still open and not arrived, is in no day’s remaining', async () => {
+    // Keyed on the start day by decision (§12.114), not by accident. If this
+    // starts failing because the count is 1, the rule was changed — update
+    // the spec with it.
+    await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await addLoad(tx, truck.id, [{ seq: 1, ...lastNight() }]);
+      expect(await health(tx)).toMatchObject({ remaining: 0, onTime: 0, late: 0 });
     });
   });
 });
