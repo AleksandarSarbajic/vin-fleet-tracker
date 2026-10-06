@@ -274,3 +274,32 @@ describe('the dirty banner names the arrival (§12.57)', () => {
     expect(dirtyFields(edit(), edit())).not.toContain('arrival');
   });
 });
+
+describe('the dirty banner names the APPT window apart from the time (§12.115)', () => {
+  const appt = (windowMinutes: number, h = 14) => ({
+    type: 'APPT',
+    date: { y: 2026, m: 9, d: 18 },
+    time: { h, min: 0 },
+    tz: 'America/Chicago',
+    windowMinutes,
+  });
+  const edit = (over: Record<string, unknown> = {}) => StopEdit.parse({ ...base, ...over });
+
+  it('says nothing about the appointment when only the note moved', () => {
+    const before = edit({ appointment: appt(0) });
+    const after = edit({ appointment: appt(0), dispatcherNote: 'gate 4' });
+    expect(dirtyFields(before, after)).toEqual(['note']);
+  });
+
+  it('names the window, and only the window, when it moved', () => {
+    expect(dirtyFields(edit({ appointment: appt(0) }), edit({ appointment: appt(30) }))).toEqual([
+      'appointment window',
+    ]);
+  });
+
+  it('names the time, and only the time, when it moved', () => {
+    expect(
+      dirtyFields(edit({ appointment: appt(30) }), edit({ appointment: appt(30, 15) })),
+    ).toEqual(['appointment time']);
+  });
+});

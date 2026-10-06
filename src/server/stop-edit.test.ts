@@ -4,7 +4,7 @@ import { assignments, loads, overrides, stopRoutes, stops, auditLog } from '@/db
 import { describeDb, rolledBack } from '@/test/db';
 import { makeDispatcher, makeDriver, makePosition, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
-import { AppointmentTimeError } from '@/lib/appointment';
+import { AppointmentTimeError, storedWindowMinutes } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
 import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
 import { eveningBefore, fallBack, YEAR } from '@/test/dst';
@@ -710,6 +710,133 @@ withDb('the edit modal save', () => {
     const second = rows.find((r) => r.before !== null);
     expect((second?.before as { zip: string }).zip).toBe('60451');
     expect((second?.after as { zip: string }).zip).toBe('60452');
+  });
+
+  describe('an APPT window survives a save that does not touch it (§12.115)', () => {
+    const APPT = (windowMinutes: number) => ({
+      type: 'APPT' as const,
+      date: { y: YEAR, m: 6, d: 12 },
+      time: { h: 14, min: 0 },
+      tz: 'America/Chicago',
+      windowMinutes,
+    });
+
+    /**
+     * Reopen the stop the way the console does — through the fleet query —
+     * and save it with ONLY a note change, carrying the window the modal now
+     * opens with. Returns the stored window before and after, and the audit
+     * row of the note save.
+     */
+    const reopenAndSaveNote = async (tx: Tx, truckId: string, stopId: string) => {
+      const raw = await tx.execute(LATEST_POSITION_SQL);
+      const stop = parseFleetRows(raw as never).find((r) => r.id === truckId)!.nextStop!;
+      const opensWith = storedWindowMinutes(stop.apptStartUtc, stop.apptEndUtc);
+      await saveStopEdit(tx as never, {
+        actorUserId: null,
+        dispatchTz: DISPATCH_TZ,
+        edit: edit({ truckId, stopId, appointment: APPT(opensWith), dispatcherNote: 'gate 4' }),
+      });
+      return opensWith;
+    };
+
+    const windowOf = async (tx: Tx, stopId: string) => {
+      const [row] = await tx
+        .select({ start: stops.appointmentStartUtc, end: stops.appointmentEndUtc })
+        .from(stops)
+        .where(eq(stops.id, stopId));
+      return {
+        start: row!.start,
+        end: row!.end,
+        minutes: Math.round((row!.end!.getTime() - row!.start!.getTime()) / 60_000),
+      };
+    };
+
+    const lastAudit = async (tx: Tx, stopId: string) => {
+      const rows = await tx
+        .select({ before: auditLog.before, after: auditLog.after, at: auditLog.createdAt })
+        .from(auditLog)
+        .where(eq(auditLog.entityId, stopId));
+      type Logged = { appointmentEndUtc?: string | null };
+      const last = rows.filter((r) => r.before !== null).at(-1)!;
+      return {
+        before: (last.before as Logged).appointmentEndUtc,
+        after: (last.after as Logged).appointmentEndUtc,
+      };
+    };
+
+    it('keeps an exact time exact: end = start after a note-only save', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, appointment: APPT(0) }),
+        });
+        const opensWith = await reopenAndSaveNote(tx, t[0]!.id, created.stopId);
+        return { opensWith, stored: await windowOf(tx, created.stopId), audit: await lastAudit(tx, created.stopId) };
+      });
+      expect(seen.opensWith).toBe(0);
+      expect(seen.stored.end!.toISOString()).toBe(seen.stored.start!.toISOString());
+      // The audit shows the end written back unchanged — not widened.
+      expect(seen.audit.after).toBe(seen.audit.before);
+      expect(seen.audit.after).toBe(seen.stored.start!.toISOString());
+    });
+
+    it('keeps +30 at 30', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, appointment: APPT(30) }),
+        });
+        await reopenAndSaveNote(tx, t[0]!.id, created.stopId);
+        return windowOf(tx, created.stopId);
+      });
+      expect(seen.minutes).toBe(30);
+    });
+
+    it('keeps a stored 45 minutes, which the dropdown does not offer', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, appointment: APPT(30) }),
+        });
+        // Written the way a script would, past the modal's five choices.
+        await tx
+          .update(stops)
+          .set({ appointmentEndUtc: sql`appointment_start_utc + interval '45 minutes'` })
+          .where(eq(stops.id, created.stopId));
+        const opensWith = await reopenAndSaveNote(tx, t[0]!.id, created.stopId);
+        return { opensWith, stored: await windowOf(tx, created.stopId) };
+      });
+      expect(seen.opensWith).toBe(45);
+      expect(seen.stored.minutes).toBe(45);
+    });
+
+    it('changes the window when the dispatcher changes it, and audits old and new', async () => {
+      const seen = await rolledBack(async (tx) => {
+        const { trucks: t } = await fixtures(tx);
+        const created = await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, appointment: APPT(30) }),
+        });
+        const before = await windowOf(tx, created.stopId);
+        await saveStopEdit(tx as never, {
+          actorUserId: null,
+          dispatchTz: DISPATCH_TZ,
+          edit: edit({ truckId: t[0]!.id, stopId: created.stopId, appointment: APPT(60) }),
+        });
+        return { before, after: await windowOf(tx, created.stopId), audit: await lastAudit(tx, created.stopId) };
+      });
+      expect(seen.before.minutes).toBe(30);
+      expect(seen.after.minutes).toBe(60);
+      expect(seen.audit.before).toBe(seen.before.end!.toISOString());
+      expect(seen.audit.after).toBe(seen.after.end!.toISOString());
+    });
   });
 
   describe('overnight receiving hours (§12.114)', () => {

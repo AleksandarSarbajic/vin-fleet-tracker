@@ -98,6 +98,33 @@ export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 /** 12 hours. Longer than any real dock window; a typo beyond it is a typo. */
 export const MAX_WINDOW_MINUTES = 720;
 
+/** The window choices the modal offers an APPT stop. 0 is an exact time. */
+export const WINDOW_OPTIONS = [0, 15, 30, 60, 120] as const;
+
+/** What a NEW appointment starts with. Never what an existing one opens with (§12.115). */
+export const DEFAULT_WINDOW_MINUTES = 30;
+
+/**
+ * §12.115. The window an APPT stop was SAVED with, for the modal to open on.
+ *
+ * The modal used to open every stop at the default, and every save writes the
+ * window — so saving a note on an exact-time appointment moved its deadline
+ * thirty minutes later, and the dirty banner said nothing, because "30" was
+ * both what it opened with and what it sent.
+ *
+ *   no appointment yet      the default, for the dispatcher to change
+ *   no end, or end = start  0, an exact time
+ *   otherwise               end − start in whole minutes, whatever it is
+ */
+export function storedWindowMinutes(
+  startUtc: string | null,
+  endUtc: string | null,
+): number {
+  if (!startUtc) return DEFAULT_WINDOW_MINUTES;
+  if (!endUtc) return 0;
+  return Math.max(0, Math.round((Date.parse(endUtc) - Date.parse(startUtc)) / 60_000));
+}
+
 /**
  * `.strict()` throughout, so a client that sends `startUtc`, `iso` or
  * `offset` is refused by name instead of having the unknown key dropped and

@@ -288,8 +288,19 @@ export function dirtyFields(before: Partial<StopEdit>, after: StopEdit): string[
   // "leave it alone"), so an absent key must not read as a change. The filter
   // above already skips a `before` of undefined; this skips an `after` of it.
 
-  if (JSON.stringify(before.appointment ?? null) !== JSON.stringify(after.appointment ?? null)) {
+  // The window is named apart from the time it hangs off, so a banner that
+  // says "appointment window" means the dispatcher moved the deadline — and
+  // one that does not, means the save sends the stored window back (§12.115).
+  const { windowMinutes: beforeWindow, ...beforeTime } = before.appointment ?? {};
+  const { windowMinutes: afterWindow, ...afterTime } = after.appointment ?? {};
+  if (
+    JSON.stringify(before.appointment ? beforeTime : null) !==
+    JSON.stringify(after.appointment ? afterTime : null)
+  ) {
     changed.push('appointment time');
+  }
+  if (before.appointment && after.appointment && beforeWindow !== afterWindow) {
+    changed.push('appointment window');
   }
   // §12.57. Structural, like the appointment: both sides are objects, and the
   // `!==` above would call every open modal dirty on identity alone.

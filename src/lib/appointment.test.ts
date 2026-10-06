@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AppointmentInput, endsNextDay, fcfsEndDate } from './appointment';
+import {
+  AppointmentInput,
+  DEFAULT_WINDOW_MINUTES,
+  endsNextDay,
+  fcfsEndDate,
+  storedWindowMinutes,
+} from './appointment';
 
 /**
  * §12.114. The pure half of an overnight window: which DAY the latest hour is
@@ -93,5 +99,25 @@ describe('the schema, for FCFS hours', () => {
     expect(same.success).toBe(false);
     expect(same.error?.issues[0]?.path).toEqual(['endTime']);
     expect(same.error?.issues[0]?.message).toContain('00:00 to 23:59');
+  });
+});
+
+describe('storedWindowMinutes (§12.115)', () => {
+  const start = '2026-09-28T13:00:00.000Z';
+  const plus = (minutes: number) => new Date(Date.parse(start) + minutes * 60_000).toISOString();
+
+  it('is exact for an end equal to the start, or no end at all', () => {
+    expect(storedWindowMinutes(start, start)).toBe(0);
+    expect(storedWindowMinutes(start, null)).toBe(0);
+  });
+
+  it('is the stored window, standard or not', () => {
+    expect(storedWindowMinutes(start, plus(30))).toBe(30);
+    expect(storedWindowMinutes(start, plus(45))).toBe(45);
+    expect(storedWindowMinutes(start, plus(120))).toBe(120);
+  });
+
+  it('is the default only for an appointment not yet entered', () => {
+    expect(storedWindowMinutes(null, null)).toBe(DEFAULT_WINDOW_MINUTES);
   });
 });

@@ -1,8 +1,14 @@
 'use client';
 
 import { useMemo } from 'react';
-import { endsNextDay, fcfsEndDate, isIanaZone } from '@/lib/appointment';
-import { timeInZone, wallTimeInstant, windowLength, zoneAbbreviation } from '@/lib/format';
+import { WINDOW_OPTIONS, endsNextDay, fcfsEndDate, isIanaZone } from '@/lib/appointment';
+import {
+  timeInZone,
+  wallTimeInstant,
+  windowEnd,
+  windowLength,
+  zoneAbbreviation,
+} from '@/lib/format';
 
 /**
  * The appointment as written on the rate confirmation (§9.9).
@@ -70,6 +76,7 @@ const ZONES = [...new Set(Object.values(ZONE_BY_STATE))].sort();
 export function AppointmentFields({
   draft,
   onChange,
+  storedWindow,
   dispatchTz,
   disabled,
   error,
@@ -78,6 +85,12 @@ export function AppointmentFields({
 }: {
   draft: AppointmentDraft;
   onChange: (next: AppointmentDraft) => void;
+  /**
+   * §12.115. The window this stop was saved with. Offered even when it is not
+   * one of the standard choices (a 45-minute window from a script, say), so
+   * opening and saving the stop cannot quietly round it to something else.
+   */
+  storedWindow?: number | undefined;
   dispatchTz: string;
   disabled: boolean;
   error?: string | undefined;
@@ -142,6 +155,25 @@ export function AppointmentFields({
           : null,
     };
   }, [draft.type, draft.date, draft.time, draft.endTime, draft.tz]);
+
+  /**
+   * §12.115. What the window MEANS: the deadline, the time plus the window.
+   * The choices used to read "±30 min" over a stored start-to-start+30, which
+   * promised an early half that nothing stores or measures.
+   */
+  const deadline = useMemo(() => {
+    if (draft.type !== 'APPT') return null;
+    const date = dateParts(draft.date);
+    const time = timeParts(draft.time);
+    if (!date || !time || !isIanaZone(draft.tz)) return null;
+    const opens = wallTimeInstant(date, time, draft.tz);
+    const closes = new Date(opens.getTime() + draft.windowMinutes * 60_000);
+    return `deadline ${windowEnd(opens.toISOString(), closes.toISOString(), draft.tz)}`;
+  }, [draft.type, draft.date, draft.time, draft.tz, draft.windowMinutes]);
+
+  const windowChoices = [
+    ...new Set([...WINDOW_OPTIONS, ...(storedWindow === undefined ? [] : [storedWindow])]),
+  ].sort((a, b) => a - b);
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
@@ -260,15 +292,24 @@ export function AppointmentFields({
                   onChange={(e) => set({ windowMinutes: Number(e.target.value) })}
                   className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
                 >
-                  {[0, 15, 30, 60, 120].map((m) => (
+                  {windowChoices.map((m) => (
                     <option key={m} value={m}>
-                      {m === 0 ? 'Exact time' : `±${m} min`}
+                      {m === 0 ? 'Exact time' : `+${windowLength(m)}`}
                     </option>
                   ))}
                 </select>
               )}
             </label>
           </div>
+
+          {deadline && !error ? (
+            <p
+              data-appt-deadline=""
+              className="mt-1.5 text-right text-small tabular-nums text-text-secondary"
+            >
+              {deadline}
+            </p>
+          ) : null}
 
           {end?.nextDay && !endError ? (
             <p

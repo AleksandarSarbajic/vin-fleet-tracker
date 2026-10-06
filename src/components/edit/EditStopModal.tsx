@@ -22,6 +22,7 @@ import {
 } from './AppointmentFields';
 import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
+import { DEFAULT_WINDOW_MINUTES, storedWindowMinutes } from '@/lib/appointment';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
 import { RecentlyClosed } from './RecentlyClosed';
@@ -146,7 +147,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         endTime:
           isoTime(stop?.apptEndUtc ?? null, stop?.apptTz ?? null) || FCFS_DEFAULT_LATEST,
         tz: stop?.apptTz ?? zoneForState(stop?.state ?? null),
-        windowMinutes: 30,
+        // §12.115: the window the stop was saved with, never the default.
+        // An FCFS stop's end is its latest hour, not a window, so switching
+        // one to APPT starts from the default like a new appointment.
+        windowMinutes:
+          stop?.apptType === 'FCFS'
+            ? DEFAULT_WINDOW_MINUTES
+            : storedWindowMinutes(stop?.apptStartUtc ?? null, stop?.apptEndUtc ?? null),
       } as AppointmentDraft,
       /**
        * §12.57. Loaded from the stored value, like the note — a control that
@@ -931,6 +938,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             <AppointmentFields
               draft={form.appointment}
               onChange={(next) => set('appointment', next)}
+              storedWindow={initialForm.appointment.windowMinutes}
               dispatchTz={dispatchTz}
               disabled={!mayEdit}
               initialFocus={initialDriverId !== null}
