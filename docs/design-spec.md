@@ -8053,6 +8053,23 @@ board opened with no truck, 202 selected, then re-rendered with `initialTruck`
 101 — 202 stays selected (it went to 101 on the old code); a board opened with
 `?truck=202` still opens on it.
 
+## 12.109 Deleting a saved view leaves the scope menu open
+
+**The fault.** `header.spec.ts`'s save/rename/delete check failed once in a full
+run: after Delete the menu was gone. Clicking Delete moves focus from the find
+field to the Delete button, and the menu's "focus left me" check runs a tick
+later; the delete removes that button and focus falls to the body. When the
+click's delete landed before the check — Playwright presses and releases with
+no gap, and the suite's load moves ticks — the check saw focus outside the
+menu and closed it. A person's press-release gap usually hides it; the check
+was still wrong.
+
+**The fix.** Focus on the body is focus on nothing, not focus elsewhere: the
+menu closes on focus out only when another element has it. Tabbing out, a
+click outside and Esc close it as before. **Test** (`SavedViews.test.tsx`):
+focus and click Delete in one tick, then let timers run — the menu closed on
+the old code and stays open, reading "No saved views yet".
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

@@ -183,7 +183,15 @@ export function ScopeMenu({
     };
     const onFocusOut = () => {
       window.setTimeout(() => {
-        if (box.current && !box.current.contains(document.activeElement)) setOpen(false);
+        const now = document.activeElement;
+        /*
+         * §12.109. Closed only when focus went somewhere ELSE. Deleting a view
+         * removes the button that had focus and focus falls to the body; that
+         * is focus on nothing, and closing then shut the menu under the
+         * dispatcher whenever the delete landed before this check.
+         */
+        if (!now || now === document.body) return;
+        if (box.current && !box.current.contains(now)) setOpen(false);
       }, 0);
     };
     // A fixed menu would stay put while its button moved; close instead.

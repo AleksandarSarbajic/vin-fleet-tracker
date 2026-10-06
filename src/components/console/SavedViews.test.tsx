@@ -453,3 +453,32 @@ describe('the cap', () => {
     expect(stored).toHaveLength(VIEW_CAP);
   });
 });
+
+/**
+ * §12.109. Deleting a view removes the button that was just focused, and focus
+ * falls to the page. The menu's "focus left me" check ran a tick after the
+ * focus change; when the delete landed first it found focus on the body and
+ * closed the menu under the dispatcher. Focus on nothing is not focus
+ * elsewhere.
+ */
+describe('deleting a view', () => {
+  it('leaves the menu open even when the delete lands before the focus check', async () => {
+    await mount(['late']);
+    await openMenu();
+    await saveAs('Late today');
+    const remove = container!.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete the view Late today"]',
+    );
+    expect(remove).not.toBeNull();
+    // Focus arrives and the click lands in the same tick, as a fast click does.
+    await act(async () => {
+      remove!.focus();
+      remove!.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(viewsTrigger()?.getAttribute('aria-expanded')).toBe('true');
+    expect(container!.textContent).toContain('No saved views yet');
+  });
+});
