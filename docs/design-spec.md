@@ -5038,6 +5038,8 @@ different story:
 The simulation assumed 23 trucks all running long lanes at once; the fleet
 actually moves about seven at a time, which is why it is off by 4.5x.
 
+**Superseded by §12.61: 5,000.**
+
 **Ceiling set to 3,000** — 60% of the allowance, ~1.1x measured worst case.
 The honest statement of the risk: if utilisation rises to what §12.31
 simulated, this is reached around day six and the board spends the rest of the
