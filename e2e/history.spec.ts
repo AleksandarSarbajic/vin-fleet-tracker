@@ -61,6 +61,14 @@ test('from the account menu, through a week change, and back with G B', async ({
   await item.click();
 
   await expect(page).toHaveURL(/\/history\?week=\d{4}-W\d{2}/);
+  /*
+   * The page's "today" starts from the server's clock and moves to the
+   * browser's on the first tick. The browser's is frozen at HISTORY_NOW
+   * (Fri Oct 2, W40) and the server's is the real date, so once the real
+   * date left W40 "This week" clicked before that tick went to the real week.
+   * Wait for the frozen time to be the page's time first.
+   */
+  await expect(page.locator('[data-history-header]')).toContainText('10:42');
   await page.getByRole('button', { name: 'This week' }).click();
   await expect(page).toHaveURL(/week=2026-W40/);
   await expect(page.locator('[data-week-range]')).toHaveText('Sep 28 – Oct 4, 2026');
