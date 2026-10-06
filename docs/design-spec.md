@@ -1071,7 +1071,9 @@ Above the grid, a two-segment **`APPT` / `FCFS`** toggle (§12.2), same
   **locked to the facility** and shown as a badge inside the input
   (`surface.overlay`, `line.hair`, cond 600 11 `.09em`). A rate con reading
   14:30 gets typed as 14:30.
-- `Window` — `±30 min`. **Hidden when the stop is `FCFS`** — an FCFS time is
+- `Window` — `Exact time / +15 min / +30 min / +1 h / +2 h`, with
+  `deadline 14:30 CDT` under it (§12.115: the window is the time PLUS N, and
+  the control opens on the window the stop was saved with). **Hidden when the stop is `FCFS`** — an FCFS time is
   a facility cutoff, not a slot, so there is no window to set and
   `appointment_end_utc` stays null. The field label becomes
   `Cutoff at the facility`.
@@ -8340,7 +8342,10 @@ rule fails that test and points here.
 ### The audit row
 
 The stop's audit `before` and `after` now carry `appointmentEndUtc` and
-`appointmentType`, and `after` carries `appointmentEndResolution`. Until now
+`appointmentType`, and `after` carries `appointmentEndResolution`, from commit
+`731e437` (6 Oct 2026). **Saves before that cannot be audited for the window
+end or the type** — not by this log, and not by `eta_marks`, whose first row
+is from the same day. Until now
 the deadline was not in the log at all. That is why two production FCFS
 windows entered as `00:01–23:59` and `01:00–23:59` on 28 Sep could not be told
 apart, afterwards, from an overnight workaround or from a facility that
@@ -8364,6 +8369,79 @@ DST nights are derived (`src/test/dst.ts`, moved out of
 
 Breaking the rule on purpose (`fcfsEndDate` returning the start's date) fails
 26 tests across six files.
+
+## 12.115 The APPT window opens as it was saved
+
+**The defect.** The edit modal opened every APPT stop with its window at
+`±30 min`, whatever was stored, and every save writes the window. So saving
+only a note on an exact-time appointment moved its deadline thirty minutes
+later, and the dirty banner said nothing: `30` was both what the form opened
+with and what it sent. It had been so since the modal was first built
+(`58d1516`, 17 Sep). Reproduced on the code before the fix: a stored exact
+time opened on `±30 min`, a city edit named only "city", and the save posted
+`windowMinutes: 30`.
+
+**Measured in production** (read-only, 6 Oct). Sixteen APPT stops, thirteen
+with a time, every load DELIVERED:
+
+- **Ten are exact** (end = start). Five of them were re-saved through the modal
+  fourteen times between them, and every one of those saves sent 0 — the
+  dropdown was set back to "Exact time" by hand each time. The trap was live
+  and being worked around.
+- **Two are +30 from their only save**, the one that created them: chosen, or
+  the default left alone. Not widened by a later save.
+- **One, `a622f303` (Bismarck, truck 116), is +30 after six re-saves** — the
+  only possible widening. Nothing records whether it was ever exact, and it is
+  left as it is.
+
+No stop is provably widened, because the evidence does not exist: the audit
+log did not record the window end before `731e437` (§12.114), and `eta_marks`
+began the same day.
+
+### The fix
+
+1. **The modal opens on the stored window** (`storedWindowMinutes` in
+   `lib/appointment.ts`): end − start in whole minutes, or **Exact** when there
+   is no end or the end equals the start. A new appointment still starts at
+   the default (30). A stored window that is not one of the five choices — 45
+   minutes from a script, say — is offered as its own choice, selected, so
+   opening and saving cannot round it to something else.
+2. **An untouched save sends the stored window back.** No separate "omit
+   unless changed" path: the form renders the window, so it may write it; the
+   bug was that it rendered the wrong one. The dirty banner names
+   **`appointment window`** apart from `appointment time`, and only when the
+   window was changed. One normalisation is deliberate: an APPT stop with no
+   end at all (only a script makes one) opens as Exact and saves end = start.
+   The deadline, `end ?? start`, is the same instant either way.
+3. **The label says what is stored.** The choices read `Exact time`,
+   `+15 min`, `+30 min`, `+1 h`, `+2 h`, with **`deadline 14:30 CDT`** under the
+   control, `+1` when it falls on the next day. "±30" promised an early half
+   — arrive from 13:30 — that nothing stores or measures; the stored window
+   is start to start + N, and its end is the deadline (§12.1).
+
+### Tests
+
+- **Real Postgres** (`stop-edit.test.ts`). The stop is reopened through the
+  fleet query and saved with only a note change:
+  - an exact stop keeps end = start, and the audit's before and after ends
+    agree;
+  - a +30 stop keeps 30;
+  - a stored 45 survives;
+  - changing 30 to 60 changes the window, and the audit records the old and
+    new ends.
+- **The modal** (`WindowControl.test.tsx`). What each stored window opens as,
+  the labels, the deadline line, the banner, and what a note-only save posts.
+- **End to end** (`e2e/appt-window.spec.ts`): the same three cases through the
+  real modal, route and database.
+- **The break.** Putting `30` back as the opening window fails eight modal
+  tests and two of the three e2e cases. The server tests stay green, because
+  they reopen through `storedWindowMinutes` directly — the modal is where the
+  default lived, and the modal suite is what catches it.
+
+**Baselines.** The console and history baselines hold at zero except
+`7-edit-stop-*` (six widths), which shows the modal itself. The stop there was
+seeded exact, and the old baseline showed it at `±30 min` — the defect,
+photographed. It now reads `Exact time` with the deadline line under it.
 
 # 13. Still open
 
