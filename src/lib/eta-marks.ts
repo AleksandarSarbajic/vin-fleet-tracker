@@ -30,6 +30,26 @@ import { haversineMiles, type StatusConfig } from './status';
 export const ETA_MARKS_MILES = [400, 200, 100, 50, 25, 10] as const;
 
 /**
+ * A destination point as the prediction log keys it: integer microdegrees,
+ * `"lat:lng"` (§12.112).
+ *
+ * The log is keyed on stop, destination and distance, and the settle step
+ * matches a stop's current point against the logged one. Raw doubles would
+ * make both depend on a float surviving every round trip bit-for-bit; a
+ * microdegree is ~0.1 m, so two spellings of one point are one key while any
+ * real re-geocode — metres at the least — is a new one. `-0` and `0` are one
+ * key too. This is the ONLY place the key is made: the worker writes it and
+ * the settle step compares it, so the two cannot disagree about a point.
+ */
+export function destinationKey(lat: number, lng: number): string {
+  const micro = (x: number) => {
+    const v = Math.round(x * 1e6);
+    return String(v === 0 ? 0 : v);
+  };
+  return `${micro(lat)}:${micro(lng)}`;
+}
+
+/**
  * Marks crossed for the first time by this observation.
  *
  * A mark counts only if the truck was first seen BEYOND it. A stop entered

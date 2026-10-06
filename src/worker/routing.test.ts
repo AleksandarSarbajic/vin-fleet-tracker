@@ -28,6 +28,7 @@ function stubProvider(outcome?: RouteOutcome) {
         ok: true,
         miles: 481.3,
         durationSeconds: 7.35 * 3600,
+        baseDurationSeconds: 7.1 * 3600,
         snapFromMeters: 4,
         snapToMeters: 379,
       },
@@ -76,6 +77,10 @@ withDb('the routing sweep', () => {
     const sample = seen.samples[0]!;
     expect(sample.impliedMph).toBeCloseTo(481.3 / 7.35, 1);
     expect(sample.destState).not.toBeNull();
+
+    // §12.112. The no-traffic duration rides along on both rows.
+    expect(row.baseDurationS).toBeCloseTo(7.1 * 3600, 6);
+    expect(sample.baseDurationS).toBeCloseTo(7.1 * 3600, 6);
   });
 
   /**

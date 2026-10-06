@@ -29,6 +29,11 @@ export interface RouteSuccess {
   ok: true;
   miles: number;
   durationSeconds: number;
+  /**
+   * §12.112. The same route without traffic, when the response carries it.
+   * Recorded for the prediction log; nothing routes or projects on it.
+   */
+  baseDurationSeconds: number | null;
   /** How far each end was MOVED to reach a road. Metres. */
   snapFromMeters: number | null;
   snapToMeters: number | null;
@@ -100,7 +105,7 @@ const HereRoutes = z.object({
                 length: z.number(),
                 /** Seconds, including live traffic. */
                 duration: z.number(),
-                /** Seconds without traffic. Not used; see `route`. */
+                /** Seconds without traffic. Recorded, never projected on; see `route`. */
                 baseDuration: z.number().optional(),
               }),
               departure: z.object({ place: HerePlace() }).optional(),
@@ -247,6 +252,7 @@ export class HereRouting implements EtaProvider {
        * says 68 is capped at the configured average anyway (§12.31).
        */
       durationSeconds: section.summary.duration,
+      baseDurationSeconds: section.summary.baseDuration ?? null,
       snapFromMeters: snapFrom,
       snapToMeters: snapTo,
     };

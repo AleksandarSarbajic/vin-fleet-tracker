@@ -16,6 +16,9 @@
  *
  * ## Where a prediction comes from
  *
+ *   `log` — the prediction log (§12.112): what the board said, recorded when
+ *           the truck crossed the distance, settled with the minutes stopped.
+ *           Preferred wherever it exists.
  *   `pos` — positions. The first fix inside the mark, the route the board held
  *           once that fix's poll finished, the board's own freshness rule.
  *           Exact, but positions are kept seven days, so only recent trips.
@@ -43,6 +46,7 @@ import {
   MIN_STOP_MINUTES,
   ON_TIME_BAND_MINUTES,
   concentration,
+  destinationKey,
   firstCrossing,
   median,
   quantile,
@@ -112,6 +116,25 @@ interface PositionRow {
   speed_mph: number | null;
 }
 
+/** A settled `eta_marks` row (§12.112), as this script reads it. */
+interface LogRow {
+  stop_id: string;
+  dest_key: string;
+  mark_miles: number;
+  fix_recorded_at: Date;
+  fix_lat: number;
+  fix_lng: number;
+  straight_miles: number;
+  basis: string;
+  eta_utc: Date;
+  stopped_minutes: number | null;
+  route_routed_miles: number | null;
+  route_duration_s: number | null;
+  route_straight_miles: number | null;
+  route_lane_ratio: number | null;
+  route_computed_at: Date | null;
+}
+
 function positionFiles(): string[] {
   const files: string[] = [];
   const args = process.argv.slice(2);
@@ -168,7 +191,7 @@ const toDate = (x: number | null) => (x === null ? null : new Date(x));
 
 type Raw<T, K extends keyof T> = Omit<T, K> & { [P in K]: number | null };
 
-const { stops, samples, positions } = await client.begin('read only', async (tx) => {
+const { stops, samples, positions, log, logPresent } = await client.begin('read only', async (tx) => {
   const stops = (
     await tx<Raw<StopRow, 'arrived_at' | 'load_created_at'>[]>`
     select s.id as stop_id, t.id as truck_id, t.truck_number, s.city, s.state, s.zip,
@@ -215,7 +238,30 @@ const { stops, samples, positions } = await client.begin('read only', async (tx)
         order by recorded_at`;
     positions.push(...rows.map((r) => ({ ...r, recorded_at: toDate(r.recorded_at)! })));
   }
-  return { stops, samples, positions };
+  // The log exists once migration 0023 is applied; before that, there is none.
+  const [regclass] = await tx<{ present: boolean }[]>`
+    select to_regclass('public.eta_marks') is not null as present`;
+  const present = regclass?.present === true;
+  const log: LogRow[] = !present
+    ? []
+    : (
+        await tx<
+          Raw<LogRow, 'fix_recorded_at' | 'eta_utc' | 'route_computed_at'>[]
+        >`
+        select stop_id::text as stop_id, dest_key, mark_miles,
+               ${ms('fix_recorded_at')} as fix_recorded_at, fix_lat, fix_lng, straight_miles,
+               basis, ${ms('eta_utc')} as eta_utc, stopped_minutes,
+               route_routed_miles, route_duration_s, route_straight_miles, route_lane_ratio,
+               ${ms('route_computed_at')} as route_computed_at
+        from eta_marks
+        where settle_outcome = 'arrived' and mark_miles is not null`
+      ).map((r) => ({
+        ...r,
+        fix_recorded_at: toDate(r.fix_recorded_at)!,
+        eta_utc: toDate(r.eta_utc)!,
+        route_computed_at: toDate(r.route_computed_at),
+      }));
+  return { stops, samples, positions, log, logPresent: present };
 });
 await client.end();
 
@@ -271,7 +317,7 @@ interface Scored {
   stop: StopRow;
   place: string;
   mark: number;
-  source: 'pos' | 'rec';
+  source: 'log' | 'pos' | 'rec';
   atMiles: number;
   anchorMs: number;
   basisShown: string;
@@ -328,6 +374,75 @@ for (const stop of detected) {
       const r = [...own].reverse().find((x) => x.measured_at.getTime() <= ms + POLL_ALLOWANCE_MS);
       return r ? asRoute(r, stop) : null;
     };
+    /**
+     * The log first: it is what the board actually said. Matched on the
+     * stop's CURRENT point by the same key the worker wrote, so a stop edited
+     * to a new destination cannot lend its predictions to this arrival.
+     */
+    const logged = log.find(
+      (r) =>
+        r.stop_id === stop.stop_id &&
+        r.dest_key === destinationKey(stop.lat, stop.lng) &&
+        r.mark_miles === mark,
+    );
+    if (logged) {
+      const anchorMs = logged.fix_recorded_at.getTime();
+      const route: CachedRoute | null =
+        logged.route_routed_miles !== null &&
+        logged.route_duration_s !== null &&
+        logged.route_straight_miles !== null &&
+        logged.route_lane_ratio !== null &&
+        logged.route_computed_at !== null
+          ? {
+              provider: ROUTE_PROVIDER,
+              routedMiles: logged.route_routed_miles,
+              routedDurationS: logged.route_duration_s,
+              fromLat: NaN,
+              fromLng: NaN,
+              straightAtRouteMiles: logged.route_straight_miles,
+              laneRatio: logged.route_lane_ratio,
+              stopLat: stop.lat,
+              stopLng: stop.lng,
+              snapFromM: null,
+              snapToM: null,
+              computedAtUtc: logged.route_computed_at.toISOString(),
+            }
+          : null;
+      const replay = replayAt({
+        anchorMs,
+        straight: logged.straight_miles,
+        route,
+        fresh: logged.basis === 'routed',
+        config: CONFIG,
+      });
+      const fix = { lat: logged.fix_lat, lng: logged.fix_lng };
+      const eta = variantsFrom(
+        replay,
+        anchorMs,
+        centroid
+          ? {
+              straightStop: logged.straight_miles,
+              straightCentroid: haversineMiles(fix, centroid),
+              ratio: route?.laneRatio ?? CONFIG.roadFactor,
+            }
+          : null,
+      );
+      // What the board said is the record, not the replay of it.
+      eta.shown = logged.eta_utc.getTime();
+      scored.push({
+        stop,
+        place: placeOf(stop),
+        mark,
+        source: 'log',
+        atMiles: logged.straight_miles,
+        anchorMs,
+        basisShown: logged.basis,
+        stopped: logged.stopped_minutes,
+        eta,
+      });
+      any = true;
+      continue;
+    }
     const hit = firstCrossing(track, stop, mark);
     if (hit) {
       const anchorMs = hit.fix.atMs;
@@ -431,6 +546,11 @@ console.log(
   `route_samples used: ${samples.length - repointed}; ${repointed} skipped (measured to a point the stop no longer has).`,
 );
 console.log(
+  logPresent
+    ? `Prediction log: ${log.length} settled rows with an arrival.`
+    : 'Prediction log: not present (migration 0023 not applied).',
+);
+console.log(
   `Position files: ${files.length ? files.join(', ') : 'none'}. Trucks with any track: ${[...tracks.values()].filter((t) => t.length).length}.`,
 );
 if (unscorable.length) console.log(`Not scorable:\n  ${unscorable.join('\n  ')}`);
@@ -467,7 +587,8 @@ console.log('\n## By distance — one observation per arrival per distance\n');
 console.log('worst10% is the 90th percentile of |error|; under ten observations it is the maximum.');
 for (const mark of SCORE_MARKS) {
   const rows = scored.filter((s) => s.mark === mark);
-  const src = `${rows.filter((r) => r.source === 'pos').length} pos, ${rows.filter((r) => r.source === 'rec').length} rec`;
+  const count = (source: Scored['source']) => rows.filter((r) => r.source === source).length;
+  const src = `${count('log')} log, ${count('pos')} pos, ${count('rec')} rec`;
   console.log(`\n${mark} mi  (${src})`);
   for (const mode of [false, true]) {
     console.log(mode ? ' driving only' : ' as the dispatcher saw it');

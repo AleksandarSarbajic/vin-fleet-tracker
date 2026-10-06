@@ -10,6 +10,7 @@ import { SingletonLockError, acquireSingleton } from './singleton';
 import { flushWorkerSentry, initWorkerSentry, sentryActive } from './sentry';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
+import { runEtaLog, runEtaSettle } from './eta-marks';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
 import { HereRouting } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
@@ -250,6 +251,12 @@ async function main(): Promise<void> {
       }
 
       if (!shuttingDown && Date.now() - lastPrune >= PRUNE_INTERVAL_MS) {
+        /**
+         * §12.112. Settle BEFORE the prune: it reads the stopped minutes out
+         * of positions the prune is about to delete. It never throws, so a
+         * failed settle cannot hold positions past seven days either.
+         */
+        await runEtaSettle(db, logger);
         await prunePositions(db, logger).catch((e: unknown) =>
           logger.error('prune failed', { error: String(e) }),
         );
@@ -498,6 +505,14 @@ async function pollOnce(
     });
   }
 
+  /**
+   * §12.112. Last, after the routing sweep, so it records the route the board
+   * will show. `runEtaLog` never throws and runs under its own short timeout:
+   * whatever happens here, the positions, arrivals and routes above are
+   * already written.
+   */
+  const etaLog = await runEtaLog(db, logger);
+
   logger.info('poll: ingested', {
     vehicles: page.rows.length,
     /**
@@ -531,6 +546,7 @@ async function pollOnce(
     routedBecause: routing.routedBecause,
     routeFailures: routing.failures,
     lanesBlocked: routing.blocked,
+    etaMarksLogged: etaLog.firstSeen + etaLog.marks,
   });
 }
 

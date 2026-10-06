@@ -8141,13 +8141,76 @@ positions):
   HERE's own truck speed, +5 mph. So while a truck is driving, the cap puts
   the ETA a median **28 min per 100 road miles** after the truck.
 - The cap and the missing stops pull in opposite directions, and as seen the
-  stops win. Removing the cap alone would make the as-seen error worse.
+  stops win.
+
+**HYPOTHESIS — awaiting prediction-log data (§12.112). Not a decision.** From
+118 no-stop stretches, trucks drove a median 69 mph, well above the 52 mph
+cap. Removing the cap alone would make the error a dispatcher sees WORSE,
+because rest stops already make the as-seen ETA optimistic (median +24 to +36
+min at 100–25 mi) and an uncapped speed moves it further the same way
+(HERE uncapped, as seen: +56 / +52 / +28). The cap is not changed, and nothing
+in the engine is, until the log has enough arrivals to test this.
 
 **What it cannot support.** n = 10, and driving-only n = 2. The four distances
 within a trip are not independent. No ZIP stop has an arrival (detection is
 street-only, none marked by hand), and no block stop has ever existed, so
 precision is a what-if on street trips. Nothing here is a reason to change the
 engine yet; it is the baseline the prediction log will be measured against.
+
+## 12.112 The ETA prediction log — `eta_marks`
+
+§12.111 had to reconstruct what the board said, and positions last seven
+days. This keeps it.
+
+**What is written.** After the routing sweep, every poll, for each active
+truck's next stop (the routing sweep's selection), the worker asks the engine
+what the board shows — same fix, same cached route, same freshness rule, same
+`projectDistance` — and writes a row:
+
+- once when the stop is first seen (`mark_miles` null), and
+- once per straight-line distance crossed for the first time: 400, 200, 100,
+  50, 25, 10. A distance counts only if the truck was first seen beyond it,
+  and is never written twice: a truck that drives away and back does not log
+  it again (`marksCrossed`, and a unique index behind it).
+
+At most seven rows per trip, not one per poll. Each row carries the fix, the
+basis, projected miles, speed, the ETA, the cached route it came from
+(including HERE's `baseDuration`, now stored on `stop_routes` and
+`route_samples` from the response already received — no call or request
+change), the deadline and the config in force. Truck number and stop id only;
+no driver, no secret, ever in a row or a log line.
+
+**The key is stop + destination + distance.** A stop edited to a new
+destination is a new trip — 3 of 12 arrived stops had been (§12.111). The
+destination is compared as `destinationKey`: integer microdegrees, `lat:lng`,
+made by one function the log and the settle step both call. Two float
+spellings of one point are one key; a point moved a metre is a new one.
+
+**Settle, hourly, before the prune.** For each unsettled trip: if the stop now
+has a different key, `destination-changed` — an old point never borrows the
+new point's arrival. If it arrived, the arrival, its source and the minutes
+stopped (10+ min episodes) between each prediction and the arrival, read from
+positions while they exist. If the load closed without one,
+`closed-without-arrival`. Otherwise left for next hour. Positions are still
+pruned at seven days; a 400-mile row logged longer ago than that settles with
+the arrival and a null `stopped_minutes`.
+
+**It cannot cost the poll.** One transaction under a 3 s `statement_timeout`
+(settle: 10 s, ten trips a run), after the positions, arrivals and routes are
+already written, inside a wrapper that never throws and logs a warning with
+the database's own message, cut to 200 characters. Tested by making the insert
+fail, by failing one row of a batch (the whole poll's batch rolls back and the
+next poll writes it), and by an insert that sleeps 30 s (given up at 3 s).
+
+**Cost.** Zero routing calls. ~1.5 KB a trip; at last month's volume, kilobytes.
+
+**Read by** `npm run eta:score`, as source `log`, preferred over `pos` and
+`rec` wherever it exists.
+
+**Migration 0023**, hand-written and additive: the table, two nullable
+columns, RLS deny-all. Applied before the worker that writes it. The app never
+reads these columns; the running worker selects named columns, so the new
+column does not disturb it. Rollback: drop the table and the two columns.
 
 # 13. Still open
 

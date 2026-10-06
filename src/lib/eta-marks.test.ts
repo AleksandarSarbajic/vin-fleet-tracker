@@ -3,6 +3,7 @@ import {
   ETA_MARKS_MILES,
   MIN_STOP_MINUTES,
   concentration,
+  destinationKey,
   firstCrossing,
   marksCrossed,
   replayAt,
@@ -16,6 +17,27 @@ import { STATUS_DEFAULTS } from './status';
 
 const MIN = 60_000;
 const CONFIG = { avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph, roadFactor: STATUS_DEFAULTS.roadFactor };
+
+describe('destinationKey', () => {
+  it('counts two floating-point forms of the same point as one', () => {
+    expect(destinationKey(0.1 + 0.2, -88.0817)).toBe(destinationKey(0.3, -88.0817));
+    expect(destinationKey(41.525, -88.0817)).toBe(
+      destinationKey(41.525000000000006, -88.08169999999999),
+    );
+    expect(destinationKey(-0, 0)).toBe(destinationKey(0, -0));
+  });
+
+  it('counts a moved point as new, down to a metre', () => {
+    // 0.00001 deg of latitude is about 1.1 m.
+    expect(destinationKey(41.52501, -88.0817)).not.toBe(destinationKey(41.525, -88.0817));
+    expect(destinationKey(41.525, -88.0817)).not.toBe(destinationKey(-88.0817, 41.525));
+  });
+
+  it('writes the shape the database checks', () => {
+    expect(destinationKey(41.525, -88.0817)).toMatch(/^-?[0-9]+:-?[0-9]+$/);
+    expect(destinationKey(41.525, -88.0817)).toBe('41525000:-88081700');
+  });
+});
 
 describe('marksCrossed', () => {
   const none = new Set<number>();

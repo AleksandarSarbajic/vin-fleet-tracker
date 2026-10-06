@@ -117,6 +117,30 @@ describe('HereRouting', () => {
     expect(out.ok && out.miles).toBeCloseTo(1787.6, 1);
   });
 
+  /**
+   * §12.112. `baseDuration` arrives in the summary we already ask for, so it
+   * is recorded — not requested, not projected on.
+   */
+  it("keeps HERE's no-traffic duration from the same response", async () => {
+    const fetchImpl = ok();
+    const out = await new HereRouting('k', fetchImpl).route(LANE);
+    expect(out).toMatchObject({ ok: true, durationSeconds: 93_705, baseDurationSeconds: 92_760 });
+    const params = new URL(urlOf(fetchImpl)).searchParams;
+    expect([...params.keys()].sort()).toEqual(
+      ['apiKey', 'destination', 'origin', 'return', 'transportMode'].sort(),
+    );
+  });
+
+  it('reads a response without baseDuration as unknown, not zero', async () => {
+    const response = JSON.parse(body()) as {
+      routes: { sections: { summary: Record<string, number> }[] }[];
+    };
+    delete response.routes[0]!.sections[0]!.summary['baseDuration'];
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(response), { status: 200 }));
+    const out = await new HereRouting('k', fetchImpl).route(LANE);
+    expect(out).toMatchObject({ ok: true, baseDurationSeconds: null });
+  });
+
   it('computes the snap distance HERE does not hand over', async () => {
     // Mapbox gave `waypoints[].distance` outright; HERE gives the two points
     // and leaves the arithmetic here. Same concept, one haversine later.

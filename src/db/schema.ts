@@ -599,6 +599,12 @@ export const stopRoutes = pgTable(
      * traffic (§12.59). Used only through the speed cap — see §12.31.
      */
     routedDurationS: doublePrecision('routed_duration_s').notNull(),
+    /**
+     * §12.112. The same route without traffic, from the same response. Stored
+     * so the prediction log can separate traffic from the rest; nothing in the
+     * engine reads it.
+     */
+    baseDurationS: doublePrecision('base_duration_s'),
 
     /** Where the truck was when this was routed. The recompute rule's origin. */
     fromLat: doublePrecision('from_lat').notNull(),
@@ -675,6 +681,8 @@ export const routeSamples = pgTable(
     routedMiles: doublePrecision('routed_miles').notNull(),
     laneRatio: doublePrecision('lane_ratio').notNull(),
     routedDurationS: doublePrecision('routed_duration_s').notNull(),
+    /** §12.112. HERE's no-traffic duration. Null before 0023, or when absent. */
+    baseDurationS: doublePrecision('base_duration_s'),
     /** routed_miles / routed_hours — the provider's implied speed, uncapped. */
     impliedMph: doublePrecision('implied_mph'),
 
@@ -687,6 +695,89 @@ export const routeSamples = pgTable(
   (t) => [
     index('route_samples_measured_idx').on(t.measuredAt),
     index('route_samples_dest_idx').on(t.destState, t.destCity),
+  ],
+);
+
+/**
+ * §12.112. What the board predicted, at fixed distances, kept so it can be
+ * scored against the arrival (`npm run eta:score`).
+ *
+ * One row when the worker first sees a stop as a truck's next stop
+ * (`markMiles` null), then one per straight-line distance crossed for the
+ * first time. Written by the worker after the routing sweep, from the cached
+ * route — no routing call is made for it. Settled hourly, before positions
+ * are pruned, with the arrival and the minutes stopped on the way.
+ *
+ * Keyed on the stop AND its destination point: a stop edited to a new
+ * destination is a new trip, and its predictions must not be scored against
+ * the old point's arrival (§12.111).
+ */
+export const etaMarks = pgTable(
+  'eta_marks',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    stopId: uuid('stop_id')
+      .notNull()
+      .references(() => stops.id, { onDelete: 'cascade' }),
+    /** Provenance only. Truck number and stop id are all a log line names. */
+    truckId: uuid('truck_id').notNull(),
+    truckNumber: integer('truck_number'),
+    markMiles: integer('mark_miles'),
+    destLat: doublePrecision('dest_lat').notNull(),
+    destLng: doublePrecision('dest_lng').notNull(),
+    /** The point as the key compares it — `destinationKey`, never raw floats. */
+    destKey: text('dest_key').notNull(),
+    destPrecision: geocodePrecision('dest_precision'),
+    destAccuracyMiles: doublePrecision('dest_accuracy_miles'),
+    deadlineUtc: timestamp('deadline_utc', { withTimezone: true }),
+    fixRecordedAt: timestamp('fix_recorded_at', { withTimezone: true }).notNull(),
+    fixLat: doublePrecision('fix_lat').notNull(),
+    fixLng: doublePrecision('fix_lng').notNull(),
+    fixSpeedMph: doublePrecision('fix_speed_mph'),
+    straightMiles: doublePrecision('straight_miles').notNull(),
+    basis: text('basis').notNull(),
+    projectedMiles: doublePrecision('projected_miles').notNull(),
+    speedMph: doublePrecision('speed_mph').notNull(),
+    etaUtc: timestamp('eta_utc', { withTimezone: true }).notNull(),
+    routeRoutedMiles: doublePrecision('route_routed_miles'),
+    routeDurationS: doublePrecision('route_duration_s'),
+    routeBaseDurationS: doublePrecision('route_base_duration_s'),
+    routeStraightMiles: doublePrecision('route_straight_miles'),
+    routeLaneRatio: doublePrecision('route_lane_ratio'),
+    routeComputedAt: timestamp('route_computed_at', { withTimezone: true }),
+    avgSpeedMph: doublePrecision('avg_speed_mph').notNull(),
+    roadFactor: doublePrecision('road_factor').notNull(),
+    loggedAt: timestamp('logged_at', { withTimezone: true }).notNull().default(now),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+    settleOutcome: text('settle_outcome'),
+    arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+    arrivedSource: arrivalSource('arrived_source'),
+    stoppedMinutes: doublePrecision('stopped_minutes'),
+  },
+  (t) => [
+    uniqueIndex('eta_marks_mark_key')
+      .on(t.stopId, t.destKey, t.markMiles)
+      .where(sql`mark_miles is not null`),
+    uniqueIndex('eta_marks_first_seen_key')
+      .on(t.stopId, t.destKey)
+      .where(sql`mark_miles is null`),
+    index('eta_marks_unsettled_idx').on(t.stopId).where(sql`settled_at is null`),
+    check(
+      'eta_marks_mark_known',
+      sql`mark_miles is null or mark_miles in (400, 200, 100, 50, 25, 10)`,
+    ),
+    check('eta_marks_basis_known', sql`basis in ('routed', 'lane-estimate', 'straight-line')`),
+    check(
+      'eta_marks_settle_outcome_known',
+      sql`settle_outcome is null or settle_outcome in ('arrived', 'destination-changed', 'closed-without-arrival')`,
+    ),
+    check('eta_marks_settled_whole', sql`(settled_at is null) = (settle_outcome is null)`),
+    check(
+      'eta_marks_arrival_only_when_arrived',
+      sql`arrived_at is null or settle_outcome = 'arrived'`,
+    ),
+    check('eta_marks_stopped_nonnegative', sql`stopped_minutes is null or stopped_minutes >= 0`),
+    check('eta_marks_dest_key_shape', sql`dest_key ~ '^-?[0-9]+:-?[0-9]+$'`),
   ],
 );
 
