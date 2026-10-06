@@ -8443,6 +8443,17 @@ began the same day.
 seeded exact, and the old baseline showed it at `±30 min` — the defect,
 photographed. It now reads `Exact time` with the deadline line under it.
 
+Re-saved only after every changed pixel was shown to lie inside the modal
+panel, measured from the DOM at each width (720 × 852 at y 24). The changed
+region is the same at every width: from the Window control down to the
+panel's bottom edge, y 342–874, x from panel-left + 17 to panel-left + 702 —
+the new line moves everything under it down by one line. 111,377 pixels
+differ by any channel at each width, and none outside the panel.
+
+`7b-edit-stop-plus-30-1440.png` is new: the same modal for a stop stored
+at +30, so the control is held in both states — `Exact time` /
+`deadline 14:30 CDT` and `+30 min` / `deadline 15:00 CDT`.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

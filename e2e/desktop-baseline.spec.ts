@@ -309,3 +309,34 @@ for (const width of WIDTHS) {
     await shoot(page, '3-feed-down', width);
   });
 }
+
+/**
+ * §12.115. The edit modal again, for an APPT stop with a +30 window — the
+ * other state of the Window control. `7-edit-stop-*` pictures the seeded exact
+ * time ("Exact time", "deadline 14:30 CDT"); this one pictures "+30 min" and
+ * "deadline 15:00 CDT". One width is enough: the control's layout does not
+ * change with the page, and the six above already hold the modal at every
+ * width.
+ */
+test('edit stop with a +30 window at 1440px matches its baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  const width = 1440;
+  await seed();
+  const sql = connect();
+  try {
+    await sql`update stops set appointment_end_utc = appointment_start_utc + interval '30 minutes'
+              where id = ${IDS.stopChicago}`;
+  } finally {
+    await sql.end();
+  }
+  await page.clock.setFixedTime(FROZEN);
+  await page.setViewportSize({ width, height: HEIGHT });
+
+  await open(page);
+  await select101(page);
+  await page.getByRole('button', { name: 'Edit load' }).click();
+  await page.locator('[role="dialog"][aria-label^="Edit stop"]').waitFor();
+  await page.waitForTimeout(400);
+  await page.mouse.move(2, HEIGHT - 2);
+  await shoot(page, '7b-edit-stop-plus-30', width);
+});
