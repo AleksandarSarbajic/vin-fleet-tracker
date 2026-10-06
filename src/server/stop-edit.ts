@@ -1,6 +1,7 @@
 import { desc, eq, sql, type SQL } from 'drizzle-orm';
 import { loads, positions, stopRoutes, stops, trucks } from '@/db/schema';
 import { normalizeAddress, type AddressParts } from '@/lib/address';
+import { zoneAbbreviation } from '@/lib/format';
 import { ANCHOR_MAX_AGE_MINUTES, anchorAtTick, type AnchorDecision } from '@/lib/arrival';
 import { needsReachedAnswer } from '@/lib/reached-stop';
 import type { StopEdit } from '@/lib/stop-edit';
@@ -211,6 +212,12 @@ export async function saveStopEdit(
     const appointment = edit.appointment
       ? await resolveAppointment(tx, edit.appointment)
       : null;
+    if (appointment?.endResolution === 'ambiguous' && appointment.endUtc) {
+      warnings.push({
+        field: 'appointment.endTime',
+        message: repeatedHourWarning(appointment.endUtc, appointment.tz),
+      });
+    }
 
     /* -------------------------- the load and stop ---------------------- */
 
@@ -228,6 +235,8 @@ export async function saveStopEdit(
               state: stops.state,
               zip: stops.zip,
               appointmentStartUtc: stops.appointmentStartUtc,
+              appointmentEndUtc: stops.appointmentEndUtc,
+              appointmentType: stops.appointmentType,
               appointmentTz: stops.appointmentTz,
               dispatcherNote: stops.dispatcherNote,
               arrivedAt: stops.arrivedAt,
@@ -694,6 +703,8 @@ export async function saveStopEdit(
             zip: existing.zip,
             // Stored as an instant; logged as one, with the zone beside it.
             appointmentStartUtc: existing.appointmentStartUtc?.toISOString() ?? null,
+            appointmentEndUtc: existing.appointmentEndUtc?.toISOString() ?? null,
+            appointmentType: existing.appointmentType,
             appointmentTz: existing.appointmentTz,
             dispatcherNote: existing.dispatcherNote,
             arrivedAt: existing.arrivedAt?.toISOString() ?? null,
@@ -715,6 +726,13 @@ export async function saveStopEdit(
         state: edit.state,
         zip: edit.zip,
         appointmentStartUtc: appointment?.startUtc ?? null,
+        /**
+         * The deadline, and what kind of time it is (§12.114). Absent from
+         * this log until then, which is why two FCFS windows ending 23:59
+         * could not be told apart from an overnight workaround afterwards.
+         */
+        appointmentEndUtc: appointment?.endUtc ?? null,
+        appointmentType: appointmentColumns.appointmentType,
         appointmentTz: appointment?.tz ?? null,
         /**
          * What the geocoder did, or that it was not asked. An ETA a
@@ -736,6 +754,7 @@ export async function saveStopEdit(
           : 'address unchanged — not re-geocoded',
         /** Kept: on the fall-back date this says which 01:30 was stored. */
         appointmentResolution: appointment?.resolution ?? null,
+        appointmentEndResolution: appointment?.endResolution ?? null,
         // What was WRITTEN, not what was sent (§12.21). A save that left the
         // note alone must not appear in history as having set it.
         ...(noteChanged ? { dispatcherNote: edit.dispatcherNote ?? null } : {}),
@@ -849,4 +868,28 @@ export async function setTruckActive(
       after: { active: input.active, source: 'edit-modal' },
     });
   });
+}
+
+/**
+ * §12.114. The latest hour landed on the hour that happens twice. Postgres
+ * takes the SECOND one — standard time, the later instant — which for a
+ * deadline is the generous reading. Saved, and said, because a dispatcher
+ * reading "01:30" off a rate confirmation has no way to know which one the
+ * receiver meant either.
+ */
+function repeatedHourWarning(endUtc: string, tz: string): string {
+  const end = new Date(endUtc);
+  const wall = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(end);
+  return (
+    `The latest hour, ${wall}, happens twice in ${tz} — the clocks go back that ` +
+    `night. Saved as the second one (${zoneAbbreviation(end, tz)}), the later deadline.`
+  );
 }

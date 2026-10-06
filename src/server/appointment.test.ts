@@ -374,17 +374,16 @@ describe('FCFS receiving hours, on the wire', () => {
     expect(appointment.success).toBe(false);
   });
 
-  it('refuses an overnight window, deliberately and for now (§12.22)', () => {
+  it('accepts an overnight window (§12.114)', () => {
     // 22:00-06:00 is real — grocery and retail DCs receive through the night.
-    // Reading 06:00 as tomorrow would make a transposed typo look valid, so
-    // it is refused until there is an explicit next-day control.
-    const overnight = fcfs({ time: { h: 22, min: 0 }, endTime: { h: 6, min: 0 } });
-    expect(overnight.success).toBe(false);
-    expect(JSON.stringify(overnight.error?.issues)).toMatch(/overnight/i);
+    // The latest hour is on the next day; the form says so in words.
+    expect(fcfs({ time: { h: 22, min: 0 }, endTime: { h: 6, min: 0 } }).success).toBe(true);
   });
 
-  it('refuses a zero-length window', () => {
-    expect(fcfs({ endTime: { h: 7, min: 0 } }).success).toBe(false);
+  it('refuses a zero-length window, and says how to enter all day', () => {
+    const same = fcfs({ endTime: { h: 7, min: 0 } });
+    expect(same.success).toBe(false);
+    expect(JSON.stringify(same.error?.issues)).toContain('00:00 to 23:59');
   });
 });
 

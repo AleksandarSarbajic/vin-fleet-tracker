@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   AppointmentTimeError,
+  fcfsEndDate,
   wallText,
   type AppointmentInput,
   type AppointmentResolution,
@@ -35,13 +36,15 @@ export function appointmentStartSql(input: Pick<AppointmentInput, 'date' | 'time
  *   APPT  start + the ± window, or null for an exact time.
  *   FCFS  the LATEST receiving hour — a wall time in its own right, typed by
  *         the dispatcher, and therefore converted the same way the start is
- *         rather than derived by arithmetic.
+ *         rather than derived by arithmetic. At or before the earliest hour
+ *         it is on the next day (§12.114), and the DAY is the only thing
+ *         worked out here; the instant is still Postgres reading a wall time.
  */
 export function appointmentEndSql(input: AppointmentInput): SQL | null {
   if (input.type === 'FCFS') {
     const end = input.endTime;
     if (!end) return null;
-    const { y, m, d } = input.date;
+    const { y, m, d } = fcfsEndDate(input.date, input.time, end);
     return sql`timezone(${input.tz},
       make_timestamp(${y}::int, ${m}::int, ${d}::int, ${end.h}::int, ${end.min}::int, 0))`;
   }
@@ -71,6 +74,11 @@ const ResolveRow = z
     end_reads_back_as: z.string().nullable(),
     /** True when the hour before lands on the same wall time (fall-back). */
     ambiguous: z.boolean(),
+    /**
+     * The same question for the typed latest hour. An overnight window ends
+     * in the small hours, which is exactly where the repeated hour sits.
+     */
+    end_ambiguous: z.boolean().nullable(),
   })
   .strict();
 
@@ -81,6 +89,11 @@ export interface ResolvedAppointment {
   /** The zone as entered. Stored beside the instant, never an abbreviation. */
   tz: string;
   resolution: AppointmentResolution;
+  /**
+   * Which 01:30 the FCFS latest hour got, on the night it has two. Null when
+   * the end was derived (APPT start + window) or there is none.
+   */
+  endResolution: AppointmentResolution | null;
 }
 
 /** A handle that can run raw SQL: the pooled db, or a transaction. */
@@ -138,7 +151,14 @@ export async function resolveAppointment(
       to_char(((${start}) - interval '1 hour') at time zone ${input.tz},
               'YYYY-MM-DD HH24:MI')
         = to_char((${start}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')
-                                                                       as ambiguous
+                                                                       as ambiguous,
+      ${
+        typedEnd
+          ? sql`to_char(((${typedEnd}) - interval '1 hour') at time zone ${input.tz},
+                        'YYYY-MM-DD HH24:MI')
+                  = to_char((${typedEnd}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')`
+          : sql`null::boolean`
+      }                                                                    as end_ambiguous
   `);
 
   const rows = z.array(ResolveRow).parse(result);
@@ -152,9 +172,13 @@ export async function resolveAppointment(
 
   // The FCFS latest hour is typed by a person too, so it can land in the
   // hour that does not exist just as easily — 02:00-03:00 sits inside
-  // plausible night receiving hours.
+  // plausible night receiving hours. Compared against the day the end is
+  // ON, which for an overnight window is the day after the start (§12.114).
   if (input.endTime && row.end_reads_back_as !== null) {
-    const endWall = wallText(input, input.endTime);
+    const endWall = wallText(
+      { date: fcfsEndDate(input.date, input.time, input.endTime) },
+      input.endTime,
+    );
     if (row.end_reads_back_as !== endWall) {
       throw new AppointmentTimeError(
         endWall,
@@ -170,6 +194,8 @@ export async function resolveAppointment(
     endUtc: row.end_utc,
     tz: input.tz,
     resolution: row.ambiguous ? 'ambiguous' : 'exact',
+    endResolution:
+      row.end_ambiguous === null ? null : row.end_ambiguous ? 'ambiguous' : 'exact',
   };
 }
 
@@ -209,7 +235,8 @@ export async function resolveWallTime(
       to_char(((${at}) - interval '1 hour') at time zone ${input.tz},
               'YYYY-MM-DD HH24:MI')
         = to_char((${at}) at time zone ${input.tz}, 'YYYY-MM-DD HH24:MI')
-                                                                       as ambiguous
+                                                                       as ambiguous,
+      null::boolean                                                    as end_ambiguous
   `);
 
   const rows = z.array(ResolveRow).parse(result);

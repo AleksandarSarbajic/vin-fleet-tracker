@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { nextCalendarDay } from './calendar';
 
 /**
  * The appointment contract, shared by the client and the server.
@@ -131,20 +132,68 @@ export const AppointmentInput = z
     message: 'An appointment has a ± window, not receiving hours.',
   })
   .refine(
-    (a) =>
-      a.type !== 'FCFS' ||
-      !a.endTime ||
-      a.endTime.h * 60 + a.endTime.min > a.time.h * 60 + a.time.min,
+    (a) => a.type !== 'FCFS' || !a.endTime || minuteOfDay(a.endTime) !== minuteOfDay(a.time),
     {
       path: ['endTime'],
       message:
-        'The latest receiving hour must be after the earliest, on the same ' +
-        'day. Overnight receiving (22:00\u201306:00) is not supported yet \u2014 ' +
-        'see \u00a712.22.',
+        'Earliest and latest are the same time. For hours that run all day, ' +
+        'enter 00:00 to 23:59.',
     },
   );
 
 export type AppointmentInput = z.infer<typeof AppointmentInput>;
+
+/* -------------------------------------------------------------------------
+ * \u00a712.114 \u2014 overnight receiving hours
+ * ---------------------------------------------------------------------- */
+
+type WallClock = { h: number; min: number };
+type CalendarDate = { y: number; m: number; d: number };
+
+function minuteOfDay(t: WallClock): number {
+  return t.h * 60 + t.min;
+}
+
+/**
+ * A latest hour at or before the earliest is on the NEXT day: 22:00\u201306:00 is
+ * a night shift, not a typo the form should refuse. Equal is refused by the
+ * schema above, so here it can only mean the next day.
+ *
+ * The form's "Ends next day" line and the server's conversion both ask this
+ * one function, so the line a dispatcher reads and the instant that gets
+ * stored cannot disagree about which day 06:00 is.
+ */
+export function endsNextDay(time: WallClock, endTime: WallClock): boolean {
+  return minuteOfDay(endTime) <= minuteOfDay(time);
+}
+
+/**
+ * The stop-local calendar date the latest hour falls on.
+ *
+ * Calendar arithmetic only \u2014 the day after, never "plus 24 hours". The
+ * window's LENGTH is not computed here at all: the end is a wall time in its
+ * own right, converted by Postgres exactly like the start, so a 22:00\u201306:00
+ * window comes out 7 hours on the spring-forward night and 9 on the
+ * fall-back one without either being a special case.
+ */
+export function fcfsEndDate(
+  date: CalendarDate,
+  time: WallClock,
+  endTime: WallClock,
+): CalendarDate {
+  if (!endsNextDay(time, endTime)) return date;
+  const [y, m, d] = nextCalendarDay(dateText(date)).split('-').map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  return { y, m, d };
+}
+
+function dateText({ y, m, d }: CalendarDate): string {
+  const p = (n: number, width = 2) => String(n).padStart(width, '0');
+  return `${p(y, 4)}-${p(m)}-${p(d)}`;
+}
 
 /**
  * What the server made of it. `resolution` is not decoration — it is the
@@ -159,9 +208,8 @@ export function wallText(
   input: Pick<AppointmentInput, 'date'>,
   time: { h: number; min: number },
 ): string {
-  const p = (n: number, width = 2) => String(n).padStart(width, '0');
-  const { y, m, d } = input.date;
-  return `${p(y, 4)}-${p(m)}-${p(d)} ${p(time.h)}:${p(time.min)}`;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${dateText(input.date)} ${p(time.h)}:${p(time.min)}`;
 }
 
 /**

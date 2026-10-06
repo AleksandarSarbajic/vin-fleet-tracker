@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { isIanaZone } from '@/lib/appointment';
-import { zoneAbbreviation } from '@/lib/format';
+import { endsNextDay, fcfsEndDate, isIanaZone } from '@/lib/appointment';
+import { timeInZone, wallTimeInstant, windowLength, zoneAbbreviation } from '@/lib/format';
 
 /**
  * The appointment as written on the rate confirmation (§9.9).
@@ -94,27 +94,54 @@ export function AppointmentFields({
    * gets saved is the wall time itself.
    */
   const preview = useMemo(() => {
-    if (!draft.date || !draft.time || !isIanaZone(draft.tz)) return null;
-    const [y, m, d] = draft.date.split('-').map(Number);
-    const [h, min] = draft.time.split(':').map(Number);
-    if ([y, m, d, h, min].some((n) => n === undefined || Number.isNaN(n))) return null;
+    const date = dateParts(draft.date);
+    const time = timeParts(draft.time);
+    if (!date || !time || !isIanaZone(draft.tz)) return null;
 
     // Display-only: good enough to name the abbreviation and show the two
     // clocks. The authoritative conversion happens on the server.
-    const guess = new Date(Date.UTC(y!, m! - 1, d!, h!, min!));
-    const abbrev = zoneAbbreviation(guess, draft.tz);
+    const at = wallTimeInstant(date, time, draft.tz);
+    const abbrev = zoneAbbreviation(at, draft.tz);
     const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const at = (zone: string) =>
+    const clock = (zone: string) =>
       new Intl.DateTimeFormat('en-GB', {
         timeZone: zone, weekday: 'short', day: '2-digit', month: 'short',
         hour: '2-digit', minute: '2-digit', hour12: false,
-      }).format(offsetGuess(guess, draft.tz));
+      }).format(at);
     return {
       abbrev,
-      dispatch: `${at(dispatchTz)} ${zoneAbbreviation(guess, dispatchTz)}`,
-      viewer: `${at(viewerZone)} ${zoneAbbreviation(guess, viewerZone)}`,
+      dispatch: `${clock(dispatchTz)} ${zoneAbbreviation(at, dispatchTz)}`,
+      viewer: `${clock(viewerZone)} ${zoneAbbreviation(at, viewerZone)}`,
     };
   }, [draft.date, draft.time, draft.tz, dispatchTz]);
+
+  /**
+   * §12.114. The FCFS latest hour, on the day it is actually on.
+   *
+   * Its abbreviation is the END's own — on the fall-back night a window opens
+   * at 22:00 CDT and closes at 06:00 CST, and borrowing the start's would
+   * print the wrong one beside the deadline. `nextDay` carries the line that
+   * says so in words, with the length, because the length is what gives away
+   * a transposed 15:00–07:00 that was meant as 07:00–15:00.
+   */
+  const end = useMemo(() => {
+    if (draft.type !== 'FCFS') return null;
+    const date = dateParts(draft.date);
+    const time = timeParts(draft.time);
+    const endTime = timeParts(draft.endTime);
+    if (!date || !time || !endTime || !isIanaZone(draft.tz)) return null;
+
+    const closes = wallTimeInstant(fcfsEndDate(date, time, endTime), endTime, draft.tz);
+    const opens = wallTimeInstant(date, time, draft.tz);
+    const minutes = Math.round((closes.getTime() - opens.getTime()) / 60_000);
+    return {
+      abbrev: zoneAbbreviation(closes, draft.tz),
+      nextDay:
+        endsNextDay(time, endTime) && minutes > 0
+          ? `Ends next day · ${timeInZone(closes, draft.tz, { weekday: true })} · ${windowLength(minutes)}`
+          : null,
+    };
+  }, [draft.type, draft.date, draft.time, draft.endTime, draft.tz]);
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
@@ -224,7 +251,7 @@ export function AppointmentFields({
                     }`}
                   />
                   <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 border border-line-hair bg-surface-overlay px-1.5 py-0.5 font-cond text-[11px] uppercase tracking-[.09em] text-text-secondary">
-                    {preview?.abbrev ?? '—'}
+                    {end?.abbrev ?? '—'}
                   </span>
                 </span>
               ) : (
@@ -242,6 +269,15 @@ export function AppointmentFields({
               )}
             </label>
           </div>
+
+          {end?.nextDay && !endError ? (
+            <p
+              data-ends-next-day=""
+              className="mt-1.5 text-right text-small font-medium tabular-nums text-text"
+            >
+              {end.nextDay}
+            </p>
+          ) : null}
 
           <div className="mt-3 grid grid-cols-3 gap-3">
             <label className="col-span-1 block">
@@ -291,18 +327,16 @@ export function AppointmentFields({
   );
 }
 
-/**
- * Turns a wall time into the instant it names in `zone`, for display only.
- * Two passes: build a UTC guess, measure how that guess renders in the zone,
- * then correct by the difference. The SERVER does the real conversion, in
- * Postgres, and its answer is what gets stored.
- */
-function offsetGuess(utcGuess: Date, zone: string): Date {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit',
-    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(utcGuess);
-  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
-  const asUtc = Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second'));
-  return new Date(utcGuess.getTime() * 2 - asUtc);
+/** `yyyy-mm-dd` from the date input, as integer parts, or null while incomplete. */
+function dateParts(value: string): { y: number; m: number; d: number } | null {
+  const [y, m, d] = value.split('-').map(Number);
+  if ([y, m, d].some((n) => n === undefined || Number.isNaN(n))) return null;
+  return { y: y!, m: m!, d: d! };
+}
+
+/** `HH:mm` from a time input, as integer parts, or null while incomplete. */
+function timeParts(value: string): { h: number; min: number } | null {
+  const [h, min] = value.split(':').map(Number);
+  if ([h, min].some((n) => n === undefined || Number.isNaN(n))) return null;
+  return { h: h!, min: min! };
 }

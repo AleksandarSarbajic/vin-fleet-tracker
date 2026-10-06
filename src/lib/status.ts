@@ -1,3 +1,4 @@
+import { calendarDayInZone, nextCalendarDay } from './calendar';
 import {
   metresToMiles,
   projectDistance,
@@ -89,11 +90,8 @@ export interface UpcomingDay {
   tomorrow: boolean;
 }
 
-/** The calendar day after a `YYYY-MM-DD`. Date arithmetic, not 24 hours — DST-proof. */
-export function nextCalendarDay(day: string): string {
-  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
-  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-}
+/** Moved to `calendar.ts`, which the appointment contract shares (§12.114). */
+export { nextCalendarDay, calendarDayInZone };
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
@@ -408,16 +406,6 @@ export function project(
     miles: projection.miles,
     projection,
   };
-}
-
-/** The calendar date in a zone, as YYYY-MM-DD. */
-export function calendarDayInZone(instant: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(instant);
 }
 
 function isLiveOverride(override: OverrideFacts | null, now: Date): boolean {

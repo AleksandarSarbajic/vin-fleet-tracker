@@ -105,6 +105,52 @@ export function timeInZone(
   return opts.zone === false ? clock : `${clock} ${zoneAbbreviation(instant, timeZone)}`;
 }
 
+/** Minutes east of UTC that `zone` keeps at `instant`. */
+function offsetMinutesAt(instant: number, zone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(instant));
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const asUtc = Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second'));
+  return Math.round((asUtc - instant) / 60_000);
+}
+
+/**
+ * A stop-local wall time as the instant it names — FOR DISPLAY ONLY.
+ *
+ * The form uses it to name the abbreviation, show the two console clocks and
+ * say how long an overnight window is. What gets SAVED is the wall time
+ * itself; Postgres does the real conversion and checks its own work.
+ *
+ * Two passes, and the second is the point. The first measures the offset at
+ * a guess that is five or six hours from the target, and on the fall-back
+ * morning that guess is still on daylight time: one pass turned 06:00 into
+ * 05:00 CST. The second measures the offset at the first answer, which is on
+ * the right side of the change.
+ */
+export function wallTimeInstant(
+  date: { y: number; m: number; d: number },
+  time: { h: number; min: number },
+  zone: string,
+): Date {
+  const asIfUtc = Date.UTC(date.y, date.m - 1, date.d, time.h, time.min);
+  const first = asIfUtc - offsetMinutesAt(asIfUtc, zone) * 60_000;
+  return new Date(asIfUtc - offsetMinutesAt(first, zone) * 60_000);
+}
+
+/**
+ * How long a window runs, for the form's "Ends next day" line (§12.114):
+ * "8 h", "7 h 30 min", "45 min". Measured between instants, so it reads 7 or
+ * 9 on the nights the clocks change.
+ */
+export function windowLength(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
 /** Speed for the popup. One decimal is noise on a truck. */
 export function mph(speed: number | null): string | null {
   if (speed === null || !Number.isFinite(speed)) return null;
