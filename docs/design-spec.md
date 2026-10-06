@@ -8236,6 +8236,14 @@ made, a run is refused when too few are left, and a failure mid-run counts
 only the calls made. Skipping the count fails three tests; counting after the
 call instead of before fails the mid-run one.
 
+**The daily line.** Once a day, at the UTC rollover beside the feed-health
+report, the worker logs `routing budget: daily count` with the finished day,
+its month, the month's calls so far and the ceiling. It reports the month the
+finished day belongs to, so the line just after midnight on the 1st carries
+the previous month's final total — the number to set beside HERE's monthly
+report. Read-only; the routing job is unchanged. Ships with the next worker
+deploy.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

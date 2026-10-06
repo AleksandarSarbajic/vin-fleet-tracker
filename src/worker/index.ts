@@ -11,6 +11,7 @@ import { flushWorkerSentry, initWorkerSentry, sentryActive } from './sentry';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { runEtaLog, runEtaSettle } from './eta-marks';
+import { readBudgetDay } from './budget-day';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
 import { HereRouting } from '@/server/routing/provider';
 import { detectMergeCandidates } from '@/server/drivers';
@@ -210,6 +211,7 @@ async function main(): Promise<void> {
       const today = utcDayStart(new Date(startedAt)).getTime();
       if (today !== reportedDay) {
         await reportDay(db, new Date(reportedDay), 'yesterday');
+        await reportBudgetDay(db, new Date(reportedDay), env.ROUTING_MONTHLY_CEILING);
         reportedDay = today;
       }
       const gapSeconds = (startedAt - lastSuccessAt) / 1000;
@@ -331,6 +333,26 @@ async function reportDay(
   // of them is good news. The message, not just a field, has to say which.
   else if (!day.complete) logger.info('feed health: this day was not fully recorded', detail);
   else logger.info('feed health: no stalls', detail);
+}
+
+/**
+ * §12.113. One line a day: the routing counter's month total beside the
+ * ceiling, for comparing with HERE's usage report. Its own try, like
+ * `reportDay`: a reporting query must not stop the worker from polling.
+ */
+async function reportBudgetDay(
+  db: ReturnType<typeof createDirectDb>['db'],
+  dayStart: Date,
+  ceiling: number,
+): Promise<void> {
+  try {
+    logger.info('routing budget: daily count', { ...(await readBudgetDay(db, dayStart, ceiling)) });
+  } catch (error: unknown) {
+    logger.error('routing budget daily count failed', {
+      error: error instanceof Error ? error.message : String(error),
+      day: dayStart.toISOString().slice(0, 10),
+    });
+  }
 }
 
 /** One poll: feed → positions → heartbeat. The cursor advances only on success. */
