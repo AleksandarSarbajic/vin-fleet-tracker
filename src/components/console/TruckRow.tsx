@@ -12,7 +12,8 @@ import {
 import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import { upcomingLabel, type Status } from '@/lib/status';
-import { elapsed, timeInZone } from '@/lib/format';
+import { calendarDayInZone } from '@/lib/calendar';
+import { elapsed, timeInZone, windowEnd } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { ChipFlip } from './ChipFlip';
 import { ROW_HEIGHT, type Density } from '@/lib/density';
@@ -191,7 +192,13 @@ export function apptText(row: FleetRow): { prefix: string | null; time: string }
 
   if (stop.apptType === 'FCFS') {
     if (!stop.apptEndUtc) return { prefix: null, time: '—' };
-    return { prefix: 'by', time: timeInZone(new Date(stop.apptEndUtc), stop.apptTz) };
+    // `+1` when the doors close on the day after they open (§12.114).
+    return {
+      prefix: 'by',
+      time: stop.apptStartUtc
+        ? windowEnd(stop.apptStartUtc, stop.apptEndUtc, stop.apptTz)
+        : timeInZone(new Date(stop.apptEndUtc), stop.apptTz),
+    };
   }
   if (!stop.apptStartUtc) return { prefix: null, time: '—' };
   return { prefix: null, time: timeInZone(new Date(stop.apptStartUtc), stop.apptTz) };
@@ -335,8 +342,13 @@ function apptTitle(row: FleetRow): string | null {
   if (!stop?.apptTz || !stop.apptStartUtc) return null;
   const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
   if (stop.apptType !== 'FCFS' || !stop.apptEndUtc) return from;
-  // The whole window, since the cell only had room for the deadline.
-  const to = timeInZone(new Date(stop.apptEndUtc), stop.apptTz);
+  // The whole window, since the cell only had room for the deadline. An
+  // overnight one names both days, which is what the cell's `+1` stands for.
+  const end = new Date(stop.apptEndUtc);
+  const overnight =
+    calendarDayInZone(end, stop.apptTz) !==
+    calendarDayInZone(new Date(stop.apptStartUtc), stop.apptTz);
+  const to = timeInZone(end, stop.apptTz, { weekday: overnight });
   return `FCFS receiving hours ${from} to ${to} — no slot, the deadline is ${to}`;
 }
 

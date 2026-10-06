@@ -1,3 +1,5 @@
+import { calendarDayInZone } from './calendar';
+
 /**
  * Display formatting. Every one of these is pure so it can be unit tested,
  * and none of them stores what it produces.
@@ -103,6 +105,34 @@ export function timeInZone(
     ...(opts.weekday ? { weekday: 'short' } : {}),
   }).format(instant);
   return opts.zone === false ? clock : `${clock} ${zoneAbbreviation(instant, timeZone)}`;
+}
+
+/**
+ * The end of a window, as it reads beside its start: `06:00 CDT`, or
+ * `06:00 CDT +1` when it falls on a later calendar day AT THE STOP (§12.114).
+ *
+ * The day is the stop's own, because the window is the facility's — "22:00
+ * to 06:00" is a night at the receiver, whatever day it is in Belgrade. Any
+ * window can cross midnight: FCFS hours since §12.114, and an APPT at 23:30
+ * with a 60-minute window always could.
+ */
+export function windowEnd(startUtc: string, endUtc: string, timeZone: string): string {
+  const end = new Date(endUtc);
+  const text = timeInZone(end, timeZone);
+  const days = daysBetween(
+    calendarDayInZone(new Date(startUtc), timeZone),
+    calendarDayInZone(end, timeZone),
+  );
+  return days > 0 ? `${text} +${days}` : text;
+}
+
+/** Whole calendar days from one `YYYY-MM-DD` to another. */
+function daysBetween(from: string, to: string): number {
+  const utc = (day: string) => {
+    const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((utc(to) - utc(from)) / 86_400_000);
 }
 
 /** Minutes east of UTC that `zone` keeps at `instant`. */

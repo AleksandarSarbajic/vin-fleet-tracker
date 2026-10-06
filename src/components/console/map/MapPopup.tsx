@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef } from 'react';
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
-import { compassPoint, elapsed, mph, timeInZone } from '@/lib/format';
+import { compassPoint, elapsed, mph, timeInZone, windowEnd } from '@/lib/format';
 import { basisShort, etaCaution, etaDetails, milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
 import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
@@ -35,7 +35,7 @@ export function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
   const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
   if (stop.apptType !== 'FCFS') return from;
   return stop.apptEndUtc
-    ? `${from} to ${timeInZone(new Date(stop.apptEndUtc), stop.apptTz)}`
+    ? `${from} to ${windowEnd(stop.apptStartUtc, stop.apptEndUtc, stop.apptTz)}`
     : from;
 }
 

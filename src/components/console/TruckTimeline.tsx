@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useFocusTrap, useReturnFocus } from '@/components/edit/useModalChrome';
 import { useTruckTimeline } from '@/hooks/useTruckTimeline';
-import { timeInZone } from '@/lib/format';
+import { timeInZone, windowEnd } from '@/lib/format';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL, type OverrideReason, type Status } from '@/lib/status';
 import {
@@ -229,7 +229,9 @@ function StopCard({
             ) : (
               <>
                 {at(stop.apptStartUtc)}
-                {stop.apptEndUtc ? ` – ${at(stop.apptEndUtc)}` : ''}
+                {stop.apptEndUtc
+                  ? ` – ${windowEnd(stop.apptStartUtc, stop.apptEndUtc, zone)}`
+                  : ''}
               </>
             )}
           </Line>
