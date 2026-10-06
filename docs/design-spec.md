@@ -5176,6 +5176,8 @@ and the standing argument for a cheaper recompute rule.
 Raising it further is a decision to pay HERE for overage and wants a price in
 hand, not a quieter log.
 
+**22 Sep 2026: the counter was 24 below HERE's bill (154 billed, 130 counted), because of hand-run scripts that called HERE directly; fixed in §12.113.**
+
 ### What was measured and rejected: the per-lane cooldown
 
 A per-lane cooldown — a floor on how often ONE lane may be routed,
