@@ -317,7 +317,7 @@ describeDb('the ETA log scores the board’s next stop on a two-stop load (§12.
       const lane = await twoStopLoad(tx, { arrived: true });
       await tx
         .update(stops)
-        .set({ departedAt: new Date(Date.now() - 30 * 60_000) })
+        .set({ departedAt: new Date(Date.now() - 30 * 60_000), departedSource: 'detected' })
         .where(eq(stops.id, lane.pickupId));
       await parkedAt(tx, lane.truck.id, { lat: 41.7, lng: -88.0 }, 2, 1);
       await logEtaMarks(tx);

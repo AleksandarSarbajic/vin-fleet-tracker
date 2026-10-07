@@ -56,6 +56,7 @@ async function addLoad(tx: Tx, truckId: string, loadNumber: string | null, legs:
         arrivedAt: leg.arrivedAt ?? null,
         arrivedSource: leg.arrivedAt ? (leg.source ?? 'dispatcher') : null,
         departedAt: leg.departedAt ?? null,
+        departedSource: leg.departedAt ? ('detected' as const) : null,
         arrivalAnchorLat: leg.anchor?.lat ?? null,
         arrivalAnchorLng: leg.anchor?.lng ?? null,
         arrivalAnchorAt: leg.anchor?.at ?? null,

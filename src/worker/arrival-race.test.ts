@@ -139,10 +139,8 @@ describeDb('the sweep and a dispatcher saving at the same moment (§12.118)', ()
 });
 
 describeDb('the worker says what it recorded (§12.118)', () => {
-  it('writes departed_source itself — with the 0024 bridge switched off', async () => {
+  it('writes departed_source itself — there is no bridge to fill it in since 0025', async () => {
     const seen = await rolledBack(async (tx) => {
-      // The bridge would fill it in; 0025 removes it. Off for this test only.
-      await tx.execute(sql`alter table stops disable trigger stops_departure_source_bridge`);
       const truck = await makeTruck(tx);
       const [load] = await tx
         .insert(loads)

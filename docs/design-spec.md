@@ -8732,6 +8732,21 @@ The note, arrival and departure of a departed stop can still be corrected.
 **The audit row** carries `departedAt` and `departedSource` only when the
 save moved them, and `before` carries `departedSource`.
 
+### Migration 0025 — the bridge goes
+
+Drops `stops_departure_source_bridge` and its function, and nothing else.
+Applied only once the worker that writes the source (f86e7fb) and the app that
+writes `dispatcher` (3cd1d59) are both live. From then a departure written
+with no source — the pre-0024 worker's statement — and a clear that leaves
+the source behind — the pre-0024 app's — are refused by the paired check,
+loudly, instead of being labelled by a guess. `departure-source.test.ts`
+asserts both refusals.
+
+Every fixture that writes a departure now says whose it is: seeded and
+fixture departures stand in for the worker's and carry `detected`, one that
+stands in for a dispatcher carries `dispatcher` (the test builders, the e2e
+history seed and previous-load spec, `seed-demo`).
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

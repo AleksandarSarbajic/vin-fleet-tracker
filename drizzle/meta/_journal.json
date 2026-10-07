@@ -176,6 +176,13 @@
       "when": 1791358445023,
       "tag": "0024_departure_source",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791360776660,
+      "tag": "0025_drop_departure_bridge",
+      "breakpoints": true
     }
   ]
 }

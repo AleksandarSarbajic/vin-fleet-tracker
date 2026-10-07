@@ -76,7 +76,7 @@ async function loadWith(tx: Tx, legs: Leg[]) {
         appointmentTz: TZ,
         appointmentType: 'APPT',
         ...(reached ? { arrivedAt: at(-3), arrivedSource: 'detected' as const } : {}),
-        ...(leg.departed ? { departedAt: at(-2) } : {}),
+        ...(leg.departed ? { departedAt: at(-2), departedSource: 'detected' as const } : {}),
       })
       .returning({ id: stops.id });
     stopIds.push(row!.id);
@@ -453,7 +453,7 @@ describeDb('the version check (§12.117)', () => {
       // The sweep's own writes: detected arrival, then departure.
       await tx
         .update(stops)
-        .set({ arrivedAt: at(-1), arrivedSource: 'detected', departedAt: at(-0.5) })
+        .set({ arrivedAt: at(-1), arrivedSource: 'detected', departedAt: at(-0.5), departedSource: 'detected' })
         .where(eq(stops.id, lane.stopIds[0]!));
       const after = await readLoadVersion(tx, lane.loadId);
       const saved = await attempt(tx, {

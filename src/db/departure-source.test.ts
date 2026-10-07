@@ -8,9 +8,8 @@ import { makeTruck } from '@/test/fleet';
 import type { Tx } from '@/server/audit';
 
 /**
- * §12.118. Migration 0024: `stops.departed_source`, its paired check, the
- * backfill guard, and the bridge that keeps writers older than the column
- * working until 0025 removes it.
+ * §12.118. `stops.departed_source`: its paired check (0024), the backfill
+ * guard (0024), and the rule with no bridge left (0025).
  */
 
 /** Drizzle wraps the driver's error; Postgres's own message is the cause. */
@@ -59,47 +58,66 @@ const GUARD = (() => {
   return text.slice(start, text.indexOf('END $$;', start) + 'END $$;'.length);
 })();
 
-describeDb('the departure source bridge, until 0025 (§12.118)', () => {
-  it('labels a departure written the way the old worker writes it — time only — as detected', async () => {
-    const seen = await rolledBack(async (tx) => {
-      const stopId = await arrivedStop(tx);
-      // The deployed worker's statement: `update stops set departed_at = …`.
-      await tx.execute(sql`update stops set departed_at = now() where id = ${stopId}::uuid`);
-      return departure(tx, stopId);
-    });
-    expect(seen.at).not.toBeNull();
-    expect(seen.source).toBe('detected');
+/**
+ * Since 0025 the bridge is gone, and the paired check is the whole rule: the
+ * two writes it used to translate — the pre-0024 worker's time-only departure
+ * and the pre-0024 app's time-only clear — are refused. That is why 0025 is
+ * applied only once the worker and the app that write the source are live.
+ */
+describeDb('a departure and its source, since 0025 (§12.118)', () => {
+  it('has no bridge left', async () => {
+    const triggers = await rolledBack(async (tx) =>
+      tx.execute(sql`select tgname from pg_trigger where tgname = 'stops_departure_source_bridge'`),
+    );
+    expect([...triggers]).toEqual([]);
   });
 
-  it('clears the source when the old app clears the departure', async () => {
-    const seen = await rolledBack(async (tx) => {
-      const stopId = await arrivedStop(tx);
-      await tx.execute(sql`update stops set departed_at = now() where id = ${stopId}::uuid`);
-      // The deployed app's arrival clear: departed_at -> null, source untouched.
-      await tx.execute(sql`update stops set departed_at = null where id = ${stopId}::uuid`);
-      return departure(tx, stopId);
-    });
-    expect(seen).toEqual({ at: null, source: null });
+  it('refuses a departure written the way the old worker wrote it — time only', async () => {
+    const message = await refusal(
+      rolledBack(async (tx) => {
+        const stopId = await arrivedStop(tx);
+        return tx.execute(sql`update stops set departed_at = now() where id = ${stopId}::uuid`);
+      }),
+    );
+    expect(message).toMatch(/stops_departed_source_paired/);
   });
 
-  it('keeps a source that was written', async () => {
+  it('refuses a clear written the way the old app wrote it — time only', async () => {
+    const message = await refusal(
+      rolledBack(async (tx) => {
+        const stopId = await arrivedStop(tx);
+        await tx
+          .update(stops)
+          .set({ departedAt: new Date(), departedSource: 'detected' })
+          .where(eq(stops.id, stopId));
+        return tx.execute(sql`update stops set departed_at = null where id = ${stopId}::uuid`);
+      }),
+    );
+    expect(message).toMatch(/stops_departed_source_paired/);
+  });
+
+  it('keeps a source that was written, and clears both together', async () => {
     const seen = await rolledBack(async (tx) => {
       const stopId = await arrivedStop(tx);
       await tx
         .update(stops)
         .set({ departedAt: new Date(), departedSource: 'dispatcher' })
         .where(eq(stops.id, stopId));
-      return departure(tx, stopId);
+      const written = await departure(tx, stopId);
+      await tx
+        .update(stops)
+        .set({ departedAt: null, departedSource: null })
+        .where(eq(stops.id, stopId));
+      return { written, cleared: await departure(tx, stopId) };
     });
-    expect(seen.source).toBe('dispatcher');
+    expect(seen.written.source).toBe('dispatcher');
+    expect(seen.cleared).toEqual({ at: null, source: null });
   });
 
-  it('pairs the two columns in the database, bridge or not', async () => {
+  it('refuses a source with no departure', async () => {
     const message = await refusal(
       rolledBack(async (tx) => {
         const stopId = await arrivedStop(tx);
-        // Lifted for this one statement, inside a transaction that rolls back.
-        await tx.execute(sql`alter table stops disable trigger stops_departure_source_bridge`);
         return tx.execute(
           sql`update stops set departed_source = 'dispatcher' where id = ${stopId}::uuid`,
         );
@@ -114,7 +132,9 @@ describeDb('the 0024 backfill guard (§12.118)', () => {
     const message = await refusal(
       rolledBack(async (tx) => {
         const stopId = await arrivedStop(tx);
-        await tx.execute(sql`update stops set departed_at = now() where id = ${stopId}::uuid`);
+        await tx.execute(
+          sql`update stops set departed_at = now(), departed_source = 'detected' where id = ${stopId}::uuid`,
+        );
         return tx.execute(sql.raw(GUARD));
       }),
     );
@@ -126,7 +146,9 @@ describeDb('the 0024 backfill guard (§12.118)', () => {
       const stopId = await arrivedStop(tx);
       // An hour ago, after the fixture's arrival, at the millisecond the worker logs.
       const at = new Date(Date.now() - 3_600_000).toISOString();
-      await tx.execute(sql`update stops set departed_at = ${at}::timestamptz where id = ${stopId}::uuid`);
+      await tx.execute(
+        sql`update stops set departed_at = ${at}::timestamptz, departed_source = 'detected' where id = ${stopId}::uuid`,
+      );
       await tx.insert(auditLog).values({
         entity: 'stop',
         entityId: stopId,

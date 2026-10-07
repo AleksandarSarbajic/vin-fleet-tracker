@@ -85,9 +85,11 @@ export async function seedHistory(): Promise<void> {
         values (${truckIds.get(truck)!}, ${number}, ${status}, ${created}) returning id`;
       for (const [i, s] of stops.entries()) {
         await sql`
-          insert into stops (load_id, type, sequence, city, state, arrived_at, arrived_source, departed_at)
+          insert into stops (load_id, type, sequence, city, state, arrived_at, arrived_source,
+                             departed_at, departed_source)
           values (${l!.id}, ${s.type}, ${i + 1}, ${s.city}, ${s.state}, ${s.arrived ?? null},
-                  ${s.arrived ? 'detected' : null}, ${s.departed ?? null})`;
+                  ${s.arrived ? 'detected' : null}, ${s.departed ?? null},
+                  ${s.departed ? 'detected' : null})`;
       }
     };
     /** A pickup load and a delivery load under one number: the page pairs them. */
@@ -209,9 +211,10 @@ export async function seedLongWeek(): Promise<void> {
           insert into loads (truck_id, load_number, status, created_at)
           values (${t!.id}, ${number}, 'DELIVERED', ${at(W38, day, hour - 2)}) returning id`;
         await sql`
-          insert into stops (load_id, type, sequence, city, state, arrived_at, arrived_source, departed_at)
+          insert into stops (load_id, type, sequence, city, state, arrived_at, arrived_source,
+                             departed_at, departed_source)
           values (${l!.id}, ${i % 2 ? 'DEL' : 'PU'}, 1, ${city}, ${state}, ${at(W38, day, hour, 10)},
-                  'detected', ${at(W38, day, hour + 1, 5)})`;
+                  'detected', ${at(W38, day, hour + 1, 5)}, 'detected')`;
       }
     }
   } finally {

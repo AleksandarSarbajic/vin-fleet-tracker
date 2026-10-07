@@ -40,6 +40,7 @@ async function addLoad(
       arrivedAt: s.arrivedAt ?? null,
       arrivedSource: s.arrivedAt ? 'detected' : null,
       departedAt: s.departedAt ?? null,
+      departedSource: s.departedAt ? ('detected' as const) : null,
     });
   }
   return load!.id;

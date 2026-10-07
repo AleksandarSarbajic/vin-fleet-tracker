@@ -1875,7 +1875,7 @@ withDb('the hand-marked arrival (§12.57)', () => {
       const departed = new Date(Date.now() - 47 * 3_600_000);
       await tx
         .update(stops)
-        .set({ arrivedAt: arrived, arrivedSource: 'detected', departedAt: departed })
+        .set({ arrivedAt: arrived, arrivedSource: 'detected', departedAt: departed, departedSource: 'detected' })
         .where(eq(stops.id, stopId));
       try {
         await saveStopEdit(tx as never, {
@@ -2114,7 +2114,7 @@ withDb('the arrival anchor (§12.85)', () => {
     const seen = await rolledBack(async (tx) => {
       const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
       await mark(tx, truckId, stopId);
-      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
+      await tx.update(stops).set({ departedAt: new Date(), departedSource: 'detected' }).where(eq(stops.id, stopId));
       await mark(tx, truckId, stopId, { arrivedAt: null });
       return read(tx, stopId);
     });
@@ -2164,7 +2164,7 @@ withDb('the arrival anchor (§12.85)', () => {
     const seen = await rolledBack(async (tx) => {
       const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
       await mark(tx, truckId, stopId);
-      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
+      await tx.update(stops).set({ departedAt: new Date(), departedSource: 'detected' }).where(eq(stops.id, stopId));
       const before = await read(tx, stopId);
       const error = await mark(tx, truckId, stopId, { addressLine: '26700 S Walton Dr' }).then(
         () => null,

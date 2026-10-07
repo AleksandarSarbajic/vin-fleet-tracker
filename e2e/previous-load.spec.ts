@@ -25,7 +25,7 @@ async function finishOnTheRoad(loadId: string, stopId: string, loadNumber: strin
     await sql`
       update stops set city = ${'Vernon Hills'}, zip = ${'60061'},
                        arrived_at = ${hoursAgo(2)}, arrived_source = 'detected',
-                       departed_at = ${hoursAgo(1)}
+                       departed_at = ${hoursAgo(1)}, departed_source = 'detected'
        where id = ${stopId}`;
   } finally {
     await sql.end({ timeout: 5 });
@@ -42,10 +42,10 @@ async function secondPreviousOn102() {
     await sql`
       insert into stops (id, load_id, type, sequence, address_line, city, state, zip,
                          lat, lng, geocode_precision, appointment_tz, appointment_type,
-                         arrived_at, arrived_source, departed_at)
+                         arrived_at, arrived_source, departed_at, departed_source)
       values (${STOP_B}, ${LOAD_B}, 'DEL', 1, ${'2 Test Dock'}, ${'Joliet'}, ${'IL'},
               ${'60433'}, 41.525, -88.0817, 'street', ${'America/Chicago'}, 'APPT',
-              ${hoursAgo(4)}, 'dispatcher', ${hoursAgo(3)})`;
+              ${hoursAgo(4)}, 'dispatcher', ${hoursAgo(3)}, 'detected')`;
   } finally {
     await sql.end({ timeout: 5 });
   }

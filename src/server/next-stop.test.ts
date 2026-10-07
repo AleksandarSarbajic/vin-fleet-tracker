@@ -55,6 +55,7 @@ async function addLoad(
       // §12.57. A departed leg was arrived at first, and the pair is enforced.
       arrivedSource: leg.departed ? ('detected' as const) : null,
       departedAt: leg.departed ? at(-2) : null,
+      departedSource: leg.departed ? ('detected' as const) : null,
     });
   }
   return load!.id;

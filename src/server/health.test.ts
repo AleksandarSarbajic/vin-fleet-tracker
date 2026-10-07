@@ -80,6 +80,7 @@ async function addLoad(
       // §12.57: the pair is enforced by a check constraint, both ways.
       arrivedSource: leg.arrivedAt ? ('detected' as const) : null,
       departedAt: leg.departedAt ?? null,
+      departedSource: leg.departedAt ? ('detected' as const) : null,
     });
   }
 }

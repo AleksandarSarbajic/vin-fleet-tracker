@@ -177,6 +177,8 @@ for (const [index, truck] of fleet.entries()) {
       arrivedAt: leg.seq === 1 && index % 4 === 0 ? sql`now() - interval '5 hours'` : null,
       arrivedSource: leg.seq === 1 && index % 4 === 0 ? 'detected' : null,
       departedAt: leg.seq === 1 && index % 4 === 0 ? sql`now() - interval '4 hours'` : null,
+      // §12.118. Paired with the time; a seeded departure stands in for the worker's.
+      departedSource: leg.seq === 1 && index % 4 === 0 ? ('detected' as const) : null,
     });
     stopCount += 1;
   }

@@ -46,6 +46,7 @@ async function addLoad(
         arrivedAt: leg.arrivedAt ?? null,
         arrivedSource: leg.arrivedAt ? ('detected' as const) : null,
         departedAt: leg.departedAt ?? null,
+        departedSource: leg.departedAt ? ('detected' as const) : null,
       })
       .returning({ id: stops.id });
     ids.push(row!.id);
