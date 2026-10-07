@@ -1046,3 +1046,59 @@ describe('a load changed since the modal opened', () => {
     expect(reloadButton()).toBeUndefined();
   });
 });
+
+/**
+ * §12.118. The departure, under the arrival: shown only once the arrival is
+ * ticked, sent as a wall time in the stop's zone, and taken away with the
+ * arrival — said before Save.
+ */
+describe('the departure control', () => {
+  const box = (label: string) =>
+    container!.querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`);
+  const ARRIVED = 'This truck has arrived at this stop';
+  const LEFT = 'This truck has left this stop';
+
+  const bodies = () =>
+    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
+      .filter(([url]) => url === '/api/stops')
+      .map(([, init]) => stopView(JSON.parse(String(init.body))));
+
+  it('is not there until the arrival is ticked', async () => {
+    await render();
+    expect(box(LEFT)).toBeNull();
+    await act(async () => box(ARRIVED)!.click());
+    expect(box(LEFT)).not.toBeNull();
+    expect(box(LEFT)!.checked).toBe(false);
+  });
+
+  it('sends a wall time and the stop’s zone, and says unticking the arrival takes it too', async () => {
+    await render();
+    await act(async () => box(ARRIVED)!.click());
+    await act(async () => box(LEFT)!.click());
+    expect(container!.querySelector('[data-departure-note]')?.textContent).toBe(
+      'Unticking the arrival clears the departure too.',
+    );
+    await act(async () => buttonLabelled('Save').click());
+
+    const [body] = bodies();
+    expect(body?.['departedAt']).toMatchObject({
+      date: { y: expect.any(Number), m: expect.any(Number), d: expect.any(Number) },
+      time: { h: expect.any(Number), min: expect.any(Number) },
+      tz: ROW.nextStop!.apptTz ?? 'America/Chicago',
+    });
+    expect(body?.['arrivedAt']).toBeDefined();
+  });
+
+  it('goes with the arrival when the arrival is unticked', async () => {
+    await render();
+    await act(async () => box(ARRIVED)!.click());
+    await act(async () => box(LEFT)!.click());
+    await act(async () => box(ARRIVED)!.click());
+    expect(box(LEFT)).toBeNull();
+    // Something to save, so the request is sent and can be read.
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await act(async () => buttonLabelled('Save').click());
+    const [body] = bodies();
+    expect(body && 'departedAt' in body).toBe(false);
+  });
+});

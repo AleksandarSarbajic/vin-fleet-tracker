@@ -33,6 +33,7 @@ const stop = (over: Partial<TimelineStop> = {}): TimelineStop => ({
   arrivedAt: null,
   arrivedSource: null,
   departedAt: null,
+  departedSource: null,
   dispatcherNote: null,
   noteAt: null,
   overrides: [],

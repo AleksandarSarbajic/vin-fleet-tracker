@@ -254,7 +254,15 @@ function StopCard({
             </Line>
           ) : null}
 
-          {stop.departedAt ? <Line label="Departed">{at(stop.departedAt)}</Line> : null}
+          {stop.departedAt ? (
+            <Line label="Departed">
+              {at(stop.departedAt)}
+              {/* §12.118. A person's record, said as such — never a measurement. */}
+              {stop.departedSource === 'dispatcher' ? (
+                <span className="text-text-mutedOnOverlay"> · marked by hand</span>
+              ) : null}
+            </Line>
+          ) : null}
 
           {stop.dispatcherNote ? (
             <Line label="Note">

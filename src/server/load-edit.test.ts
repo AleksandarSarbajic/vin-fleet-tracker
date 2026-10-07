@@ -645,7 +645,9 @@ describeDb('one transaction (§12.117)', () => {
 describeDb('Reopen reads a close made by a multi-stop save (§12.107)', () => {
   it('finds the close, and reopens the load to the status it had', async () => {
     const seen = await rolledBack(async (tx) => {
-      const lane = await loadWith(tx, [{ city: 'A', departed: true }, { city: 'B', arrived: true }]);
+      // Both reached, neither left: a departed stop's appointment is locked
+      // (§12.116 D4), and this draft sends none.
+      const lane = await loadWith(tx, [{ city: 'A', arrived: true }, { city: 'B', arrived: true }]);
       const version = await readLoadVersion(tx, lane.loadId);
       await save(tx, {
         loadId: lane.loadId,

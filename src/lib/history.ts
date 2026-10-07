@@ -35,6 +35,8 @@ export interface HistoryStop {
   state: string | null;
   arrivedAt: string | null;
   departedAt: string | null;
+  /** §12.118. Who recorded the departure. Null with no departure. */
+  departedSource: 'detected' | 'dispatcher' | null;
 }
 
 export interface HistoryLoad {
@@ -379,7 +381,12 @@ export function buildHistoryWeek(input: {
           kind: s.type === 'PU' ? 'Pickup' : 'Delivery',
           place: placeOf(s) ?? 'No place entered',
           arrived: s.arrivedAt ? stamp(s.arrivedAt) : unreached,
-          departed: s.departedAt ? stamp(s.departedAt, s.arrivedAt) : s.arrivedAt && kind === 'progress' ? 'Not yet' : unreached,
+          departed: s.departedAt
+            ? // §12.118. A hand departure is said as one, here as on the timeline.
+              `${stamp(s.departedAt, s.arrivedAt)}${s.departedSource === 'dispatcher' ? ', marked by hand' : ''}`
+            : s.arrivedAt && kind === 'progress'
+              ? 'Not yet'
+              : unreached,
         })),
         missing: !hasPu
           ? 'No pickup stop in the data for this load.'

@@ -45,6 +45,8 @@ const Stop = z.object({
   arrivedAt: ISO.nullable(),
   arrivedSource: z.enum(ARRIVAL_SOURCES).nullable(),
   departedAt: ISO.nullable(),
+  /** §12.118. */
+  departedSource: z.enum(['detected', 'dispatcher']).nullable(),
   precision: z.enum(['street', 'block', 'zip']).nullable(),
   accuracyMiles: z.number().nullable(),
   override: Override.nullable(),
@@ -95,6 +97,7 @@ export async function loadForEdit(db: Db | Tx, loadId: string): Promise<LoadForE
                  'arrivedAt', ${iso('s.arrived_at')},
                  'arrivedSource', s.arrived_source,
                  'departedAt', ${iso('s.departed_at')},
+                 'departedSource', s.departed_source,
                  'precision', s.geocode_precision,
                  'accuracyMiles', s.geocode_accuracy_miles,
                  'override', (

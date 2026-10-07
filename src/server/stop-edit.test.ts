@@ -2128,17 +2128,12 @@ withDb('the arrival anchor (§12.85)', () => {
     });
   });
 
-  it('is wiped by an address change, with the arrival and the departure', async () => {
+  it('is wiped by an address change, with the arrival', async () => {
     const seen = await rolledBack(async (tx) => {
       const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
       await mark(tx, truckId, stopId);
-      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
       const before = await read(tx, stopId);
       // The modal re-sends the stored arrival; the address is what changed.
-      const [{ at }] = (await tx.execute(
-        sql`select arrived_at as at from stops where id = ${stopId}::uuid`,
-      )) as unknown as [{ at: string }];
-      void at;
       await mark(tx, truckId, stopId, { addressLine: '26700 S Walton Dr' });
       const audit = (
         await tx.select({ after: auditLog.after }).from(auditLog).where(eq(auditLog.entityId, stopId))
@@ -2148,7 +2143,6 @@ withDb('the arrival anchor (§12.85)', () => {
       return { before, after: await read(tx, stopId), audit };
     });
     expect(seen.before.lat).not.toBeNull();
-    expect(seen.before.departedAt).not.toBeNull();
     expect(seen.after).toEqual({
       arrivedAt: null,
       arrivedSource: null,
@@ -2158,6 +2152,28 @@ withDb('the arrival anchor (§12.85)', () => {
       at: null,
     });
     expect(seen.audit).toMatchObject({ arrivedAt: null, departedAt: null, arrivalWipedBy: 'address-changed' });
+  });
+
+  /**
+   * §12.116 D4 narrows the rule above. It used to wipe a DEPARTED stop's
+   * arrival and departure too, which on a load with a next stop would move
+   * the board back to a stop the truck has left. A departed stop's address
+   * now stays as recorded, and the save is refused with nothing changed.
+   */
+  it('refuses the address change on a stop the truck has left, and wipes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { truckId, stopId } = await setUp(tx, { ...PARKED, speedMph: 0, minutesOld: 1 });
+      await mark(tx, truckId, stopId);
+      await tx.update(stops).set({ departedAt: new Date() }).where(eq(stops.id, stopId));
+      const before = await read(tx, stopId);
+      const error = await mark(tx, truckId, stopId, { addressLine: '26700 S Walton Dr' }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      return { before, after: await read(tx, stopId), error };
+    });
+    expect((seen.error as Error).message).toMatch(/has left this stop/);
+    expect(seen.after).toEqual(seen.before);
   });
 
   it('wipes a DETECTED arrival on an address change too', async () => {

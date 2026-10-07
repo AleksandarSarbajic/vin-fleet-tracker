@@ -31,6 +31,8 @@ describe('the arrival-clearing column sets', () => {
       arrivedAt: null,
       arrivedSource: null,
       departedAt: null,
+      // §12.118. The departure's pair goes with it.
+      departedSource: null,
       ...ANCHOR_CLEARED,
     });
   });

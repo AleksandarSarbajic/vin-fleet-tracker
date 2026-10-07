@@ -7,10 +7,11 @@ import type { Db, Tx } from './audit';
  * An md5 of everything a PERSON edits about the load: its number, status and
  * truck; the truck's open assignment (which assignment, which driver); and,
  * for every stop in sequence order, its id, sequence, type, address,
- * appointment, note, a dispatcher's arrival, and the id of its live override.
+ * appointment, note, a dispatcher's arrival and departure (§12.118), and the
+ * id of its live override.
  *
  * What the worker writes is left out on purpose: a detected arrival, a
- * departure, coordinates. A truck reaching its stop while the modal is open
+ * detected departure, coordinates. A truck reaching its stop while the modal is open
  * must not refuse the dispatcher's save — the rules that care about an
  * arrival (the reached-stop question, removing a stop) re-read it under the
  * lock and ask or refuse by themselves.
@@ -42,6 +43,8 @@ export function loadVersionSql(loadId: SQL): SQL {
                  sv.appointment_tz, sv.appointment_type, sv.dispatcher_note,
                  case when sv.arrived_source = 'dispatcher'
                       then extract(epoch from sv.arrived_at) end,
+                 case when sv.departed_source = 'dispatcher'
+                      then extract(epoch from sv.departed_at) end,
                  (select ov.id from overrides ov
                    where ov.stop_id = sv.id and ov.cleared_at is null)
                ) order by sv.sequence)

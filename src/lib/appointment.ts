@@ -258,7 +258,8 @@ export class AppointmentTimeError extends Error {
     readonly field:
       | 'appointment.time'
       | 'appointment.endTime'
-      | 'arrivedAt.time' = 'appointment.time',
+      | 'arrivedAt.time'
+      | 'departedAt.time' = 'appointment.time',
   ) {
     super(
       `${wall} does not exist in ${tz} — the clocks jump that hour, and it ` +

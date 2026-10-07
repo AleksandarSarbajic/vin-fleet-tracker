@@ -213,6 +213,14 @@ export function previousLoadLine(
       : last.arrivedSource === 'dispatcher'
         ? ' (marked by hand)'
         : '';
+  /**
+   * §12.118. The note at the end has always described the ARRIVAL. A hand
+   * departure needs its own, so then each note sits beside the time it is
+   * about; a line without one reads exactly as it did.
+   */
+  if (last.departedSource === 'dispatcher') {
+    return `Previous load ${shortName(load.loadNumber)}: ${lastPlace(load)}, ${arrived}${how}, ${departed} (marked by hand). Still open.`;
+  }
   return `Previous load ${shortName(load.loadNumber)}: ${lastPlace(load)}, ${arrived}, ${departed}${how}. Still open.`;
 }
 

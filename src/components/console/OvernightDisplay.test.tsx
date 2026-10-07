@@ -157,6 +157,7 @@ describe('the timeline', () => {
     arrivedAt: null,
     arrivedSource: null,
     departedAt: null,
+    departedSource: null,
     dispatcherNote: null,
     noteAt: null,
     overrides: [],
@@ -187,6 +188,21 @@ describe('the timeline', () => {
   it('marks an APPT window that runs past midnight too', () => {
     mountTimeline([stop(hours({ h: 23, min: 30 }, { h: 0, min: 30 }, 'APPT'))]);
     expect(container.textContent).toContain('23:30 CDT – 00:30 CDT +1');
+  });
+
+  it('says a departure was marked by hand (§12.118)', () => {
+    mountTimeline([
+      stop({ arrivedAt: '2026-09-18T12:00:00.000Z', arrivedSource: 'detected', departedAt: '2026-09-18T13:00:00.000Z', departedSource: 'dispatcher' }),
+    ]);
+    expect(container.textContent).toContain('marked by hand');
+  });
+
+  it('says nothing more for a detected departure (§12.118)', () => {
+    mountTimeline([
+      stop({ arrivedAt: '2026-09-18T12:00:00.000Z', arrivedSource: 'detected', departedAt: '2026-09-18T13:00:00.000Z', departedSource: 'detected' }),
+    ]);
+    expect(container.textContent).toContain('Departed');
+    expect(container.textContent).not.toContain('marked by hand');
   });
 
   it('reads a same-day window as before', () => {

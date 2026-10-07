@@ -40,18 +40,35 @@ export interface ArrivalDraft {
   time: string;
 }
 
+/**
+ * §12.118. The departure, by the arrival's rules: a wall time at the stop, in
+ * the stop's own zone, never a button that stamps now. Shown only under a
+ * ticked arrival — a truck can only leave a stop it reached.
+ */
+export interface DepartureDraft {
+  /** Unchecked with a stored departure means CLEAR IT. */
+  marked: boolean;
+  date: string;
+  time: string;
+}
+
 export function ArrivalFields({
   draft,
   onChange,
+  departure,
+  onDepartureChange,
   /** The stop's zone — whatever the appointment block currently holds. */
   zone,
   storedSource,
   addressChanged = false,
   disabled,
   error,
+  departureError,
 }: {
   draft: ArrivalDraft;
   onChange: (next: ArrivalDraft) => void;
+  departure: DepartureDraft;
+  onDepartureChange: (next: DepartureDraft) => void;
   zone: string;
   /** What is in the database now, or null when the truck has not arrived. */
   storedSource: ArrivalSource | null;
@@ -59,21 +76,26 @@ export function ArrivalFields({
   addressChanged?: boolean;
   disabled: boolean;
   error?: string | undefined;
+  departureError?: string | undefined;
 }) {
   const set = (patch: Partial<ArrivalDraft>) => onChange({ ...draft, ...patch });
+  const setDeparture = (patch: Partial<DepartureDraft>) =>
+    onDepartureChange({ ...departure, ...patch });
 
   /**
    * Display only, and built from the date being typed rather than from today:
    * the abbreviation is a property of the INSTANT, and an arrival entered on
    * 3 November is CST where the same clock face on 1 November is CDT.
    */
-  const abbrev = (() => {
+  const abbrevFor = (date: string, time: string) => {
     if (!isIanaZone(zone)) return '';
-    const [y, m, d] = draft.date.split('-').map(Number);
-    const [h, min] = draft.time.split(':').map(Number);
+    const [y, m, d] = date.split('-').map(Number);
+    const [h, min] = time.split(':').map(Number);
     if ([y, m, d, h, min].some((n) => n === undefined || Number.isNaN(n))) return '';
     return zoneAbbreviation(new Date(Date.UTC(y!, m! - 1, d!, h!, min!)), zone);
-  })();
+  };
+  const abbrev = abbrevFor(draft.date, draft.time);
+  const departureAbbrev = abbrevFor(departure.date, departure.time);
 
   return (
     <fieldset disabled={disabled} className="mt-4 border-0 p-0">
@@ -85,7 +107,11 @@ export function ArrivalFields({
         <input
           type="checkbox"
           checked={draft.marked}
-          onChange={(e) => set({ marked: e.target.checked })}
+          onChange={(e) => {
+            set({ marked: e.target.checked });
+            // §12.57/§12.118. The departure goes with the arrival it left from.
+            if (!e.target.checked && departure.marked) setDeparture({ marked: false });
+          }}
           aria-label="This truck has arrived at this stop"
         />
         This truck has arrived at this stop
@@ -145,6 +171,66 @@ export function ArrivalFields({
               This arrival was detected from GPS. Changing the time replaces that
               with your own entry, and the row will read <em>marked</em> instead of{' '}
               <em>arrived</em>.
+            </p>
+          ) : null}
+
+          {/* --------------------------- departure ------------------------ */}
+          <label className="mt-3 flex items-center gap-2 text-body text-text-secondary">
+            <input
+              type="checkbox"
+              checked={departure.marked}
+              onChange={(e) => setDeparture({ marked: e.target.checked })}
+              aria-label="This truck has left this stop"
+            />
+            This truck has left this stop
+          </label>
+
+          {departure.marked ? (
+            <>
+              <div className="mt-3 grid grid-cols-[1.2fr_1fr_1.4fr] gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-small text-text-secondary">
+                    Departure date
+                  </span>
+                  <input
+                    type="date"
+                    value={departure.date}
+                    onChange={(e) => setDeparture({ date: e.target.value })}
+                    className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-small text-text-secondary">
+                    Departure time at the stop
+                  </span>
+                  <div className="relative">
+                    <input
+                      type="time"
+                      value={departure.time}
+                      onChange={(e) => setDeparture({ time: e.target.value })}
+                      className="h-10 w-full border border-line-hair bg-surface-sunken px-2 pr-12 text-body text-text"
+                    />
+                    {departureAbbrev ? (
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnOverlay">
+                        {departureAbbrev}
+                      </span>
+                    ) : null}
+                  </div>
+                </label>
+                <p className="self-end pb-2 text-small text-text-mutedOnOverlay">
+                  When the truck left, on the receiver&rsquo;s clock.
+                </p>
+              </div>
+              {/* Said before Save: unticking the arrival takes this with it. */}
+              <p className="mt-2 text-small text-text-mutedOnOverlay" data-departure-note="">
+                Unticking the arrival clears the departure too.
+              </p>
+            </>
+          ) : null}
+
+          {departureError ? (
+            <p className="mt-2 text-small text-status-late-fg" role="alert">
+              {departureError}
             </p>
           ) : null}
         </>

@@ -42,6 +42,7 @@ const stop = (over: Partial<TimelineStop> = {}): TimelineStop => ({
   arrivedAt: null,
   arrivedSource: null,
   departedAt: null,
+  departedSource: null,
   dispatcherNote: null,
   noteAt: null,
   overrides: [],
@@ -241,6 +242,13 @@ describe('previous loads (§12.92)', () => {
     it('says "marked by hand" for an arrival the dispatcher entered', () => {
       const [load] = previousLoads([done({ arrivedSource: 'dispatcher' })]);
       expect(previousLoadLine(load!, TZ, now)).toContain('(marked by hand). Still open.');
+    });
+
+    it('says which time a dispatcher entered when the departure was theirs (§12.118)', () => {
+      const [load] = previousLoads([done({ loadNumber: '6612193', departedSource: 'dispatcher' })]);
+      expect(previousLoadLine(load!, TZ, now)).toBe(
+        `Previous load 6612193: Vernon Hills, arrived ${at(4)} (detected automatically), departed ${at(3)} (marked by hand). Still open.`,
+      );
     });
 
     it('says "no number" for a load without one (§12.21)', () => {

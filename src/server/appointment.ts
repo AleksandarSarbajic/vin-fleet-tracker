@@ -222,7 +222,7 @@ export async function resolveAppointment(
 export async function resolveWallTime(
   executor: Executor,
   input: WallTimeInput,
-  field: 'arrivedAt.time' = 'arrivedAt.time',
+  field: 'arrivedAt.time' | 'departedAt.time' = 'arrivedAt.time',
 ): Promise<{ utc: string; resolution: AppointmentResolution }> {
   const at = appointmentStartSql(input);
 

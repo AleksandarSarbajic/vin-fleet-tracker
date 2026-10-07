@@ -23,6 +23,7 @@ const stop = (over: Partial<HistoryStop> & Pick<HistoryStop, 'type'>): HistorySt
   state: null,
   arrivedAt: null,
   departedAt: null,
+  departedSource: null,
   ...over,
 });
 const load = (over: Partial<HistoryLoad> & { stops: HistoryStop[] }): HistoryLoad => ({
@@ -115,6 +116,23 @@ describe('a pickup and a delivery pair only under all four rules', () => {
     expect(view.rows[0]!.cells[0]!.entries[0]!.tip.stops.map((s) => [s.kind, s.arrived])).toEqual([
       ['Pickup', 'Mon 28 · 07:00 CDT'],
       ['Delivery', 'Tue 29 · 16:00 CDT'],
+    ]);
+  });
+
+  it('says a departure was marked by hand, in the tooltip (§12.118)', () => {
+    const view = build([
+      load({
+        number: '48300',
+        stops: [
+          stop({ type: 'PU', city: 'Melrose Park', state: 'IL', arrivedAt: at(0, 7), departedAt: at(0, 8), departedSource: 'dispatcher' }),
+          stop({ type: 'DEL', sequence: 2, city: 'Fargo', state: 'ND', arrivedAt: at(1, 16), departedAt: at(1, 17), departedSource: 'detected' }),
+        ],
+      }),
+    ]);
+    expect(view.rows[0]!.cells[0]!.entries[0]!.tip.stops.map((s) => s.departed)).toEqual([
+      // Same day as its arrival, so the time alone (as every departure reads).
+      '08:00 CDT, marked by hand',
+      '17:00 CDT',
     ]);
   });
 

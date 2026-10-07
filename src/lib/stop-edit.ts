@@ -216,6 +216,19 @@ export const StopEdit = z
     arrivedAt: WallTimeInput.nullable().optional(),
 
     /**
+     * §12.118. The departure, marked by hand — the arrival's three states,
+     * for leaving:
+     *
+     *     {date,time,tz}   set it — recorded as `dispatcher`
+     *     null             clear it, and its source with it
+     *     omitted          LEAVE IT ALONE
+     *
+     * Needs an arrival, stored or in this save; never before it, never in
+     * the future. Clearing the arrival clears this too (§12.57).
+     */
+    departedAt: WallTimeInput.nullable().optional(),
+
+    /**
      * The driver this truck should end up with. Undefined leaves the
      * assignment alone; null clears it; a uuid assigns or reassigns, which
      * goes through the two-sided transaction and the confirm dialog.
@@ -306,6 +319,9 @@ export function dirtyFields(before: Partial<StopEdit>, after: StopEdit): string[
   // `!==` above would call every open modal dirty on identity alone.
   if (JSON.stringify(before.arrivedAt ?? null) !== JSON.stringify(after.arrivedAt ?? null)) {
     changed.push('arrival');
+  }
+  if (JSON.stringify(before.departedAt ?? null) !== JSON.stringify(after.departedAt ?? null)) {
+    changed.push('departure');
   }
   return changed;
 }

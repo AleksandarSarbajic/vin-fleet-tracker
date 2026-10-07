@@ -66,6 +66,7 @@ export async function loadHistoryWeek(db: Db, week: IsoWeek, timeZone: string): 
           state: stops.state,
           arrivedAt: stops.arrivedAt,
           departedAt: stops.departedAt,
+          departedSource: stops.departedSource,
         })
         .from(stops)
         .where(inArray(stops.loadId, ids))
@@ -110,6 +111,7 @@ export async function loadHistoryWeek(db: Db, week: IsoWeek, timeZone: string): 
         state: s.state,
         arrivedAt: s.arrivedAt?.toISOString() ?? null,
         departedAt: s.departedAt?.toISOString() ?? null,
+        departedSource: s.departedSource,
       })),
   }));
 

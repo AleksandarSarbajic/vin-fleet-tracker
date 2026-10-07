@@ -21,7 +21,7 @@ import {
   zoneForState,
   type AppointmentDraft,
 } from './AppointmentFields';
-import { ArrivalFields, type ArrivalDraft } from './ArrivalFields';
+import { ArrivalFields, type ArrivalDraft, type DepartureDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
 import { DEFAULT_WINDOW_MINUTES, storedWindowMinutes } from '@/lib/appointment';
 import { ReassignConfirm } from './ReassignConfirm';
@@ -190,6 +190,16 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
         time:
           isoTime(stop?.arrivedAt ?? null, arrivalZone) || isoTime(openedAt, arrivalZone),
       } as ArrivalDraft,
+      /**
+       * §12.118. The board's next stop has not been left — that is what makes
+       * it the next stop — so this always opens unmarked, with the same
+       * frozen default the arrival has: now, at the stop.
+       */
+      departure: {
+        marked: false,
+        date: isoDate(openedAt, arrivalZone),
+        time: isoTime(openedAt, arrivalZone),
+      } as DepartureDraft,
     }),
     [arrivalZone, drivers, openedAt, row.id, stop],
   );
@@ -340,6 +350,26 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             }
           : stop?.arrivedAt
             ? null
+            : undefined,
+        /**
+         * §12.118. Marked: a wall time in the stop's zone. Unmarked: nothing
+         * to say — the next stop has no departure to clear. Never sent
+         * without the arrival it leaves from; unticking that unticks this.
+         */
+        departedAt:
+          f.arrival.marked && f.departure.marked
+            ? {
+                date: {
+                  y: Number(f.departure.date.slice(0, 4)),
+                  m: Number(f.departure.date.slice(5, 7)),
+                  d: Number(f.departure.date.slice(8, 10)),
+                },
+                time: {
+                  h: Number(f.departure.time.slice(0, 2)),
+                  min: Number(f.departure.time.slice(3, 5)),
+                },
+                tz: f.appointment.tz,
+              }
             : undefined,
         driverId: f.driverId,
       };
@@ -1012,6 +1042,8 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             <ArrivalFields
               draft={form.arrival}
               onChange={(next) => set('arrival', next)}
+              departure={form.departure}
+              onDepartureChange={(next) => set('departure', next)}
               zone={form.appointment.tz}
               storedSource={stop?.arrivedSource ?? null}
               addressChanged={
@@ -1036,6 +1068,14 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
                 errorFor('arrivedAt.date.d') ??
                 errorFor('arrivedAt.time.h') ??
                 errorFor('arrivedAt.time.min')
+              }
+              departureError={
+                errorFor('departedAt.time') ??
+                errorFor('departedAt.date.y') ??
+                errorFor('departedAt.date.m') ??
+                errorFor('departedAt.date.d') ??
+                errorFor('departedAt.time.h') ??
+                errorFor('departedAt.time.min')
               }
             />
 

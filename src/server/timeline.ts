@@ -76,6 +76,8 @@ export interface TimelineStop {
   arrivedAt: string | null;
   arrivedSource: 'detected' | 'dispatcher' | null;
   departedAt: string | null;
+  /** §12.118. Who recorded the departure: the worker, or a dispatcher. */
+  departedSource: 'detected' | 'dispatcher' | null;
   dispatcherNote: string | null;
   noteAt: string | null;
   overrides: TimelineOverride[];
@@ -123,7 +125,8 @@ export async function loadTruckTimeline(
            s.appointment_start_utc, s.appointment_end_utc,
            s.appointment_tz, s.appointment_type::text as appointment_type,
            s.arrived_at, s.arrived_source::text as arrived_source,
-           s.departed_at, s.dispatcher_note, s.note_at,
+           s.departed_at, s.departed_source::text as departed_source,
+           s.dispatcher_note, s.note_at,
            /*
             * The overrides for this stop, newest first, as JSON rather than
             * as a second query or a join that multiplies the stop rows. A
@@ -171,6 +174,7 @@ export async function loadTruckTimeline(
     arrivedAt: iso(r['arrived_at']),
     arrivedSource: (r['arrived_source'] as 'detected' | 'dispatcher' | null) ?? null,
     departedAt: iso(r['departed_at']),
+    departedSource: (r['departed_source'] as 'detected' | 'dispatcher' | null) ?? null,
     dispatcherNote: (r['dispatcher_note'] as string | null) ?? null,
     noteAt: iso(r['note_at']),
     overrides: ((r['overrides'] as TimelineOverride[] | null) ?? []).map((o) => ({

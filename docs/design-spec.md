@@ -8685,6 +8685,53 @@ to the bridge fails the explicit-source test, run with the bridge disabled.
 A stop the dispatcher marked left is never watched again: the sweep watches
 the board's next stop (§12.116), which is the first stop not departed.
 
+### The control
+
+Under the arrival, and only while the arrival is ticked: **"This truck has
+left this stop"**, then a date and a time at the stop, in the stop's own zone
+(the appointment block's, as the arrival uses), with the abbreviation for the
+typed instant. It defaults to now at the stop, frozen when the modal opens.
+While both are ticked the modal says **"Unticking the arrival clears the
+departure too."**; unticking the arrival hides and resets it.
+
+On the wire the stop carries `departedAt` with the arrival's three states —
+a wall time, null to clear, omitted to leave alone. The server:
+
+- needs the arrival it leaves from, stored or written in the same save —
+  "Mark the arrival first: a truck can only leave a stop it reached.";
+- refuses one before the arrival, one in the future (the arrival's 5-minute
+  guard), and the spring-forward hour, each on `departedAt.time`;
+- moves the source only when the minute moves, so a detected departure
+  re-sent by an unrelated save stays `detected`;
+- clears it, and its source, with the arrival (`ARRIVAL_CLEARED`), and drops
+  it with an arrival an address change wipes (§12.85).
+
+**The board** moves on exactly as after a detected departure: to the next
+stop, or — on a one-stop load — to the "No next stop. 1 previous load still
+open" state, which Clear stop closes.
+
+**The version** (§12.117) now includes a dispatcher's departure; a detected
+one stays out. The expression changed, so every load's version changed once
+when this deployed.
+
+**"Marked by hand"** appears wherever a departure is shown: the timeline's
+Departed line, the previous-load line, and the history page's tooltip. The
+previous-load line's closing note has always described the arrival; with a
+hand departure each note now sits beside its own time, and a line without one
+reads exactly as before.
+
+**D4** (§12.116). A stop the truck has left keeps its address, type and
+appointment — "The truck has left this stop, so its address, type and
+appointment stay as recorded." The address and type are checked before the
+reached-stop question, so it is never asked about a change that would then be
+refused. This narrows §12.85: an address change used to wipe a departed
+stop's arrival and departure; it is now refused, because on a load with a
+next stop the wipe would move the board back to a stop the truck has left.
+The note, arrival and departure of a departed stop can still be corrected.
+
+**The audit row** carries `departedAt` and `departedSource` only when the
+save moved them, and `before` carries `departedSource`.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

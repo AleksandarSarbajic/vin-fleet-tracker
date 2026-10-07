@@ -45,6 +45,8 @@ export const StopDraft = z
     dispatcherNote: blankIsNull(2000).optional(),
     /** Omitted leaves the arrival alone; null clears it (§12.57). */
     arrivedAt: WallTimeInput.nullable().optional(),
+    /** §12.118. The same three states, for the departure. */
+    departedAt: WallTimeInput.nullable().optional(),
     /** Omitted leaves any override alone (§12.28). */
     override: StopOverrideEdit.optional(),
   })
@@ -131,6 +133,7 @@ export function loadEditFromStop(
     appointment: edit.appointment,
     ...(edit.dispatcherNote !== undefined ? { dispatcherNote: edit.dispatcherNote } : {}),
     ...(edit.arrivedAt !== undefined ? { arrivedAt: edit.arrivedAt } : {}),
+    ...(edit.departedAt !== undefined ? { departedAt: edit.departedAt } : {}),
     ...(edit.override !== undefined ? { override: edit.override } : {}),
   };
   return {

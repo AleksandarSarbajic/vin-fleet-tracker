@@ -30,5 +30,7 @@ export const ARRIVAL_CLEARED = {
   arrivedAt: null,
   arrivedSource: null,
   departedAt: null,
+  // §12.118. The pair goes with it, or the paired check refuses the write.
+  departedSource: null,
   ...ANCHOR_CLEARED,
 } as const;

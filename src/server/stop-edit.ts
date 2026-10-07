@@ -90,6 +90,10 @@ export class StopEditError extends Error {
   }
 }
 
+/** §12.116 D4. A stop the truck has left keeps where and when it was. */
+const LEFT_STOP_LOCKED =
+  'The truck has left this stop, so its address, type and appointment stay as recorded. Nothing was saved.';
+
 /** §12.117. Said word for word by the modal, which keeps what was typed. */
 export const STALE_LOAD_MESSAGE = 'This load was changed since you opened it. Nothing was saved.';
 
@@ -140,6 +144,7 @@ const STORED_STOP = {
   arrivedAt: stops.arrivedAt,
   arrivedSource: stops.arrivedSource,
   departedAt: stops.departedAt,
+  departedSource: stops.departedSource,
   lat: stops.lat,
   lng: stops.lng,
   geocodePrecision: stops.geocodePrecision,
@@ -184,6 +189,7 @@ function stopBefore(load: StoredLoad, s: StoredStop): Record<string, unknown> {
     arrivedAt: s.arrivedAt?.toISOString() ?? null,
     arrivedSource: s.arrivedSource,
     departedAt: s.departedAt?.toISOString() ?? null,
+    departedSource: s.departedSource,
     arrivalAnchorAt: s.arrivalAnchorAt?.toISOString() ?? null,
   };
 }
@@ -310,6 +316,23 @@ export async function saveLoadEdit(
     const byId = new Map(stored.map((s) => [s.stopId, s]));
 
     if (load) checkStops(edit, stored, byId, removedIds, isNextTrip);
+
+    /**
+     * §12.116 D4, before the reached-stop question: a departed stop's address
+     * and type are not open to "correction or next trip?" at all, and asking
+     * first would only lead to a refusal after the answer. Its appointment is
+     * held to the same rule in `writeStop`, once resolved.
+     */
+    edit.stops.forEach((draft, i) => {
+      const existing = draft.stopId ? byId.get(draft.stopId) : undefined;
+      if (
+        existing?.departedAt &&
+        (normalizeAddress(existing) !== normalizeAddress(addressOf(draft)) ||
+          existing.stopType !== draft.stopType)
+      ) {
+        throw new AtStopError(i, new StopEditError(LEFT_STOP_LOCKED, '*'));
+      }
+    });
 
     /**
      * The overwritten-trips fix. Asked every time the city of a reached stop
@@ -777,6 +800,8 @@ async function writeStop(
   const { geocode, addressChanged } = ctx.located;
   const typed = addressOf(draft);
   const arrivedAtEdit = ctx.ignoreArrival ? undefined : draft.arrivedAt;
+  /** §12.118. The departure, by the arrival's rules; the next trip starts with neither. */
+  const departedAtEdit = ctx.ignoreArrival ? undefined : draft.departedAt;
 
   /* -------------------------- the appointment ------------------------ */
 
@@ -790,6 +815,37 @@ async function writeStop(
       message: repeatedHourWarning(appointment.endUtc, appointment.tz),
     });
   }
+
+  /**
+   * §12.116 D4. A stop the truck has LEFT is a record of where it went. Its
+   * address, type and appointment stay as recorded: under §12.85 a new
+   * address would wipe the departure, and the board would jump back to a
+   * stop the truck is no longer at. Its note, arrival and departure can still
+   * be corrected.
+   */
+  if (existing?.departedAt) {
+    const instant = (value: Date | string | null | undefined) =>
+      value ? new Date(value).getTime() : null;
+    const unchanged =
+      normalizeAddress(existing) === normalizeAddress(typed) &&
+      existing.stopType === draft.stopType &&
+      instant(existing.appointmentStartUtc) === instant(appointment?.startUtc) &&
+      instant(existing.appointmentEndUtc) === instant(appointment?.endUtc) &&
+      (existing.appointmentStartUtc === null ||
+        (existing.appointmentTz === (appointment?.tz ?? null) &&
+          existing.appointmentType === (draft.appointment?.type ?? 'APPT')));
+    if (!unchanged) {
+      throw new StopEditError(LEFT_STOP_LOCKED, '*');
+    }
+  }
+
+  /**
+   * §12.118. The departure as an instant, resolved up front so the arrival's
+   * own "not after the truck left" check below measures against the
+   * departure this save is writing, not the one it is replacing. Refused on
+   * the spring-forward hour, like the arrival.
+   */
+  const departure = departedAtEdit ? await resolveWallTime(tx, departedAtEdit, 'departedAt.time') : null;
 
   /**
    * §12.23 — an edit writes only the fields the form owns. Coordinates are
@@ -961,8 +1017,10 @@ async function writeStop(
       );
     }
     // The database would refuse this too (`stops_departed_after_arrived`),
-    // as a 500 with no field on it. Said here so it lands on the input.
-    if (existing?.departedAt && at > existing.departedAt.getTime()) {
+    // as a 500 with no field on it. Said here so it lands on the input. A
+    // departure this save also writes is checked against the arrival below,
+    // on its own field.
+    if (departedAtEdit === undefined && existing?.departedAt && at > existing.departedAt.getTime()) {
       throw new StopEditError(
         'That is after the truck left this stop. Check the date.',
         'arrivedAt.time',
@@ -1055,6 +1113,73 @@ async function writeStop(
     }
   }
 
+  /* -------------------------- the departure -------------------------- */
+
+  /**
+   * §12.118. `departed_at`, written by a person — the arrival's three rules:
+   * omitted leaves it, null clears it, a wall time is converted here; and the
+   * source moves only when the MINUTE moves, so a detected departure re-sent
+   * by an unrelated save stays `detected`.
+   *
+   * It needs the arrival it leaves from — stored, or written in this save —
+   * and is never before it nor in the future. Clearing the arrival has
+   * already cleared it (`ARRIVAL_CLEARED`), and so has an address change;
+   * a departure sent beside a wiped arrival is dropped with it, like the
+   * arrival itself (§12.85).
+   */
+  let departureColumns:
+    | Record<string, never>
+    | { departedAt: null; departedSource: null }
+    | { departedAt: SQL; departedSource: 'dispatcher' } = {};
+  /** What to log: undefined = untouched, null = cleared, string = written. */
+  let departureWritten: string | null | undefined;
+
+  const arrivalCleared = arrivalColumns === CLEARED;
+  if (!wipedByAddress) {
+    if (departedAtEdit === null) {
+      if (existing?.departedAt && !arrivalCleared) {
+        departureColumns = { departedAt: null, departedSource: null };
+        departureWritten = null;
+      }
+    } else if (departure) {
+      const minute = (value: Date | null) =>
+        value === null ? null : Math.floor(value.getTime() / 60_000);
+      if (minute(existing?.departedAt ?? null) !== minute(new Date(departure.utc))) {
+        const arrivedAt = arrivalCleared
+          ? null
+          : arrivalWritten !== undefined && arrivalWritten !== null
+            ? new Date(arrivalWritten)
+            : (existing?.arrivedAt ?? null);
+        if (arrivedAt === null) {
+          throw new StopEditError(
+            'Mark the arrival first: a truck can only leave a stop it reached.',
+            'departedAt.time',
+          );
+        }
+        const at = new Date(departure.utc).getTime();
+        // The arrival's guard, unchanged: the control defaults to the
+        // dispatcher's own clock, so a browser a minute fast is tolerated.
+        if (at > Date.now() + FUTURE_ARRIVAL_TOLERANCE_MS) {
+          throw new StopEditError(
+            'That departure time is in the future. The truck cannot have left yet.',
+            'departedAt.time',
+          );
+        }
+        if (at < arrivedAt.getTime()) {
+          throw new StopEditError(
+            'That is before the truck arrived at this stop. Check the date.',
+            'departedAt.time',
+          );
+        }
+        departureColumns = {
+          departedAt: sql`${departure.utc}::timestamptz`,
+          departedSource: 'dispatcher',
+        };
+        departureWritten = departure.utc;
+      }
+    }
+  }
+
   let stopId: string;
   if (existing) {
     stopId = existing.stopId;
@@ -1068,6 +1193,7 @@ async function writeStop(
         zip: draft.zip,
         ...noteColumns,
         ...arrivalColumns,
+        ...departureColumns,
         ...geocodeColumns,
         ...appointmentColumns,
       })
@@ -1116,6 +1242,7 @@ async function writeStop(
         // A brand new stop has no arrival to leave alone either, so the
         // block above resolves to `{}` for both omitted and null.
         ...arrivalColumns,
+        ...departureColumns,
         ...geocodeColumns,
         ...appointmentColumns,
       })
@@ -1173,8 +1300,8 @@ async function writeStop(
      * moved it. A history that showed an arrival being re-set on every
      * unrelated edit would bury the one entry that matters.
      */
-    arrival:
-      arrivalWritten !== undefined
+    arrival: {
+      ...(arrivalWritten !== undefined
         ? {
             arrivedAt: arrivalWritten,
             arrivedSource: arrivalWritten === null ? null : 'dispatcher',
@@ -1184,10 +1311,18 @@ async function writeStop(
                 ? { arrivalAnchor: anchor.anchor }
                 : { arrivalAnchor: null, anchorRefused: anchor.refused, anchorMiles: anchor.miles }
               : {}),
-            ...(arrivalWritten === null ? { departedAt: null } : {}),
+            ...(arrivalWritten === null ? { departedAt: null, departedSource: null } : {}),
             ...(arrivalWipedBy ? { arrivalWipedBy } : {}),
           }
-        : {},
+        : {}),
+      // §12.118. Same rule: present only when this save moved the departure.
+      ...(departureWritten !== undefined
+        ? {
+            departedAt: departureWritten,
+            departedSource: departureWritten === null ? null : 'dispatcher',
+          }
+        : {}),
+    },
   };
 }
 
