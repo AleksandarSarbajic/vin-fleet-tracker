@@ -57,6 +57,8 @@ export interface FieldError {
 
 /** §12.119 S4-A. Said under the time field of a ticked appointment with no time. */
 export const APPOINTMENT_TIME_MISSING = 'Enter a time, or untick the appointment.';
+/** §12.119. Said under the date field of a ticked appointment with no date. */
+export const APPOINTMENT_DATE_MISSING = 'Enter a date, or untick the appointment.';
 
 const isoDate = (utc: string | null, tz: string | null): string => {
   if (!utc || !tz) return '';
@@ -289,16 +291,23 @@ export function stopsToSend(
 }
 
 /**
- * §12.119 S4-A. A ticked appointment with no time used to save as NO
- * appointment, silently: `stopEditOf` cannot build one without a time, and
- * sends null. Now it is an error on the time field, on every stop.
+ * §12.119 S4-A. A ticked appointment with no time — or no date — used to
+ * save as NO appointment, silently: `stopEditOf` cannot build one without
+ * both, and sends null. Now each is an error on its own field, on every stop,
+ * APPT or FCFS alike.
  */
 export function appointmentErrors(form: LoadForm): FieldError[] {
-  return form.stops.flatMap((s) =>
-    s.appointment.enabled && s.appointment.time.trim() === ''
-      ? [{ field: 'appointment.time', message: APPOINTMENT_TIME_MISSING, stopKey: s.key }]
-      : [],
-  );
+  return form.stops.flatMap((s) => {
+    if (!s.appointment.enabled) return [];
+    const errors: FieldError[] = [];
+    if (s.appointment.date.trim() === '') {
+      errors.push({ field: 'appointment.date', message: APPOINTMENT_DATE_MISSING, stopKey: s.key });
+    }
+    if (s.appointment.time.trim() === '') {
+      errors.push({ field: 'appointment.time', message: APPOINTMENT_TIME_MISSING, stopKey: s.key });
+    }
+    return errors;
+  });
 }
 
 /**

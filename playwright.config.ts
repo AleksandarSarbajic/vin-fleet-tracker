@@ -30,9 +30,10 @@ export const SENTRY_SINK_URL = `http://127.0.0.1:${SENTRY_SINK_PORT}`;
 const SENTRY_SINK_DSN = `http://e2e@127.0.0.1:${SENTRY_SINK_PORT}/sentrysink/1`;
 /** The e2e build's own directory — never `.next`, which `next dev` owns. */
 export const E2E_DIST_DIR = '.next-e2e';
+// §12.119: the browser suite's own database — see e2e/fixtures.ts.
 const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ??
-  `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
+  process.env.E2E_DATABASE_URL ??
+  `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_e2e`;
 
 /**
  * §12.84. This run's results folder: `test-results/<run id>`, never a shared

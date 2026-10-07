@@ -73,7 +73,7 @@ export function StopForm({
         <span className="font-cond text-[15px] font-semibold uppercase tracking-[.07em] text-text">
           Stop {index + 1}
         </span>
-        <div role="radiogroup" aria-label="Stop type" className="flex">
+        <div role="group" aria-label="Stop type" className="flex">
           {(
             [
               ['PU', 'Pick up'],
@@ -85,8 +85,7 @@ export function StopForm({
               <button
                 key={type}
                 type="button"
-                role="radio"
-                aria-checked={on}
+                aria-pressed={on}
                 disabled={!mayEdit || locked}
                 title={lockedTitle}
                 onClick={() => onChange({ stopType: type })}
@@ -175,6 +174,7 @@ export function StopForm({
         disabled={!mayEdit || locked}
         initialFocus={initialFocus}
         error={errorFor('appointment.time')}
+        dateError={errorFor('appointment.date')}
         endError={errorFor('appointment.endTime')}
       />
 

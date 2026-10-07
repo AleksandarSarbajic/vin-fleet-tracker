@@ -20,6 +20,9 @@ PGDIR="${ROOT}/.testdb"
 PGBIN="${PGBIN:-/opt/homebrew/opt/postgresql@17/bin}"
 PORT="${TEST_PGPORT:-55432}"
 DB="fleet_test"
+# §12.119. The browser suite's own database, so a commit's unit run and a
+# running browser suite never touch the same tables.
+E2E_DB="fleet_e2e"
 LOG="${PGDIR}/postgres.log"
 
 if [ ! -x "${PGBIN}/pg_ctl" ]; then
@@ -48,9 +51,12 @@ create() {
 }
 
 start() {
-  running && return 0
-  "${PGBIN}/pg_ctl" -D "${PGDIR}" -l "${LOG}" -w -t 30 start >/dev/null
-  "${PGBIN}/createdb" -h 127.0.0.1 -p "${PORT}" -U postgres "${DB}" 2>/dev/null || true
+  running || "${PGBIN}/pg_ctl" -D "${PGDIR}" -l "${LOG}" -w -t 30 start >/dev/null
+  # Both databases, every time: a cluster made before fleet_e2e existed gets
+  # it on its next `up`. createdb refuses one that exists, which is fine.
+  for name in "${DB}" "${E2E_DB}"; do
+    "${PGBIN}/createdb" -h 127.0.0.1 -p "${PORT}" -U postgres "${name}" 2>/dev/null || true
+  done
 }
 
 case "${1:-up}" in

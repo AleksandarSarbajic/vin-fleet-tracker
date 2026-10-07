@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { LoadForEdit } from '@/lib/load-read';
 import type { FleetRow } from '@/server/fleet-query';
@@ -23,7 +23,16 @@ import type { FleetRow } from '@/server/fleet-query';
  * row shows it, however long ago it was fetched.
  */
 
-export const LOAD_READ_SETTLE_MS = 250;
+/**
+ * How long a keyboard selection must hold before its load is read. Arrowing
+ * selects a row every keystroke; 150ms lets a held key or a quick run through
+ * the list pass without reading every load, and an Enter a beat later finds
+ * the read already under way (§12.119: 250 left a fast Enter waiting).
+ */
+export const LOAD_READ_SETTLE_MS = 150;
+
+/** How long the pointer must rest on a row before its load is read. */
+export const LOAD_READ_HOVER_MS = 100;
 
 /**
  * How long a read nobody is looking at is kept. React Query's default is five
@@ -83,4 +92,45 @@ export function usePrefetchLoadRead(row: FleetRow | null): void {
     // The key, not the row object: the row is a new object every poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, keyText]);
+}
+
+/**
+ * §12.119. The pointer's half: a row the pointer has RESTED on for 100ms is
+ * read, so a click and an Enter right after it find the load in hand. A
+ * pointer sweeping across the list rests on nothing and reads nothing.
+ * Rows are found by their `data-row-id`, wherever the list draws them.
+ */
+export function useHoverPrefetchLoadRead(rows: readonly FleetRow[], enabled: boolean): void {
+  const client = useQueryClient();
+  const byId = useRef(new Map<string, FleetRow>());
+  byId.current = new Map(rows.map((r) => [r.id, r]));
+
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let over: string | null = null;
+    const cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const onOver = (event: PointerEvent) => {
+      const id =
+        (event.target as Element | null)?.closest('[data-row-id]')?.getAttribute('data-row-id') ??
+        null;
+      if (id === over) return;
+      over = id;
+      cancel();
+      if (!id) return;
+      timer = setTimeout(() => {
+        const row = byId.current.get(id);
+        // `prefetchQuery` never rejects; see usePrefetchLoadRead.
+        if (row) void prefetchLoadRead(client, row);
+      }, LOAD_READ_HOVER_MS);
+    };
+    document.addEventListener('pointerover', onOver);
+    return () => {
+      document.removeEventListener('pointerover', onOver);
+      cancel();
+    };
+  }, [client, enabled]);
 }

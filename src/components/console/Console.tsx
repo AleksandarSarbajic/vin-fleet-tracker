@@ -11,7 +11,7 @@ import { passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
-import { usePrefetchLoadRead } from '@/hooks/useLoadRead';
+import { useHoverPrefetchLoadRead, usePrefetchLoadRead } from '@/hooks/useLoadRead';
 import { ConsoleHeader, type HeaderNote } from './ConsoleHeader';
 import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
@@ -440,6 +440,7 @@ export function Console({
    * nothing opens the modal (§12.94).
    */
   usePrefetchLoadRead(editingAllowed ? selectedRow : null);
+  useHoverPrefetchLoadRead(rows, editingAllowed);
 
   const timelineRow = useMemo(
     () => (timelineId ? (rows.find((r) => r.id === timelineId) ?? null) : null),

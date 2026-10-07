@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { IDS, TRUCK_NUMBERS, ZIP_STOP, connect, resetWorld } from './fixtures';
+import { IDS, TRUCK_NUMBERS, ZIP_STOP, connect, resetWorld, TEST_DATABASE_URL } from './fixtures';
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -38,8 +38,7 @@ test('a truck parked exactly on a zip-precision stop still does not arrive', asy
     const { sweepArrivals } = await import('../src/worker/arrival');
     const { createDirectDb } = await import('../src/db/connection');
     const handle = createDirectDb(
-      process.env.TEST_DATABASE_URL ??
-        `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`,
+      TEST_DATABASE_URL,
       1,
     );
     try {

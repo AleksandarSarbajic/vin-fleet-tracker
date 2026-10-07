@@ -34,7 +34,11 @@ export default async function globalSetup(): Promise<void> {
   }
 
   execFileSync('scripts/test-db.sh', ['up'], { stdio: 'inherit' });
-  execFileSync('npx', ['tsx', 'scripts/test-db-migrate.mts'], { stdio: 'inherit' });
+  // The migrator reads TEST_DATABASE_URL; point it at this suite's database.
+  execFileSync('npx', ['tsx', 'scripts/test-db-migrate.mts'], {
+    stdio: 'inherit',
+    env: { ...process.env, TEST_DATABASE_URL },
+  });
 
   const sql = connect();
   try {

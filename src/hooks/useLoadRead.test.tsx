@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fleetRow } from '@/test/fleet-row';
 import { loadReadFor } from '@/test/load-read';
 import type { FleetRow } from '@/server/fleet-query';
-import { LOAD_READ_SETTLE_MS, loadReadKey, usePrefetchLoadRead } from './useLoadRead';
+import {
+  LOAD_READ_HOVER_MS,
+  LOAD_READ_SETTLE_MS,
+  loadReadKey,
+  useHoverPrefetchLoadRead,
+  usePrefetchLoadRead,
+} from './useLoadRead';
 
 /**
  * §12.119. The selected truck's load is read before Edit load is clicked —
@@ -66,7 +72,10 @@ describe('prefetching the selected truck’s load (§12.119)', () => {
   });
 
   it('reads nothing for a selection the arrows passed straight through', async () => {
-    const other = fleetRow({ id: '11111111-1111-4111-8111-0000000000aa' });
+    const other = fleetRow({
+      id: '11111111-1111-4111-8111-0000000000aa',
+      nextStop: { loadId: '33333333-3333-4333-8333-0000000000aa', stopId: '22222222-2222-4222-8222-0000000000aa' },
+    });
     await show(ROW);
     await act(async () => vi.advanceTimersByTime(100));
     await show(other);
@@ -106,5 +115,44 @@ describe('a prefetched read is kept long enough to be used (§12.119)', () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await act(async () => vi.advanceTimersByTimeAsync(10 * 60_000));
     expect(client.getQueryData(loadReadKey(ROW)!)).toEqual(loadReadFor(ROW));
+  });
+});
+
+describe('reading the load a pointer rests on (§12.119)', () => {
+  function Rows({ rows }: { rows: FleetRow[] }) {
+    useHoverPrefetchLoadRead(rows, true);
+    return createElement(
+      'div',
+      null,
+      rows.map((r) => createElement('div', { key: r.id, 'data-row-id': r.id }, createElement('span', null, r.truckNumber))),
+    );
+  }
+  const OTHER = fleetRow({
+    id: '11111111-1111-4111-8111-0000000000aa',
+    truckNumber: 138,
+    nextStop: { loadId: '33333333-3333-4333-8333-0000000000aa', stopId: '22222222-2222-4222-8222-0000000000aa' },
+  });
+  const enter = (id: string) =>
+    act(async () => {
+      container!
+        .querySelector(`[data-row-id="${id}"] span`)!
+        .dispatchEvent(new Event('pointerover', { bubbles: true }));
+    });
+
+  it('reads a row the pointer rests on for 100ms, and not one it passes over', async () => {
+    await act(async () => {
+      root!.render(createElement(QueryClientProvider, { client }, createElement(Rows, { rows: [ROW, OTHER] })));
+    });
+    await enter(OTHER.id);
+    await act(async () => vi.advanceTimersByTime(LOAD_READ_HOVER_MS - 40));
+    await enter(ROW.id);
+    await act(async () => vi.advanceTimersByTime(LOAD_READ_HOVER_MS - 1));
+    expect(reads()).toEqual([]);
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(reads()).toEqual([`/api/loads/${ROW.nextStop!.loadId}`]);
+  });
+
+  it('settles a keyboard selection in 150ms', () => {
+    expect([LOAD_READ_SETTLE_MS, LOAD_READ_HOVER_MS]).toEqual([150, 100]);
   });
 });

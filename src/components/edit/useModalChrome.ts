@@ -44,7 +44,14 @@ export function useReturnFocus(active: boolean): void {
  * Esc is deliberately NOT handled here: it raises the discard confirm rather
  * than closing, and only the modal knows whether anything is dirty.
  */
-export function useFocusTrap(active: boolean) {
+export function useFocusTrap(
+  active: boolean,
+  /**
+   * §12.119. Picks the opening focus from what is on the screen, given the
+   * element marked `data-initial-focus`; the marked one when absent.
+   */
+  choose?: (root: HTMLElement, marked: HTMLElement | null) => HTMLElement | null,
+) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,8 +70,13 @@ export function useFocusTrap(active: boolean) {
         ),
       ].filter((el) => el.offsetParent !== null);
 
-    const chosen = root.querySelector<HTMLElement>('[data-initial-focus]');
-    (chosen ?? focusable()[0])?.focus();
+    const marked = root.querySelector<HTMLElement>('[data-initial-focus]');
+    const chosen = choose ? choose(root, marked) : marked;
+    // §12.119. Focus, never a scroll: a field low in a tall form would open
+    // the modal scrolled past its own top. (A native date input scrolls
+    // itself into view regardless, so `choose` keeps one that is off the
+    // screen from being picked at all.)
+    (chosen ?? focusable()[0])?.focus({ preventScroll: true });
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;
@@ -87,6 +99,8 @@ export function useFocusTrap(active: boolean) {
       document.removeEventListener('keydown', onKey, true);
       previous?.focus();
     };
+    // `choose` is read once, when the trap opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   return container;

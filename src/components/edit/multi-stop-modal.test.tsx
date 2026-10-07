@@ -5,7 +5,7 @@ import { act } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditStopModal } from './EditStopModal';
-import { APPOINTMENT_TIME_MISSING, LEFT_STOP_NOTE } from './load-form';
+import { APPOINTMENT_DATE_MISSING, APPOINTMENT_TIME_MISSING, LEFT_STOP_NOTE } from './load-form';
 import { fleetRow, nextStop } from '@/test/fleet-row';
 import { loadReadFor, primeLoadRead } from '@/test/load-read';
 import { loadReadKey } from '@/hooks/useLoadRead';
@@ -201,7 +201,7 @@ describe('a stop the truck has left (§12.116 D4)', () => {
     expect(form().textContent).toContain(LEFT_STOP_NOTE);
     expect(field('City').disabled || field('City').closest('fieldset')!.disabled).toBe(true);
     expect(
-      [...form().querySelectorAll<HTMLButtonElement>('[role="radio"]')].every((b) => b.disabled),
+      [...form().querySelectorAll<HTMLButtonElement>('[aria-pressed]')].every((b) => b.disabled),
     ).toBe(true);
     expect(box('This truck has left this stop').checked).toBe(true);
     expect(form().querySelector('textarea')!.closest('fieldset')!.disabled).toBe(false);
@@ -498,5 +498,84 @@ describe('opening (§12.119)', () => {
     );
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(() => button('Retry')).not.toThrow();
+  });
+});
+
+describe('a ticked appointment with a time but no date (§12.119)', () => {
+  it.each(['APPT', 'FCFS'] as const)('%s: an error on the date field, and no save', async (kind) => {
+    await render(ROW, { before: [PU], after: [{ city: 'Moorhead', state: 'MN', apptStartUtc: null }] });
+    await click(rows()[2]!);
+    await click(form().querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+    if (kind === 'FCFS') await click(button('FCFS', form()));
+    await type(field(kind === 'FCFS' ? 'Earliest receiving hour' : 'Time at the stop'), '09:00');
+    expect(form().textContent).not.toContain(APPOINTMENT_TIME_MISSING);
+    expect(form().textContent).toContain(APPOINTMENT_DATE_MISSING);
+    expect(button('Save').disabled).toBe(true);
+    expect(rows()[2]!.textContent).toContain('Error');
+
+    await type(field('Date (stop-local)'), '2026-10-12');
+    expect(form().textContent).not.toContain(APPOINTMENT_DATE_MISSING);
+  });
+});
+
+describe('the keyboard (§12.119)', () => {
+  const key = (el: Element, k: string) =>
+    act(async () => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    });
+
+  it('moves through the stops with every arrow, wrapping at the ends, focus following', async () => {
+    await render(ROW, { before: [PU], after: [{ city: 'Moorhead', state: 'MN' }] });
+    expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    await key(rows()[1]!, 'ArrowDown');
+    expect(document.activeElement).toBe(rows()[2]);
+    await key(rows()[2]!, 'ArrowRight');
+    expect(document.activeElement).toBe(rows()[0]);
+    await key(rows()[0]!, 'ArrowLeft');
+    expect(document.activeElement).toBe(rows()[2]);
+    expect(rows()[2]!.getAttribute('aria-selected')).toBe('true');
+    expect(field('City').value).toBe('Moorhead');
+  });
+
+  it('reaches the stop type by Tab — two plain buttons — and a press switches it', async () => {
+    await render();
+    const types = [...form().querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Stop type"] button')];
+    expect(types.map((b) => [b.textContent, b.type, b.tabIndex, b.disabled])).toEqual([
+      ['Pick up', 'button', 0, false],
+      ['Deliver', 'button', 0, false],
+    ]);
+    expect(types.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    await click(types[0]!);
+    expect(types.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+    expect(banner()).toBe('Unsaved changes — stop 2: stop type.');
+  });
+
+  it('Esc closes a clean modal from anywhere in it — the list included', async () => {
+    const onClose = vi.fn();
+    primeLoadRead(client, ROW, { before: [PU] });
+    await act(async () => {
+      root!.render(
+        createElement(QueryClientProvider, { client }, createElement(EditStopModal, { ...props(ROW), onClose })),
+      );
+    });
+    await settle();
+    rows()[1]!.focus();
+    await key(document.activeElement!, 'Escape');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc on unsaved work asks first, and Esc again backs out of nothing but the question', async () => {
+    const onClose = vi.fn();
+    primeLoadRead(client, ROW, { before: [PU] });
+    await act(async () => {
+      root!.render(
+        createElement(QueryClientProvider, { client }, createElement(EditStopModal, { ...props(ROW), onClose })),
+      );
+    });
+    await settle();
+    await type(field('ZIP'), '58104');
+    await key(field('ZIP'), 'Escape');
+    expect(container!.textContent).toContain('Discard changes?');
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

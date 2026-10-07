@@ -81,6 +81,7 @@ export function AppointmentFields({
   disabled,
   error,
   endError,
+  dateError,
   initialFocus = false,
 }: {
   draft: AppointmentDraft;
@@ -96,6 +97,8 @@ export function AppointmentFields({
   error?: string | undefined;
   /** Field error for the FCFS latest hour. */
   endError?: string | undefined;
+  /** §12.119. A ticked appointment with no date. */
+  dateError?: string | undefined;
   /** Takes the modal's opening focus when the truck already has a driver. */
   initialFocus?: boolean;
 }) {
@@ -235,8 +238,15 @@ export function AppointmentFields({
                 data-initial-focus={initialFocus ? '' : undefined}
                 value={draft.date}
                 onChange={(e) => set({ date: e.target.value })}
-                className="h-10 w-full border border-line-hair bg-surface-sunken px-2.5 text-body tabular-nums text-text"
+                className={`h-10 w-full border bg-surface-sunken px-2.5 text-body tabular-nums text-text ${
+                  dateError ? 'border-status-late-fg' : 'border-line-hair'
+                }`}
               />
+              {dateError ? (
+                <span role="alert" className="mt-1 block text-small text-status-late-fg">
+                  {dateError}
+                </span>
+              ) : null}
             </label>
 
             <label className="block">

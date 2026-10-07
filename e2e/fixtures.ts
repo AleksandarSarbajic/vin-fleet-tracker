@@ -14,9 +14,16 @@ import postgres from 'postgres';
  * changes with the data. Everything a spec asserts on is created by name here.
  */
 
+/**
+ * §12.119. The browser suite's OWN database, beside the unit suite's
+ * `fleet_test` in the same disposable cluster. They used to share one: a
+ * commit's pre-commit check (the unit suite) running while the browser suite
+ * was mid-run sent a test to the sign-in page. Separate databases, so neither
+ * waits for the other and neither can disturb the other.
+ */
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ??
-  `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
+  process.env.E2E_DATABASE_URL ??
+  `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_e2e`;
 
 /** Stable ids, so a spec can address a row without querying for it first. */
 export const IDS = {

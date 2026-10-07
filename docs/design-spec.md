@@ -8786,12 +8786,14 @@ It edits every stop a load already has; adding and removing stops is 4b.
 ### It opens on the load read, fetched before it is asked for
 
 The modal's data is `GET /api/loads/:id` (§12.117): the load, every stop in
-order, and the version of exactly that. The console reads it when a truck is
-**selected** — which is also when its popup opens — once the selection has
-held for 250ms, so arrowing down the list does not spend the `read` rate
-limit on loads nobody opened. A click on Edit load, or Enter, then finds it
-in hand; with nothing in hand the modal says "Reading this load…" and reads
-it, and says so with Retry if that fails.
+order, and the version of exactly that. The console reads it when the pointer
+**rests on a row** for 100ms, and when a truck is **selected** — which is also
+when its popup opens — once the selection has held for 150ms, so arrowing
+down the list does not spend the `read` rate limit on loads nobody opened. A
+click on Edit load, or Enter, then finds it in hand; with nothing in hand the
+modal says "Reading this load…" and reads it, and says so with Retry if that
+fails. (The first cut waited 250ms and read on selection only: an Enter
+pressed straight after a click waited ~220ms for the read.)
 
 The read is cached under the load id, the version, the next stop and its
 arrival. The version covers everything people edit; the worker writes only
@@ -8810,7 +8812,12 @@ read and opens the modal again on the board as it is now.
 ### Layout
 
 A 960px panel, header and footer fixed and the middle scrolling, capped at
-the viewport less the scrim's 24px each side. In the middle: the banners
+the viewport less the scrim's 24px each side. It opens at its own top. The
+opening focus is the appointment date, as before, when the date is on the
+screen; at 720px tall it is below the fold, and a native date input scrolls
+itself into view when focused, which opened the modal with the load strip's
+labels cut in half — there the street address, at the top of the stop's
+form, takes the focus instead. In the middle: the banners
 (error with Reload, unsaved changes, saved warnings, previous loads), the
 load strip — truck, driver, load number, status, "On the console" — and the
 stops: a 280px list beside the selected stop's form at 1008px and up, and a
@@ -8835,9 +8842,12 @@ Next; a dot for unsaved changes.
   earlier in it.
 - **The status override, the ETA basis and the computed status** are the
   next stop's (D2); other stops name where the override is.
-- **A ticked appointment with no time** — APPT or FCFS — is an error on the
-  time field, on every stop: "Enter a time, or untick the appointment." It
-  used to save as no appointment, silently.
+- **A ticked appointment with no time, or no date** — APPT or FCFS — is an
+  error on that field, on every stop: "Enter a time, or untick the
+  appointment." / "Enter a date, or untick the appointment." Either used to
+  save as no appointment, silently.
+- **The stop type** is two buttons, Pick up and Deliver (`aria-pressed`):
+  Tab reaches each, Space or Enter presses it.
 
 ### What a save sends, and where its answers land
 
@@ -8852,6 +8862,11 @@ The banner names each stop's fields: "Unsaved changes — load number; stop 2:
 appointment time". A field error the server names `stops.<i>.<field>` is
 routed by the request's own order to its stop, the stop is selected, its row
 says Error, and the footer counts the stops that need attention.
+
+**The browser suite has its own database.** `fleet_e2e`, beside the unit
+suite's `fleet_test` in the same disposable cluster. They shared one, and a
+commit's pre-commit check run during a browser run sent a browser test to the
+sign-in page.
 
 **The reached-stop question, per stop.** Asked as before — a reached stop
 given a new city, a reached load a new number — and now naming the stop:

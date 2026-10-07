@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { IDS, ZIP_STOP, connect, resetWorld } from './fixtures';
+import { IDS, ZIP_STOP, connect, resetWorld, TEST_DATABASE_URL } from './fixtures';
 
 /**
  * §12.85 through the real screen: a ZIP-centre stop marked arrived in the
@@ -41,8 +41,7 @@ async function sweep() {
   const { sweepArrivals } = await import('../src/worker/arrival');
   const { createDirectDb } = await import('../src/db/connection');
   const handle = createDirectDb(
-    process.env.TEST_DATABASE_URL ??
-      `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`,
+    TEST_DATABASE_URL,
     1,
   );
   try {

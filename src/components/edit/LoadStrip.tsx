@@ -67,12 +67,7 @@ export function LoadStrip({
           </p>
         </label>
         <label className="block">
-          <span className="mb-1 flex items-baseline justify-between gap-2">
-            <span className="text-small text-text-secondary">Assigned driver</span>
-            <span className="font-cond text-micro uppercase tracking-[.09em] text-status-risk-fg">
-              Driver change requires confirm
-            </span>
-          </span>
+          <span className="mb-1 block text-small text-text-secondary">Assigned driver</span>
           <DriverSelect
             drivers={drivers}
             value={driverId}
@@ -95,7 +90,12 @@ export function LoadStrip({
             assignToTruckId={null}
             onDriverCreated={onDriverCreated}
           />
-          <span className="mt-1 block text-small text-text-mutedOnOverlay">
+          {/* Under the field, as the design has it: beside the label it ran
+              into the next column at 960px. */}
+          <span className="mt-1 block font-cond text-micro uppercase tracking-[.09em] text-status-risk-fg">
+            Driver change requires confirm
+          </span>
+          <span className="mt-0.5 block text-small text-text-mutedOnOverlay">
             {currentDriverName
               ? `Current assignment: ${currentDriverName}.`
               : 'No driver on this truck.'}{' '}

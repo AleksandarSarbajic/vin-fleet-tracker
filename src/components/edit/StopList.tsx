@@ -52,7 +52,8 @@ function whenLine(stop: StopForm): string {
   const [y, m, d] = a.date.split('-').map(Number);
   const [h, min] = a.time.split(':').map(Number);
   const abbrev =
-    isIanaZone(zone) && [y, m, d, h, min].every((n) => n !== undefined && !Number.isNaN(n))
+    isIanaZone(zone) &&
+    [y, m, d, h, min].every((n) => n !== undefined && !Number.isNaN(n))
       ? ` ${zoneAbbreviation(new Date(Date.UTC(y!, m! - 1, d!, h!, min!)), zone)}`
       : '';
   return `${a.date ? a.date.slice(5) : '—'} ${a.time || '—'}${abbrev}`;
@@ -85,99 +86,110 @@ export function StopList({
   return (
     <div
       data-stop-list=""
-      className="flex gap-1.5 overflow-x-auto border-b border-line-hair bg-surface-raised p-2.5 min-[1008px]:sticky min-[1008px]:top-0 min-[1008px]:min-h-[300px] min-[1008px]:flex-col min-[1008px]:overflow-x-visible min-[1008px]:border-b-0 min-[1008px]:border-r"
+      // The pane runs the form's full height, so its ground does too; the
+      // list inside it stays in view as the form scrolls.
+      className="border-b border-line-hair bg-surface-raised min-[1008px]:border-b-0 min-[1008px]:border-r"
     >
-      <div className="hidden items-baseline justify-between px-0.5 pb-0.5 min-[1008px]:flex">
-        <span className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-          Stops
-        </span>
-        <span className="text-small text-text-mutedOnOverlay">{stops.length}</span>
-      </div>
-      <div
-        role="tablist"
-        aria-label="Stops on this load"
-        aria-orientation={twoPane ? 'vertical' : 'horizontal'}
-        className="flex gap-1.5 min-[1008px]:flex-col"
-        onKeyDown={(event) => {
-          const back = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
-          const ahead = event.key === 'ArrowDown' || event.key === 'ArrowRight';
-          if (!back && !ahead) return;
-          event.preventDefault();
-          move(selected + (ahead ? 1 : -1));
-        }}
-      >
-        {stops.map((stop, i) => {
-          const f = flags[i]!;
-          const isSelected = i === selected;
-          const hasError = errorKeys.has(stop.key);
-          const chip = hasError
-            ? { text: 'Error', tone: 'border-status-late-fg text-status-late-fg' }
-            : f.arrived && !f.departed
-              ? { text: 'Arrived', tone: 'border-status-ontime-fg text-status-ontime-fg' }
-              : f.next
-                ? { text: 'Next', tone: 'border-accent text-accent' }
-                : null;
-          const place = [stop.city.trim(), stop.state.trim().toUpperCase()]
-            .filter(Boolean)
-            .join(', ');
-          return (
-            <button
-              key={stop.key}
-              ref={(el) => {
-                tabs.current[i] = el;
-              }}
-              type="button"
-              role="tab"
-              id={stopTabId(stop.key)}
-              aria-selected={isSelected}
-              aria-controls={STOP_FORM_ID}
-              tabIndex={isSelected ? 0 : -1}
-              data-stop-row={i + 1}
-              data-departed={f.departed ? '' : undefined}
-              onClick={() => onSelect(i)}
-              className={`flex min-w-[200px] shrink-0 items-center gap-2 border p-2 text-left min-[1008px]:min-w-0 ${
-                isSelected ? 'border-accent bg-accent-veil' : 'border-line-soft hover:border-line-hair'
-              }`}
-            >
-              <span className="w-3 text-center font-cond text-[13px] font-semibold text-text-mutedOnOverlay">
-                {i + 1}
-              </span>
-              <span
-                className={`inline-flex h-[19px] min-w-[30px] shrink-0 items-center justify-center border px-[5px] font-cond text-[10.5px] font-bold leading-none tracking-[.08em] ${
-                  stop.stopType === 'PU' ? 'border-accent text-accent' : 'border-text text-text'
+      <div className="flex gap-1.5 overflow-x-auto p-2.5 min-[1008px]:sticky min-[1008px]:top-0 min-[1008px]:flex-col min-[1008px]:overflow-x-visible">
+        <div className="hidden items-baseline justify-between px-0.5 pb-0.5 min-[1008px]:flex">
+          <span className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
+            Stops
+          </span>
+          <span className="text-small text-text-mutedOnOverlay">{stops.length}</span>
+        </div>
+        <div
+          role="tablist"
+          aria-label="Stops on this load"
+          aria-orientation={twoPane ? 'vertical' : 'horizontal'}
+          className="flex gap-1.5 min-[1008px]:flex-col"
+          onKeyDown={(event) => {
+            const back = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+            const ahead = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+            if (!back && !ahead) return;
+            event.preventDefault();
+            move(selected + (ahead ? 1 : -1));
+          }}
+        >
+          {stops.map((stop, i) => {
+            const f = flags[i]!;
+            const isSelected = i === selected;
+            const hasError = errorKeys.has(stop.key);
+            const chip = hasError
+              ? { text: 'Error', tone: 'border-status-late-fg text-status-late-fg' }
+              : f.arrived && !f.departed
+                ? {
+                    text: 'Arrived',
+                    tone: 'border-status-ontime-fg text-status-ontime-fg',
+                  }
+                : f.next
+                  ? { text: 'Next', tone: 'border-accent text-accent' }
+                  : null;
+            const place = [stop.city.trim(), stop.state.trim().toUpperCase()]
+              .filter(Boolean)
+              .join(', ');
+            return (
+              <button
+                key={stop.key}
+                ref={(el) => {
+                  tabs.current[i] = el;
+                }}
+                type="button"
+                role="tab"
+                id={stopTabId(stop.key)}
+                aria-selected={isSelected}
+                aria-controls={STOP_FORM_ID}
+                tabIndex={isSelected ? 0 : -1}
+                data-stop-row={i + 1}
+                data-departed={f.departed ? '' : undefined}
+                onClick={() => onSelect(i)}
+                className={`flex min-w-[200px] shrink-0 items-center gap-2 border p-2 text-left min-[1008px]:min-w-0 ${
+                  isSelected
+                    ? 'border-accent bg-accent-veil'
+                    : 'border-line-soft hover:border-line-hair'
                 }`}
               >
-                {stop.stopType}
-              </span>
-              <span className="min-w-0 flex-1">
+                <span className="w-3 text-center font-cond text-[13px] font-semibold text-text-mutedOnOverlay">
+                  {i + 1}
+                </span>
                 <span
-                  className={`block truncate text-[13px] font-semibold leading-[1.2] ${
-                    f.departed ? 'text-text-secondary' : 'text-text'
+                  className={`inline-flex h-[19px] min-w-[30px] shrink-0 items-center justify-center border px-[5px] font-cond text-[10.5px] font-bold leading-none tracking-[.08em] ${
+                    stop.stopType === 'PU'
+                      ? 'border-accent text-accent'
+                      : 'border-text text-text'
                   }`}
                 >
-                  {place || 'New stop'}
+                  {stop.stopType}
                 </span>
-                <span className="block truncate text-[11px] leading-[1.3] tabular-nums text-text-mutedOnOverlay">
-                  {whenLine(stop)}
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate text-[13px] font-semibold leading-[1.2] ${
+                      f.departed ? 'text-text-secondary' : 'text-text'
+                    }`}
+                  >
+                    {place || 'New stop'}
+                  </span>
+                  <span className="block truncate text-[11px] leading-[1.3] tabular-nums text-text-mutedOnOverlay">
+                    {whenLine(stop)}
+                  </span>
                 </span>
-              </span>
-              {dirtyKeys.has(stop.key) ? (
-                <span
-                  aria-label="Unsaved changes"
-                  title="Unsaved changes"
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-risk-fg"
-                />
-              ) : null}
-              {chip ? (
-                <span
-                  className={`shrink-0 border px-[5px] py-[3px] font-cond text-[10px] font-bold uppercase leading-none tracking-[.09em] ${chip.tone}`}
-                >
-                  {chip.text}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
+                {dirtyKeys.has(stop.key) ? (
+                  <span
+                    aria-label="Unsaved changes"
+                    title="Unsaved changes"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-risk-fg"
+                  />
+                ) : null}
+                {chip ? (
+                  <span
+                    className={`shrink-0 border px-[5px] py-[3px] font-cond text-[10px] font-bold uppercase leading-none tracking-[.09em] ${chip.tone}`}
+                  >
+                    {chip.text}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

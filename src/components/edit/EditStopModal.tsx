@@ -204,7 +204,21 @@ function LoadEditor({
   read,
 }: Props & { read: LoadForEdit | null }) {
   const queryClient = useQueryClient();
-  const trap = useFocusTrap(true);
+  /**
+   * §12.119. The opening focus stays the appointment date, as it was — when
+   * the date is on the screen. At 720px tall it is below the fold, and a
+   * native date input scrolls itself into view when focused, opening the
+   * modal past the top of its load strip; the street address, at the top of
+   * the stop's form, takes the focus instead.
+   */
+  const trap = useFocusTrap(true, (root, marked) => {
+    const area = root.querySelector('[data-edit-scroll]');
+    if (!marked || !area) return marked;
+    const a = area.getBoundingClientRect();
+    const m = marked.getBoundingClientRect();
+    if (m.top >= a.top && m.bottom <= a.bottom) return marked;
+    return root.querySelector<HTMLElement>('[role="tabpanel"] input[type="text"]') ?? marked;
+  });
   const mayEdit = can(role, 'dispatcher');
   const mayFlipActive = can(role, 'admin');
   const lockedReason = `Your role is ${role}. Editing needs dispatcher.`;
@@ -799,7 +813,7 @@ function LoadEditor({
           </div>
 
           {/* ------------------------- middle, scrolls ---------------------- */}
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div data-edit-scroll="" className="min-h-0 flex-1 overflow-auto">
             {bannerError ? (
               <div className="flex items-center gap-3 border-b border-status-late-bd bg-status-late-bg px-4 py-2">
                 <p role="alert" className="flex-1 text-body text-status-late-fg">
@@ -910,7 +924,7 @@ function LoadEditor({
               onActive={setActive}
             />
 
-            <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr] min-[1008px]:items-start">
+            <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr]">
               <StopList
                 stops={form.stops}
                 flags={flags}
