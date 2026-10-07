@@ -8454,6 +8454,75 @@ differ by any channel at each width, and none outside the panel.
 at +30, so the control is held in both states — `Exact time` /
 `deadline 14:30 CDT` and `+30 min` / `deadline 15:00 CDT`.
 
+## 12.116 The worker acts on the board's next stop, or on none
+
+Stage 1 of multi-stop loads. Nothing a dispatcher sees changes.
+
+§12.13 put the next-stop ORDER in one place, and four queries shared it. Three
+of them — the arrival sweep, the routing sweep and the ETA log — added
+conditions of their own **inside** the ordered lookup:
+
+| query | condition inside the lookup |
+|---|---|
+| arrival sweep | coordinates or an anchor |
+| routing sweep | coordinates, and `arrived_at is null` |
+| ETA log | coordinates, and `arrived_at is null` |
+
+A condition inside an ordered `limit 1` does not remove a stop; it moves to
+the next one. On a one-stop load that is the same thing. On a two-stop load
+it is not:
+
+- **Pickup arrived, not left.** The board shows the pickup, ARRIVED. Routing
+  routed the delivery from the dock, and the ETA log wrote a first sighting
+  of the delivery — a prediction the board never showed, whose score would
+  include the time spent loading.
+- **Pickup unlocated.** The board shows the pickup. The arrival sweep watched
+  the delivery, and would have recorded an arrival there with the pickup
+  never reached — the board then stuck on a stop the truck had left.
+
+Truck 124's bug (§12.13) by another route. Production held no load with two
+stops and no truck with two open loads when this was written (30 loads, every
+stop sequence 1), so nothing it would have changed had happened yet.
+
+**The fix.** `BOARD_NEXT_STOP` in `server/next-stop.ts` selects the stop with
+the board's conditions only — open load, not departed — and joins it in as
+`s`. Each worker query filters that one stop in its own `WHERE`. A stop it
+cannot use means no candidate for that truck, never a different stop.
+
+The board's query and the reassign preview keep their own lateral, because
+they add no condition. Two guards hold the copies together:
+
+1. **Agreement.** `next-stop.test.ts` builds every §12.13 shape — departed
+   leg, delivered load, two open loads, backwards appointments, a
+   part-finished load, a pickup arrived and not left, every stop left — and
+   asserts `BOARD_NEXT_STOP` names the same stop as the fleet query for each
+   truck.
+2. **Source.** `${NEXT_STOP_ORDER}` may appear only in `next-stop.ts`,
+   `fleet-query.ts` and `reassign.ts`, and the lookup in the last two may
+   carry exactly the three board conditions. A new caller goes through
+   `BOARD_NEXT_STOP`.
+
+`scripts/recompute-sim.mts` copied the routing selection and is aligned with
+it, so `route:simulate` still replays the sweep that runs.
+
+**What changes for a truck holding two open loads.** The same rule: if the
+board's stop is unlocated, the arrival sweep now watches nothing for that
+truck rather than the other load's stop. A stop that cannot be detected is
+reported as such (§12.56), not silently swapped.
+
+**Departure, not arrival, moves a load on.** `multi-stop.test.ts` drives a
+truck onto a pickup and away again through the real sweep and the real board
+query: arrival leaves the pickup as the next stop, ARRIVED; departure makes
+the delivery the next stop. Unchanged — written down because "arrival at the
+pickup makes the delivery next" is the natural guess and is not the rule.
+
+**Tests, and the fix broken on purpose.** Nine in `multi-stop.test.ts`, two
+in `next-stop.test.ts`. Each worker file put back to its old query fails its
+own cases (arrival 1, routing 2, ETA log 2); `arrived_at is null` slipped
+inside `BOARD_NEXT_STOP` fails five, including the agreement test; the
+arrival sweep given routing's arrival filter fails three, including the
+departure case.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
