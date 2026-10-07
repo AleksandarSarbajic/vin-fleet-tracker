@@ -126,6 +126,18 @@ export const overrideReason = pgEnum('override_reason', [
 export const arrivalSource = pgEnum('arrival_source', ['detected', 'dispatcher']);
 
 /**
+ * §12.118. Which kind of claim `stops.departed_at` is — the arrival's
+ * distinction (§12.57), for the departure.
+ *
+ *   detected    the departure sweep saw the truck leave, confirmed over polls.
+ *   dispatcher  a person typed it, under the arrival in the edit modal.
+ *
+ * Its own enum rather than `arrival_source`, so the two vocabularies can
+ * differ later without a migration that renames one of them.
+ */
+export const departureSource = pgEnum('departure_source', ['detected', 'dispatcher']);
+
+/**
  * The dispatcher's vocabulary for where a load is.
  *
  * TONU — "truck ordered not used" — is the broker cancelling AFTER the truck
@@ -419,6 +431,12 @@ export const stops = pgTable(
     arrivedSource: arrivalSource('arrived_source'),
     departedAt: timestamp('departed_at', { withTimezone: true }),
     /**
+     * §12.118. Paired with `departedAt` by a check constraint, both ways.
+     * Backfilled `detected` for every departure the worker's audit row
+     * accounts for; written explicitly by every writer since.
+     */
+    departedSource: departureSource('departed_source'),
+    /**
      * §12.85. Where the TRUCK was when a dispatcher marked this stop arrived,
      * and that fix's instant — the point its departure is measured from.
      * Written only by the edit modal's save, only with a dispatcher arrival,
@@ -487,6 +505,11 @@ export const stops = pgTable(
     check(
       'stops_arrived_source_paired',
       sql`(arrived_at is null) = (arrived_source is null)`,
+    ),
+    /** §12.118. The same, for the departure. */
+    check(
+      'stops_departed_source_paired',
+      sql`(departed_at IS NULL) = (departed_source IS NULL)`,
     ),
     /** §12.85. An anchor is three columns or none — half a point is no point. */
     check(

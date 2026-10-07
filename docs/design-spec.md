@@ -8616,6 +8616,53 @@ re-sends the arrival it showed, and the server records it as the dispatcher's.
 That is how it behaved before this; closing it needs the modal to send an
 arrival only when it was touched, which is Stage 4's form.
 
+## 12.118 A departure says who recorded it — `departed_source`
+
+Stage 3 of multi-stop loads (decision D1 A). A dispatcher can record that the
+truck has LEFT a stop, and the record says whether a person typed it or the
+worker saw it, as the arrival already does (§12.57).
+
+Why it is needed before several stops: the board moves on by departure
+(§12.13), and the worker can detect one only on a street-precision stop or
+from a dispatcher's anchor (§12.85). A hand-marked arrival on a ZIP or block
+stop with no anchor never departs — harmless on a one-stop load, which Clear
+stop closes, but on a two-stop load it holds the board on the pickup for good.
+
+### Migration 0024
+
+`departure_source` (`detected`, `dispatcher`) — its own enum, so the two
+vocabularies can part later — and `stops.departed_source`, paired with
+`departed_at` by `stops_departed_source_paired`.
+
+**The backfill** labels every existing departure `detected`, and is checked
+first: a `DO` block counts departures with no worker audit row
+(`source` `worker` or `departure-after-manual-arrival`) for exactly that
+instant, and raises if any. Measured on 2026-10-07: 13 departures, 13 matching
+rows, all `worker`; the worker has written 26 departure rows in all, the other
+13 for departures since wiped or deleted. Nothing else has ever written one.
+
+**All or nothing.** drizzle's migrator runs every pending file and its journal
+row inside one transaction (`PgDialect.migrate`, 0.44.7). Shown on a scratch
+database on the local cluster: migrated to 0023, one departure inserted with
+no audit row, 0024 refused with "1 departure(s) have no worker audit row for
+that instant; none labelled", and afterwards no enum, no column, no trigger,
+no check, the journal still at 24. With the worker's row added, the same run
+applied and the departure read `detected`.
+
+**The bridge.** A default of `detected` would not have worked: the worker
+records a departure with an UPDATE, and a default applies only on INSERT.
+Without help, the running worker's next departure would be refused by the
+paired check, and the deployed app's arrival clear (time to null, source
+untouched) with it. `stops_departure_source_bridge` — a row trigger on
+`departed_at`/`departed_source` — labels a departure written with no source
+`detected`, and clears the source when the time is cleared. The first rule is
+an inference, true only while the one writer that leaves the source empty is
+the worker deployed before this column; so it is temporary, and 0025 drops it
+once the worker writes the source itself.
+
+**Order of deploys**, each on its own approval: 0024 → the worker (explicit
+`detected`, conditional writes) → the app (the control) → 0025.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
