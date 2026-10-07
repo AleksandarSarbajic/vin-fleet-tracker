@@ -1,8 +1,12 @@
-import { expect, it } from 'vitest';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { loads, stops } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows, type FleetRow } from './fleet-query';
+import { BOARD_NEXT_STOP } from './next-stop';
 import type { Tx } from './audit';
 
 /**
@@ -171,5 +175,127 @@ withDb('the next stop (§12.13)', () => {
     // the cast is in the query and the type says string.
     expect(typeof value).toBe('string');
     expect(value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+});
+
+/**
+ * §12.116. The worker reaches the next stop through BOARD_NEXT_STOP; the board
+ * keeps its own lateral. Two copies of a selection are only safe while they
+ * give the same answer, so every shape above is asked of both at once.
+ */
+withDb('BOARD_NEXT_STOP picks the stop the board shows', () => {
+  it('agrees with the fleet query on every case above, truck by truck', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const trucks: string[] = [];
+      const truck = async () => {
+        const id = await emptyTruck(tx);
+        trucks.push(id);
+        return id;
+      };
+
+      await truck(); // no load at all
+      await addLoad(tx, await truck(), 'AGREE-DEPARTED', 'DISPATCHED', [
+        { seq: 1, appt: at(-6), departed: true },
+        { seq: 2, appt: at(6) },
+      ]);
+      const delivered = await truck();
+      await addLoad(tx, delivered, 'AGREE-DONE', 'DELIVERED', [{ seq: 1, appt: at(1) }]);
+      await addLoad(tx, delivered, 'AGREE-LIVE', 'DISPATCHED', [{ seq: 1, appt: at(9) }]);
+      const two = await truck();
+      await addLoad(tx, two, 'AGREE-LATER', 'DISPATCHED', [{ seq: 1, appt: at(20) }]);
+      await addLoad(tx, two, 'AGREE-SOONER', 'DISPATCHED', [{ seq: 1, appt: at(4) }]);
+      await addLoad(tx, await truck(), 'AGREE-BACKWARDS', 'DISPATCHED', [
+        { seq: 1, appt: at(30) },
+        { seq: 2, appt: at(-18) },
+      ]);
+      const part = await truck();
+      await addLoad(tx, part, 'AGREE-STARTED', 'DISPATCHED', [
+        { seq: 1, appt: at(-6), departed: true },
+        { seq: 2, appt: at(20) },
+      ]);
+      await addLoad(tx, part, 'AGREE-URGENT', 'DISPATCHED', [{ seq: 1, appt: at(8) }]);
+      // At the pickup: arrived, not left. The board stays on it (§12.13).
+      const atPickup = await addLoad(tx, await truck(), 'AGREE-AT-PICKUP', 'DISPATCHED', [
+        { seq: 1, appt: at(-1) },
+        { seq: 2, appt: at(7) },
+      ]);
+      await tx
+        .update(stops)
+        .set({ arrivedAt: at(-1), arrivedSource: 'detected' })
+        .where(sql`${stops.loadId} = ${atPickup} and ${stops.sequence} = 1`);
+      const allDone = await truck();
+      await addLoad(tx, allDone, 'AGREE-ALL-LEFT', 'DISPATCHED', [
+        { seq: 1, appt: at(-9), departed: true },
+        { seq: 2, appt: at(-4), departed: true },
+      ]);
+
+      const board = parseFleetRows(await tx.execute(LATEST_POSITION_SQL));
+      const shared = (await tx.execute(sql`
+        select t.id::text as truck_id, s.id::text as stop_id
+        from trucks t
+        ${BOARD_NEXT_STOP}
+      `)) as unknown as { truck_id: string; stop_id: string }[];
+
+      return trucks.map((id) => ({
+        truck: id,
+        board: board.find((r) => r.id === id)?.nextStop?.stopId ?? null,
+        shared: shared.find((r) => r.truck_id === id)?.stop_id ?? null,
+      }));
+    });
+
+    // Some have a next stop and some do not, or the comparison proves little.
+    expect(seen.filter((t) => t.board !== null)).toHaveLength(6);
+    for (const truck of seen) expect(truck.shared).toBe(truck.board);
+  });
+});
+
+/**
+ * §12.116. The defect was a condition added INSIDE an ordered next-stop
+ * lookup, which skips to the next stop instead of yielding none. The order is
+ * therefore used in exactly three places: its own module, and the two queries
+ * that select with the board's conditions and nothing else. Anything new goes
+ * through BOARD_NEXT_STOP and filters outside it.
+ */
+describe('nothing else orders its own next stop', () => {
+  const ROOT = process.cwd();
+  const ALLOWED = new Set([
+    join(ROOT, 'src', 'server', 'next-stop.ts'),
+    join(ROOT, 'src', 'server', 'fleet-query.ts'),
+    join(ROOT, 'src', 'server', 'reassign.ts'),
+  ]);
+
+  function sources(dir: string): string[] {
+    return readdirSync(dir).flatMap((entry) => {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) return sources(path);
+      if (!/\.m?tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) return [];
+      return [path];
+    });
+  }
+
+  it('uses NEXT_STOP_ORDER only in next-stop, the fleet query and the reassign preview', () => {
+    const users = [...sources(join(ROOT, 'src')), ...sources(join(ROOT, 'scripts'))].filter(
+      (file) => /\$\{NEXT_STOP_ORDER\}/.test(readFileSync(file, 'utf8')),
+    );
+    expect(users.filter((file) => !ALLOWED.has(file))).toEqual([]);
+  });
+
+  it('adds no condition of its own in the two queries allowed to use it', () => {
+    for (const file of [...ALLOWED].filter((f) => !f.endsWith('next-stop.ts'))) {
+      const text = readFileSync(file, 'utf8');
+      const lookup = text.slice(
+        text.lastIndexOf('where l.truck_id = t.id', text.indexOf('${NEXT_STOP_ORDER}')),
+        text.indexOf('${NEXT_STOP_ORDER}'),
+      );
+      const conditions = lookup
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => /^(where|and)\b/.test(line));
+      expect(conditions, file).toEqual([
+        'where l.truck_id = t.id',
+        "and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')",
+        'and s.departed_at is null',
+      ]);
+    }
   });
 });
