@@ -8660,8 +8660,25 @@ an inference, true only while the one writer that leaves the source empty is
 the worker deployed before this column; so it is temporary, and 0025 drops it
 once the worker writes the source itself.
 
-**Order of deploys**, each on its own approval: 0024 → the worker (explicit
-`detected`, conditional writes) → the app (the control) → 0025.
+**Order of deploys**, each on its own approval, all on 2026-10-07 (UTC):
+
+1. **0024** (b8e6d8f), applied about 09:26. The column, the check and the
+   bridge arrive together; the worker and app already running write no source,
+   and the bridge covers them.
+2. **The worker** (f86e7fb), running from 09:56. It writes `detected` itself,
+   conditionally.
+3. **The app** (3cd1d59), live on Vercel at 10:40. The control writes
+   `dispatcher`, and an arrival clear clears the source with the time.
+4. **0025** (63e2b51), applied at 11:03. The bridge goes.
+
+Any other order breaks something. 0025 before the worker or the app refuses
+their writes; the worker or the app before 0024 writes a column that does not
+exist yet.
+
+**The bridge existed from 0024 to 0025**, about an hour and a half on
+production. Nothing wrote a stop in that time: no departure, no audit row on
+any stop. So it never labelled anything, and all 13 departures carry the
+backfill's `detected`.
 
 ### The worker
 
@@ -8741,6 +8758,19 @@ with no source — the pre-0024 worker's statement — and a clear that leaves
 the source behind — the pre-0024 app's — are refused by the paired check,
 loudly, instead of being labelled by a guess. `departure-source.test.ts`
 asserts both refusals.
+
+Applied to production at 11:03 UTC on 2026-10-07: the journal holds 26
+entries, the trigger and function are gone, and `stops_departed_source_paired`
+is unchanged. On throwaway rows in a transaction that was then rolled back:
+
+- a departure time with no source was refused, both as an UPDATE (the
+  pre-0024 worker's statement) and as an INSERT;
+- a time and a source written together were kept;
+- clearing the time alone (the pre-0024 app's clear) was refused;
+- clearing both together worked.
+
+At that point the worker's own departure write had not yet run on production.
+The last departure was at 23:24 UTC on 2026-10-06, before the worker deploy.
 
 Every fixture that writes a departure now says whose it is: seeded and
 fixture departures stand in for the worker's and carry `detected`, one that
