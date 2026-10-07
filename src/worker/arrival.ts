@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { positions as positionsTable, stops } from '@/db/schema';
 import {
@@ -59,6 +59,8 @@ const CandidateRow = z.object({
   anchor_at: z.string().nullable(),
 });
 
+export type ArrivalCandidate = z.infer<typeof CandidateRow>;
+
 export interface ArrivalSweep {
   arrived: number;
   departed: number;
@@ -91,11 +93,8 @@ export interface SweepLogger {
   info: (message: string, fields?: Record<string, unknown>) => void;
 }
 
-export async function sweepArrivals(
-  db: Db,
-  logger: SweepLogger,
-  config: ArrivalConfig = ARRIVAL_DEFAULTS,
-): Promise<ArrivalSweep> {
+/** One sweep's candidates: per truck, the board's next stop, when it can be watched. */
+export async function arrivalCandidates(db: Db): Promise<ArrivalCandidate[]> {
   /**
    * The next stop per truck, exactly as the BOARD shows it (§12.13): the
    * earliest undeparted stop across every OPEN load. Then restricted to stops
@@ -144,7 +143,15 @@ export async function sweepArrivals(
        * on the way past.
        */`);
 
-  const candidates = z.array(CandidateRow).parse(candidateResult);
+  return z.array(CandidateRow).parse(candidateResult);
+}
+
+export async function sweepArrivals(
+  db: Db,
+  logger: SweepLogger,
+  config: ArrivalConfig = ARRIVAL_DEFAULTS,
+): Promise<ArrivalSweep> {
+  const candidates = await arrivalCandidates(db);
   if (candidates.length === 0) {
     return { arrived: 0, departed: 0, considered: 0, nearest: null, cannotArrive: [] };
   }
@@ -248,13 +255,20 @@ export async function sweepArrivals(
 
     const arrivedAt = detectArrival(stopGeo, fixes, config);
     if (arrivedAt !== null) {
-      await write(db, candidate, { arrivedAt }, config);
-      arrived += 1;
-      logger.info('arrival detected', {
-        truck: candidate.truck_number,
-        stopId: candidate.stop_id,
-        arrivedAt,
-      });
+      if (await recordDetection(db, candidate, { arrivedAt }, config)) {
+        arrived += 1;
+        logger.info('arrival detected', {
+          truck: candidate.truck_number,
+          stopId: candidate.stop_id,
+          arrivedAt,
+        });
+      } else {
+        // §12.118. A dispatcher recorded it between the read and the write.
+        logger.info('arrival already recorded', {
+          truck: candidate.truck_number,
+          stopId: candidate.stop_id,
+        });
+      }
       continue;
     }
 
@@ -262,15 +276,21 @@ export async function sweepArrivals(
     if (departedAt !== null) {
       // Non-null whenever a departure was found: it is what found it.
       const rule = departureCentre(stopGeo)!;
-      await write(db, candidate, { departedAt, rule }, config);
-      departed += 1;
-      logger.info('departure detected', {
-        truck: candidate.truck_number,
-        stopId: candidate.stop_id,
-        departedAt,
-        from: rule.rule,
-        arrivedSource: candidate.arrived_source,
-      });
+      if (await recordDetection(db, candidate, { departedAt, rule }, config)) {
+        departed += 1;
+        logger.info('departure detected', {
+          truck: candidate.truck_number,
+          stopId: candidate.stop_id,
+          departedAt,
+          from: rule.rule,
+          arrivedSource: candidate.arrived_source,
+        });
+      } else {
+        logger.info('departure already recorded', {
+          truck: candidate.truck_number,
+          stopId: candidate.stop_id,
+        });
+      }
     }
   }
 
@@ -311,20 +331,22 @@ export async function sweepArrivals(
 
 /**
  * One transaction per stop: the column and the audit row that explains it.
+ * True when it wrote; false when the stop already held what it would have
+ * written (§12.118), and then there is no audit row either.
  *
  * A dispatcher seeing a stop flip to ARRIVED with nobody's name on it needs
  * to be able to find out why, and `audit_log` is the only place that answers
  * it. `actorUserId` is null because no human did this — the actor is named in
  * the payload, which is the same shape the edit modal uses for `source`.
  */
-async function write(
+export async function recordDetection(
   db: Db,
-  candidate: z.infer<typeof CandidateRow>,
+  candidate: ArrivalCandidate,
   change:
     | { arrivedAt: string }
     | { departedAt: string; rule: NonNullable<ReturnType<typeof departureCentre>> },
   config: ArrivalConfig,
-): Promise<void> {
+): Promise<boolean> {
   const isArrival = 'arrivedAt' in change;
   /**
    * §12.85. A departure that ends a DISPATCHER's arrival says so in its
@@ -335,8 +357,8 @@ async function write(
     !isArrival && candidate.arrived_source === 'dispatcher'
       ? 'departure-after-manual-arrival'
       : 'worker';
-  await db.transaction(async (tx) => {
-    await tx
+  return db.transaction(async (tx) => {
+    const written = await tx
       .update(stops)
       .set(
         isArrival
@@ -350,9 +372,34 @@ async function write(
                */
               arrivedSource: 'detected' as const,
             }
-          : { departedAt: sql`${change.departedAt}::timestamptz` },
+          : {
+              departedAt: sql`${change.departedAt}::timestamptz`,
+              /**
+               * §12.118. Said, not left to the 0024 bridge to infer: the
+               * bridge goes in 0025, and after that a departure with no
+               * source is refused by the paired check.
+               */
+              departedSource: 'detected' as const,
+            },
       )
-      .where(eq(stops.id, candidate.stop_id));
+      /**
+       * §12.118. Only over NOTHING. The candidate was read at the top of the
+       * sweep; a dispatcher may have recorded this arrival or departure since,
+       * and a measurement must not overwrite — or relabel — a person's
+       * record. The departure also needs the arrival it is measured from to
+       * be there, and not after it.
+       */
+      .where(
+        isArrival
+          ? and(eq(stops.id, candidate.stop_id), isNull(stops.arrivedAt))
+          : and(
+              eq(stops.id, candidate.stop_id),
+              isNull(stops.departedAt),
+              lte(stops.arrivedAt, sql`${change.departedAt}::timestamptz`),
+            ),
+      )
+      .returning({ id: stops.id });
+    if (written.length === 0) return false;
 
     await writeAudit(tx, {
       actorUserId: null,
@@ -368,7 +415,7 @@ async function write(
       after: {
         ...(isArrival
           ? { arrivedAt: change.arrivedAt, arrivedSource: 'detected' }
-          : { departedAt: change.departedAt }),
+          : { departedAt: change.departedAt, departedSource: 'detected' }),
         source,
         /** What convinced it, so the threshold is arguable after the fact. */
         detection: {
@@ -395,5 +442,6 @@ async function write(
         },
       },
     });
+    return true;
   });
 }

@@ -8663,6 +8663,28 @@ once the worker writes the source itself.
 **Order of deploys**, each on its own approval: 0024 → the worker (explicit
 `detected`, conditional writes) → the app (the control) → 0025.
 
+### The worker
+
+It writes `departed_source = 'detected'` itself, and says so in the audit
+row, rather than leaving it to the bridge.
+
+Its arrival and departure writes are **conditional**. The sweep reads its
+candidates at the top and writes a while later; a dispatcher can save in
+between. An arrival is written only `where arrived_at is null`, a departure
+only `where departed_at is null and arrived_at <= the departure`. Zero rows
+means the dispatcher got there first: no write, no audit row, an
+`arrival/departure already recorded` log line. Before this an arrival typed
+in that window was overwritten and relabelled `detected`.
+
+The candidate read and the write are `arrivalCandidates` and
+`recordDetection`, so `arrival-race.test.ts` runs that interleaving for real:
+read, save the dispatcher's record, write — `false`, the record intact. Broken
+on purpose: an unconditional write fails both race tests; leaving the source
+to the bridge fails the explicit-source test, run with the bridge disabled.
+
+A stop the dispatcher marked left is never watched again: the sweep watches
+the board's next stop (§12.116), which is the first stop not departed.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
