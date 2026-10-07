@@ -76,7 +76,7 @@ async function closeAudit(loadId: string) {
 
 const rowOf = (page: Page, truckId: string) => page.locator(`[data-row-id="${truckId}"]`);
 const editModal = (page: Page, truck: number) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${truck}` });
+  page.getByRole('dialog', { name: new RegExp(`^(Edit|New) load for truck ${truck}$`) });
 const shot = (page: Page, info: TestInfo, name: string, target = page.locator('body')) =>
   target.screenshot({ path: info.outputPath(`${name}.png`) });
 
@@ -189,7 +189,7 @@ test('saving a new load asks about the previous one; Delivered closes it with th
   ]);
   // The row names a load only when there are two (§12.13); the modal names it.
   await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
-  await expect(modal.locator('h2')).toHaveText('Edit stop — truck 101');
+  await expect(modal.locator('h2')).toHaveText('Edit load — truck 101');
   await expect(modal.locator('h2 + p')).toContainText('NEW-777');
   await expect(modal.locator('[data-previous-load]')).toHaveCount(0);
 });

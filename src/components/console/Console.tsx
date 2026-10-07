@@ -11,6 +11,7 @@ import { passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
+import { usePrefetchLoadRead } from '@/hooks/useLoadRead';
 import { ConsoleHeader, type HeaderNote } from './ConsoleHeader';
 import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
@@ -431,6 +432,14 @@ export function Console({
     () => (selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null),
     [selectedId, rows],
   );
+
+  /**
+   * §12.119. The selected truck's load, read before anyone asks for it: the
+   * popup opens with the selection, and Edit load and Enter both open the
+   * modal on it — which then has the load in hand. Not on a phone, where
+   * nothing opens the modal (§12.94).
+   */
+  usePrefetchLoadRead(editingAllowed ? selectedRow : null);
 
   const timelineRow = useMemo(
     () => (timelineId ? (rows.find((r) => r.id === timelineId) ?? null) : null),

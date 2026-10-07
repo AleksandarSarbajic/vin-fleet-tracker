@@ -8,6 +8,7 @@ import { EditStopModal } from './EditStopModal';
 import { fleetRow, nextStop } from '@/test/fleet-row';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { stopView } from '@/test/load-body';
+import { primeLoadRead } from '@/test/load-read';
 
 /**
  * §12.44, and the §12.21 rule it rests on: **the cache must never hold a
@@ -55,6 +56,7 @@ afterEach(() => {
 });
 
 const render = async (row = ROW) => {
+  primeLoadRead(client, row);
   await act(async () => {
     root!.render(
       createElement(
@@ -428,6 +430,7 @@ describe('Clear stop (§12.88)', () => {
       .map(([, init]) => JSON.parse(String(init.body)) as Record<string, string>);
 
   const renderWith = async (row = ROW, onClose = vi.fn()) => {
+    primeLoadRead(client, row);
     await act(async () => {
       root!.render(
         createElement(
@@ -497,7 +500,7 @@ describe('Clear stop (§12.88)', () => {
     await press('Escape');
     expect(confirmStep()).toBeNull();
     expect(
-      container!.querySelector('[aria-label^="Edit stop for truck"]'),
+      container!.querySelector('[aria-label^="Edit load for truck"]'),
     ).not.toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(clears()).toEqual([]);
@@ -975,6 +978,7 @@ describe('a load changed since the modal opened', () => {
       .map(([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>);
 
   const mount = async (row: typeof OPENED, onReload: () => void) => {
+    primeLoadRead(client, row);
     await act(async () => {
       root!.render(
         createElement(

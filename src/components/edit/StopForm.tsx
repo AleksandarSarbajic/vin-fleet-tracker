@@ -1,0 +1,228 @@
+'use client';
+
+import { Fragment, type ReactNode } from 'react';
+import type { Status } from '@/lib/status';
+import { StatusChip } from '@/components/console/StatusChip';
+import { AppointmentFields } from './AppointmentFields';
+import { ArrivalFields } from './ArrivalFields';
+import { Field } from './Field';
+import { LEFT_STOP_NOTE, type StopFlags, type StopForm as StopFormState } from './load-form';
+import { STOP_FORM_ID, stopTabId } from './StopList';
+
+/**
+ * §12.119. The selected stop's form: where and when it is, whether the truck
+ * reached and left it, and the note. The fields, labels and rules are the
+ * one-stop modal's; what is new is that they belong to ONE stop of several.
+ *
+ *   - A stop the truck has LEFT keeps its address, type and appointment
+ *     (§12.116 D4); its note, arrival and departure stay correctable.
+ *   - Its arrival cannot be ticked while an earlier stop has not been left
+ *     (D5) — the reason is under the box.
+ *   - The status override, the ETA basis and the computed status belong to
+ *     the board's NEXT stop only (D2): the engine computes nothing for the
+ *     others. They are passed in for that stop and absent for the rest.
+ */
+export function StopForm({
+  stop,
+  index,
+  flags,
+  mayEdit,
+  loadExists,
+  dispatchTz,
+  storedWindow,
+  initialFocus,
+  addressChanged,
+  computed,
+  basisDetails,
+  overrideBlock,
+  notNextNote,
+  errorFor,
+  onChange,
+}: {
+  stop: StopFormState;
+  index: number;
+  flags: StopFlags;
+  mayEdit: boolean;
+  /** False on a new load: there is nothing to have arrived at yet. */
+  loadExists: boolean;
+  dispatchTz: string;
+  storedWindow: number | undefined;
+  initialFocus: boolean;
+  addressChanged: boolean;
+  /** The board's computed status, for the next stop of an existing load. */
+  computed: Status | null;
+  basisDetails: { label: string; value: string }[];
+  overrideBlock: ReactNode;
+  /** Said instead of the override on a stop that is not the next one. */
+  notNextNote: string | null;
+  errorFor: (field: string) => string | undefined;
+  onChange: (patch: Partial<StopFormState>) => void;
+}) {
+  const locked = flags.departed;
+  const lockedTitle = locked ? LEFT_STOP_NOTE : undefined;
+
+  return (
+    <div
+      id={STOP_FORM_ID}
+      role="tabpanel"
+      aria-labelledby={stopTabId(stop.key)}
+      data-stop-form={index + 1}
+      className="flex min-w-0 flex-col gap-3 px-4 pb-4 pt-3"
+    >
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="font-cond text-[15px] font-semibold uppercase tracking-[.07em] text-text">
+          Stop {index + 1}
+        </span>
+        <div role="radiogroup" aria-label="Stop type" className="flex">
+          {(
+            [
+              ['PU', 'Pick up'],
+              ['DEL', 'Deliver'],
+            ] as const
+          ).map(([type, label]) => {
+            const on = stop.stopType === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={!mayEdit || locked}
+                title={lockedTitle}
+                onClick={() => onChange({ stopType: type })}
+                className={`h-[30px] border px-3 font-cond text-micro font-semibold uppercase tracking-[.09em] disabled:opacity-60 ${
+                  on
+                    ? 'border-accent bg-accent text-text-inverse'
+                    : 'border-line-hair text-text-secondary'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {flags.next && loadExists ? (
+          <span className="inline-flex h-5 items-center bg-accent px-[7px] font-cond text-[10.5px] font-bold uppercase leading-none tracking-[.09em] text-text-inverse">
+            Next stop
+          </span>
+        ) : null}
+        {flags.next && computed ? <StatusChip status={computed} /> : null}
+      </div>
+
+      {locked ? (
+        <p className="border-l border-line-soft pl-3 text-small text-text-mutedOnOverlay" data-left-stop-note="">
+          {LEFT_STOP_NOTE}
+        </p>
+      ) : null}
+
+      {errorFor('*') ? (
+        <p role="alert" className="border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg">
+          {errorFor('*')}
+        </p>
+      ) : null}
+
+      <fieldset disabled={!mayEdit || locked} title={lockedTitle} className="border-0 p-0">
+        <div className="grid grid-cols-4 gap-x-3 gap-y-2">
+          <div className="col-span-4">
+            <Field
+              label="Street address"
+              value={stop.addressLine}
+              onChange={(v) => onChange({ addressLine: v })}
+              error={errorFor('addressLine')}
+            />
+          </div>
+          <Field
+            label="ZIP"
+            value={stop.zip}
+            onChange={(v) => onChange({ zip: v })}
+            error={errorFor('zip')}
+          />
+          <div className="col-span-2">
+            <Field
+              label="City"
+              value={stop.city}
+              onChange={(v) => onChange({ city: v })}
+              error={errorFor('city')}
+            />
+          </div>
+          <Field
+            label="State"
+            value={stop.state}
+            onChange={(v) => onChange({ state: v })}
+            placeholder="IL"
+            error={errorFor('state')}
+          />
+        </div>
+      </fieldset>
+
+      {/* §12.33: the basis in full, under the address that produced it. */}
+      {basisDetails.length > 0 ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-line-soft py-1 pl-3 text-small">
+          {basisDetails.map((detail) => (
+            <Fragment key={detail.label}>
+              <dt className="text-text-mutedOnOverlay">{detail.label}</dt>
+              <dd className="text-text-secondary">{detail.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
+
+      <AppointmentFields
+        draft={stop.appointment}
+        onChange={(next) => onChange({ appointment: next })}
+        storedWindow={storedWindow}
+        dispatchTz={dispatchTz}
+        disabled={!mayEdit || locked}
+        initialFocus={initialFocus}
+        error={errorFor('appointment.time')}
+        endError={errorFor('appointment.endTime')}
+      />
+
+      <ArrivalFields
+        draft={stop.arrival}
+        onChange={(next) => onChange({ arrival: next })}
+        departure={stop.departure}
+        onDepartureChange={(next) => onChange({ departure: next })}
+        zone={stop.appointment.tz}
+        storedSource={stop.stored?.arrivedSource ?? null}
+        addressChanged={addressChanged}
+        disabled={!mayEdit || !loadExists}
+        arrivalBlocked={flags.arrivalBlocked}
+        error={
+          errorFor('arrivedAt.time') ??
+          errorFor('arrivedAt.date.y') ??
+          errorFor('arrivedAt.date.m') ??
+          errorFor('arrivedAt.date.d') ??
+          errorFor('arrivedAt.time.h') ??
+          errorFor('arrivedAt.time.min')
+        }
+        departureError={
+          errorFor('departedAt.time') ??
+          errorFor('departedAt.date.y') ??
+          errorFor('departedAt.date.m') ??
+          errorFor('departedAt.date.d') ??
+          errorFor('departedAt.time.h') ??
+          errorFor('departedAt.time.min')
+        }
+      />
+
+      <fieldset disabled={!mayEdit} className="border-0 p-0">
+        <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
+          Dispatcher note · visible to the next shift
+        </legend>
+        <textarea
+          value={stop.note}
+          onChange={(e) => onChange({ note: e.target.value })}
+          className="h-14 w-full border border-line-hair bg-surface-sunken p-2 text-[13px] leading-[1.5] text-text"
+        />
+      </fieldset>
+
+      {overrideBlock}
+      {notNextNote ? (
+        <p className="text-small text-text-mutedOnOverlay" data-override-elsewhere="">
+          {notNextNote}
+        </p>
+      ) : null}
+    </div>
+  );
+}

@@ -21,6 +21,8 @@ export function ReachedStopQuestion({
   now,
   onAnswer,
   onBack,
+  stopName,
+  nextTrip = true,
 }: {
   /** The arrival being asked about — the server's, when it raised the question. */
   arrivedAt: string;
@@ -29,6 +31,13 @@ export function ReachedStopQuestion({
   now: Date;
   onAnswer: (answer: ReachedAnswer) => void;
   onBack: () => void;
+  /** §12.119. Named only on a load of several stops. */
+  stopName?: string | undefined;
+  /**
+   * §12.116 D3. Offered only once every stop on the load was reached and the
+   * save is that one stop; otherwise the next trip is Clear stop's job.
+   */
+  nextTrip?: boolean;
 }) {
   const trap = useFocusTrap(true);
 
@@ -48,11 +57,15 @@ export function ReachedStopQuestion({
 
   const options: { answer: ReachedAnswer; label: string; says: string }[] = [
     { answer: 'correction', label: 'Correction', says: 'Saves the changes on this stop, as typed.' },
-    {
-      answer: 'next-trip',
-      label: 'Next trip',
-      says: `${closing} closes as Delivered, with its arrival kept. The form is saved as a new load.`,
-    },
+    ...(nextTrip
+      ? [
+          {
+            answer: 'next-trip' as const,
+            label: 'Next trip',
+            says: `${closing} closes as Delivered, with its arrival kept. The form is saved as a new load.`,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -74,7 +87,7 @@ export function ReachedStopQuestion({
 
         <div className="space-y-4 p-4">
           <p className="text-body font-medium text-text">
-            {reachedPrompt(arrivedAt, dispatchTz, now)}
+            {reachedPrompt(arrivedAt, dispatchTz, now, stopName)}
           </p>
           {options.map((option) => (
             <div key={option.answer} className="flex items-start gap-3">
@@ -88,9 +101,15 @@ export function ReachedStopQuestion({
               <p className="pt-2 text-small text-text-mutedOnOverlay">{option.says}</p>
             </div>
           ))}
-          <p className="text-small text-text-mutedOnOverlay">
-            Closing and saving happen together: if either fails, neither does.
-          </p>
+          {nextTrip ? (
+            <p className="text-small text-text-mutedOnOverlay">
+              Closing and saving happen together: if either fails, neither does.
+            </p>
+          ) : (
+            <p className="text-small text-text-mutedOnOverlay" data-next-trip-elsewhere="">
+              To enter the next trip, close this load with Clear stop.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">

@@ -67,7 +67,7 @@ test('a hand-marked ZIP arrival clears when the truck drives away', async ({ pag
   // Mark it arrived fifteen minutes ago, on the receiver's clock.
   await row.click();
   await page.keyboard.press('Enter');
-  const modal = page.getByRole('dialog', { name: /Edit stop for truck/ });
+  const modal = page.getByRole('dialog', { name: /^(Edit|New) load for truck / });
   await expect(modal).toBeVisible();
   await modal.getByLabel('This truck has arrived at this stop').check();
   const wall = chicagoWall(new Date(Date.now() - 15 * 60_000));

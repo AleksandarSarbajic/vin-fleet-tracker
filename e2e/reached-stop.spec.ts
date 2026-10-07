@@ -73,7 +73,7 @@ async function closeAudit(loadId: string) {
 
 const rowOf = (page: Page, truckId: string) => page.locator(`[data-row-id="${truckId}"]`);
 const editModal = (page: Page, truck: number) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${truck}` });
+  page.getByRole('dialog', { name: new RegExp(`^(Edit|New) load for truck ${truck}$`) });
 const reachedQuestion = (page: Page) => page.getByRole('dialog', { name: 'Stop already reached' });
 const shot = (page: Page, info: TestInfo, name: string, target = page.locator('body')) =>
   target.screenshot({ path: info.outputPath(`${name}.png`) });

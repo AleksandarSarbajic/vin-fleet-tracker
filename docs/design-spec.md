@@ -8777,6 +8777,91 @@ fixture departures stand in for the worker's and carry `detected`, one that
 stands in for a dispatcher carries `dispatcher` (the test builders, the e2e
 history seed and previous-load spec, `seed-demo`).
 
+## 12.119 The edit modal edits a load — stage 4a
+
+Stage 4 of multi-stop loads, first half: the 960px two-pane modal from the
+approved design, on the stage 2 save path and the stage 3 departure control.
+It edits every stop a load already has; adding and removing stops is 4b.
+
+### It opens on the load read, fetched before it is asked for
+
+The modal's data is `GET /api/loads/:id` (§12.117): the load, every stop in
+order, and the version of exactly that. The console reads it when a truck is
+**selected** — which is also when its popup opens — once the selection has
+held for 250ms, so arrowing down the list does not spend the `read` rate
+limit on loads nobody opened. A click on Edit load, or Enter, then finds it
+in hand; with nothing in hand the modal says "Reading this load…" and reads
+it, and says so with Retry if that fails.
+
+The read is cached under the load id, the version, the next stop and its
+arrival. The version covers everything people edit; the worker writes only
+the board's next stop — its arrival, and the departure that moves it on — so
+a read under the key the row shows now is the load as the row shows it,
+however long ago it was fetched. It is kept 30 minutes, not React Query's 5,
+so a truck selected before a phone call is still in hand after it.
+
+**Frozen at the first read.** The form, the version its save is checked
+against, the override and active flag it compares with, and which stop is
+next are all taken once, when the modal opens. The console polls under the
+open modal; nothing a poll brings changes what the form holds or replaces
+the version. Clear now takes back the version it returns; Reload drops the
+read and opens the modal again on the board as it is now.
+
+### Layout
+
+A 960px panel, header and footer fixed and the middle scrolling, capped at
+the viewport less the scrim's 24px each side. In the middle: the banners
+(error with Reload, unsaved changes, saved warnings, previous loads), the
+load strip — truck, driver, load number, status, "On the console" — and the
+stops: a 280px list beside the selected stop's form at 1008px and up, and a
+row of tabs above it below that. One tablist either way; the arrow keys move
+between stops. The title is **"Edit load — truck N"**, and **"New load —
+truck N"** when the truck has no next stop.
+
+A list row: number, PU/DEL, place, and its appointment in the stop's own
+zone — or, for a stop the truck has left, "Departed 08:20 CDT", with
+"· marked by hand" when a dispatcher recorded it. Chips: Error, Arrived,
+Next; a dot for unsaved changes.
+
+### The rules each stop's form keeps
+
+- **A stop the truck has left** keeps its address, type and appointment
+  (§12.116 D4), said at the top of its form; its note, arrival and departure
+  stay correctable. It opens with its stored departure ticked.
+- **An arrival needs the stop before it left** (D5): the box is disabled
+  with the server's own sentence while an earlier stop has no departure —
+  stored, or ticked in this same form. The server now agrees: it counts a
+  departure written earlier in the same save, and stops counting one cleared
+  earlier in it.
+- **The status override, the ETA basis and the computed status** are the
+  next stop's (D2); other stops name where the override is.
+- **A ticked appointment with no time** — APPT or FCFS — is an error on the
+  time field, on every stop: "Enter a time, or untick the appointment." It
+  used to save as no appointment, silently.
+
+### What a save sends, and where its answers land
+
+The stops with unsaved changes, in the load's order; a save that changes
+only the load's own fields, or the override, sends the next stop, as the
+one-stop modal always did. On a one-stop load the request is byte for byte
+the one the one-stop modal sent — a plain save, a reassign, a previous-load
+close, a correction and a next trip were recorded from it before the split
+(`one-stop-body.test.tsx`) and are compared exactly.
+
+The banner names each stop's fields: "Unsaved changes — load number; stop 2:
+appointment time". A field error the server names `stops.<i>.<field>` is
+routed by the request's own order to its stop, the stop is selected, its row
+says Error, and the footer counts the stops that need attention.
+
+**The reached-stop question, per stop.** Asked as before — a reached stop
+given a new city, a reached load a new number — and now naming the stop:
+"Stop 2 (Fargo, ND) was reached at …". The server's 409 carries the stop's
+id and its place in the request (null when the request did not send it), so
+a stop reached after the modal opened is the one selected and asked about.
+"Next trip" is offered only once every stop on the load was reached and the
+save is that one stop (D3); otherwise the question says "To enter the next
+trip, close this load with Clear stop."
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

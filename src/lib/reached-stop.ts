@@ -44,6 +44,12 @@ export function needsReachedAnswer(stored: StoredStop, edit: EditedStop): boolea
 }
 
 /** "This stop was reached at 07:40 CDT. Is this a correction, or the next trip?" */
-export function reachedPrompt(arrivedAt: string, dispatchTz: string, now: Date): string {
-  return `This stop was reached at ${dispatchTime(arrivedAt, dispatchTz, now)}. Is this a correction, or the next trip?`;
+export function reachedPrompt(
+  arrivedAt: string,
+  dispatchTz: string,
+  now: Date,
+  /** §12.119. On a load of several stops, which one: "Stop 2 (Fargo, ND)". */
+  stopName?: string,
+): string {
+  return `${stopName ?? 'This stop'} was reached at ${dispatchTime(arrivedAt, dispatchTz, now)}. Is this a correction, or the next trip?`;
 }

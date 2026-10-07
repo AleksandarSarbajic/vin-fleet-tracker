@@ -9,7 +9,7 @@ import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 const rowOf = (page: Page, truckId: string) => page.locator(`[data-row-id="${truckId}"]`);
 const editModal = (page: Page, truck: number) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${truck}` });
+  page.getByRole('dialog', { name: new RegExp(`^(Edit|New) load for truck ${truck}$`) });
 
 async function openModal(page: Page, truckId: string, truck: number) {
   await rowOf(page, truckId).click();

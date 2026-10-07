@@ -13,7 +13,7 @@ import { SIZES, onPhone } from './phone-helpers';
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
 const rowOf = (page: Page, truckId: string) => page.locator(`[data-row-id="${truckId}"]`);
 const editModal = (page: Page, truck: number) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${truck}` });
+  page.getByRole('dialog', { name: new RegExp(`^(Edit|New) load for truck ${truck}$`) });
 const confirmStep = (page: Page) => page.getByRole('dialog', { name: 'Confirm reopen load' });
 const shot = (page: Page, info: TestInfo, name: string) =>
   page.screenshot({ path: info.outputPath(`${name}.png`) });

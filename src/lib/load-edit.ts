@@ -113,17 +113,9 @@ export const LoadEdit = z
 export type LoadEdit = z.infer<typeof LoadEdit>;
 export type LoadEditInput = z.input<typeof LoadEdit>;
 
-/**
- * Today's modal edits ONE stop, the truck's next stop (§12.117). This turns
- * its flat form into the load-shaped request, key by key — an omitted key in
- * the form stays omitted here, because omitted means "leave it alone" on
- * both shapes and a converter that filled one in would be §12.23's wipe.
- */
-export function loadEditFromStop(
-  edit: StopEdit,
-  ids: { loadId: string | null; version?: string | undefined },
-): LoadEditInput {
-  const stop: z.input<typeof StopDraft> = {
+/** One stop of the form as the load-shaped request carries it, key by key. */
+function stopDraftFrom(edit: StopEdit): z.input<typeof StopDraft> {
+  return {
     stopId: edit.stopId,
     stopType: edit.stopType,
     addressLine: edit.addressLine,
@@ -136,6 +128,25 @@ export function loadEditFromStop(
     ...(edit.departedAt !== undefined ? { departedAt: edit.departedAt } : {}),
     ...(edit.override !== undefined ? { override: edit.override } : {}),
   };
+}
+
+/**
+ * The modal's flat per-stop edits turned into the load-shaped request, key by
+ * key — an omitted key in the form stays omitted here, because omitted means
+ * "leave it alone" on both shapes and a converter that filled one in would be
+ * §12.23's wipe.
+ *
+ * §12.119. Every stop of one load carries the same load fields, so they are
+ * read off the first. The stops go in the order given — the load's own order
+ * — and the removals after them, only when there are any: a one-stop save is
+ * byte for byte the request the one-stop modal sent (one-stop-body.test.tsx).
+ */
+export function loadEditFromStops(
+  edits: readonly [StopEdit, ...StopEdit[]],
+  ids: { loadId: string | null; version?: string | undefined },
+  removedStopIds: readonly string[] = [],
+): LoadEditInput {
+  const edit = edits[0];
   return {
     loadId: ids.loadId,
     truckId: edit.truckId,
@@ -146,8 +157,17 @@ export function loadEditFromStop(
     ...(edit.previewToken !== undefined ? { previewToken: edit.previewToken } : {}),
     ...(edit.closePrevious !== undefined ? { closePrevious: edit.closePrevious } : {}),
     ...(edit.reachedStop !== undefined ? { reachedStop: edit.reachedStop } : {}),
-    stops: [stop],
+    stops: edits.map(stopDraftFrom),
+    ...(removedStopIds.length > 0 ? { removedStopIds: [...removedStopIds] } : {}),
   };
+}
+
+/** One stop: the request the one-stop modal sent (§12.117). */
+export function loadEditFromStop(
+  edit: StopEdit,
+  ids: { loadId: string | null; version?: string | undefined },
+): LoadEditInput {
+  return loadEditFromStops([edit], ids);
 }
 
 /**

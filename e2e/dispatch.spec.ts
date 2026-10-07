@@ -28,7 +28,7 @@ test('an appointment edit reads back in the row, in the stop’s own zone', asyn
   await row.click();
   await page.keyboard.press('Enter');
 
-  const modal = page.getByRole('dialog', { name: /Edit stop for truck/ });
+  const modal = page.getByRole('dialog', { name: /^(Edit|New) load for truck / });
   await expect(modal).toBeVisible();
 
   // A time nothing else in the fixture uses, so the assertion cannot pass on

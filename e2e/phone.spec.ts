@@ -764,7 +764,7 @@ check('editing stays hidden', async (page, size) => {
     .soft(page.locator('[data-clear-stop]'), size.name)
     .toHaveCount(0, { timeout: 2_000 });
   await expect
-    .soft(page.locator('[role="dialog"][aria-label^="Edit stop"]'), size.name)
+    .soft(page.locator('[role="dialog"][aria-label*=" load for truck"]'), size.name)
     .toHaveCount(0, { timeout: 2_000 });
 });
 

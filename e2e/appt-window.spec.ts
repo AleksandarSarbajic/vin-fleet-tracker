@@ -15,7 +15,7 @@ test.beforeEach(async () => {
 
 const rowOf = (page: Page) => page.locator(`[data-row-id="${IDS.truckChicago}"]`);
 const editModal = (page: Page) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${TRUCK_NUMBERS.chicago}` });
+  page.getByRole('dialog', { name: `Edit load for truck ${TRUCK_NUMBERS.chicago}` });
 
 async function openModal(page: Page) {
   await page.goto('/');

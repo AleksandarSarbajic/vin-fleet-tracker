@@ -11,6 +11,7 @@ import { wallTimeInstant } from '@/lib/format';
 import type { FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { stopView } from '@/test/load-body';
+import { primeLoadRead } from '@/test/load-read';
 
 /**
  * §12.115. The APPT window opens as it was saved, an untouched save sends it
@@ -64,6 +65,7 @@ const stopWith = (minutes: number | null): FleetRow =>
 
 const render = async (row: FleetRow) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  primeLoadRead(client, row);
   client.setQueryData<FleetResponse>(['fleet'], {
     fleet: [row],
     fetchedAt: '2026-09-18T12:00:00.000Z',

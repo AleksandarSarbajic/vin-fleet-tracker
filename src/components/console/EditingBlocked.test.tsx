@@ -8,6 +8,7 @@ import { fleetHealth, fleetRow } from '@/test/fleet-row';
 import { stubLayout } from '@/test/layout';
 import { DESKTOP_ONLY, EDIT_MEDIA } from '@/lib/editing';
 import type { FleetRow } from '@/server/fleet-query';
+import { primeLoadRead } from '@/test/load-read';
 
 /**
  * §12.94 — below 768px no route opens the Edit Stop modal or a bulk edit.
@@ -77,6 +78,8 @@ const render = async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
+  // §12.119. As the console's prefetch would have, by the time Enter opens it.
+  for (const row of ROWS) primeLoadRead(client, row);
   await act(async () => {
     root!.render(
       createElement(
@@ -107,7 +110,7 @@ const row = (n: number) =>
   [...container!.querySelectorAll<HTMLElement>('[role="row"][tabindex]')].find((el) =>
     (el.textContent ?? '').includes(String(n)),
   )!;
-const editor = () => document.querySelector('[role="dialog"][aria-label^="Edit stop"]');
+const editor = () => document.querySelector('[role="dialog"][aria-label*=" load for truck"]');
 const press = (key: string) =>
   act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key }));

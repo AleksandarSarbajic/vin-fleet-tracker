@@ -62,6 +62,7 @@ export function ArrivalFields({
   storedSource,
   addressChanged = false,
   disabled,
+  arrivalBlocked = null,
   error,
   departureError,
 }: {
@@ -75,6 +76,11 @@ export function ArrivalFields({
   /** §12.85. The address fields differ from what is stored. */
   addressChanged?: boolean;
   disabled: boolean;
+  /**
+   * §12.116 D5. Why this stop's arrival cannot be ticked — an earlier stop
+   * has not been left. A ticked arrival can still be unticked.
+   */
+  arrivalBlocked?: string | null;
   error?: string | undefined;
   departureError?: string | undefined;
 }) {
@@ -107,6 +113,7 @@ export function ArrivalFields({
         <input
           type="checkbox"
           checked={draft.marked}
+          disabled={arrivalBlocked !== null && !draft.marked}
           onChange={(e) => {
             set({ marked: e.target.checked });
             // §12.57/§12.118. The departure goes with the arrival it left from.
@@ -116,6 +123,11 @@ export function ArrivalFields({
         />
         This truck has arrived at this stop
       </label>
+      {arrivalBlocked !== null && !draft.marked ? (
+        <p className="mt-1.5 text-small text-text-mutedOnOverlay" data-arrival-blocked="">
+          {arrivalBlocked}
+        </p>
+      ) : null}
 
       {draft.marked ? (
         <>

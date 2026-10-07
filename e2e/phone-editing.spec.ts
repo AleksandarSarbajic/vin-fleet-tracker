@@ -38,7 +38,7 @@ async function onPhone(browser: Browser, width: number, height: number): Promise
   return context.newPage();
 }
 
-const editor = (page: Page) => page.locator('[role="dialog"][aria-label^="Edit stop"]');
+const editor = (page: Page) => page.locator('[role="dialog"][aria-label*=" load for truck"]');
 const clearConfirm = (page: Page) =>
   page.getByRole('dialog', { name: 'Confirm clear stop' });
 /** The truck number itself: a click there selects, whatever else the row holds. */

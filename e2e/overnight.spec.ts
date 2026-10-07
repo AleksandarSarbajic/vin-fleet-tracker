@@ -25,7 +25,7 @@ test.beforeEach(async () => {
 
 const rowOf = (page: Page) => page.locator(`[data-row-id="${IDS.truckChicago}"]`);
 const editModal = (page: Page) =>
-  page.getByRole('dialog', { name: `Edit stop for truck ${TRUCK_NUMBERS.chicago}` });
+  page.getByRole('dialog', { name: `Edit load for truck ${TRUCK_NUMBERS.chicago}` });
 const shoot = (info: TestInfo) => async (name: string, target: ReturnType<Page['locator']>) =>
   target.screenshot({ path: info.outputPath(`${name}.png`) });
 

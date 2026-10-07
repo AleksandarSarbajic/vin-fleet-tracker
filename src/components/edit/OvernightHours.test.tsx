@@ -12,6 +12,7 @@ import { wallTimeInstant } from '@/lib/format';
 import type { FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
 import { stopView } from '@/test/load-body';
+import { primeLoadRead } from '@/test/load-read';
 
 /**
  * §12.114 in the form. A latest hour at or before the earliest is the next
@@ -69,6 +70,7 @@ const stored = (
   });
 
 const render = async (row: FleetRow) => {
+  primeLoadRead(client, row);
   client.setQueryData<FleetResponse>(['fleet'], {
     fleet: [row],
     fetchedAt: '2026-09-18T12:00:00.000Z',

@@ -1,7 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { z } from 'zod';
-import { LOAD_STATUSES } from '@/lib/loads';
-import { ARRIVAL_SOURCES } from '@/lib/status';
+import { LoadForEdit } from '@/lib/load-read';
 import type { Db, Tx } from './audit';
 import { loadVersionSql } from './load-version';
 
@@ -19,50 +17,10 @@ import { loadVersionSql } from './load-version';
  * query and its type fails here.
  */
 
-const ISO = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+// §12.119. The shape lives in lib so the modal can check what it is given
+// without importing this file, which holds the query.
+export { LoadForEdit } from '@/lib/load-read';
 
-const Override = z.object({
-  id: z.string().uuid(),
-  forcedStatus: z.string(),
-  reason: z.string(),
-  reasonNote: z.string().nullable(),
-  expiresAtUtc: ISO,
-});
-
-const Stop = z.object({
-  stopId: z.string().uuid(),
-  sequence: z.number().int(),
-  type: z.enum(['PU', 'DEL']),
-  addressLine: z.string().nullable(),
-  city: z.string().nullable(),
-  state: z.string().nullable(),
-  zip: z.string().nullable(),
-  apptStartUtc: ISO.nullable(),
-  apptEndUtc: ISO.nullable(),
-  apptTz: z.string().nullable(),
-  apptType: z.enum(['APPT', 'FCFS']),
-  dispatcherNote: z.string().nullable(),
-  arrivedAt: ISO.nullable(),
-  arrivedSource: z.enum(ARRIVAL_SOURCES).nullable(),
-  departedAt: ISO.nullable(),
-  /** §12.118. */
-  departedSource: z.enum(['detected', 'dispatcher']).nullable(),
-  precision: z.enum(['street', 'block', 'zip']).nullable(),
-  accuracyMiles: z.number().nullable(),
-  override: Override.nullable(),
-});
-
-export const LoadForEdit = z.object({
-  loadId: z.string().uuid(),
-  truckId: z.string().uuid().nullable(),
-  loadNumber: z.string().nullable(),
-  status: z.enum(LOAD_STATUSES),
-  assignment: z.object({ id: z.string().uuid(), driverId: z.string().uuid() }).nullable(),
-  stops: z.array(Stop),
-  version: z.string().regex(/^[0-9a-f]{32}$/),
-});
-
-export type LoadForEdit = z.infer<typeof LoadForEdit>;
 
 const iso = (column: string) =>
   sql.raw(`to_char(${column} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`);

@@ -1,5 +1,7 @@
+import type { QueryClient } from '@tanstack/react-query';
+import { loadReadKey } from '@/hooks/useLoadRead';
 import type { FleetRow } from '@/server/fleet-query';
-import type { LoadForEdit } from '@/server/load-read';
+import type { LoadForEdit } from '@/lib/load-read';
 
 type StopRead = LoadForEdit['stops'][number];
 
@@ -65,4 +67,18 @@ export function loadReadFor(
     stops,
     version: s.loadVersion ?? '0123456789abcdef0123456789abcdef',
   };
+}
+
+/**
+ * Puts the row's load read where the modal looks for it — as the console's
+ * prefetch would have (§12.119) — so a suite about something else renders
+ * the modal ready, without answering `GET /api/loads/:id` itself.
+ */
+export function primeLoadRead(
+  client: QueryClient,
+  row: FleetRow,
+  extra?: Parameters<typeof loadReadFor>[1],
+): void {
+  const key = loadReadKey(row);
+  if (key) client.setQueryData(key, loadReadFor(row, extra));
 }

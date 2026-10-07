@@ -1,35 +1,26 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { etaDetails } from '@/lib/eta-basis';
-import { LOAD_STATUSES, LOAD_STATUS_LABEL } from '@/lib/loads';
 import { can, type Role } from '@/lib/roles';
-import { StopEdit, dirtyFields } from '@/lib/stop-edit';
-import { loadEditFromStop, singleStopField } from '@/lib/load-edit';
+import { loadEditFromStops } from '@/lib/load-edit';
+import type { LoadForEdit } from '@/lib/load-read';
+import type { StopEdit } from '@/lib/stop-edit';
 import type { FleetRow } from '@/server/fleet-query';
 import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
 import type { FleetResponse } from '@/hooks/useFleet';
-import { DriverSelect } from '@/components/assignments/DriverSelect';
+import { LOAD_READ_GC_MS, fetchLoadRead, loadReadKey } from '@/hooks/useLoadRead';
 import { OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
 import { OverrideBlock, type OverrideDraft } from './OverrideBlock';
-import {
-  AppointmentFields,
-  FCFS_DEFAULT_EARLIEST,
-  FCFS_DEFAULT_LATEST,
-  zoneForState,
-  type AppointmentDraft,
-} from './AppointmentFields';
-import { ArrivalFields, type ArrivalDraft, type DepartureDraft } from './ArrivalFields';
 import { normalizeAddress } from '@/lib/address';
-import { DEFAULT_WINDOW_MINUTES, storedWindowMinutes } from '@/lib/appointment';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
 import { RecentlyClosed } from './RecentlyClosed';
 import { PreviousLoadQuestion } from './PreviousLoadQuestion';
 import { ReachedStopQuestion } from './ReachedStopQuestion';
-import { needsReachedAnswer, type ReachedAnswer } from '@/lib/reached-stop';
+import type { ReachedAnswer } from '@/lib/reached-stop';
 import { useTruckTimeline } from '@/hooks/useTruckTimeline';
 import {
   clearStopTitle,
@@ -41,18 +32,40 @@ import {
   type SaveAnswer,
 } from '@/lib/clear-stop';
 import { useFocusTrap } from './useModalChrome';
+import {
+  dirtyLabels,
+  dirtyOf,
+  loadFormFrom,
+  localErrors,
+  nextTripAllowed,
+  reachedAsk as askFor,
+  routeServerError,
+  stopEditOf,
+  stopFlags,
+  stopName,
+  stopsToSend,
+  type FieldError,
+  type LoadForm,
+  type ReachedAsk,
+  type StopForm as StopFormState,
+} from './load-form';
+import { LoadStrip } from './LoadStrip';
+import { StopList } from './StopList';
+import { StopForm } from './StopForm';
 
 /**
- * design-spec §9.9. One modal covers editing a stop and entering the truck's
- * first load: a dispatcher doing either is doing the same thing with
- * different starting data, and a second creation flow would be a second place
- * for the appointment path to go wrong.
+ * design-spec §9.9, §12.119. One modal covers editing a load and entering
+ * the truck's first one: a dispatcher doing either is doing the same thing
+ * with different starting data, and a second creation flow would be a second
+ * place for the appointment path to go wrong.
  *
- * TODO(phase 5): the status override block (§9.5) belongs between the note
- * and the footer. It is deliberately absent, not forgotten — it renders the
- * COMPUTED status beside the forced one, and the engine that computes it
- * lands next phase. A block whose headline number is fabricated is worse than
- * no block.
+ * §12.119. It edits a LOAD: the load's own fields once, its stops in a list
+ * beside the selected stop's form (tabs above it below 1008px). It opens on
+ * the load read (`GET /api/loads/:id`) — fetched when the truck was
+ * selected, so in hand by the time Edit load is clicked — and the version
+ * that read carries. Both are frozen when the modal opens: the console polls
+ * the board under it, and nothing a poll brings may change what the form
+ * holds or the version its save is checked against (§12.117).
  */
 
 interface Props {
@@ -69,142 +82,156 @@ interface Props {
   onReload?: () => void;
 }
 
-interface FieldError {
-  field: string;
-  message: string;
+const truckNameOf = (row: FleetRow) =>
+  row.truckNumber === null ? row.samsaraName : String(row.truckNumber);
+
+/**
+ * The read, then the editor. The read's key is taken once, when the modal
+ * opens; the read itself is kept from the first answer, and nothing after it
+ * — a refetch, a poll's new key — replaces it.
+ */
+export function EditStopModal(props: Props) {
+  const queryClient = useQueryClient();
+  const [key] = useState(() => loadReadKey(props.row));
+  const [loadId] = useState(() => props.row.nextStop?.loadId ?? null);
+  const query = useQuery({
+    queryKey: key ?? ['load', 'none'],
+    queryFn: () => fetchLoadRead(loadId!),
+    enabled: key !== null,
+    staleTime: Infinity,
+    gcTime: LOAD_READ_GC_MS,
+    retry: 1,
+  });
+  const [read, setRead] = useState<LoadForEdit | null>(() =>
+    key ? (queryClient.getQueryData<LoadForEdit>(key) ?? null) : null,
+  );
+  useEffect(() => {
+    if (read === null && query.data) setRead(query.data);
+  }, [query.data, read]);
+
+  if (key !== null && read === null) {
+    return (
+      <ReadingPanel
+        truckName={truckNameOf(props.row)}
+        failed={query.isError ? (query.error as Error).message : null}
+        onRetry={() => void query.refetch()}
+        onClose={props.onClose}
+      />
+    );
+  }
+  return <LoadEditor {...props} read={read} />;
 }
 
-const isoDate = (utc: string | null, tz: string | null): string => {
-  if (!utc || !tz) return '';
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(utc));
-};
+/** While the load is read — no time at all when the prefetch got there first. */
+function ReadingPanel({
+  truckName,
+  failed,
+  onRetry,
+  onClose,
+}: {
+  truckName: string;
+  failed: string | null;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
 
-const isoTime = (utc: string | null, tz: string | null): string => {
-  if (!utc || !tz) return '';
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date(utc));
-};
+  return (
+    <div
+      className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-busy={failed === null}
+      aria-label={`Edit load for truck ${truckName}`}
+    >
+      <div className="flex w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal">
+        <div className="flex items-baseline justify-between border-b border-line-soft px-4 py-3">
+          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+            Edit load — truck {truckName}
+          </h2>
+          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
+            Esc close
+          </span>
+        </div>
+        <div className="flex items-center gap-3 px-4 py-6">
+          {failed ? (
+            <>
+              <p role="alert" className="flex-1 text-body text-status-late-fg">
+                {failed}
+              </p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <p className="text-body text-text-secondary">Reading this load…</p>
+          )}
+        </div>
+        <div className="flex justify-end border-t border-line-hair bg-surface-raised px-4 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReload }: Props) {
+function LoadEditor({
+  row,
+  drivers,
+  role,
+  dispatchTz,
+  onClose,
+  onReload,
+  read,
+}: Props & { read: LoadForEdit | null }) {
   const queryClient = useQueryClient();
   const trap = useFocusTrap(true);
   const mayEdit = can(role, 'dispatcher');
   const mayFlipActive = can(role, 'admin');
   const lockedReason = `Your role is ${role}. Editing needs dispatcher.`;
-
-  const stop = row.nextStop;
-
-  /**
-   * §12.117. The load's version as the row showed it when the modal OPENED,
-   * frozen. The row itself is live — the console re-reads it every poll — so
-   * reading the version from it at save time would describe a load the form
-   * never showed, and the check would pass exactly when it should refuse.
-   * Moved only by this modal's own `Clear now`, which returns the result.
-   */
-  const [version, setVersion] = useState(() => stop?.loadVersion ?? null);
-  /** §12.117. A save was refused because the load changed; Reload is offered. */
-  const [stale, setStale] = useState(false);
+  const truckName = truckNameOf(row);
 
   /**
-   * Derived, not state: it depends only on the row the modal was given. The
-   * saved coordinates do not change while the modal is open — a re-geocode
-   * happens on save, and the modal closes.
-   */
-  const basisDetails = stop ? etaDetails(row) : [];
-
-  /**
-   * One form object, and the SAME function turns it into a StopEdit whether
-   * it holds the values the modal opened with or the ones on screen now.
-   *
-   * The first version of this diffed the live edit against a hand-written
-   * "before" object, and got it wrong: the appointment was missing from that
-   * object, so every modal opened already dirty and the banner named fields
-   * nobody had touched. A dirty banner that is always on is worse than none —
-   * it trains people to ignore it.
-   */
-  /**
-   * The instant this modal opened, frozen. Used only to default the arrival
-   * time; a live `new Date()` inside the memo would recompute on any
-   * re-render and silently change what "unchanged" means.
+   * Everything the form is measured against, taken ONCE as it opens. The row
+   * is live — the console re-reads it every poll — and a "before" that moved
+   * with it would make the form dirty, or clean, on its own.
    */
   const [openedAt] = useState(() => new Date().toISOString());
-
-  /** The stop's zone, for the arrival. Same facility, same clock (§7.1). */
-  const arrivalZone = stop?.apptTz ?? zoneForState(stop?.state ?? null);
-
-  const initialForm = useMemo(
-    () => ({
-      loadNumber: stop?.loadNumber ?? '',
-      loadStatus: stop?.loadStatus ?? ('AVAILABLE' as (typeof LOAD_STATUSES)[number]),
-      stopType: stop?.type ?? ('DEL' as 'PU' | 'DEL'),
-      addressLine: stop?.addressLine ?? '',
-      city: stop?.city ?? '',
-      state: stop?.state ?? '',
-      zip: stop?.zip ?? '',
-      /**
-       * §12.53. This was `''` unconditionally, which made the modal a
-       * data-destruction path: it opened with an empty box over a stored note,
-       * the dispatcher saw nothing to preserve, and the save wrote that
-       * emptiness back over the note AND its authorship. The same shape as
-       * §12.23's broker wipe, in the one field the label promises is
-       * "visible to the next shift".
-       */
-      note: stop?.dispatcherNote ?? '',
-      driverId: drivers.find((d) => d.truckId === row.id)?.id ?? null,
-      appointment: {
-        enabled: Boolean(stop?.apptStartUtc),
-        type: stop?.apptType ?? ('APPT' as 'APPT' | 'FCFS'),
-        date: isoDate(stop?.apptStartUtc ?? null, stop?.apptTz ?? null),
-        time:
-          isoTime(stop?.apptStartUtc ?? null, stop?.apptTz ?? null) ||
-          (stop?.apptType === 'FCFS' ? FCFS_DEFAULT_EARLIEST : ''),
-        // §12.22: receiving hours default to 07:00–15:00 on a new FCFS stop.
-        endTime:
-          isoTime(stop?.apptEndUtc ?? null, stop?.apptTz ?? null) || FCFS_DEFAULT_LATEST,
-        tz: stop?.apptTz ?? zoneForState(stop?.state ?? null),
-        // §12.115: the window the stop was saved with, never the default.
-        // An FCFS stop's end is its latest hour, not a window, so switching
-        // one to APPT starts from the default like a new appointment.
-        windowMinutes:
-          stop?.apptType === 'FCFS'
-            ? DEFAULT_WINDOW_MINUTES
-            : storedWindowMinutes(stop?.apptStartUtc ?? null, stop?.apptEndUtc ?? null),
-      } as AppointmentDraft,
-      /**
-       * §12.57. Loaded from the stored value, like the note — a control that
-       * opened blank over a recorded arrival would write that blank back and
-       * destroy it, which is §12.53 again.
-       *
-       * Unmarked, it still carries a DEFAULT of now at the stop, so checking
-       * the box gives a sensible time to correct rather than an empty field
-       * to fill. The default is computed once, at open: a `now` that ticked
-       * while the modal sat there would make the form dirty on its own.
-       */
-      arrival: {
-        marked: Boolean(stop?.arrivedAt),
-        date:
-          isoDate(stop?.arrivedAt ?? null, arrivalZone) || isoDate(openedAt, arrivalZone),
-        time:
-          isoTime(stop?.arrivedAt ?? null, arrivalZone) || isoTime(openedAt, arrivalZone),
-      } as ArrivalDraft,
-      /**
-       * §12.118. The board's next stop has not been left — that is what makes
-       * it the next stop — so this always opens unmarked, with the same
-       * frozen default the arrival has: now, at the stop.
-       */
-      departure: {
-        marked: false,
-        date: isoDate(openedAt, arrivalZone),
-        time: isoTime(openedAt, arrivalZone),
-      } as DepartureDraft,
-    }),
-    [arrivalZone, drivers, openedAt, row.id, stop],
+  const [nextKey] = useState(() => (read ? (row.nextStop?.stopId ?? null) : null));
+  const [openedOverride] = useState(() => row.override);
+  const [openedActive] = useState(() => row.active);
+  const [initialDriverId] = useState(
+    () => drivers.find((d) => d.truckId === row.id)?.id ?? null,
+  );
+  const [initialForm] = useState<LoadForm>(() => loadFormFrom(read, openedAt, initialDriverId));
+  const [form, setForm] = useState<LoadForm>(initialForm);
+  const [selected, setSelected] = useState(() =>
+    Math.max(0, initialForm.stops.findIndex((s) => s.key === nextKey)),
   );
 
-  const [form, setForm] = useState(initialForm);
+  /** §12.117. The version the form opened with; moved only by this modal's own Clear now. */
+  const [version, setVersion] = useState(() => read?.version ?? null);
+  /** §12.117. A save was refused because the load changed; Reload is offered. */
+  const [stale, setStale] = useState(false);
 
   const [override, setOverride] = useState<OverrideDraft>(() => ({
     forced: row.override?.forcedStatus ?? 'AUTO',
@@ -214,36 +241,17 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
     customDate: '',
     customTime: '',
   }));
-  const set = <K extends keyof typeof initialForm>(key: K, value: (typeof initialForm)[K]) =>
-    setForm((f) => ({ ...f, [key]: value }));
 
   /**
-   * §12.14's `trucks.active`, which §12.53 found inert.
-   *
-   * It was `defaultChecked` with no `onChange` and nothing reading it, so the
-   * one surface the ruling names as the ONLY place the flag is editable could
-   * not edit it — while `/api/trucks` and `setTruckActive`, audit row and all,
-   * sat there with zero callers. §12.37's shape a sixth time.
-   *
-   * Its own state and its own request, not part of the stop's save, because it
-   * is a different entity behind a different gate: the stop route requires
-   * `dispatcher` and this requires `admin`. Folding an admin-only field into a
-   * dispatcher-level transaction would have made the whole save admin-only, or
-   * made the route's role check a lie. Same reasoning as `Clear now` keeping
-   * its own request (§12.28).
+   * §12.14's `trucks.active`. Its own state and its own request, not part of
+   * the save: it is a different entity behind a different gate (`admin`),
+   * and folding it in would make the whole save admin-only.
    */
   const [active, setActive] = useState(row.active);
 
+  /** Errors the server answered with, routed to their stop. */
   const [errors, setErrors] = useState<FieldError[]>([]);
-  /**
-   * §12.24. The save SUCCEEDED and something about it is worth knowing —
-   * today, that the address could not be located so the stop has no ETA.
-   *
-   * Deliberately not an error: the dispatcher's work is saved and correct,
-   * and colouring it red would send them looking for what they got wrong.
-   * The modal stays open on a warning rather than closing over it, because a
-   * banner nobody sees is the same as no banner.
-   */
+  /** §12.24. The save SUCCEEDED and something about it is worth knowing. */
   const [saveWarnings, setSaveWarnings] = useState<FieldError[]>([]);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
@@ -252,170 +260,61 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
   const [clearing, setClearing] = useState(false);
   /** §12.92. Opened from a previous-load line: that load comes preselected. */
   const [clearLoadId, setClearLoadId] = useState<string | null>(null);
+  /** The stops the last request carried, in its order — a field error's `stops.<i>`. */
+  const sentKeys = useRef<string[]>([]);
+
+  const setStop = useCallback((index: number, patch: Partial<StopFormState>) => {
+    setForm((f) => ({
+      ...f,
+      stops: f.stops.map((s, i) => (i === index ? { ...s, ...patch } : s)),
+    }));
+  }, []);
+  const selectKey = useCallback(
+    (key: string) => {
+      const index = form.stops.findIndex((s) => s.key === key);
+      if (index !== -1) setSelected(index);
+    },
+    [form.stops],
+  );
 
   /**
    * §12.92. No next stop, but open loads: every one of them is a PREVIOUS
-   * load — open, every stop departed. Read fresh, like Clear stop's confirm
-   * step, for the lines above the form, the Clear stop tooltip and the
-   * save-time question. Nothing is read for a truck that does not need it.
+   * load — open, every stop departed. Read fresh for the lines above the
+   * form, the Clear stop tooltip and the save-time question.
    */
-  const needsPrevious = !stop && row.openLoadCount > 0;
+  const needsPrevious = !read && row.openLoadCount > 0;
   const timeline = useTruckTimeline(needsPrevious ? row.id : null, { fresh: true });
   const previous = needsPrevious && timeline.data ? previousLoads(timeline.data) : null;
   const previousReady = previous !== null && !timeline.isFetching;
-  /** The save-time question is open, and what has been answered so far. */
   const [asking, setAsking] = useState(false);
   const [answers, setAnswers] = useState<Record<string, SaveAnswer>>({});
-  /**
-   * What the save closes. Null until the question has been answered — a save
-   * that needs the answer will not go without one.
-   */
   const [closes, setCloses] = useState<{ loadId: string; status: ClearStatus }[] | null>(
     null,
   );
 
-  /**
-   * The overwritten-trips fix. The arrival being asked about while the
-   * "correction, or the next trip?" question is open — the stop's own, or the
-   * one the server answered a save with when the stop was reached after this
-   * modal opened. Null when the question is closed.
-   */
-  const [reachedAsk, setReachedAsk] = useState<string | null>(null);
-  /** The answer given, held for a save that goes on to the reassign preview. */
+  /** "Correction, or the next trip?" — open, and about which stop. */
+  const [reachedAsk, setReachedAsk] = useState<ReachedAsk | null>(null);
   const [reachedAnswer, setReachedAnswer] = useState<ReachedAnswer | null>(null);
 
-  const toEdit = useCallback(
-    (f: typeof initialForm) => {
-      const trimmed = (value: string) => (value.trim() === '' ? null : value.trim());
-      const [y, m, d] = f.appointment.date.split('-').map(Number);
-      const [h, min] = f.appointment.time.split(':').map(Number);
-      const [endH, endMin] = f.appointment.endTime.split(':').map(Number);
-      const hasAppointment =
-        f.appointment.enabled &&
-        [y, m, d, h, min].every((n) => n !== undefined && !Number.isNaN(n));
-      const isFcfs = f.appointment.type === 'FCFS';
+  /* ------------------------------ derived ------------------------------- */
 
-      return {
-        stopId: stop?.stopId ?? null,
-        truckId: row.id,
-        loadNumber: f.loadNumber,
-        loadStatus: f.loadStatus,
-        stopType: f.stopType,
-        addressLine: trimmed(f.addressLine),
-        city: trimmed(f.city),
-        state: trimmed(f.state),
-        zip: trimmed(f.zip),
-        // Wall time and a zone. Never an instant — the server converts (§7).
-        appointment: hasAppointment
-          ? {
-              type: f.appointment.type,
-              date: { y: y!, m: m!, d: d! },
-              time: { h: h!, min: min! },
-              tz: f.appointment.tz,
-              windowMinutes: isFcfs ? null : f.appointment.windowMinutes,
-              // FCFS carries the latest receiving hour as a typed wall time,
-              // converted server-side exactly like the earliest one.
-              endTime:
-                isFcfs && endH !== undefined && !Number.isNaN(endH)
-                  ? { h: endH, min: endMin ?? 0 }
-                  : null,
-            }
-          : null,
-        dispatcherNote: trimmed(f.note),
-        /**
-         * §12.57, and the three states are not interchangeable:
-         *
-         *   marked          the wall time, for the server to convert
-         *   cleared         null — explicitly, and only when there IS one to
-         *                   clear, so an untouched unarrived stop stays quiet
-         *   nothing to say  omitted, which means leave it alone
-         *
-         * The zone is the appointment block's, live rather than captured:
-         * correcting the facility's zone corrects the arrival with it, and a
-         * stale copy here would convert the arrival against a zone the
-         * dispatcher has just said is wrong.
-         */
-        arrivedAt: f.arrival.marked
-          ? {
-              date: {
-                y: Number(f.arrival.date.slice(0, 4)),
-                m: Number(f.arrival.date.slice(5, 7)),
-                d: Number(f.arrival.date.slice(8, 10)),
-              },
-              time: {
-                h: Number(f.arrival.time.slice(0, 2)),
-                min: Number(f.arrival.time.slice(3, 5)),
-              },
-              tz: f.appointment.tz,
-            }
-          : stop?.arrivedAt
-            ? null
-            : undefined,
-        /**
-         * §12.118. Marked: a wall time in the stop's zone. Unmarked: nothing
-         * to say — the next stop has no departure to clear. Never sent
-         * without the arrival it leaves from; unticking that unticks this.
-         */
-        departedAt:
-          f.arrival.marked && f.departure.marked
-            ? {
-                date: {
-                  y: Number(f.departure.date.slice(0, 4)),
-                  m: Number(f.departure.date.slice(5, 7)),
-                  d: Number(f.departure.date.slice(8, 10)),
-                },
-                time: {
-                  h: Number(f.departure.time.slice(0, 2)),
-                  min: Number(f.departure.time.slice(3, 5)),
-                },
-                tz: f.appointment.tz,
-              }
-            : undefined,
-        driverId: f.driverId,
-      };
-    },
-    [row.id, stop?.arrivedAt, stop?.stopId],
+  const dirty = useMemo(() => dirtyOf(initialForm, form, row.id), [form, initialForm, row.id]);
+  const unsaved = useMemo(
+    () => [...dirtyLabels(dirty, form), ...(active === openedActive ? [] : ['active flag'])],
+    [active, dirty, form, openedActive],
   );
 
-  const initialDriverId = initialForm.driverId;
-  const driverId = form.driverId;
-  const edit = useMemo(() => toEdit(form), [form, toEdit]);
-  const initialEdit = useMemo(() => toEdit(initialForm), [initialForm, toEdit]);
-
-  const parsed = StopEdit.safeParse(edit);
-  const localErrors: FieldError[] = parsed.success
-    ? []
-    : parsed.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message }));
-  const allErrors = [...localErrors, ...errors];
-  const errorFor = (field: string) => allErrors.find((e) => e.field === field)?.message;
-
-  const dirty = useMemo(
-    () => [
-      ...dirtyFields(initialEdit as StopEdit, edit as StopEdit),
-      // Not a StopEdit field — it is a different entity on a different route —
-      // but it is unsaved work in this modal, and the banner names what is
-      // unsaved rather than what is in one particular request.
-      ...(active === row.active ? [] : ['active flag']),
-    ],
-    [active, edit, initialEdit, row.active],
-  );
-
-  const driverChanged = driverId !== initialDriverId;
+  const driverChanged = form.driverId !== initialDriverId;
 
   /**
-   * The override travels as its own request to its own table — but Save owns
-   * both, so §9.5's rule holds: Save is disabled while an override lacks a
-   * reason, exactly as it is while a field is invalid.
+   * The override travels inside the save, on the next stop (§12.28, D2) — but
+   * Save owns it, so §9.5's rule holds: Save is disabled while an override
+   * lacks a reason, exactly as while a field is invalid.
    */
   const overrideChanged =
-    override.forced !== (row.override?.forcedStatus ?? 'AUTO') ||
-    (override.forced !== 'AUTO' && override.reason !== (row.override?.reason ?? ''));
+    override.forced !== (openedOverride?.forcedStatus ?? 'AUTO') ||
+    (override.forced !== 'AUTO' && override.reason !== (openedOverride?.reason ?? ''));
 
-  /**
-   * §12.28: the override travels INSIDE the stop save now, so it carries no
-   * stopId — the server uses the row it just wrote, which on a new load did
-   * not exist when this was built.
-   */
   const overridePayload =
     override.forced === 'AUTO'
       ? null
@@ -441,30 +340,10 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
                 }
               : null,
         });
-
   const overrideErrors: FieldError[] =
     overridePayload && !overridePayload.success
-      ? overridePayload.error.issues.map((i) => ({
-          field: i.path.join('.'),
-          message: i.message,
-        }))
+      ? overridePayload.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message }))
       : [];
-
-  const canSave =
-    mayEdit &&
-    parsed.success &&
-    overrideErrors.length === 0 &&
-    (dirty.length > 0 || overrideChanged) &&
-    !saving;
-
-  /**
-   * What the save sends for the override, or undefined to leave it alone.
-   *
-   * §12.28. This used to be a SECOND request to a second route, fired after
-   * the stop save came back. A dispatcher who moved an appointment and forced
-   * a status could get one and not the other, and the error explaining it was
-   * on a screen nobody would be looking at when the next shift read the row.
-   */
   const overrideEdit: StopOverrideEdit | undefined = useMemo(
     () =>
       !overrideChanged
@@ -477,22 +356,49 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
     [override.forced, overrideChanged, overridePayload],
   );
 
+  /** §12.119. What the save would send, and whether it is ready to. */
+  const send = useMemo(
+    () => stopsToSend(form, dirty, nextKey, overrideChanged),
+    [dirty, form, nextKey, overrideChanged],
+  );
+  const local = useMemo(() => localErrors(form, send, row.id), [form, row.id, send]);
+  const parsed = local.parsed;
+  const allErrors = useMemo(() => [...local.errors, ...errors], [errors, local.errors]);
+  const errorFor = (field: string, stopKey?: string) =>
+    allErrors.find((e) => e.field === field && e.stopKey === stopKey)?.message;
+  const errorKeys = useMemo(
+    () => new Set(allErrors.flatMap((e) => (e.stopKey ? [e.stopKey] : []))),
+    [allErrors],
+  );
+  const stopsWithErrors = errorKeys.size;
+
+  const canSave =
+    mayEdit &&
+    parsed !== null &&
+    overrideErrors.length === 0 &&
+    (unsaved.length > 0 || overrideChanged) &&
+    !saving;
+
+  const flags = form.stops.map((_, i) => stopFlags(form, i, nextKey));
+  const current = form.stops[selected] ?? form.stops[0]!;
+  const currentFlags = flags[selected] ?? flags[0]!;
+  const initialCurrent = initialForm.stops.find((s) => s.key === current.key);
+
+  /* ------------------------------- Clear now ---------------------------- */
+
   /**
-   * `Clear now` from the block — immediate, not part of the save (§9.5).
-   *
-   * §12.117. It changes the load's version, so it carries the version this
-   * modal holds and takes back the new one: the dispatcher's own clear must
-   * not make their next save look stale. A load changed by someone else is
-   * refused here exactly as a save would be.
+   * `Clear now` from the block — immediate, not part of the save (§9.5). It
+   * changes the load's version, so it carries the version this modal holds
+   * and takes back the new one (§12.117).
    */
   const clearOverrideNow = useCallback(async () => {
-    if (!stop) return;
+    if (!nextKey) return;
     setSaving(true);
     try {
       const response = await fetch('/api/overrides', {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ stopId: stop.stopId, ...(version ? { version } : {}) }),
+        body: JSON.stringify({ stopId: nextKey, ...(version ? { version } : {}) }),
       });
       if (response.status === 409) {
         const body = (await response.json()) as { error?: string };
@@ -509,44 +415,33 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
     } finally {
       setSaving(false);
     }
-  }, [queryClient, stop, version]);
+  }, [nextKey, queryClient, version]);
+
+  /* --------------------------------- send ------------------------------- */
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
-  const send = useCallback(
+  const sendSave = useCallback(
     async (token?: string, closeList = closes, reached = reachedAnswer) => {
-      if (!parsed.success) return;
+      if (!parsed) return;
       setSaving(true);
       setErrors([]);
 
       /**
        * Optimistic: patch the row in place, keep the snapshot to roll back to.
-       *
-       * From `parsed.data`, NEVER from `edit` (§12.21). `edit` is the form's
-       * own shape and the schema is what turns it into the server's:
-       *
-       *     loadNumber   ''      ->  null        and untrimmed -> trimmed
-       *     state        'il'    ->  'IL'
-       *
-       * Patching from `edit` put `''` in the cache where the server would have
-       * written `null`, and both renderers of that field use `??`, which does
-       * not catch `''` — so a cleared load number rendered as empty space
-       * instead of "no number yet", until the refetch replaced it. The same
-       * bug in a second coat of paint: the form's layer and the wire's layer
-       * disagreeing about what the value is.
-       *
-       * The fix is not to loosen `??` to `||`. **The cache must never hold a
-       * shape the server cannot produce** — a renderer written against the
-       * server's contract is then correct everywhere, and anything that reads
-       * the cache later does not need to know an optimistic write happened.
+       * From the PARSED edit, never the form (§12.21): the cache must never
+       * hold a shape the server cannot produce.
        */
       const key = ['fleet'];
       const snapshot = queryClient.getQueryData<FleetResponse>(key);
-      const patch = parsed.data;
-      queryClient.setQueryData<FleetResponse>(key, (current) =>
-        current
+      const fallbackKey = (form.stops.find((s) => s.key === nextKey) ?? form.stops[0]!).key;
+      const nextIndex = send.findIndex((s) => s.key === nextKey);
+      const patch = nextIndex === -1 ? null : parsed[nextIndex]!;
+      const loadNumber = parsed[0]!.loadNumber;
+      queryClient.setQueryData<FleetResponse>(key, (cache) =>
+        cache
           ? {
-              ...current,
-              fleet: current.fleet.map((r) =>
+              ...cache,
+              fleet: cache.fleet.map((r) =>
                 r.id === row.id && r.nextStop
                   ? {
                       ...r,
@@ -554,48 +449,51 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
                         ...r.nextStop,
                         // Undefined means "leave it alone" on the wire, so it
                         // has to mean the same here (§12.23).
-                        loadNumber:
-                          patch.loadNumber === undefined
-                            ? r.nextStop.loadNumber
-                            : patch.loadNumber,
-                        addressLine: patch.addressLine,
-                        city: patch.city,
-                        state: patch.state,
-                        zip: patch.zip,
-                        // Same rule, same reason: the cache must never hold a
-                        // shape the server cannot produce (§12.21).
-                        dispatcherNote:
-                          patch.dispatcherNote === undefined
-                            ? r.nextStop.dispatcherNote
-                            : patch.dispatcherNote,
+                        loadNumber: loadNumber === undefined ? r.nextStop.loadNumber : loadNumber,
+                        ...(patch
+                          ? {
+                              addressLine: patch.addressLine,
+                              city: patch.city,
+                              state: patch.state,
+                              zip: patch.zip,
+                              dispatcherNote:
+                                patch.dispatcherNote === undefined
+                                  ? r.nextStop.dispatcherNote
+                                  : patch.dispatcherNote,
+                            }
+                          : {}),
                       },
                     }
                   : r,
               ),
             }
-          : current,
+          : cache,
       );
 
+      const edits = parsed.map(
+        (edit, i): StopEdit => ({
+          ...edit,
+          ...(token ? { previewToken: token } : {}),
+          ...(overrideEdit && send[i]!.key === fallbackKey ? { override: overrideEdit } : {}),
+          // §12.92: closed in the same transaction as the new load.
+          ...(closeList?.length ? { closePrevious: closeList } : {}),
+          ...(reached ? { reachedStop: reached } : {}),
+        }),
+      );
+      sentKeys.current = send.map((s) => s.key);
+
       try {
-        // One request. The stop, the appointment, the assignment and the
-        // override are one act and land in one transaction (§12.28) — sent
-        // as a load with its one stop, and the version this modal opened
-        // with (§12.117).
+        // One request: the stops, their appointments, the assignment and the
+        // override are one act and land in one transaction (§12.28), checked
+        // against the version this modal opened with (§12.117).
         const response = await fetch('/api/stops', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(
-            loadEditFromStop(
-              {
-                ...parsed.data,
-                ...(token ? { previewToken: token } : {}),
-                ...(overrideEdit ? { override: overrideEdit } : {}),
-                // §12.92: closed in the same transaction as the new load.
-                ...(closeList?.length ? { closePrevious: closeList } : {}),
-                ...(reached ? { reachedStop: reached } : {}),
-              },
-              { loadId: stop?.loadId ?? null, version: version ?? undefined },
-            ),
+            loadEditFromStops(edits as [StopEdit, ...StopEdit[]], {
+              loadId: read?.loadId ?? null,
+              version: version ?? undefined,
+            }),
           ),
         });
 
@@ -604,7 +502,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             preview?: ReassignPreview;
             error?: string;
             closePrevious?: boolean;
-            reachedStop?: { arrivedAt: string };
+            reachedStop?: { arrivedAt: string; stopId?: string; stopIndex?: number | null };
             stale?: boolean;
           };
           queryClient.setQueryData(key, snapshot);
@@ -613,8 +511,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             /**
              * §12.117. Someone changed this load after the modal opened.
              * Nothing was written. What the dispatcher typed stays in the
-             * form; Reload opens it again on the load as it is now, and
-             * nothing is merged either way.
+             * form; Reload opens it again on the load as it is now.
              */
             setCloses(null);
             setStale(true);
@@ -622,14 +519,22 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             return;
           }
           if (body.reachedStop) {
-            // Reached after this modal opened. Nothing was written; ask, with
-            // the arrival the server holds.
-            setReachedAsk(body.reachedStop.arrivedAt);
+            // Reached after this modal opened. Nothing was written; ask about
+            // THAT stop (§12.119), with the arrival the server holds.
+            const asked = body.reachedStop;
+            const stopKey =
+              asked.stopId ??
+              (asked.stopIndex !== undefined && asked.stopIndex !== null
+                ? sentKeys.current[asked.stopIndex]
+                : undefined) ??
+              fallbackKey;
+            selectKey(stopKey);
+            setReachedAsk({ arrivedAt: asked.arrivedAt, stopKey });
             return;
           }
           if (body.closePrevious) {
-            // §12.92. A previous load changed under the question — closed
-            // elsewhere, say. Nothing was written; ask again on a fresh read.
+            // §12.92. A previous load changed under the question. Nothing was
+            // written; ask again on a fresh read.
             setCloses(null);
             setAnswers({});
             setErrors([
@@ -649,19 +554,15 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
             reference?: string;
           };
           queryClient.setQueryData(key, snapshot);
-          // Nothing was closed either; the next Save asks again.
           setCloses(null);
           setReachedAnswer(null);
-          setErrors(
-            body.fields?.length
-              ? // §12.117. The server names a stop's field `stops.0.…`.
-                // A missing version has no input of its own: the banner.
-                body.fields.map((f) => ({
-                  ...f,
-                  field: f.field === 'version' ? '*' : singleStopField(f.field),
-                }))
-              : [{ field: '*', message: `${body.error ?? 'Save failed.'}${body.reference ? ` (${body.reference})` : ''}` }],
-          );
+          const routed = body.fields?.length
+            ? body.fields.map((f) => routeServerError(f, sentKeys.current))
+            : [{ field: '*', message: `${body.error ?? 'Save failed.'}${body.reference ? ` (${body.reference})` : ''}` }];
+          setErrors(routed);
+          // The form shows the stop the server named.
+          const named = routed.find((e) => e.stopKey)?.stopKey;
+          if (named) selectKey(named);
           return;
         }
 
@@ -669,26 +570,21 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
 
         /**
          * §12.14. A second request, deliberately, and only when the flag
-         * actually moved — see the note on `active` above for why it cannot
-         * ride inside the stop's transaction.
-         *
-         * After the stop save, not before: a truck vanishing from the console
-         * while its stop failed to save would be the worse half to land alone.
+         * moved — after the save, not before: a truck vanishing from the
+         * console while its stop failed to save would be the worse half.
          */
-        if (active !== row.active) {
+        if (active !== openedActive) {
           const flipped = await fetch('/api/trucks', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ truckId: row.id, active }),
           });
           if (!flipped.ok) {
-            const body = (await flipped.json().catch(() => null)) as {
-              error?: string;
-            } | null;
+            const body = (await flipped.json().catch(() => null)) as { error?: string } | null;
             await queryClient.invalidateQueries({ queryKey: key });
             // The stop IS saved. Saying otherwise would send the dispatcher
             // back to redo work that landed (§12.24's warning-not-error rule).
-            setActive(row.active);
+            setActive(openedActive);
             setSaveWarnings([
               {
                 field: 'active',
@@ -711,7 +607,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
 
         if (saved.warnings?.length) {
           setSaveWarnings(
-            saved.warnings.map((w) => ({ ...w, field: singleStopField(w.field) })),
+            saved.warnings.map((w) => {
+              const routed = routeServerError(w, sentKeys.current);
+              // On a load of several stops, the warning says which.
+              return form.stops.length > 1 && routed.stopKey
+                ? { ...routed, message: `${stopName(form, routed.stopKey)}: ${routed.message}` }
+                : routed;
+            }),
           );
           return;
         }
@@ -727,60 +629,56 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
         setSaving(false);
       }
     },
-    // `edit` is deliberately absent: this function reads `parsed.data` only.
-    // The raw form shape does not leave the component (§12.21).
-    [active, closes, onClose, overrideEdit, parsed, queryClient, reachedAnswer, row.active, row.id, stop?.loadId, version],
+    [active, closes, form, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, send, version],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
-  const save = useCallback(async (
-    closeList?: { loadId: string; status: ClearStatus }[],
-    reached?: ReachedAnswer,
-  ) => {
-    if (!canSave || !parsed.success) return;
-    /**
-     * The overwritten-trips fix: a reached stop given a new city or number is
-     * asked about first, every time — the same rule the server enforces.
-     */
-    const given = reached ?? null;
-    if (
-      stop?.arrivedAt &&
-      given === null &&
-      needsReachedAnswer(
-        { arrivedAt: stop.arrivedAt, city: stop.city, loadNumber: stop.loadNumber },
-        { city: parsed.data.city, loadNumber: parsed.data.loadNumber },
-      )
-    ) {
-      setReachedAsk(stop.arrivedAt);
-      return;
-    }
-    setReachedAnswer(given);
-    /**
-     * §12.92. A new load on a truck still holding a previous one asks about
-     * it first, every time. Never closed without the answer.
-     */
-    const answered = closeList ?? closes;
-    if (needsPrevious && answered === null) {
-      setAnswers({});
-      setAsking(true);
-      return;
-    }
-    setCloses(answered);
-    if (driverChanged) {
-      const response = await fetch('/api/assignments/preview', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ truckId: row.id, driverId }),
-      });
-      if (response.ok) {
-        setPreview((await response.json()) as ReassignPreview);
+  const save = useCallback(
+    async (closeList?: { loadId: string; status: ClearStatus }[], reached?: ReachedAnswer) => {
+      if (!canSave || !parsed) return;
+      /**
+       * The overwritten-trips fix: a reached stop given a new city — or a
+       * reached load a new number — is asked about first, every time, by the
+       * same rule the server enforces.
+       */
+      const given = reached ?? null;
+      if (given === null) {
+        const ask = askFor(read, send, parsed);
+        if (ask) {
+          selectKey(ask.stopKey);
+          setReachedAsk(ask);
+          return;
+        }
+      }
+      setReachedAnswer(given);
+      /**
+       * §12.92. A new load on a truck still holding a previous one asks about
+       * it first, every time. Never closed without the answer.
+       */
+      const answered = closeList ?? closes;
+      if (needsPrevious && answered === null) {
+        setAnswers({});
+        setAsking(true);
         return;
       }
-    }
-    await send(undefined, answered, given);
-  }, [canSave, closes, driverChanged, driverId, needsPrevious, parsed, row.id, send, stop]);
+      setCloses(answered);
+      if (driverChanged) {
+        const response = await fetch('/api/assignments/preview', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ truckId: row.id, driverId: form.driverId }),
+        });
+        if (response.ok) {
+          setPreview((await response.json()) as ReassignPreview);
+          return;
+        }
+      }
+      await sendSave(undefined, answered, given);
+    },
+    [canSave, closes, driverChanged, form.driverId, needsPrevious, parsed, read, row.id, selectKey, send, sendSave],
+  );
 
-  /** One answer given; the last one saves. */
+  /** One previous-load answer given; the last one saves. */
   const answer = useCallback(
     (loadId: string, given: SaveAnswer) => {
       const next = { ...answers, [loadId]: given };
@@ -807,14 +705,13 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
   /** Esc raises the discard confirm; it never closes silently (§9.9). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // §12.88. The confirm step owns Enter and Esc while it is open: Esc
-      // backs out of it, never out of this modal.
+      // §12.88. A confirm step owns Enter and Esc while it is open.
       if (clearing || asking || reachedAsk) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
         if (preview) setPreview(null);
-        else if (dirty.length > 0) setDiscarding(true);
+        else if (unsaved.length > 0) setDiscarding(true);
         else onClose();
       } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
@@ -823,7 +720,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [asking, clearing, dirty.length, onClose, preview, reachedAsk, save]);
+  }, [asking, clearing, onClose, preview, reachedAsk, save, unsaved.length]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -833,24 +730,37 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
     return map;
   }, [drivers]);
 
-  const truckName = row.truckNumber === null ? row.samsaraName : String(row.truckNumber);
-
   /**
-   * §12.88. Keyed off the COUNT, not off `stop`: a truck whose only open load
-   * has every stop departed opens this modal in its new-load state and still
-   * has a load to close — nine of the eighteen open loads looked like that
-   * when this was written.
+   * §12.88. Keyed off the COUNT, not off the read: a truck whose only open
+   * load has every stop departed opens in its new-load state and still has a
+   * load to close.
    */
   const canClear = mayEdit && row.openLoadCount > 0 && !saving;
   const clearTitle = !mayEdit
     ? lockedReason
     : row.openLoadCount === 0
       ? 'This truck has no open load to close.'
-      : !stop
+      : !read
         ? // §12.92: the form is empty, so the tooltip names the load.
           clearStopTitle(previous)
         : 'Close a finished load in one step.';
   const currentDriverName = drivers.find((d) => d.id === initialDriverId)?.name ?? null;
+
+  const title = read ? `Edit load — truck ${truckName}` : `New load — truck ${truckName}`;
+  const stopCount = `${form.stops.length} ${form.stops.length === 1 ? 'stop' : 'stops'}`;
+  const nextIndex = form.stops.findIndex((s) => s.key === nextKey);
+  const bannerError = errorFor('*');
+
+  const editCurrent = stopEditOf(form, current, row.id);
+  const editInitial = initialCurrent ? stopEditOf(initialForm, initialCurrent, row.id) : editCurrent;
+
+  const footerNote = driverChanged
+    ? `Reassigns truck ${truckName} from ${currentDriverName ?? 'Unassigned'} to ${
+        drivers.find((d) => d.id === form.driverId)?.name ?? 'Unassigned'
+      }.`
+    : stopsWithErrors > 0
+      ? `${stopsWithErrors} ${stopsWithErrors === 1 ? 'stop needs' : 'stops need'} attention before saving`
+      : '';
 
   return (
     <>
@@ -858,55 +768,86 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
         className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
         role="dialog"
         aria-modal="true"
-        aria-label={`Edit stop for truck ${truckName}`}
+        aria-label={`${read ? 'Edit' : 'New'} load for truck ${truckName}`}
       >
         <div
           ref={trap}
-          className="max-h-full w-[720px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
+          className="flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
         >
-          <div className="flex items-baseline justify-between border-b border-line-soft px-4 py-3">
+          {/* -------------------------- header, fixed ----------------------- */}
+          <div className="flex flex-none items-baseline justify-between border-b border-line-soft px-4 py-3">
             <div>
               <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-                {stop ? `Edit stop — truck ${truckName}` : `New load — truck ${truckName}`}
+                {title}
               </h2>
               <p className="mt-0.5 text-small text-text-mutedOnOverlay">
-                {stop
-                  ? (stop.loadNumber ?? 'Load number not given yet')
+                {read
+                  ? (read.loadNumber ?? 'Load number not given yet')
                   : // §12.92: the same count that enables Clear stop.
                     newLoadSubtitle(row.openLoadCount)}
                 {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
               </p>
             </div>
-            <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
-              Esc close
-            </span>
+            <div className="flex items-baseline gap-3">
+              <span className="text-small text-text-mutedOnOverlay" data-stop-count="">
+                {stopCount}
+              </span>
+              <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
+                Esc close
+              </span>
+            </div>
           </div>
 
-          {dirty.length > 0 ? (
-            <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
-              Unsaved changes — {dirty.join(', ')}.
-            </p>
-          ) : null}
-
-          {saveWarnings.length > 0 ? (
-            <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
-              <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
-                Saved · one thing to know
-              </p>
-              {saveWarnings.map((warning) => (
-                <p key={warning.field + warning.message} className="mt-0.5 text-body text-text">
-                  {warning.message}
+          {/* ------------------------- middle, scrolls ---------------------- */}
+          <div className="min-h-0 flex-1 overflow-auto">
+            {bannerError ? (
+              <div className="flex items-center gap-3 border-b border-status-late-bd bg-status-late-bg px-4 py-2">
+                <p role="alert" className="flex-1 text-body text-status-late-fg">
+                  {bannerError}
                 </p>
-              ))}
-            </div>
-          ) : null}
+                {stale && onReload ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // The board as it is now, then the modal on it, read
+                      // afresh. The typed values are discarded only here.
+                      void queryClient.refetchQueries({ queryKey: ['fleet'] }).finally(() => {
+                        if (read) queryClient.removeQueries({ queryKey: ['load', read.loadId] });
+                        onReload();
+                      });
+                    }}
+                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+                  >
+                    Reload
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
-          <div className="p-4">
-            {/* ------------------------- previous loads -------------------- */}
+            {unsaved.length > 0 ? (
+              <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
+                Unsaved changes — {unsaved.join(', ')}.
+              </p>
+            ) : null}
+
+            {saveWarnings.length > 0 ? (
+              <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
+                <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
+                  Saved · one thing to know
+                </p>
+                {saveWarnings.map((warning) => (
+                  <p key={warning.field + warning.message} className="mt-0.5 text-body text-text">
+                    {warning.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {/* ------------------------ previous loads -------------------- */}
             {needsPrevious ? (
               <div
                 data-previous-loads=""
-                className="mb-4 space-y-2 border border-status-risk-bd bg-status-risk-bg px-3 py-2"
+                className="space-y-2 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2"
               >
                 {timeline.isError ? (
                   <p role="alert" className="text-body text-status-late-fg">
@@ -944,290 +885,104 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
               </div>
             ) : null}
 
-            {/* ---------------------------- assignment --------------------- */}
-            <fieldset disabled={!mayEdit} className="border-0 p-0">
-              <legend className="mb-2 flex w-full items-baseline justify-between border-b border-line-soft pb-1.5">
-                <span className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-                  Assignment
-                </span>
-                <span className="font-cond text-micro uppercase tracking-[.09em] text-status-risk-fg">
-                  Driver change requires confirm
-                </span>
-              </legend>
-
-              <div className="grid grid-cols-[110px_1fr_150px] gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-small text-text-secondary">Truck no.</span>
-                  <p className="flex h-10 items-center font-sans text-data font-bold tabular-nums text-text">
-                    {truckName}
-                  </p>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-small text-text-secondary">
-                    Assigned driver
-                  </span>
-                  <DriverSelect
-                    drivers={drivers}
-                    value={driverId}
-                    /**
-                     * Only when the truck has nobody. With a driver already
-                     * assigned, the modal was opened to change something
-                     * else — most often the appointment — and an open
-                     * dropdown over the form is in the way.
-                     */
-                    autoFocus={initialDriverId === null}
-                    claimedBy={claimedBy}
-                    truckLabel={truckName}
-                    disabled={!mayEdit || saving}
-                    disabledReason={mayEdit ? undefined : lockedReason}
-                    onChange={(id) => set('driverId', id)}
-                    /**
-                     * §12.38. CREATE ONLY here — `assignToTruckId` stays null
-                     * even on an empty truck.
-                     *
-                     * The modal already assigns inside its own save (§12.28),
-                     * with the preview token a reassignment needs. Creating
-                     * AND assigning server-side would write the assignment
-                     * twice: once here and once when the modal saves. So the
-                     * driver is created, selected, and the modal's save does
-                     * the assigning — which is also why the button reads
-                     * "Add driver" on this surface.
-                     */
-                    assignToTruckId={null}
-                    onDriverCreated={() => {
-                      // The picker holds the new driver itself until this
-                      // lands, so the selection never blanks.
-                      void queryClient.invalidateQueries({ queryKey: ['fleet'] });
-                    }}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-small text-text-secondary">Active</span>
-                  <span
-                    title={mayFlipActive ? undefined : 'Only an admin may change this.'}
-                    className="flex h-10 items-center gap-2 text-body text-text-secondary"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      disabled={!mayFlipActive || saving}
-                      aria-label="Active — on the console"
-                      onChange={(e) => setActive(e.target.checked)}
-                    />
-                    On the console
-                  </span>
-                </label>
-              </div>
-              <p className="mt-1.5 text-small text-text-mutedOnOverlay">
-                {currentDriverName
-                  ? `Current assignment: ${currentDriverName}.`
-                  : 'No driver on this truck.'}{' '}
-                Type a surname to search all {drivers.length} drivers.
-              </p>
-            </fieldset>
-
-            {/* --------------------------- appointment --------------------- */}
-            <AppointmentFields
-              draft={form.appointment}
-              onChange={(next) => set('appointment', next)}
-              storedWindow={initialForm.appointment.windowMinutes}
-              dispatchTz={dispatchTz}
-              disabled={!mayEdit}
-              initialFocus={initialDriverId !== null}
-              error={errorFor('appointment.time')}
-              endError={errorFor('appointment.endTime')}
+            <LoadStrip
+              truckName={truckName}
+              drivers={drivers}
+              driverId={form.driverId}
+              initialDriverId={initialDriverId}
+              currentDriverName={currentDriverName}
+              claimedBy={claimedBy}
+              loadNumber={form.loadNumber}
+              loadStatus={form.loadStatus}
+              active={active}
+              mayEdit={mayEdit}
+              mayFlipActive={mayFlipActive}
+              saving={saving}
+              lockedReason={lockedReason}
+              loadNumberError={errorFor('loadNumber')}
+              onDriver={(id) => setForm((f) => ({ ...f, driverId: id }))}
+              onDriverCreated={() => {
+                // The picker holds the new driver itself until this lands.
+                void queryClient.invalidateQueries({ queryKey: ['fleet'] });
+              }}
+              onLoadNumber={(value) => setForm((f) => ({ ...f, loadNumber: value }))}
+              onLoadStatus={(value) => setForm((f) => ({ ...f, loadStatus: value }))}
+              onActive={setActive}
             />
 
-            {/* ---------------------------- arrival ------------------------ */}
-            <ArrivalFields
-              draft={form.arrival}
-              onChange={(next) => set('arrival', next)}
-              departure={form.departure}
-              onDepartureChange={(next) => set('departure', next)}
-              zone={form.appointment.tz}
-              storedSource={stop?.arrivedSource ?? null}
-              addressChanged={
-                normalizeAddress({
-                  addressLine: edit.addressLine,
-                  city: edit.city,
-                  state: edit.state,
-                  zip: edit.zip,
-                }) !==
-                normalizeAddress({
-                  addressLine: initialEdit.addressLine,
-                  city: initialEdit.city,
-                  state: initialEdit.state,
-                  zip: initialEdit.zip,
-                })
-              }
-              disabled={!mayEdit || !stop}
-              error={
-                errorFor('arrivedAt.time') ??
-                errorFor('arrivedAt.date.y') ??
-                errorFor('arrivedAt.date.m') ??
-                errorFor('arrivedAt.date.d') ??
-                errorFor('arrivedAt.time.h') ??
-                errorFor('arrivedAt.time.min')
-              }
-              departureError={
-                errorFor('departedAt.time') ??
-                errorFor('departedAt.date.y') ??
-                errorFor('departedAt.date.m') ??
-                errorFor('departedAt.date.d') ??
-                errorFor('departedAt.time.h') ??
-                errorFor('departedAt.time.min')
-              }
-            />
-
-            {/* --------------------------- stop & load --------------------- */}
-            <fieldset disabled={!mayEdit} className="mt-4 border-0 p-0">
-              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-                Stop &amp; load
-              </legend>
-
-              <div className="grid grid-cols-[1.6fr_1fr_1fr] gap-3">
-                <Field
-                  label="Street address"
-                  value={form.addressLine}
-                  onChange={(v) => set('addressLine', v)}
-                />
-                <Field label="ZIP" value={form.zip} onChange={(v) => set('zip', v)} />
-                <label className="block">
-                  <span className="mb-1 block text-small text-text-secondary">Stop type</span>
-                  <select
-                    value={form.stopType}
-                    onChange={(e) => set('stopType', e.target.value as 'PU' | 'DEL')}
-                    className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
-                  >
-                    <option value="PU">Pick up</option>
-                    <option value="DEL">Deliver</option>
-                  </select>
-                </label>
-              </div>
-
-              {/**
-               * §12.33: the basis in full, under the address that produced it.
-               *
-               * Anyone in this modal is already looking deliberately, so it is
-               * open rather than collapsed — unlike the popup, where the same
-               * block sits behind a disclosure. This is where a dispatcher
-               * reconciling against a rate confirmation ends up, and the
-               * car-profile caveat is the reason it moved out of the tooltip.
-               */}
-              {basisDetails.length > 0 ? (
-                <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-line-soft py-1 pl-3 text-small">
-                  {basisDetails.map((detail) => (
-                    <Fragment key={detail.label}>
-                      <dt className="text-text-mutedOnOverlay">{detail.label}</dt>
-                      <dd className="text-text-secondary">{detail.value}</dd>
-                    </Fragment>
-                  ))}
-                </dl>
-              ) : null}
-
-              <div className="mt-3 grid grid-cols-[1.6fr_1fr_1fr] gap-3">
-                <Field label="City" value={form.city} onChange={(v) => set('city', v)} />
-                <Field label="State" value={form.state} onChange={(v) => set('state', v)} placeholder="IL" />
-                <label className="block">
-                  <span className="mb-1 block text-small text-text-secondary">Load status</span>
-                  <select
-                    value={form.loadStatus}
-                    onChange={(e) =>
-                      set('loadStatus', e.target.value as (typeof LOAD_STATUSES)[number])
-                    }
-                    className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
-                  >
-                    {LOAD_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {LOAD_STATUS_LABEL[status]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="mt-3 grid grid-cols-[1.6fr_1fr_1fr] gap-3">
-                {/* §12.21: no longer required. Broker paperwork does not
-                    always carry a number when the load is entered. */}
-                <Field
-                  label="Load number"
-                  value={form.loadNumber}
-                  onChange={(v) => set('loadNumber', v)}
-                  error={errorFor('loadNumber')}
-                  help="Any format the broker uses, or leave it blank (§12.21)"
-                />
-              </div>
-            </fieldset>
-
-            {/* ------------------------------ note ------------------------- */}
-            <fieldset disabled={!mayEdit} className="mt-4 border-0 p-0">
-              <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-                Dispatcher note · visible to the next shift
-              </legend>
-              <textarea
-                value={form.note}
-                onChange={(e) => set('note', e.target.value)}
-                className="h-14 w-full border border-line-hair bg-surface-sunken p-2 text-[13px] leading-[1.5] text-text"
+            <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr] min-[1008px]:items-start">
+              <StopList
+                stops={form.stops}
+                flags={flags}
+                selected={selected}
+                dirtyKeys={new Set(dirty.stops.keys())}
+                errorKeys={errorKeys}
+                onSelect={setSelected}
               />
-            </fieldset>
-
-            <OverrideBlock
-              draft={override}
-              onChange={setOverride}
-              computed={row.computed}
-              live={
-                row.override
-                  ? {
-                      forcedStatus: row.override.forcedStatus,
-                      reasonLabel: OVERRIDE_REASON_LABEL[row.override.reason],
-                      setByName: row.override.setByName,
-                      setAtUtc: row.override.setAtUtc,
-                      expiresAtUtc: row.override.expiresAtUtc,
-                    }
-                  : null
-              }
-              disabled={!mayEdit || !stop}
-              onClearNow={() => void clearOverrideNow()}
-              errors={(field) =>
-                overrideErrors.find((e) => e.field === field)?.message ??
-                errors.find((e) => e.field === field)?.message
-              }
-            />
-
-            {errorFor('*') ? (
-              <div className="mt-3 flex items-center gap-3 border border-status-late-bd bg-status-late-bg px-3 py-2"
-              >
-                <p className="flex-1 text-body text-status-late-fg">{errorFor('*')}</p>
-                {stale && onReload ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // The board as it is now, then the modal on it. The
-                      // typed values are discarded only here, on request.
-                      void queryClient
-                        .refetchQueries({ queryKey: ['fleet'] })
-                        .finally(onReload);
-                    }}
-                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
-                  >
-                    Reload
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
+              <StopForm
+                key={current.key}
+                stop={current}
+                index={selected}
+                flags={currentFlags}
+                mayEdit={mayEdit}
+                loadExists={read !== null}
+                dispatchTz={dispatchTz}
+                storedWindow={initialCurrent?.appointment.windowMinutes}
+                initialFocus={initialDriverId !== null}
+                addressChanged={normalizeAddress(editCurrent) !== normalizeAddress(editInitial)}
+                computed={read && currentFlags.next ? row.computed : null}
+                basisDetails={read && currentFlags.next ? etaDetails(row) : []}
+                overrideBlock={
+                  !read || currentFlags.next ? (
+                    <OverrideBlock
+                      draft={override}
+                      onChange={setOverride}
+                      computed={row.computed}
+                      live={
+                        row.override
+                          ? {
+                              forcedStatus: row.override.forcedStatus,
+                              reasonLabel: OVERRIDE_REASON_LABEL[row.override.reason],
+                              setByName: row.override.setByName,
+                              setAtUtc: row.override.setAtUtc,
+                              expiresAtUtc: row.override.expiresAtUtc,
+                            }
+                          : null
+                      }
+                      disabled={!mayEdit || !read}
+                      onClearNow={() => void clearOverrideNow()}
+                      errors={(field) =>
+                        overrideErrors.find((e) => e.field === field)?.message ??
+                        errors.find((e) => e.field === field && !e.stopKey)?.message
+                      }
+                    />
+                  ) : null
+                }
+                notNextNote={
+                  read && !currentFlags.next && nextIndex !== -1
+                    ? `A status override applies to the truck's next stop (stop ${nextIndex + 1}).`
+                    : null
+                }
+                errorFor={(field) => errorFor(field, current.key)}
+                onChange={(patch) => setStop(selected, patch)}
+              />
+            </div>
 
             {/* §12.107. Drawn only when this truck closed a load in the last 7 days. */}
-            <RecentlyClosed
-              truckId={row.id}
-              truckName={truckName}
-              dispatchTz={dispatchTz}
-              mayEdit={mayEdit}
-              lockedReason={lockedReason}
-              onReopened={onClose}
-            />
+            <div className="px-4 pb-4">
+              <RecentlyClosed
+                truckId={row.id}
+                truckName={truckName}
+                dispatchTz={dispatchTz}
+                mayEdit={mayEdit}
+                lockedReason={lockedReason}
+                onReopened={onClose}
+              />
+            </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
+          {/* --------------------------- footer, fixed ---------------------- */}
+          <div className="flex flex-none items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
             <div className="flex min-w-0 items-center gap-3">
               {/* §12.88. Bottom-left, away from Save and Cancel. */}
               <button
@@ -1243,18 +998,18 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
               >
                 Clear stop
               </button>
-              <span className="text-[11.5px] font-medium text-status-risk-fg">
-                {driverChanged
-                  ? `Reassigns truck ${truckName} from ${currentDriverName ?? 'Unassigned'} to ${
-                      drivers.find((d) => d.id === driverId)?.name ?? 'Unassigned'
-                    }.`
-                  : ''}
+              <span
+                className={`text-[11.5px] font-medium ${
+                  driverChanged ? 'text-status-risk-fg' : 'text-status-late-fg'
+                }`}
+              >
+                {footerNote}
               </span>
             </div>
             <div className="flex shrink-0 gap-2.5">
               <button
                 type="button"
-                onClick={() => (dirty.length > 0 ? setDiscarding(true) : onClose())}
+                onClick={() => (unsaved.length > 0 ? setDiscarding(true) : onClose())}
                 className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
               >
                 Cancel
@@ -1278,7 +1033,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
           preview={preview}
           busy={saving}
           onCancel={() => setPreview(null)}
-          onConfirm={() => void send(preview.token)}
+          onConfirm={() => void sendSave(preview.token)}
         />
       ) : null}
 
@@ -1287,7 +1042,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
           truckId={row.id}
           truckName={truckName}
           dispatchTz={dispatchTz}
-          unsaved={dirty}
+          unsaved={unsaved}
           initialLoadId={clearLoadId}
           onBack={() => setClearing(false)}
           onCleared={onClose}
@@ -1307,10 +1062,12 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
 
       {reachedAsk ? (
         <ReachedStopQuestion
-          arrivedAt={reachedAsk}
-          loadNumber={stop?.loadNumber ?? null}
+          arrivedAt={reachedAsk.arrivedAt}
+          loadNumber={read?.loadNumber ?? null}
           dispatchTz={dispatchTz}
           now={new Date()}
+          stopName={form.stops.length > 1 ? stopName(form, reachedAsk.stopKey) : undefined}
+          nextTrip={nextTripAllowed(read, send, reachedAsk.stopKey)}
           onAnswer={(given) => {
             setReachedAsk(null);
             void save(undefined, given);
@@ -1326,7 +1083,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
               Discard changes?
             </h3>
             <p className="mt-1.5 text-body text-text-secondary">
-              {dirty.join(', ')} would be lost.
+              {unsaved.join(', ')} would be lost.
             </p>
             <div className="mt-4 flex justify-end gap-2.5">
               <button
@@ -1348,42 +1105,5 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReloa
         </div>
       ) : null}
     </>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  help,
-  error,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  help?: string;
-  error?: string | undefined;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-small text-text-secondary">{label}</span>
-      <input
-        type="text"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={`h-10 w-full border bg-surface-sunken px-2.5 text-body text-text ${
-          error ? 'border-status-late-fg' : 'border-line-hair'
-        }`}
-      />
-      {/* Errors sit under their own field, never in a summary banner (§9.9). */}
-      {error ? (
-        <span className="mt-1 block text-small text-status-late-fg">{error}</span>
-      ) : help ? (
-        <span className="mt-1 block text-small text-text-mutedOnOverlay">{help}</span>
-      ) : null}
-    </label>
   );
 }
