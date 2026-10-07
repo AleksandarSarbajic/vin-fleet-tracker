@@ -271,7 +271,8 @@ for (const width of WIDTHS) {
     await open(page);
     await select101(page);
     await page.getByRole('button', { name: 'Edit load' }).click();
-    await page.locator('[role="dialog"][aria-label^="Edit stop"]').waitFor();
+    // §12.119. The form, not just the dialog: the load read lands in it.
+    await page.locator('[role="dialog"][aria-label^="Edit load"] [role="tabpanel"]').waitFor();
     await page.waitForTimeout(400);
     /*
      * Parked, like every other state. The click on Edit load left the pointer
@@ -335,8 +336,75 @@ test('edit stop with a +30 window at 1440px matches its baseline', async ({ page
   await open(page);
   await select101(page);
   await page.getByRole('button', { name: 'Edit load' }).click();
-  await page.locator('[role="dialog"][aria-label^="Edit stop"]').waitFor();
+  await page.locator('[role="dialog"][aria-label^="Edit load"] [role="tabpanel"]').waitFor();
   await page.waitForTimeout(400);
   await page.mouse.move(2, HEIGHT - 2);
   await shoot(page, '7b-edit-stop-plus-30', width);
+});
+
+/**
+ * §12.119, stage 4a. The modal on a load of TWO stops: the pickup left — by
+ * hand, so its row says so — and the delivery the board's next stop. Built
+ * on 101's load from fixed instants, so every time the list prints is the
+ * same on every run.
+ */
+async function twoStops(): Promise<void> {
+  await seed();
+  const sql = connect();
+  try {
+    await sql`update stops
+                 set type = 'PU',
+                     city = 'Melrose Park', state = 'IL', zip = '60160',
+                     address_line = '1900 N 25th Ave',
+                     appointment_start_utc = '2026-10-01T12:00:00Z',
+                     appointment_end_utc = '2026-10-01T12:00:00Z',
+                     arrived_at = '2026-10-01T12:05:00Z', arrived_source = 'detected',
+                     departed_at = '2026-10-01T13:20:00Z', departed_source = 'dispatcher'
+               where id = ${IDS.stopChicago}`;
+    await sql`insert into stops (load_id, type, sequence, address_line, city, state, zip,
+                                 lat, lng, geocode_precision, appointment_start_utc,
+                                 appointment_end_utc, appointment_tz, appointment_type)
+              values (${IDS.loadChicago}, 'DEL', 2, '3450 Main Ave', 'Fargo', 'ND', '58103',
+                      46.8772, -96.7898, 'street', ${APPOINTMENT}, ${APPOINTMENT},
+                      'America/Chicago', 'APPT')`;
+  } finally {
+    await sql.end();
+  }
+}
+
+async function openTwoStops(page: Page, width: number, height: number): Promise<void> {
+  await twoStops();
+  await page.clock.setFixedTime(FROZEN);
+  await page.setViewportSize({ width, height });
+  await open(page);
+  await select101(page);
+  await page.getByRole('button', { name: 'Edit load' }).click();
+  await page.locator('[role="dialog"][aria-label^="Edit load"] [role="tabpanel"]').waitFor();
+  await page.waitForTimeout(400);
+  await page.mouse.move(2, height - 2);
+}
+
+for (const [width, height] of [
+  [1280, 720],
+  [1440, 900],
+] as const) {
+  test(`edit load with two stops at ${width}x${height} matches its baseline`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await openTwoStops(page, width, height);
+    await shoot(page, `7c-edit-load-two-stops-${height}`, width);
+  });
+}
+
+test('edit load with two stops at 768px, as tabs, matches its baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openTwoStops(page, 768, HEIGHT);
+  await shoot(page, '7d-edit-load-two-stops-tabs', 768);
+});
+
+test('a stop the truck has left, at 1440px, matches its baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openTwoStops(page, 1440, HEIGHT);
+  await page.getByRole('tab', { name: /Melrose Park/ }).click();
+  await page.mouse.move(2, HEIGHT - 2);
+  await shoot(page, '7e-edit-load-left-stop', 1440);
 });
