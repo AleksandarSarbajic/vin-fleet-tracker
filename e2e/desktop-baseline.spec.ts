@@ -382,6 +382,23 @@ async function openTwoStops(page: Page, width: number, height: number): Promise<
   await page.locator('[role="dialog"][aria-label^="Edit load"] [role="tabpanel"]').waitFor();
   await page.waitForTimeout(400);
   await page.mouse.move(2, height - 2);
+  /*
+   * At 720 tall the truck list behind the scrim has to scroll to bring 101
+   * into view, and it does so smoothly: a shot taken while it was still
+   * moving caught the rows part of a row out, once in three runs. Shot when
+   * the list has held still for three looks running.
+   */
+  await page.waitForFunction(() => {
+    const row = document.querySelector('[data-row-id]');
+    let el: Element | null = row?.parentElement ?? null;
+    while (el && !(el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== 'visible')) {
+      el = el.parentElement;
+    }
+    const w = window as unknown as { __listTop?: number[] };
+    const seen = (w.__listTop ??= []);
+    seen.push(el ? el.scrollTop : 0);
+    return seen.length >= 3 && seen.slice(-3).every((v) => v === seen[seen.length - 1]);
+  }, undefined, { polling: 150 });
 }
 
 for (const [width, height] of [
