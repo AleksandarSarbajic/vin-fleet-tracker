@@ -81,6 +81,7 @@ export function nextStop(over: Partial<NextStop> = {}): NextStop {
     loadId: '33333333-3333-4333-8333-333333333333',
     loadNumber: 'LD-4417',
     loadStatus: 'DISPATCHED',
+    loadVersion: '0123456789abcdef0123456789abcdef',
     type: 'DEL',
     addressLine: '1 Broadway',
     city: 'Chicago',

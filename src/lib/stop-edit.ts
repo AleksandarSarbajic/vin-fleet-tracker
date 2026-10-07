@@ -67,7 +67,7 @@ export const LoadNumber = blankIsNull(64).optional();
  * `state` and `zip` have their own normalisers below, which follow the same
  * `'' -> null` rule for the same reason (§12.44).
  */
-function blankIsNull(max: number) {
+export function blankIsNull(max: number) {
   return z
     .string()
     .trim()

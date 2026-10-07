@@ -6,7 +6,7 @@ import { makeTruck } from '@/test/fleet';
 import { OverrideInput } from '@/lib/override';
 import { StopEdit } from '@/lib/stop-edit';
 import { OverrideError, clearOverride, setOverride } from './override';
-import { saveStopEdit } from './stop-edit';
+import { saveStopEdit } from '@/test/stop-save';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from './fleet-query';
 import { STATUS_DEFAULTS } from '@/lib/status';
 import type { Tx } from './audit';

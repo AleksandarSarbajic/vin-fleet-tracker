@@ -368,6 +368,8 @@ export function Console({
   const [panRequest, setPanRequest] = useState(0);
   /** §12.10: Enter opens the edit modal on the selected row. */
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** §12.117. Bumped by the modal's Reload: the same truck, opened afresh. */
+  const [editOpening, setEditOpening] = useState(0);
   /**
    * §12.94. Editing is a desktop job: below 768px nothing opens the Edit
    * Stop modal (and so Clear stop) or the bulk edits. Every route goes
@@ -1121,11 +1123,13 @@ export function Console({
 
         {editingRow && editingAllowed ? (
           <EditStopModal
+            key={`${editingRow.id}:${editOpening}`}
             row={editingRow}
             drivers={drivers}
             role={role}
             dispatchTz={dispatchTz}
             onClose={() => setEditingId(null)}
+            onReload={() => setEditOpening((n) => n + 1)}
           />
         ) : null}
 

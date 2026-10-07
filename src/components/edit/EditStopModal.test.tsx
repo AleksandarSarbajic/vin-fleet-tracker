@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditStopModal } from './EditStopModal';
 import { fleetRow, nextStop } from '@/test/fleet-row';
 import type { FleetResponse } from '@/hooks/useFleet';
+import { stopView } from '@/test/load-body';
 
 /**
  * §12.44, and the §12.21 rule it rests on: **the cache must never hold a
@@ -296,7 +297,7 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
       buttonLabelled('Save').click();
     });
 
-    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as {
+    const body = stopView(JSON.parse(String(posted('/api/stops')[0]![1].body))) as {
       arrivedAt: { date: unknown; time: unknown; tz: string };
     };
     // Integers and a zone. Nothing here is a Date, an ISO string or an
@@ -317,7 +318,7 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
       buttonLabelled('Save').click();
     });
 
-    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as {
+    const body = stopView(JSON.parse(String(posted('/api/stops')[0]![1].body))) as {
       arrivedAt: unknown;
     };
     // Null, not an absent key: §12.23's difference between "clear it" and
@@ -335,7 +336,7 @@ describe('the arrival is loaded before it is saved (§12.57)', () => {
       buttonLabelled('Save').click();
     });
 
-    const body = JSON.parse(String(posted('/api/stops')[0]![1].body)) as Record<
+    const body = stopView(JSON.parse(String(posted('/api/stops')[0]![1].body))) as Record<
       string,
       unknown
     >;
@@ -660,7 +661,7 @@ describe('a truck with no next stop but open loads (§12.92)', () => {
       globalThis.fetch as unknown as { mock: { calls: [string, RequestInit?][] } }
     ).mock.calls
       .filter(([url, init]) => url === path && init?.method === 'POST')
-      .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>);
+      .map(([, init]) => stopView(JSON.parse(String(init!.body))));
 
   const settle = () =>
     act(async () => {
@@ -836,7 +837,7 @@ describe('a reached stop given a new city or number asks first', () => {
   const bodies = () =>
     (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
       .filter(([url]) => url === '/api/stops')
-      .map(([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>);
+      .map(([, init]) => stopView(JSON.parse(String(init.body))));
 
   const save = async () => {
     await act(async () => {
@@ -955,5 +956,93 @@ describe('a reached stop given a new city or number asks first', () => {
     expect(question()?.textContent).toMatch(/reached at \w{3} 07:05 /);
     await choose('Next trip');
     expect(bodies().map((b) => b['reachedStop'])).toEqual([undefined, 'next-trip']);
+  });
+});
+
+/**
+ * §12.117. The version check, as the dispatcher meets it. The save carries
+ * the load and the version the row showed when the modal OPENED; a refusal
+ * says so in the server's words, keeps every typed value, and offers Reload —
+ * which opens the modal afresh only when pressed. Nothing is merged.
+ */
+describe('a load changed since the modal opened', () => {
+  const OPENED = fleetRow({ nextStop: nextStop({ loadVersion: 'a'.repeat(32) }) });
+  const STALE = 'This load was changed since you opened it. Nothing was saved.';
+
+  const bodies = () =>
+    (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
+      .filter(([url]) => url === '/api/stops')
+      .map(([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>);
+
+  const mount = async (row: typeof OPENED, onReload: () => void) => {
+    await act(async () => {
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(EditStopModal, {
+            row,
+            drivers: [],
+            role: 'dispatcher' as const,
+            dispatchTz: 'America/Chicago',
+            onClose: () => {},
+            onReload,
+          }),
+        ),
+      );
+    });
+  };
+
+  const reloadButton = () =>
+    Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Reload');
+
+  it('sends the load and the version it opened with — not the live row’s', async () => {
+    const onReload = vi.fn();
+    await mount(OPENED, onReload);
+    // The board polls while the modal is open: same truck, newer version.
+    await mount(fleetRow({ nextStop: nextStop({ loadVersion: 'b'.repeat(32) }) }), onReload);
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await act(async () => buttonLabelled('Save').click());
+
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]).toMatchObject({
+      loadId: OPENED.nextStop!.loadId,
+      version: 'a'.repeat(32),
+      stops: [expect.objectContaining({ stopId: OPENED.nextStop!.stopId, city: 'Des Plaines' })],
+    });
+  });
+
+  it('says so, keeps what was typed, and reloads only when asked', async () => {
+    globalThis.fetch = vi.fn(async (url: string) =>
+      url === '/api/stops'
+        ? { ok: false, status: 409, json: async () => ({ error: STALE, stale: true }) }
+        : { ok: true, status: 200, json: async () => ({ ok: true }) },
+    ) as unknown as typeof fetch;
+    const onReload = vi.fn();
+    await mount(OPENED, onReload);
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await act(async () => setValue(fieldLabelled('Load number'), 'TYPED-1'));
+    await act(async () => buttonLabelled('Save').click());
+
+    expect(container!.textContent).toContain(STALE);
+    expect(fieldLabelled('City').value).toBe('Des Plaines');
+    expect(fieldLabelled('Load number').value).toBe('TYPED-1');
+    expect(onReload).not.toHaveBeenCalled();
+
+    await act(async () => reloadButton()!.click());
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no Reload for an ordinary save error', async () => {
+    globalThis.fetch = vi.fn(async (url: string) =>
+      url === '/api/stops'
+        ? { ok: false, status: 500, json: async () => ({ error: 'The save failed.' }) }
+        : { ok: true, status: 200, json: async () => ({ ok: true }) },
+    ) as unknown as typeof fetch;
+    await mount(OPENED, vi.fn());
+    await act(async () => setValue(fieldLabelled('City'), 'Des Plaines'));
+    await act(async () => buttonLabelled('Save').click());
+    expect(container!.textContent).toContain('The save failed.');
+    expect(reloadButton()).toBeUndefined();
   });
 });

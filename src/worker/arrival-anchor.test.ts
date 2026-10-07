@@ -5,7 +5,7 @@ import { describeDb, rolledBack } from '@/test/db';
 import { makePosition, makeTruck } from '@/test/fleet';
 import { StopEdit } from '@/lib/stop-edit';
 import { STATUS_DEFAULTS } from '@/lib/status';
-import { saveStopEdit } from '@/server/stop-edit';
+import { saveStopEdit } from '@/test/stop-save';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from '@/server/fleet-query';
 import type { Tx } from '@/server/audit';
 import { sweepArrivals } from './arrival';

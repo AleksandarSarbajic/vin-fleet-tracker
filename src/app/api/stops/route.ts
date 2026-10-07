@@ -8,9 +8,15 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
-import { StopEdit } from '@/lib/stop-edit';
+import { LoadEdit } from '@/lib/load-edit';
 import { statusConfig } from '@/server/fleet';
-import { ReachedStopError, saveStopEdit, StopEditError } from '@/server/stop-edit';
+import {
+  AtStopError,
+  ReachedStopError,
+  saveLoadEdit,
+  StaleLoadError,
+  StopEditError,
+} from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
 import { ClearStopError } from '@/server/clear-stop';
 
@@ -24,7 +30,8 @@ export async function POST(request: Request) {
     // service and there is deliberately no cache layer to absorb a retry loop.
     await enforceRateLimit('geocode', user.id);
 
-    const parsed = StopEdit.safeParse(await request.json());
+    // §12.117. A load and the stops it writes; today's modal sends one.
+    const parsed = LoadEdit.safeParse(await request.json());
     if (!parsed.success) {
       // Field-level errors, under their own field — never a summary banner.
       return NextResponse.json(
@@ -39,7 +46,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await saveStopEdit(db, {
+    const result = await saveLoadEdit(db, {
       actorUserId: user.id,
       edit: parsed.data,
       // §12.28: the override rides along, and END_OF_DAY / UNTIL_APPT are
@@ -48,10 +55,24 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (error: unknown) {
+    if (error instanceof StaleLoadError) {
+      // §12.117. Someone changed this load after the modal opened. Nothing
+      // was written and nothing is merged; the modal keeps what was typed
+      // and offers Reload.
+      return NextResponse.json({ error: error.message, stale: true }, { status: 409 });
+    }
+    if (error instanceof AtStopError) {
+      // One stop's field — an hour that does not exist at that facility, an
+      // arrival in the future — named with the stop it belongs to.
+      return NextResponse.json(
+        { error: error.message, fields: [{ field: error.field, message: error.message }] },
+        { status: 400 },
+      );
+    }
     if (error instanceof AppointmentTimeError) {
       // The hour does not exist at that facility on that date.
       return NextResponse.json(
-        { error: error.message, fields: [{ field: 'appointment.time', message: error.message }] },
+        { error: error.message, fields: [{ field: error.field, message: error.message }] },
         { status: 400 },
       );
     }

@@ -21,6 +21,7 @@ import {
   type UpcomingDay,
 } from '@/lib/status';
 import { LOAD_STATUSES, type LoadStatus } from '@/lib/loads';
+import { loadVersionSql } from './load-version';
 import { NEXT_STOP_ORDER } from './next-stop';
 
 /**
@@ -114,6 +115,13 @@ export interface NextStop {
   /** Null until the broker's paperwork carries one (§12.21). */
   loadNumber: string | null;
   loadStatus: LoadStatus;
+  /**
+   * §12.117. The load's version as of THIS row — computed in the same
+   * statement, so it describes exactly what the row shows. The edit modal
+   * keeps the one it opened with and the save is refused if the load has
+   * moved on. Null only if the load vanished mid-query.
+   */
+  loadVersion: string | null;
   type: 'PU' | 'DEL';
   addressLine: string | null;
   city: string | null;
@@ -194,7 +202,7 @@ export const LATEST_POSITION_SQL = sql`
     to_char(p.recorded_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as recorded_at,
     p.formatted_location      as formatted_location,
-    ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.stop_type,
+    ns.stop_id, ns.load_id, ns.load_number, ns.load_status, ns.load_version, ns.stop_type,
     ns.stop_address, ns.stop_city, ns.stop_state, ns.stop_zip,
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
@@ -236,6 +244,8 @@ export const LATEST_POSITION_SQL = sql`
       l.id::text              as load_id,
       l.load_number           as load_number,
       l.status::text          as load_status,
+      -- §12.117. The version of exactly this snapshot, for the edit modal.
+      ${loadVersionSql(sql`l.id`)} as load_version,
       s.type::text            as stop_type,
       s.address_line          as stop_address,
       s.city                  as stop_city,
@@ -355,6 +365,8 @@ export const FleetQueryRow = z.object({
   /** §12.21: a load may not have a number yet. */
   load_number: z.string().nullable(),
   load_status: z.enum(LOAD_STATUSES).nullable(),
+  /** §12.117. md5 hex, from server/load-version.ts. */
+  load_version: z.string().regex(/^[0-9a-f]{32}$/).nullable(),
   stop_type: z.enum(['PU', 'DEL']).nullable(),
   stop_address: z.string().nullable(),
   stop_city: z.string().nullable(),
@@ -446,6 +458,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             loadId: raw.load_id,
             loadNumber: raw.load_number,
             loadStatus: raw.load_status,
+            loadVersion: raw.load_version,
             type: raw.stop_type,
             addressLine: raw.stop_address,
             city: raw.stop_city,

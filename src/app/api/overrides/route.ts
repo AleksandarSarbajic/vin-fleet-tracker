@@ -11,10 +11,14 @@ import {
 import { ClearOverrideInput, OverrideInput } from '@/lib/override';
 import { statusConfig } from '@/server/fleet';
 import { OverrideError, clearOverride, setOverride } from '@/server/override';
+import { StaleLoadError, clearOverrideAt } from '@/server/stop-edit';
 
 export const dynamic = 'force-dynamic';
 
 function failure(error: unknown) {
+  if (error instanceof StaleLoadError) {
+    return NextResponse.json({ error: error.message, stale: true }, { status: 409 });
+  }
   if (error instanceof OverrideError) {
     return NextResponse.json(
       { error: error.message, fields: [{ field: error.field, message: error.message }] },
@@ -80,8 +84,11 @@ export async function DELETE(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     }
+    const { stopId, version } = parsed.data;
     return NextResponse.json(
-      await clearOverride(db, { actorUserId: user.id, clear: parsed.data }),
+      version === undefined
+        ? await clearOverride(db, { actorUserId: user.id, clear: { stopId } })
+        : await clearOverrideAt(db, { actorUserId: user.id, stopId, version }),
     );
   } catch (error: unknown) {
     return failure(error);

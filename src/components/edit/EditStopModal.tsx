@@ -6,6 +6,7 @@ import { etaDetails } from '@/lib/eta-basis';
 import { LOAD_STATUSES, LOAD_STATUS_LABEL } from '@/lib/loads';
 import { can, type Role } from '@/lib/roles';
 import { StopEdit, dirtyFields } from '@/lib/stop-edit';
+import { loadEditFromStop, singleStopField } from '@/lib/load-edit';
 import type { FleetRow } from '@/server/fleet-query';
 import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
@@ -60,6 +61,12 @@ interface Props {
   role: Role;
   dispatchTz: string;
   onClose: () => void;
+  /**
+   * §12.117. Opens the modal again on the board as it is now, after a save
+   * was refused because the load changed. The typed values go with it — the
+   * dispatcher asked for that by pressing Reload; nothing is merged.
+   */
+  onReload?: () => void;
 }
 
 interface FieldError {
@@ -81,7 +88,7 @@ const isoTime = (utc: string | null, tz: string | null): string => {
   }).format(new Date(utc));
 };
 
-export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props) {
+export function EditStopModal({ row, drivers, role, dispatchTz, onClose, onReload }: Props) {
   const queryClient = useQueryClient();
   const trap = useFocusTrap(true);
   const mayEdit = can(role, 'dispatcher');
@@ -89,6 +96,17 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
   const lockedReason = `Your role is ${role}. Editing needs dispatcher.`;
 
   const stop = row.nextStop;
+
+  /**
+   * §12.117. The load's version as the row showed it when the modal OPENED,
+   * frozen. The row itself is live — the console re-reads it every poll — so
+   * reading the version from it at save time would describe a load the form
+   * never showed, and the check would pass exactly when it should refuse.
+   * Moved only by this modal's own `Clear now`, which returns the result.
+   */
+  const [version, setVersion] = useState(() => stop?.loadVersion ?? null);
+  /** §12.117. A save was refused because the load changed; Reload is offered. */
+  const [stale, setStale] = useState(false);
 
   /**
    * Derived, not state: it depends only on the row the modal was given. The
@@ -429,22 +447,39 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     [override.forced, overrideChanged, overridePayload],
   );
 
-  /** `Clear now` from the block — immediate, not part of the save (§9.5). */
+  /**
+   * `Clear now` from the block — immediate, not part of the save (§9.5).
+   *
+   * §12.117. It changes the load's version, so it carries the version this
+   * modal holds and takes back the new one: the dispatcher's own clear must
+   * not make their next save look stale. A load changed by someone else is
+   * refused here exactly as a save would be.
+   */
   const clearOverrideNow = useCallback(async () => {
     if (!stop) return;
     setSaving(true);
     try {
-      await fetch('/api/overrides', {
+      const response = await fetch('/api/overrides', {
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ stopId: stop.stopId }),
+        body: JSON.stringify({ stopId: stop.stopId, ...(version ? { version } : {}) }),
       });
+      if (response.status === 409) {
+        const body = (await response.json()) as { error?: string };
+        setStale(true);
+        setErrors([{ field: '*', message: body.error ?? 'This load was changed since you opened it.' }]);
+        return;
+      }
+      if (response.ok) {
+        const body = (await response.json()) as { loadVersion?: string };
+        if (body.loadVersion) setVersion(body.loadVersion);
+      }
       setOverride((d) => ({ ...d, forced: 'AUTO', reason: '' }));
       await queryClient.invalidateQueries({ queryKey: ['fleet'] });
     } finally {
       setSaving(false);
     }
-  }, [queryClient, stop]);
+  }, [queryClient, stop, version]);
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
   const send = useCallback(
@@ -513,18 +548,25 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
 
       try {
         // One request. The stop, the appointment, the assignment and the
-        // override are one act and land in one transaction (§12.28).
+        // override are one act and land in one transaction (§12.28) — sent
+        // as a load with its one stop, and the version this modal opened
+        // with (§12.117).
         const response = await fetch('/api/stops', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            ...parsed.data,
-            ...(token ? { previewToken: token } : {}),
-            ...(overrideEdit ? { override: overrideEdit } : {}),
-            // §12.92: closed in the same transaction as the new load.
-            ...(closeList?.length ? { closePrevious: closeList } : {}),
-            ...(reached ? { reachedStop: reached } : {}),
-          }),
+          body: JSON.stringify(
+            loadEditFromStop(
+              {
+                ...parsed.data,
+                ...(token ? { previewToken: token } : {}),
+                ...(overrideEdit ? { override: overrideEdit } : {}),
+                // §12.92: closed in the same transaction as the new load.
+                ...(closeList?.length ? { closePrevious: closeList } : {}),
+                ...(reached ? { reachedStop: reached } : {}),
+              },
+              { loadId: stop?.loadId ?? null, version: version ?? undefined },
+            ),
+          ),
         });
 
         if (response.status === 409) {
@@ -533,9 +575,22 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             error?: string;
             closePrevious?: boolean;
             reachedStop?: { arrivedAt: string };
+            stale?: boolean;
           };
           queryClient.setQueryData(key, snapshot);
           setReachedAnswer(null);
+          if (body.stale) {
+            /**
+             * §12.117. Someone changed this load after the modal opened.
+             * Nothing was written. What the dispatcher typed stays in the
+             * form; Reload opens it again on the load as it is now, and
+             * nothing is merged either way.
+             */
+            setCloses(null);
+            setStale(true);
+            setErrors([{ field: '*', message: body.error ?? 'This load was changed since you opened it.' }]);
+            return;
+          }
           if (body.reachedStop) {
             // Reached after this modal opened. Nothing was written; ask, with
             // the arrival the server holds.
@@ -569,7 +624,12 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
           setReachedAnswer(null);
           setErrors(
             body.fields?.length
-              ? body.fields
+              ? // §12.117. The server names a stop's field `stops.0.…`.
+                // A missing version has no input of its own: the banner.
+                body.fields.map((f) => ({
+                  ...f,
+                  field: f.field === 'version' ? '*' : singleStopField(f.field),
+                }))
               : [{ field: '*', message: `${body.error ?? 'Save failed.'}${body.reference ? ` (${body.reference})` : ''}` }],
           );
           return;
@@ -620,7 +680,9 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
         }
 
         if (saved.warnings?.length) {
-          setSaveWarnings(saved.warnings);
+          setSaveWarnings(
+            saved.warnings.map((w) => ({ ...w, field: singleStopField(w.field) })),
+          );
           return;
         }
         onClose();
@@ -637,7 +699,7 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
     },
     // `edit` is deliberately absent: this function reads `parsed.data` only.
     // The raw form shape does not leave the component (§12.21).
-    [active, closes, onClose, overrideEdit, parsed, queryClient, reachedAnswer, row.active, row.id],
+    [active, closes, onClose, overrideEdit, parsed, queryClient, reachedAnswer, row.active, row.id, stop?.loadId, version],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
@@ -1093,9 +1155,25 @@ export function EditStopModal({ row, drivers, role, dispatchTz, onClose }: Props
             />
 
             {errorFor('*') ? (
-              <p className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg">
-                {errorFor('*')}
-              </p>
+              <div className="mt-3 flex items-center gap-3 border border-status-late-bd bg-status-late-bg px-3 py-2"
+              >
+                <p className="flex-1 text-body text-status-late-fg">{errorFor('*')}</p>
+                {stale && onReload ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // The board as it is now, then the modal on it. The
+                      // typed values are discarded only here, on request.
+                      void queryClient
+                        .refetchQueries({ queryKey: ['fleet'] })
+                        .finally(onReload);
+                    }}
+                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+                  >
+                    Reload
+                  </button>
+                ) : null}
+              </div>
             ) : null}
 
             {/* §12.107. Drawn only when this truck closed a load in the last 7 days. */}

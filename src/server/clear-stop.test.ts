@@ -18,7 +18,8 @@ import { sweepArrivals } from '@/worker/arrival';
 import { clearStop, ClearStopError } from './clear-stop';
 import { CHAIN_VERSION } from './geocode';
 import { LATEST_POSITION_SQL, applyStatus, parseFleetRows } from './fleet-query';
-import { ReachedStopError, saveStopEdit } from './stop-edit';
+import { ReachedStopError } from './stop-edit';
+import { saveStopEdit } from '@/test/stop-save';
 import { loadTruckTimeline } from './timeline';
 import type { Tx } from './audit';
 

@@ -185,15 +185,19 @@ test('the route refuses a save that skips the question, and writes nothing', asy
   await resetWorld();
   await reachChicagoStop();
   await page.goto('/');
+  // §12.117. The save names the load and the version it edits; the load
+  // read is where an API client gets that version.
+  const read = await page.request.get(`/api/loads/${IDS.loadChicago}`);
+  expect(read.status()).toBe(200);
+  const { version } = (await read.json()) as { version: string };
   const response = await page.request.post('/api/stops', {
     data: {
-      stopId: IDS.stopChicago,
+      loadId: IDS.loadChicago,
       truckId: IDS.truckChicago,
+      version,
       loadNumber: '200584',
       loadStatus: 'DISPATCHED',
-      stopType: 'DEL',
-      ...NEXT,
-      appointment: null,
+      stops: [{ stopId: IDS.stopChicago, stopType: 'DEL', ...NEXT, appointment: null }],
     },
   });
   expect(response.status()).toBe(409);

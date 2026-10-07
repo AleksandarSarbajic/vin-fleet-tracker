@@ -10,6 +10,7 @@ import { YEAR } from '@/test/dst';
 import { wallTimeInstant } from '@/lib/format';
 import type { FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
+import { stopView } from '@/test/load-body';
 
 /**
  * §12.115. The APPT window opens as it was saved, an untouched save sends it
@@ -37,7 +38,7 @@ beforeEach(() => {
   posted = [];
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/stops' && init?.body) {
-      posted.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      posted.push(stopView(JSON.parse(String(init.body))));
     }
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   }) as unknown as typeof fetch;

@@ -8,7 +8,7 @@ import { AppointmentTimeError, storedWindowMinutes } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
 import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
 import { eveningBefore, fallBack, YEAR } from '@/test/dst';
-import { saveStopEdit } from './stop-edit';
+import { saveStopEdit } from '@/test/stop-save';
 import type { Tx } from './audit';
 
 /**

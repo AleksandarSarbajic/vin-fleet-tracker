@@ -11,6 +11,7 @@ import { fcfsEndDate } from '@/lib/appointment';
 import { wallTimeInstant } from '@/lib/format';
 import type { FleetResponse } from '@/hooks/useFleet';
 import type { FleetRow } from '@/server/fleet-query';
+import { stopView } from '@/test/load-body';
 
 /**
  * §12.114 in the form. A latest hour at or before the earliest is the next
@@ -39,7 +40,7 @@ beforeEach(() => {
   posted = [];
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/stops' && init?.body) {
-      posted.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      posted.push(stopView(JSON.parse(String(init.body))));
     }
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   }) as unknown as typeof fetch;

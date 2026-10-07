@@ -167,5 +167,15 @@ export const BulkNoteInput = z
 export type BulkNoteInput = z.infer<typeof BulkNoteInput>;
 
 /** Clearing is its own action — `Clear now` in the detail block (§9.5). */
-export const ClearOverrideInput = z.object({ stopId: z.string().uuid() }).strict();
+export const ClearOverrideInput = z
+  .object({
+    stopId: z.string().uuid(),
+    /**
+     * §12.117. From an open edit modal: the load version it opened with. The
+     * clear is refused if the load has changed since, and the new version is
+     * returned so the modal's own save is not refused for a change it made.
+     */
+    version: z.string().regex(/^[0-9a-f]{32}$/).optional(),
+  })
+  .strict();
 export type ClearOverrideInput = z.infer<typeof ClearOverrideInput>;
