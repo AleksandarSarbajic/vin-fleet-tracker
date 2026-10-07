@@ -14,7 +14,7 @@ import { sql } from 'drizzle-orm';
 import { createDirectDb } from '../src/db/connection.ts';
 import { needsRecompute, ROUTE_PROVIDER, ROUTING_DEFAULTS, type CachedRoute } from '../src/lib/routing.ts';
 import { haversineMiles } from '../src/lib/status.ts';
-import { NEXT_STOP_ORDER } from '../src/server/next-stop.ts';
+import { BOARD_NEXT_STOP } from '../src/server/next-stop.ts';
 
 loadEnv({ path: '.env.local' });
 const { client, db } = createDirectDb(process.env['DIRECT_URL']!);
@@ -34,19 +34,15 @@ interface Row {
 }
 
 const rows = (await db.execute(sql`
-  select t.truck_number as truck, ns.stop_id, ns.stop_lat, ns.stop_lng, ns.appt,
+  select t.truck_number as truck, s.id::text as stop_id, s.lat as stop_lat,
+         s.lng as stop_lng, s.appointment_start_utc as appt,
          p.lat, p.lng, p.recorded_at
   from trucks t
-  join lateral (
-    select s.id::text as stop_id, s.lat as stop_lat, s.lng as stop_lng,
-           s.appointment_start_utc as appt
-    from loads l join stops s on s.load_id = l.id
-    where l.truck_id = t.id and l.status not in ('DELIVERED','TONU','CANCELLED')
-      and s.departed_at is null and s.lat is not null
-    ${NEXT_STOP_ORDER} limit 1
-  ) ns on true
+  -- The board's next stop, filtered outside the lookup like the sweep (§12.116).
+  ${BOARD_NEXT_STOP}
   join positions p on p.truck_id = t.id
-  where t.active and p.recorded_at > now() - make_interval(hours => ${HOURS})
+  where t.active and s.lat is not null
+    and p.recorded_at > now() - make_interval(hours => ${HOURS})
   order by t.truck_number, p.recorded_at`)) as unknown as Row[];
 
 /** One variant of the rule. */

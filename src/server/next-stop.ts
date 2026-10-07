@@ -37,12 +37,52 @@ import { sql } from 'drizzle-orm';
  * two loads' stops can interleave, which is the very thing this exists to
  * stop.
  *
- * Requires the aliases `l` (loads) and `s` (stops), which all four call sites
- * already use.
+ * Requires the aliases `l` (loads) and `s` (stops). Used directly by the
+ * board's query and the reassign preview; the worker reaches it through
+ * BOARD_NEXT_STOP below.
  */
 export const NEXT_STOP_ORDER = sql`
   order by min(s.appointment_start_utc) over (partition by l.id) asc nulls last,
            l.created_at asc,
            l.id asc,
            s.sequence asc
+`;
+
+/**
+ * The stop the BOARD shows for truck `t`, joined in as `s` — for the worker
+ * queries that then decide whether they can act on it (§12.116).
+ *
+ * Agreeing on the ORDER was not enough. The arrival sweep, the routing sweep
+ * and the ETA log each put their own conditions — coordinates, "not arrived" —
+ * INSIDE the ordered lookup, so a stop that failed them was skipped and the
+ * NEXT one chosen instead. On a one-stop load that only removed the stop. On
+ * a two-stop load it moved the worker to stop 2 while the board still showed
+ * stop 1: the delivery routed, logged in the ETA log and watched for an
+ * arrival while the truck stood at an unlocated or arrived pickup. Truck 124's
+ * bug, by another route.
+ *
+ * So the selection is made once, with only the board's conditions — an open
+ * load, a stop not departed — and a caller filters the ONE stop it gets back
+ * in its own WHERE. A stop the caller cannot use means no candidate for that
+ * truck, never a different stop.
+ *
+ * The board's own query (`fleet-query.ts`) and the reassign preview keep
+ * their lateral: they add no condition, and `next-stop.test.ts` holds all of
+ * them to the same answer.
+ *
+ * Requires the alias `t` (trucks). Inner join: a truck with no next stop
+ * yields no row.
+ */
+export const BOARD_NEXT_STOP = sql`
+  join lateral (
+    select s.id as board_stop_id
+    from loads l
+    join stops s on s.load_id = l.id
+    where l.truck_id = t.id
+      and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
+      and s.departed_at is null
+    ${NEXT_STOP_ORDER}
+    limit 1
+  ) bns on true
+  join stops s on s.id = bns.board_stop_id
 `;

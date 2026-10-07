@@ -15,7 +15,7 @@ import type { Db, Tx } from '@/server/audit';
 
 /** The worker passes its database; the tests pass a transaction they roll back. */
 type Conn = Db | Tx;
-import { NEXT_STOP_ORDER } from '@/server/next-stop';
+import { BOARD_NEXT_STOP } from '@/server/next-stop';
 
 /**
  * The ETA prediction log (§12.112), run once per poll after the routing sweep.
@@ -110,14 +110,25 @@ export async function logEtaMarks(db: Conn, now: Date = new Date()): Promise<Eta
   return db.transaction(async (tx) => {
     await tx.execute(sql.raw(`set local statement_timeout = ${LOG_TIMEOUT_MS}`));
 
-    /** Every active truck's next stop with coordinates, as the routing sweep selects it. */
+    /**
+     * Every active truck's next stop, as the board shows it, when it has
+     * coordinates and has not been reached — the routing sweep's selection.
+     *
+     * §12.116. Both conditions apply to the board's stop, OUTSIDE the lookup.
+     * Inside it, a truck standing at an arrived pickup logged a first sighting
+     * of its DELIVERY: a prediction the board never showed, whose score would
+     * then include the time spent loading.
+     */
     const rows = await tx.execute(sql`
       select
-        ns.stop_id, t.id::text as truck_id, t.truck_number,
+        s.id::text as stop_id, t.id::text as truck_id, t.truck_number,
         p.lat as truck_lat, p.lng as truck_lng, p.speed_mph as fix_speed_mph,
         ${epochMs('p.recorded_at')} as fix_ms,
-        ns.stop_lat, ns.stop_lng, ns.precision, ns.accuracy_miles,
-        ${epochMs('ns.deadline')} as deadline_ms,
+        s.lat as stop_lat, s.lng as stop_lng,
+        s.geocode_precision::text as precision,
+        s.geocode_accuracy_miles as accuracy_miles,
+        -- The engine's deadline: the end of the window, else its start.
+        ${epochMs('coalesce(s.appointment_end_utc, s.appointment_start_utc)')} as deadline_ms,
         sr.routed_miles, sr.routed_duration_s, sr.base_duration_s, sr.from_lat, sr.from_lng,
         sr.straight_at_route_miles, sr.lane_ratio, sr.snap_from_m, sr.snap_to_m, sr.provider,
         ${epochMs('sr.computed_at')} as route_ms
@@ -126,26 +137,13 @@ export async function logEtaMarks(db: Conn, now: Date = new Date()): Promise<Eta
         select lat, lng, speed_mph, recorded_at from positions
         where truck_id = t.id order by recorded_at desc limit 1
       ) p on true
-      join lateral (
-        select s.id::text as stop_id, s.lat as stop_lat, s.lng as stop_lng,
-               s.geocode_precision::text as precision,
-               s.geocode_accuracy_miles as accuracy_miles,
-               -- The engine's deadline: the end of the window, else its start.
-               coalesce(s.appointment_end_utc, s.appointment_start_utc) as deadline
-        from loads l
-        join stops s on s.load_id = l.id
-        where l.truck_id = t.id
-          and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
-          and s.departed_at is null
-          and s.arrived_at is null
-          and s.lat is not null and s.lng is not null
-        ${NEXT_STOP_ORDER}
-        limit 1
-      ) ns on true
+      ${BOARD_NEXT_STOP}
       -- The board's own join: a route measured to another point is not this stop's.
       left join stop_routes sr
-        on sr.stop_id = ns.stop_id::uuid and sr.stop_lat = ns.stop_lat and sr.stop_lng = ns.stop_lng
-      where t.active`);
+        on sr.stop_id = s.id and sr.stop_lat = s.lat and sr.stop_lng = s.lng
+      where t.active
+        and s.arrived_at is null
+        and s.lat is not null and s.lng is not null`);
     const candidates = z.array(Candidate).parse(rows);
 
     /**

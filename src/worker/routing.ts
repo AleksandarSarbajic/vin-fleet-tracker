@@ -13,7 +13,7 @@ import {
 } from '@/lib/routing';
 import type { Db, Tx } from '@/server/audit';
 import type { EtaProvider } from '@/server/routing/provider';
-import { NEXT_STOP_ORDER } from '@/server/next-stop';
+import { BOARD_NEXT_STOP } from '@/server/next-stop';
 
 /**
  * The routing sweep, run once per poll beside the arrival sweep (§12.31).
@@ -195,33 +195,31 @@ export async function sweepRouting(
     return sweep;
   }
 
-  /** Every truck's next stop that has coordinates, with its cached route. */
+  /**
+   * Every truck's next stop, as the board shows it, when it has coordinates
+   * and has not been reached.
+   *
+   * §12.116. Both conditions apply to the board's stop, OUTSIDE the lookup.
+   * Inside it, a truck standing at an arrived pickup had its DELIVERY routed —
+   * a call spent on a stop the board was not showing, for a lane measured from
+   * the dock rather than from the road.
+   */
   const result = await db.execute(sql`
     select
-      ns.stop_id, t.truck_number,
+      s.id::text as stop_id, t.truck_number,
       p.lat as truck_lat, p.lng as truck_lng,
-      ns.stop_lat, ns.stop_lng,
-      ns.dest_city, ns.dest_state, ns.dest_zip, ns.dest_precision
+      s.lat as stop_lat, s.lng as stop_lng,
+      s.city as dest_city, s.state as dest_state, s.zip as dest_zip,
+      s.geocode_precision::text as dest_precision
     from trucks t
     join lateral (
       select lat, lng from positions
       where truck_id = t.id order by recorded_at desc limit 1
     ) p on true
-    join lateral (
-      select s.id::text as stop_id, s.lat as stop_lat, s.lng as stop_lng,
-             s.city as dest_city, s.state as dest_state, s.zip as dest_zip,
-             s.geocode_precision::text as dest_precision
-      from loads l
-      join stops s on s.load_id = l.id
-      where l.truck_id = t.id
-        and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
-        and s.departed_at is null
-        and s.arrived_at is null
-        and s.lat is not null and s.lng is not null
-      ${NEXT_STOP_ORDER}
-      limit 1
-    ) ns on true
-    where t.active`);
+    ${BOARD_NEXT_STOP}
+    where t.active
+      and s.arrived_at is null
+      and s.lat is not null and s.lng is not null`);
 
   const candidates = z.array(CandidateRow).parse(result);
 

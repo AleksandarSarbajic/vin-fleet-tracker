@@ -12,7 +12,7 @@ import {
   type NearestCandidate,
 } from '@/lib/arrival';
 import { writeAudit, type Db } from '@/server/audit';
-import { NEXT_STOP_ORDER } from '@/server/next-stop';
+import { BOARD_NEXT_STOP } from '@/server/next-stop';
 import { ARRIVAL_SOURCES } from '@/lib/status';
 
 /**
@@ -97,57 +97,52 @@ export async function sweepArrivals(
   config: ArrivalConfig = ARRIVAL_DEFAULTS,
 ): Promise<ArrivalSweep> {
   /**
-   * The next stop per truck, exactly as §12.13 defines it: the earliest
-   * undeparted stop across every OPEN load. Restricted to stops that have
-   * coordinates, because nothing can be detected without them — which is why
-   * this could not have been built before the geocoder (§12.24).
+   * The next stop per truck, exactly as the BOARD shows it (§12.13): the
+   * earliest undeparted stop across every OPEN load. Then restricted to stops
+   * that have coordinates, because nothing can be detected without them —
+   * which is why this could not have been built before the geocoder (§12.24).
+   *
+   * §12.116. The restriction is applied to the board's stop, OUTSIDE the
+   * lookup. Inside it, an unlocated stop 1 was skipped and stop 2 watched
+   * instead — an arrival recorded at the delivery while the board, and the
+   * truck, were still at the pickup.
    */
   const candidateResult = await db.execute(sql`
     select
-      ns.stop_id, t.id::text as truck_id, t.truck_number,
-      ns.lat, ns.lng, ns.precision, ns.arrived_at, ns.arrived_source, ns.departed_at,
-      ns.anchor_lat, ns.anchor_lng, ns.anchor_at
+      s.id::text as stop_id, t.id::text as truck_id, t.truck_number,
+      s.lat, s.lng,
+      s.geocode_precision::text as precision,
+      to_char(s.arrived_at  at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as arrived_at,
+      s.arrived_source::text as arrived_source,
+      to_char(s.departed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as departed_at,
+      s.arrival_anchor_lat as anchor_lat, s.arrival_anchor_lng as anchor_lng,
+      to_char(s.arrival_anchor_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as anchor_at
     from trucks t
-    join lateral (
-      select s.id::text as stop_id, s.lat, s.lng,
-             s.geocode_precision::text as precision,
-             to_char(s.arrived_at  at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as arrived_at,
-             to_char(s.departed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as departed_at,
-             s.arrived_source::text as arrived_source,
-             s.arrival_anchor_lat as anchor_lat, s.arrival_anchor_lng as anchor_lng,
-             to_char(s.arrival_anchor_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as anchor_at
-      from loads l
-      join stops s on s.load_id = l.id
-      where l.truck_id = t.id
-        and l.status not in ('DELIVERED', 'TONU', 'CANCELLED')
-        and s.departed_at is null
-        /*
-         * §12.85. Coordinates OR an anchor. An unlocated stop a dispatcher
-         * marked with the truck standing there can still be LEFT, and the
-         * anchor is all that needs.
-         */
-        and ((s.lat is not null and s.lng is not null) or s.arrival_anchor_lat is not null)
-        /*
-         * §12.56. The "and s.geocode_precision = street" filter USED to sit
-         * here, and it is why the gate was invisible.
-         *
-         * §12.30 is still right that only a street coordinate can conclude an
-         * arrival — a 0.35 mi circle around a ZIP centroid ±4.6 mi is noise.
-         * But filtering here meant the stop never became a candidate, so
-         * explainNearest's coarse-precision branch was unreachable from the
-         * worker and the sweep reported "considered: 19" while meaning
-         * 19-of-21. Truck 133 sat 3.2 miles from a ZCTA centroid for twelve
-         * hours, 1,497 stationary fixes, and no line said why nothing fired.
-         *
-         * That is §12.36's shape inside the code written to end it. The stop
-         * is a candidate now and the PURE RULE refuses it, which is where the
-         * refusal was always supposed to live — and it gets counted and named
-         * on the way past.
-         */
-      ${NEXT_STOP_ORDER}
-      limit 1
-    ) ns on true
-    where t.active`);
+    ${BOARD_NEXT_STOP}
+    where t.active
+      /*
+       * §12.85. Coordinates OR an anchor. An unlocated stop a dispatcher
+       * marked with the truck standing there can still be LEFT, and the
+       * anchor is all that needs.
+       */
+      and ((s.lat is not null and s.lng is not null) or s.arrival_anchor_lat is not null)
+      /*
+       * §12.56. The "and s.geocode_precision = street" filter USED to sit
+       * here, and it is why the gate was invisible.
+       *
+       * §12.30 is still right that only a street coordinate can conclude an
+       * arrival — a 0.35 mi circle around a ZIP centroid ±4.6 mi is noise.
+       * But filtering here meant the stop never became a candidate, so
+       * explainNearest's coarse-precision branch was unreachable from the
+       * worker and the sweep reported "considered: 19" while meaning
+       * 19-of-21. Truck 133 sat 3.2 miles from a ZCTA centroid for twelve
+       * hours, 1,497 stationary fixes, and no line said why nothing fired.
+       *
+       * That is §12.36's shape inside the code written to end it. The stop
+       * is a candidate now and the PURE RULE refuses it, which is where the
+       * refusal was always supposed to live — and it gets counted and named
+       * on the way past.
+       */`);
 
   const candidates = z.array(CandidateRow).parse(candidateResult);
   if (candidates.length === 0) {
