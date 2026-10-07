@@ -8523,6 +8523,99 @@ inside `BOARD_NEXT_STOP` fails five, including the agreement test; the
 arrival sweep given routing's arrival filter fails three, including the
 departure case.
 
+## 12.117 The save is a load, checked against the version it opened with
+
+Stage 2 of multi-stop loads. The modal still edits one stop; it sends it the
+new way.
+
+**The request** (`lib/load-edit.ts`) is a load and the stops it writes:
+`loadId`, `version`, the load's fields, `stops[1..10]`, `removedStopIds`.
+A stop with an id is written, one with `stopId: null` is appended after every
+stop the load has, an id in `removedStopIds` is deleted, and a stop not
+mentioned is left alone (§12.23). Each stop's fields are `StopEdit`'s,
+normalised by the same functions. Today's modal converts its flat form with
+`loadEditFromStop`, key by key, so an omitted key stays omitted.
+
+**The save** (`saveLoadEdit` in `server/stop-edit.ts`) geocodes every changed
+address first, outside the transaction, as before. Then, in one transaction:
+
+1. lock the load row and every one of its stops;
+2. compare the version (below) — refuse with **"This load was changed since
+   you opened it. Nothing was saved."** (409, `stale: true`);
+3. the stops named are on this load, in its order, new ones last; removals
+   are unreached stops; the load ends with 1 to 10 stops;
+4. the reached-stop question (§12.97): a reached stop's new city, or a new
+   load number on a load any of whose stops was reached;
+5. D3 — the next trip only when every stop is reached; D2 — an override set
+   only on the truck's next stop (`BOARD_NEXT_STOP`);
+6. the assignment; the load; each stop through `writeStop`, which is the
+   single-stop save rule for rule (notes, arrivals and anchors, geocode
+   columns, appointments); D5 — an arrival refused while an earlier stop is
+   not left; removals; renumbering to 1..n (negated first, so the unique
+   `(load_id, sequence)` index never sees a collision);
+7. overrides; then audit (D7): one `stop` entry per stop written or removed,
+   in the shape a single stop's save always had, each with `sequence` and
+   one shared `saveId`. Reopen's `readClose` reads a close made this way
+   unchanged.
+
+Any failure rolls back all of it. A stop's own error names the stop:
+`stops.<i>.<field>`; the modal drops `stops.0.`.
+
+**The version** (`server/load-version.ts`) is an md5 of what people edit:
+the load's number, status and truck; the truck's open assignment (id and
+driver); and per stop, in order, its id, sequence, type, address,
+appointment, note, a dispatcher's arrival, and its live override's id. Worker
+writes are out — a detected arrival, a departure, coordinates — so a truck
+reaching its stop never refuses a save; the rules that care re-read it under
+the lock. Instants are epoch seconds: `timestamptz::text` depends on the
+session's zone.
+
+ONE SQL expression, used by the fleet query, `GET /api/loads/:id` and the
+save. The modal takes the version from the **fleet row it opened from** and
+freezes it: the row is live, and a version read later than the row would
+describe a load the form never showed — the check passing exactly when it
+should refuse. Measured on production: 0.95 ms for all 30 loads.
+
+**What it closes that was open.** There was no stale-edit check before. Worse,
+a reassignment made on the assignment board while a modal was open was
+silently reverted by that modal's save: it re-sent the driver it showed, and
+`applyReassignment` took that as a change with no other truck involved. The
+version includes the assignment, so that save is now refused.
+
+**`Clear now`** changes the version, so it sends the modal's and takes back
+the new one (`clearOverrideAt`); on a changed load it is refused the same way.
+
+**The modal on a refusal** keeps every typed value and offers **Reload**,
+which re-reads the board and opens the modal afresh — the typed values go
+only then, because the dispatcher asked. Nothing is merged.
+
+**`GET /api/loads/:id`** — any signed-in role, `read` limit, no cache. The
+load, its assignment, every stop with its live override, and the version,
+from one statement.
+
+**Unchanged**: `POST /api/stops` (dispatcher, `geocode` limit), the reassign
+preview, the previous-load question, the reached-stop question, Reopen. The
+126 single-stop tests run through the new path via `src/test/stop-save.ts`.
+
+**Tests.** `load-edit.test.ts`: three stops in one save; renumbering after a
+removal; a reached stop — before the modal opened, and after — cannot be
+removed; one to ten stops; D2, D3, D5; the number question across stops; a
+stale save refused with nothing written; a worker arrival and departure do
+not refuse; a reassignment elsewhere does, and stands; the fleet row, the
+read and the check agree; `Clear now`; the rollback, broken at stop 2 after
+the assignment, load, stop 1 and its override were written — the version,
+the stops, the driver, the overrides and the audit count all unchanged; the
+same for a new load with a previous load to close; Reopen of a multi-stop
+close. Broken on purpose: without the version comparison two fail; with the
+save run outside its transaction both rollback tests fail on the leftovers.
+
+**A known limit, not new.** A dispatcher clearing a DETECTED arrival does not
+move the version — a detected arrival appearing must not, and the two are the
+same change seen from either side. A second modal opened before the clear
+re-sends the arrival it showed, and the server records it as the dispatcher's.
+That is how it behaved before this; closing it needs the modal to send an
+arrival only when it was touched, which is Stage 4's form.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since
