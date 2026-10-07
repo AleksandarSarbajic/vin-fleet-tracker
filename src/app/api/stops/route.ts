@@ -87,7 +87,14 @@ export async function POST(request: Request) {
       // whether it is a correction or the next trip. Nothing was written; the
       // modal asks, quoting the arrival the server holds.
       return NextResponse.json(
-        { error: error.message, reachedStop: { arrivedAt: error.arrivedAt } },
+        {
+          error: error.message,
+          reachedStop: {
+            arrivedAt: error.arrivedAt,
+            stopId: error.stopId,
+            stopIndex: error.stopIndex,
+          },
+        },
         { status: 409 },
       );
     }

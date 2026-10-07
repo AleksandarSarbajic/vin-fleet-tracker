@@ -371,6 +371,86 @@ describeDb('one save writes several stops (§12.117)', () => {
     expect(seen.second?.arrivedAt).toBeNull();
   });
 
+  /** A wall time `minutesAgo` before now, at the stops' zone. */
+  const wallAgo = (minutesAgo: number) => {
+    const instant = new Date(Date.now() - minutesAgo * 60_000);
+    const [h, min] = new Intl.DateTimeFormat('en-GB', {
+      timeZone: TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .format(instant)
+      .split(':')
+      .map(Number);
+    return { date: localDateOf(TZ, instant), time: { h: h!, min: min! }, tz: TZ };
+  };
+
+  it('counts a departure marked on stop 1 in the same save (§12.119)', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A', arrived: true }, { city: 'B' }]);
+      const version = await readLoadVersion(tx, lane.loadId);
+      const outcome = await attempt(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: version!,
+        loadStatus: 'DISPATCHED',
+        stops: [
+          await draftOf(tx, lane.stopIds[0]!, { departedAt: wallAgo(20) }),
+          await draftOf(tx, lane.stopIds[1]!, { arrivedAt: wallAgo(10) }),
+        ],
+      });
+      const rows = await tx
+        .select({ departed: stops.departedSource, arrived: stops.arrivedSource })
+        .from(stops)
+        .where(eq(stops.loadId, lane.loadId))
+        .orderBy(asc(stops.sequence));
+      return { outcome, rows };
+    });
+
+    expect(seen.outcome.error).toBeNull();
+    expect(seen.rows).toEqual([
+      { departed: 'dispatcher', arrived: 'detected' },
+      { departed: null, arrived: 'dispatcher' },
+    ]);
+  });
+
+  it('and not a departure cleared on stop 1 in the same save (§12.119)', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A', departed: true }, { city: 'B' }]);
+      // `draftOf` sends no appointment, and a stop the truck left keeps its
+      // own (D4): give stop 1 none, so the only question is D5.
+      await tx
+        .update(stops)
+        .set({ appointmentStartUtc: null, appointmentEndUtc: null, appointmentTz: null })
+        .where(eq(stops.id, lane.stopIds[0]!));
+      const version = await readLoadVersion(tx, lane.loadId);
+      const outcome = await attempt(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: version!,
+        loadStatus: 'DISPATCHED',
+        stops: [
+          await draftOf(tx, lane.stopIds[0]!, { departedAt: null }),
+          await draftOf(tx, lane.stopIds[1]!, { arrivedAt: wallAgo(10) }),
+        ],
+      });
+      const rows = await tx
+        .select({ departedAt: stops.departedAt, arrivedAt: stops.arrivedAt })
+        .from(stops)
+        .where(eq(stops.loadId, lane.loadId))
+        .orderBy(asc(stops.sequence));
+      return { outcome, rows };
+    });
+
+    expect(seen.outcome.error).toBeInstanceOf(AtStopError);
+    expect((seen.outcome.error as AtStopError).field).toBe('stops.1.arrivedAt.time');
+    expect((seen.outcome.error as AtStopError).message).toMatch(/Stop 1 hasn't been left yet/);
+    // The whole save rolled back: stop 1 is still left, stop 2 not reached.
+    expect(seen.rows[0]!.departedAt).not.toBeNull();
+    expect(seen.rows[1]!.arrivedAt).toBeNull();
+  });
+
   it('offers the next trip only once every stop is reached (§12.116 D3)', async () => {
     const seen = await rolledBack(async (tx) => {
       const lane = await loadWith(tx, [{ city: 'A', arrived: true }, { city: 'B' }]);
@@ -392,10 +472,10 @@ describeDb('one save writes several stops (§12.117)', () => {
   });
 
   it('asks the reached-stop question for a load number change when any stop was reached', async () => {
-    const outcome = await rolledBack(async (tx) => {
+    const seen = await rolledBack(async (tx) => {
       const lane = await loadWith(tx, [{ city: 'A', departed: true }, { city: 'B' }]);
       const version = await readLoadVersion(tx, lane.loadId);
-      return attempt(tx, {
+      const outcome = await attempt(tx, {
         loadId: lane.loadId,
         truckId: lane.truck.id,
         version: version!,
@@ -403,8 +483,40 @@ describeDb('one save writes several stops (§12.117)', () => {
         loadStatus: 'DISPATCHED',
         stops: [await draftOf(tx, lane.stopIds[1]!)],
       });
+      return { outcome, reachedStopId: lane.stopIds[0]! };
     });
-    expect(outcome.error).toBeInstanceOf(ReachedStopError);
+    expect(seen.outcome.error).toBeInstanceOf(ReachedStopError);
+    // §12.119. The reached stop is stop 1, which this save does not send.
+    const error = seen.outcome.error as ReachedStopError;
+    expect(error.stopId).toBe(seen.reachedStopId);
+    expect(error.stopIndex).toBeNull();
+  });
+
+  it('names the reached stop it asks about, and its place in the request (§12.119)', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A', departed: true }, { city: 'B', arrived: true }]);
+      const version = await readLoadVersion(tx, lane.loadId);
+      const [arrived] = await tx
+        .select({ arrivedAt: stops.arrivedAt })
+        .from(stops)
+        .where(eq(stops.id, lane.stopIds[1]!));
+      const outcome = await attempt(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: version!,
+        loadStatus: 'DISPATCHED',
+        stops: [
+          await draftOf(tx, lane.stopIds[0]!),
+          await draftOf(tx, lane.stopIds[1]!, { city: 'Somewhere Else' }),
+        ],
+      });
+      return { outcome, stopId: lane.stopIds[1]!, arrivedAt: arrived!.arrivedAt!.toISOString() };
+    });
+    expect(seen.outcome.error).toBeInstanceOf(ReachedStopError);
+    const error = seen.outcome.error as ReachedStopError;
+    expect(error.stopId).toBe(seen.stopId);
+    expect(error.stopIndex).toBe(1);
+    expect(error.arrivedAt).toBe(seen.arrivedAt);
   });
 });
 

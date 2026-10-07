@@ -74,7 +74,17 @@ const FUTURE_ARRIVAL_TOLERANCE_MS = 5 * 60_000;
  * which may be newer than the modal's own copy.
  */
 export class ReachedStopError extends Error {
-  constructor(readonly arrivedAt: string) {
+  /**
+   * §12.119. Which stop: its id, and its place in the request's `stops` —
+   * the same index a field error's `stops.<i>.` carries — or null when the
+   * request did not include it (a new load number on a load whose reached
+   * stop this save does not write).
+   */
+  constructor(
+    readonly arrivedAt: string,
+    readonly stopId: string,
+    readonly stopIndex: number | null,
+  ) {
     super('This stop has been reached. Say whether this is a correction or the next trip.');
     this.name = 'ReachedStopError';
   }
@@ -341,7 +351,14 @@ export async function saveLoadEdit(
      */
     if (load && edit.reachedStop === undefined) {
       const asked = reachedArrival(edit, load, stored, byId);
-      if (asked) throw new ReachedStopError(asked.toISOString());
+      if (asked) {
+        const index = edit.stops.findIndex((d) => d.stopId === asked.stopId);
+        throw new ReachedStopError(
+          asked.arrivedAt.toISOString(),
+          asked.stopId,
+          index === -1 ? null : index,
+        );
+      }
     }
 
     /**
@@ -466,13 +483,23 @@ export async function saveLoadEdit(
 
       // §12.117. The stops that stay, in order, for D5's "earlier stop".
       const kept = stored.filter((s) => !removedIds.includes(s.stopId));
+      /**
+       * §12.119. Whether each stop has been left, AS THIS SAVE LEAVES IT. The
+       * stops are written in sequence order, so a departure marked on stop 1
+       * is in here before stop 2's arrival is checked — and a departure
+       * cleared on stop 1 is gone from it. Read from the stored rows alone,
+       * marking stop 1 left and stop 2 reached in one save was refused.
+       */
+      const departedNow = new Map(kept.map((s) => [s.stopId, s.departedAt !== null]));
       let appendAt = Math.max(0, ...stored.map((s) => s.sequence));
 
       for (const [i, draft] of edit.stops.entries()) {
         const existing = draft.stopId ? byId.get(draft.stopId) : undefined;
         const sequence = existing?.sequence ?? ++appendAt;
-        const earlier = kept.findIndex((s) => s.sequence < sequence && s.departedAt === null);
-        written.push(
+        const earlier = kept.findIndex(
+          (s) => s.sequence < sequence && departedNow.get(s.stopId) !== true,
+        );
+        const result =
           await atStop(i, () =>
             writeStop(tx, {
               actorUserId: input.actorUserId,
@@ -486,8 +513,9 @@ export async function saveLoadEdit(
               warnings,
               index: i,
             }),
-          ),
-        );
+          );
+        written.push(result);
+        if (existing) departedNow.set(existing.stopId, result.departed);
       }
 
       /**
@@ -732,16 +760,17 @@ function checkStops(
 }
 
 /**
- * The arrival the reached-stop question quotes, or null when the save needs
- * no answer. A named stop whose city changed after the truck reached it;
- * else, a new load number on a load any of whose stops was reached.
+ * The stop and arrival the reached-stop question quotes, or null when the
+ * save needs no answer. A named stop whose city changed after the truck
+ * reached it; else, a new load number on a load any of whose stops was
+ * reached — the first of them.
  */
 function reachedArrival(
   edit: LoadEdit,
   load: StoredLoad,
   stored: StoredStop[],
   byId: Map<string, StoredStop>,
-): Date | null {
+): { stopId: string; arrivedAt: Date } | null {
   for (const draft of edit.stops) {
     const existing = draft.stopId ? byId.get(draft.stopId) : undefined;
     if (
@@ -755,11 +784,12 @@ function reachedArrival(
         { city: draft.city, loadNumber: edit.loadNumber },
       )
     ) {
-      return existing.arrivedAt;
+      return { stopId: existing.stopId, arrivedAt: existing.arrivedAt };
     }
   }
   const numberChanged = edit.loadNumber !== undefined && edit.loadNumber !== load.loadNumber;
-  return numberChanged ? (stored.find((s) => s.arrivedAt !== null)?.arrivedAt ?? null) : null;
+  const reached = numberChanged ? stored.find((s) => s.arrivedAt !== null) : undefined;
+  return reached?.arrivedAt ? { stopId: reached.stopId, arrivedAt: reached.arrivedAt } : null;
 }
 
 interface WrittenStop {
@@ -771,6 +801,11 @@ interface WrittenStop {
   after: Record<string, unknown>;
   /** The arrival's part, present only when this save moved it (§12.57). */
   arrival: Record<string, unknown>;
+  /**
+   * §12.119. Whether the truck has left this stop once this save is written,
+   * for D5's "earlier stop" on the stops after it in the same save.
+   */
+  departed: boolean;
 }
 
 /**
@@ -1255,6 +1290,14 @@ async function writeStop(
     sequence: ctx.sequence,
     appointment,
     existing,
+    // A cleared arrival (unticked, or wiped by an address change) takes the
+    // departure with it; otherwise a departure this save wrote or cleared;
+    // otherwise whatever was stored.
+    departed: arrivalCleared
+      ? false
+      : departureWritten !== undefined
+        ? departureWritten !== null
+        : (existing?.departedAt ?? null) !== null,
     after: {
       stopType: draft.stopType,
       addressLine: draft.addressLine,
