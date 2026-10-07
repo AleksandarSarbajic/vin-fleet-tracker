@@ -302,6 +302,93 @@ describeDb('settling the log, before the prune', () => {
     expect(rows[0]!.settleOutcome).toBe('arrived');
   });
 
+  /**
+   * §12.119. A load of two stops through log and settle. The pickup's
+   * predictions settle with the PICKUP's arrival; the delivery is logged only
+   * once the pickup is left, stays open while it is not reached, and settles
+   * with its own arrival — never the pickup's.
+   */
+  it('settles each stop of a two-stop load with its own arrival', async () => {
+    const out = await rolledBack(async (tx) => {
+      const lane = await laneAt(tx, 60); // stop 1, the pickup, at STOP
+      const DROP = { lat: STOP.lat + 0.4, lng: STOP.lng };
+      const [delivery] = await tx
+        .insert(stops)
+        .values({
+          loadId: lane.loadId,
+          type: 'DEL',
+          sequence: 2,
+          city: 'Plainfield',
+          state: 'IL',
+          lat: DROP.lat,
+          lng: DROP.lng,
+          geocodePrecision: 'street',
+          geocodeAccuracyMiles: 0.1,
+          geocodedAt: new Date(),
+          appointmentStartUtc: new Date(Date.now() + 10 * 3_600_000),
+          appointmentTz: 'America/Chicago',
+          appointmentType: 'APPT',
+        })
+        .returning({ id: stops.id });
+      await tx.update(stops).set({ type: 'PU' }).where(eq(stops.id, lane.stopId));
+
+      await logEtaMarks(tx);
+      const beforePickup = (await marksFor(tx, delivery!.id)).length;
+
+      const pickupArrived = new Date(Date.now() - 40_000);
+      await tx
+        .update(stops)
+        .set({
+          arrivedAt: pickupArrived,
+          arrivedSource: 'detected',
+          departedAt: new Date(Date.now() - 20_000),
+          departedSource: 'detected',
+        })
+        .where(eq(stops.id, lane.stopId));
+      const first = await settleEtaMarks(tx);
+
+      await logEtaMarks(tx); // the board's next stop is now the delivery
+      const second = await settleEtaMarks(tx);
+      const openDelivery = await marksFor(tx, delivery!.id);
+
+      const deliveryArrived = new Date();
+      await tx
+        .update(stops)
+        .set({ arrivedAt: deliveryArrived, arrivedSource: 'detected' })
+        .where(eq(stops.id, delivery!.id));
+      const third = await settleEtaMarks(tx);
+      return {
+        beforePickup,
+        first,
+        second,
+        third,
+        openDelivery,
+        pickup: await marksFor(tx, lane.stopId),
+        delivery: await marksFor(tx, delivery!.id),
+        pickupArrived,
+        deliveryArrived,
+      };
+    });
+
+    // While the pickup is the board's stop, nothing is logged for the delivery.
+    expect(out.beforePickup).toBe(0);
+    expect(out.first).toMatchObject({ arrived: 1, destinationChanged: 0, closedWithoutArrival: 0 });
+    expect(out.pickup.length).toBeGreaterThan(0);
+    for (const r of out.pickup) {
+      expect(r.settleOutcome).toBe('arrived');
+      expect(r.arrivedAt?.getTime()).toBe(out.pickupArrived.getTime());
+    }
+
+    // Logged once the pickup was left, and still in progress before arrival.
+    expect(out.openDelivery.map((r) => r.markMiles)).toEqual([null]);
+    expect(out.openDelivery[0]!.settledAt).toBeNull();
+    expect(out.second).toMatchObject({ arrived: 0, destinationChanged: 0, closedWithoutArrival: 0 });
+
+    expect(out.third).toMatchObject({ arrived: 1 });
+    expect(out.delivery[0]!.settleOutcome).toBe('arrived');
+    expect(out.delivery[0]!.arrivedAt?.getTime()).toBe(out.deliveryArrived.getTime());
+  });
+
   it('closes out a load that ended without an arrival, and leaves an open one alone', async () => {
     const rows = await rolledBack(async (tx) => {
       const closed = await laneAt(tx, 60);

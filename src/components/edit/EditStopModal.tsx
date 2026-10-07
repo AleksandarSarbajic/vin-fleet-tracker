@@ -33,12 +33,17 @@ import {
 } from '@/lib/clear-stop';
 import { useFocusTrap } from './useModalChrome';
 import {
+  addBlocked,
+  addStop,
+  deliveryBeforePickup,
   dirtyLabels,
   dirtyOf,
   loadFormFrom,
   localErrors,
   nextTripAllowed,
   reachedAsk as askFor,
+  removeBlocked,
+  removeStop,
   routeServerError,
   stopEditOf,
   stopFlags,
@@ -50,7 +55,7 @@ import {
   type StopForm as StopFormState,
 } from './load-form';
 import { LoadStrip } from './LoadStrip';
-import { StopList } from './StopList';
+import { STOP_FORM_ID, StopList } from './StopList';
 import { StopForm } from './StopForm';
 
 /**
@@ -283,6 +288,36 @@ function LoadEditor({
       stops: f.stops.map((s, i) => (i === index ? { ...s, ...patch } : s)),
     }));
   }, []);
+  /**
+   * §12.119 stage 4b. Add stop selects the new stop and puts the cursor in
+   * its street address — once its form has mounted, so the key is held here
+   * until then.
+   */
+  const [focusAddressOf, setFocusAddressOf] = useState<string | null>(null);
+  const addOne = useCallback(() => {
+    const added = addStop(form, openedAt);
+    setForm(added.form);
+    setSelected(added.form.stops.length - 1);
+    setFocusAddressOf(added.key);
+  }, [form, openedAt]);
+  const removeOne = useCallback(
+    (key: string) => {
+      const index = form.stops.findIndex((s) => s.key === key);
+      if (index === -1) return;
+      setForm(removeStop(form, key));
+      // The stop below takes its place; the last one's place is taken by the one above.
+      setSelected(Math.min(index, form.stops.length - 2));
+      setErrors((list) => list.filter((e) => e.stopKey !== key));
+    },
+    [form],
+  );
+  useEffect(() => {
+    if (focusAddressOf === null) return;
+    if (form.stops[selected]?.key !== focusAddressOf) return;
+    document.getElementById(STOP_FORM_ID)?.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+    setFocusAddressOf(null);
+  }, [focusAddressOf, form.stops, selected]);
+
   const selectKey = useCallback(
     (key: string) => {
       const index = form.stops.findIndex((s) => s.key === key);
@@ -314,8 +349,11 @@ function LoadEditor({
 
   const dirty = useMemo(() => dirtyOf(initialForm, form, row.id), [form, initialForm, row.id]);
   const unsaved = useMemo(
-    () => [...dirtyLabels(dirty, form), ...(active === openedActive ? [] : ['active flag'])],
-    [active, dirty, form, openedActive],
+    () => [
+      ...dirtyLabels(dirty, form, initialForm),
+      ...(active === openedActive ? [] : ['active flag']),
+    ],
+    [active, dirty, form, initialForm, openedActive],
   );
 
   const driverChanged = form.driverId !== initialDriverId;
@@ -504,10 +542,11 @@ function LoadEditor({
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(
-            loadEditFromStops(edits as [StopEdit, ...StopEdit[]], {
-              loadId: read?.loadId ?? null,
-              version: version ?? undefined,
-            }),
+            loadEditFromStops(
+              edits as [StopEdit, ...StopEdit[]],
+              { loadId: read?.loadId ?? null, version: version ?? undefined },
+              form.removed,
+            ),
           ),
         });
 
@@ -932,6 +971,9 @@ function LoadEditor({
                 dirtyKeys={new Set(dirty.stops.keys())}
                 errorKeys={errorKeys}
                 onSelect={setSelected}
+                mayEdit={mayEdit && !saving}
+                addBlocked={mayEdit ? addBlocked(form) : lockedReason}
+                onAdd={addOne}
               />
               <StopForm
                 key={current.key}
@@ -947,7 +989,7 @@ function LoadEditor({
                 computed={read && currentFlags.next ? row.computed : null}
                 basisDetails={read && currentFlags.next ? etaDetails(row) : []}
                 overrideBlock={
-                  !read || currentFlags.next ? (
+                  (!read && selected === 0) || currentFlags.next ? (
                     <OverrideBlock
                       draft={override}
                       onChange={setOverride}
@@ -979,6 +1021,13 @@ function LoadEditor({
                 }
                 errorFor={(field) => errorFor(field, current.key)}
                 onChange={(patch) => setStop(selected, patch)}
+                removeBlocked={
+                  mayEdit
+                    ? removeBlocked(form, selected, dispatchTz)
+                    : { text: lockedReason, reached: false }
+                }
+                onRemove={() => removeOne(current.key)}
+                orderNote={deliveryBeforePickup(form, selected)}
               />
             </div>
 
@@ -1081,7 +1130,7 @@ function LoadEditor({
           dispatchTz={dispatchTz}
           now={new Date()}
           stopName={form.stops.length > 1 ? stopName(form, reachedAsk.stopKey) : undefined}
-          nextTrip={nextTripAllowed(read, send, reachedAsk.stopKey)}
+          nextTrip={nextTripAllowed(read, send, reachedAsk.stopKey, form.removed)}
           onAnswer={(given) => {
             setReachedAsk(null);
             void save(undefined, given);

@@ -1,4 +1,6 @@
-import { DEFAULT_WINDOW_MINUTES, storedWindowMinutes } from '@/lib/appointment';
+import { DEFAULT_WINDOW_MINUTES, isIanaZone, storedWindowMinutes } from '@/lib/appointment';
+import { timeInZone, wallTimeInstant } from '@/lib/format';
+import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
 import { LOAD_STATUSES } from '@/lib/loads';
 import type { LoadForEdit } from '@/lib/load-read';
 import { needsReachedAnswer } from '@/lib/reached-stop';
@@ -46,6 +48,8 @@ export interface LoadForm {
   loadStatus: LoadStatus;
   driverId: string | null;
   stops: StopForm[];
+  /** §12.119 stage 4b. Saved stops taken off the load by this form, in the order removed. */
+  removed: string[];
 }
 
 export interface FieldError {
@@ -138,6 +142,7 @@ export function loadFormFrom(
     loadNumber: read?.loadNumber ?? '',
     loadStatus: read?.status ?? 'AVAILABLE',
     driverId,
+    removed: [],
     stops: read && read.stops.length > 0
       ? read.stops.map((s) => stopFormFrom(s, openedAt))
       : [stopFormFrom(null, openedAt)],
@@ -239,8 +244,8 @@ export function dirtyOf(initial: LoadForm, current: LoadForm, truckId: string): 
   for (const stop of current.stops) {
     const before = initial.stops.find((s) => s.key === stop.key);
     if (!before) {
-      stops.set(stop.key, ['new stop']);
-      raw.set(stop.key, ['new stop']);
+      stops.set(stop.key, ['new']);
+      raw.set(stop.key, ['new']);
       continue;
     }
     const labels = dirtyFields(
@@ -260,15 +265,28 @@ export function dirtyOf(initial: LoadForm, current: LoadForm, truckId: string): 
  * "Unsaved changes — appointment time, note." — and several name their stop:
  * "load number; stop 2: appointment time".
  */
-export function dirtyLabels(dirty: Dirty, form: LoadForm): string[] {
-  if (form.stops.length === 1) return dirty.raw.get(form.stops[0]!.key) ?? [];
+export function dirtyLabels(dirty: Dirty, form: LoadForm, initial: LoadForm): string[] {
+  if (form.stops.length === 1 && form.removed.length === 0) {
+    return dirty.raw.get(form.stops[0]!.key) ?? [];
+  }
   const out = [...dirty.load];
   form.stops.forEach((stop, i) => {
     const own = dirty.stops.get(stop.key);
     if (own) out.push(`stop ${i + 1}: ${own.join(', ')}`);
   });
+  // A removed stop is named as it was numbered when the form opened.
+  for (const id of form.removed) {
+    const index = initial.stops.findIndex((s) => s.key === id);
+    const stop = initial.stops[index];
+    if (!stop) continue;
+    const place = placeOf(stop);
+    out.push(`stop ${index + 1}${place ? ` (${place})` : ''} removed`);
+  }
   return out;
 }
+
+const placeOf = (stop: StopForm) =>
+  [stop.city.trim(), stop.state.trim().toUpperCase()].filter(Boolean).join(', ');
 
 /**
  * §12.119. Which stops a save sends: those with unsaved changes, in the load's
@@ -284,8 +302,13 @@ export function stopsToSend(
 ): StopForm[] {
   const fallback =
     form.stops.find((s) => s.key === nextKey) ?? form.stops[0]!;
+  // A stop this form added is always sent — on a new load, the one it
+  // opened with as well, untouched or not: a new load is every stop it has.
   const send = form.stops.filter(
-    (s) => dirty.stops.has(s.key) || (overrideChanged && s.key === fallback.key),
+    (s) =>
+      dirty.stops.has(s.key) ||
+      (s.stored === null && form.stops.length > 1) ||
+      (overrideChanged && s.key === fallback.key),
   );
   return send.length > 0 ? send : [fallback];
 }
@@ -442,10 +465,15 @@ export function nextTripAllowed(
   read: LoadForEdit | null,
   send: StopForm[],
   askedKey: string,
+  removed: readonly string[] = [],
 ): boolean {
   if (!read) return false;
   return (
-    read.stops.every((s) => s.arrivedAt !== null || s.stopId === askedKey) && send.length === 1
+    read.stops.every((s) => s.arrivedAt !== null || s.stopId === askedKey) &&
+    send.length === 1 &&
+    // An added stop or a removal is an edit of THIS load, not the next trip.
+    send[0]!.stored !== null &&
+    removed.length === 0
   );
 }
 
@@ -454,6 +482,126 @@ export function stopName(form: LoadForm, key: string): string {
   const index = form.stops.findIndex((s) => s.key === key);
   const stop = form.stops[index];
   if (!stop) return 'This stop';
-  const place = [stop.city.trim(), stop.state.trim().toUpperCase()].filter(Boolean).join(', ');
+  const place = placeOf(stop);
   return place ? `Stop ${index + 1} (${place})` : `Stop ${index + 1}`;
+}
+
+/* ------------------------- Add and Remove (stage 4b) ------------------------- */
+
+/** §12.116 D6. Under Add stop when the load is full. */
+export const ADD_STOP_FULL = `A load holds at most ${MAX_STOPS_PER_LOAD} stops.`;
+/** Under Remove stop on a load's only stop. */
+export const REMOVE_LAST_STOP = 'A load needs at least one stop.';
+
+/** Why Add stop is off, or null. */
+export function addBlocked(form: LoadForm): string | null {
+  return form.stops.length >= MAX_STOPS_PER_LOAD ? ADD_STOP_FULL : null;
+}
+
+/**
+ * A new stop after the last one: the other type — a delivery follows a
+ * pickup — and an appointment already ticked, on the last stop's date and in
+ * its zone, with no time. The time is the one thing that cannot be guessed,
+ * and an empty time on a ticked appointment is an error (S4-A), so the stop
+ * cannot be saved without one.
+ */
+export function addStop(form: LoadForm, openedAt: string): { form: LoadForm; key: string } {
+  const last = form.stops[form.stops.length - 1]!;
+  const used = form.stops.flatMap((s) => {
+    const match = /^new-(\d+)$/.exec(s.key);
+    return match ? [Number(match[1])] : [];
+  });
+  const key = `new-${Math.max(0, ...used) + 1}`;
+  const blank = stopFormFrom(null, openedAt, key);
+  const stop: StopForm = {
+    ...blank,
+    stopType: last.stopType === 'PU' ? 'DEL' : 'PU',
+    appointment: {
+      ...blank.appointment,
+      enabled: true,
+      type: 'APPT',
+      date: last.appointment.date,
+      time: '',
+      tz: last.appointment.tz,
+    },
+  };
+  return { form: { ...form, stops: [...form.stops, stop] }, key };
+}
+
+/** Why Remove stop is off, and whether that is because the truck reached the stop. */
+export interface RemoveBlock {
+  text: string;
+  /**
+   * Reached: said as visible text under the stop's header, because it is a
+   * fact about the stop. Otherwise — the load's only stop, the role — the
+   * button's tooltip alone.
+   */
+  reached: boolean;
+}
+
+/**
+ * Why a stop cannot be removed, or null. A stop the truck reached is part of
+ * the record — the server refuses its removal under the load's lock too —
+ * and a load keeps at least one stop.
+ */
+export function removeBlocked(form: LoadForm, index: number, dispatchTz: string): RemoveBlock | null {
+  const stop = form.stops[index]!;
+  const reachedAt = stop.stored?.arrivedAt ?? stop.stored?.departedAt ?? null;
+  if (reachedAt) {
+    const zone = isIanaZone(stop.appointment.tz) ? stop.appointment.tz : dispatchTz;
+    return {
+      text: `Can't remove: the truck arrived here at ${timeInZone(new Date(reachedAt), zone)}.`,
+      reached: true,
+    };
+  }
+  if (form.stops.length <= 1) return { text: REMOVE_LAST_STOP, reached: false };
+  return null;
+}
+
+/**
+ * A stop off the form. One this form added is simply gone; a saved one is
+ * remembered in `removed`, so the save deletes it and Cancel — which drops
+ * the form — leaves it on the load.
+ */
+export function removeStop(form: LoadForm, key: string): LoadForm {
+  const stop = form.stops.find((s) => s.key === key);
+  if (!stop) return form;
+  return {
+    ...form,
+    stops: form.stops.filter((s) => s.key !== key),
+    removed: stop.stored ? [...form.removed, stop.stored.stopId] : form.removed,
+  };
+}
+
+/** The appointment's start as an instant, when the form holds a whole one. */
+function appointmentInstant(stop: StopForm): Date | null {
+  const a = stop.appointment;
+  if (!a.enabled || !isIanaZone(a.tz)) return null;
+  const [y, m, d] = a.date.split('-').map(Number);
+  const [h, min] = a.time.split(':').map(Number);
+  if (![y, m, d, h, min].every((n) => n !== undefined && !Number.isNaN(n))) return null;
+  return wallTimeInstant({ y: y!, m: m!, d: d! }, { h: h!, min: min! }, a.tz);
+}
+
+/**
+ * A quiet note under a delivery whose appointment comes before a pickup
+ * above it — usually a typo in one of the two dates. Display only: never
+ * sent, never an error, never in the way of Save. Compared as instants, so
+ * stops in two zones are compared correctly; each time is shown in its own.
+ */
+export function deliveryBeforePickup(form: LoadForm, index: number): string | null {
+  const stop = form.stops[index];
+  if (!stop || stop.stopType !== 'DEL') return null;
+  const at = appointmentInstant(stop);
+  if (!at) return null;
+  for (let j = index - 1; j >= 0; j -= 1) {
+    const pickup = form.stops[j]!;
+    if (pickup.stopType !== 'PU') continue;
+    const pickupAt = appointmentInstant(pickup);
+    if (!pickupAt || pickupAt.getTime() <= at.getTime()) continue;
+    const zone = pickup.appointment.tz;
+    const day = new Intl.DateTimeFormat('en-US', { timeZone: zone, month: 'short', day: 'numeric' }).format(pickupAt);
+    return `This delivery is before the pickup above it (stop ${j + 1}, ${day} ${timeInZone(pickupAt, zone)}).`;
+  }
+  return null;
 }

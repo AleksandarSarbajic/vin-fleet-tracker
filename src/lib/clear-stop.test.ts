@@ -161,6 +161,28 @@ describe('what the confirm step says', () => {
     expect(lines([stop()]).join('\n')).not.toMatch(/stops close with it/);
   });
 
+  it('says how many stops of a multi-stop load were never reached (§12.119)', () => {
+    const reached = { arrivedAt: ago(5), arrivedSource: 'detected' as const };
+    const two = lines([
+      stop({ type: 'PU', ...reached }),
+      stop({ stopId: 's2', sequence: 2 }),
+      stop({ stopId: 's3', sequence: 3 }),
+    ]);
+    expect(two).toContain(
+      '2 of its stops were never reached; they stay on record as not reached.',
+    );
+    const one = lines([stop({ type: 'PU', ...reached }), stop({ stopId: 's2', sequence: 2 })]);
+    expect(one).toContain('1 of its stops was never reached; it stays on record as not reached.');
+
+    const all = lines([
+      stop({ type: 'PU', ...reached }),
+      stop({ stopId: 's2', sequence: 2, ...reached }),
+    ]).join('\n');
+    expect(all).not.toMatch(/never reached/);
+    // One stop: the timeline sentence already says whether it was reached.
+    expect(lines([stop()]).join('\n')).not.toMatch(/never reached/);
+  });
+
   it('on a "+1 load" truck, names the load that keeps going', () => {
     const said = lines([
       stop(),

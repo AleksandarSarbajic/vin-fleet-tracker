@@ -14,6 +14,20 @@ export const TEST_DATABASE_URL =
   `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_test`;
 
 /**
+ * §12.119. The same cluster's `fleet_commit`, for the few tests that have to
+ * COMMIT — two transactions racing for one row lock cannot both run inside a
+ * rollback. Kept apart from `fleet_test`, whose guard (src/test/db.ts) empties
+ * every table the moment it sees a committed row: a parallel suite would see
+ * these rows mid-test and truncate under them. Migrated and emptied by
+ * vitest.globalSetup.ts at the start of every run.
+ */
+export const COMMIT_DATABASE_URL = (() => {
+  const url = new URL(TEST_DATABASE_URL);
+  url.pathname = '/fleet_commit';
+  return url.toString();
+})();
+
+/**
  * Hosts a test may talk to. Everything else is somebody's production system.
  *
  * Re-exported from the env schema, which needs the same list to allow a

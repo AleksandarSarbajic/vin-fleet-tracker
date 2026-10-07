@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
-import { and, asc, count, eq, isNull } from 'drizzle-orm';
-import { assignments, auditLog, loads, overrides, stops } from '@/db/schema';
-import { describeDb, rolledBack } from '@/test/db';
+import { and, asc, count, eq, isNull, sql } from 'drizzle-orm';
+import { assignments, auditLog, loads, overrides, stops, trucks } from '@/db/schema';
+import { commitDb, describeDb, rolledBack } from '@/test/db';
 import { assign, makeDriver, makeTruck } from '@/test/fleet';
 import { localDateOf, springForward, YEAR } from '@/test/dst';
 import { AppointmentTimeError } from '@/lib/appointment';
@@ -109,6 +109,21 @@ const newStop = (city: string, over: Record<string, unknown> = {}) => ({
   appointment: null,
   ...over,
 });
+
+/**
+ * The hour that does not exist at the facility, derived for this year:
+ * the local date of the spring-forward, and the hour the clock skips.
+ */
+function skippedHour() {
+  const change = springForward(TZ, YEAR);
+  const date = localDateOf(TZ, change);
+  const before = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(
+      new Date(change.getTime() - 60_000),
+    ),
+  );
+  return { type: 'APPT' as const, date, time: { h: before + 1, min: 30 }, tz: TZ, windowMinutes: null };
+}
 
 async function save(tx: Tx, input: LoadEditInput) {
   return saveLoadEdit(tx as never, { ...DISPATCH, edit: LoadEdit.parse(input) });
@@ -249,6 +264,28 @@ describeDb('one save writes several stops (§12.117)', () => {
     }
     expect(seen.rows).toHaveLength(3);
     expect(seen.audit).toBe(0);
+  });
+
+  it('removes a middle stop and appends one in the same save, numbered 1, 2, 3 again', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A' }, { city: 'B' }, { city: 'C' }]);
+      const version = await readLoadVersion(tx, lane.loadId);
+      await save(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: version!,
+        loadStatus: 'DISPATCHED',
+        stops: [await draftOf(tx, lane.stopIds[0]!), newStop('D')],
+        removedStopIds: [lane.stopIds[1]!],
+      });
+      return stopsOf(tx, lane.loadId);
+    });
+
+    expect(seen.map((r) => [r.sequence, r.city])).toEqual([
+      [1, 'A'],
+      [2, 'C'],
+      [3, 'D'],
+    ]);
   });
 
   /**
@@ -668,21 +705,6 @@ describeDb('the version check (§12.117)', () => {
 });
 
 describeDb('one transaction (§12.117)', () => {
-  /**
-   * The hour that does not exist at the facility, derived for this year:
-   * the local date of the spring-forward, and the hour the clock skips.
-   */
-  function skippedHour() {
-    const change = springForward(TZ, YEAR);
-    const date = localDateOf(TZ, change);
-    const before = Number(
-      new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(
-        new Date(change.getTime() - 60_000),
-      ),
-    );
-    return { type: 'APPT' as const, date, time: { h: before + 1, min: 30 }, tz: TZ, windowMinutes: null };
-  }
-
   it('breaks after the first write and leaves nothing behind — load, stops, driver, override, audit', async () => {
     const seen = await rolledBack(async (tx) => {
       const lane = await loadWith(tx, [{ city: 'A' }, { city: 'B' }]);
@@ -753,6 +775,177 @@ describeDb('one transaction (§12.117)', () => {
     expect(seen.auditGrew).toBe(0);
   });
 });
+
+describeDb('a new load with a pickup and a delivery, in one save (§12.119, stage 4b)', () => {
+  it('creates the load and both stops, in order, with one audit row each under one saveId', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const result = await save(tx, {
+        loadId: null,
+        truckId: truck.id,
+        loadNumber: 'VT-NEW-2',
+        loadStatus: 'DISPATCHED',
+        stops: [newStop('Melrose Park', { stopType: 'PU' }), newStop('Joliet')],
+      });
+      const [load] = await tx
+        .select({ id: loads.id, loadNumber: loads.loadNumber, status: loads.status })
+        .from(loads)
+        .where(eq(loads.truckId, truck.id));
+      const rows = await tx
+        .select({ id: stops.id, sequence: stops.sequence, type: stops.type, city: stops.city })
+        .from(stops)
+        .where(eq(stops.loadId, load!.id))
+        .orderBy(asc(stops.sequence));
+      const audit = await tx
+        .select({ entity: auditLog.entity, entityId: auditLog.entityId, after: auditLog.after })
+        .from(auditLog);
+      return { result, load: load!, rows, audit };
+    });
+
+    expect(seen.load).toMatchObject({ loadNumber: 'VT-NEW-2', status: 'DISPATCHED' });
+    expect(seen.rows.map((r) => [r.sequence, r.type, r.city])).toEqual([
+      [1, 'PU', 'Melrose Park'],
+      [2, 'DEL', 'Joliet'],
+    ]);
+    expect(seen.result.stops.map((s) => s.stopId)).toEqual(seen.rows.map((r) => r.id));
+
+    const stopRows = seen.audit.filter((a) => a.entity === 'stop');
+    expect(stopRows.map((a) => a.entityId).sort()).toEqual(seen.rows.map((r) => r.id).sort());
+    // Every row the save wrote carries its one saveId.
+    const saveIds = seen.audit.map((a) => (a.after as Record<string, unknown> | null)?.['saveId']);
+    expect(new Set(saveIds)).toEqual(new Set([seen.result.saveId]));
+    for (const row of stopRows) {
+      expect(row.after).toMatchObject({ loadId: seen.load.id, source: 'edit-modal' });
+    }
+  });
+
+  it('breaks at the delivery and leaves nothing behind — no load, no stop, no audit row', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const auditBefore = await auditRows(tx);
+      const outcome = await attempt(tx, {
+        loadId: null,
+        truckId: truck.id,
+        loadNumber: 'NEVER',
+        loadStatus: 'DISPATCHED',
+        // The pickup is written first; the delivery's skipped hour throws.
+        stops: [
+          newStop('Melrose Park', { stopType: 'PU' }),
+          newStop('Joliet', { appointment: skippedHour() }),
+        ],
+      });
+      const onTruck = await tx.select({ id: loads.id }).from(loads).where(eq(loads.truckId, truck.id));
+      const [stopCount] = await tx.select({ n: count() }).from(stops);
+      return { outcome, onTruck, stopCount: stopCount!.n, auditGrew: (await auditRows(tx)) - auditBefore };
+    });
+
+    expect(seen.outcome.error).toBeInstanceOf(AtStopError);
+    expect((seen.outcome.error as AtStopError).field).toBe('stops.1.appointment.time');
+    expect(seen.onTruck).toEqual([]);
+    expect(seen.stopCount).toBe(0);
+    expect(seen.auditGrew).toBe(0);
+  });
+});
+
+/**
+ * §12.117, for real: two connections. The rows are COMMITTED — a lock is
+ * only a lock between transactions — in `fleet_commit`, never the shared test
+ * database (src/test/db.ts `commitDb`), and deleted again at the end.
+ *
+ * The worker's arrival is written and held open; the save that removes the
+ * same stop starts and must WAIT on the stop's row lock; the worker commits;
+ * the save, now reading the arrived stop under its lock, refuses. Without
+ * `for update` the save would read the stop as unreached and delete it once
+ * the worker let go — removing a stop the truck had reached.
+ */
+describeDb('a removal racing the worker’s arrival (§12.117)', () => {
+  it('waits on the stop’s row lock, then refuses the removal and writes nothing', async () => {
+    const db = commitDb();
+    const truck = await makeTruck(db as never);
+    const [load] = await db
+      .insert(loads)
+      .values({ truckId: truck.id, loadNumber: 'VT-RACE', status: 'DISPATCHED' })
+      .returning({ id: loads.id });
+    const [first, second] = await db
+      .insert(stops)
+      .values([
+        { loadId: load!.id, type: 'PU', sequence: 1, city: 'A', state: 'IL' },
+        { loadId: load!.id, type: 'DEL', sequence: 2, city: 'B', state: 'IL' },
+      ])
+      .returning({ id: stops.id });
+
+    try {
+      const version = await readLoadVersion(db as never, load!.id);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let arrivalWritten!: () => void;
+      const written = new Promise<void>((resolve) => {
+        arrivalWritten = resolve;
+      });
+
+      // 1. The worker writes stop 2's arrival and holds its transaction open.
+      const worker = db.transaction(async (w) => {
+        await w
+          .update(stops)
+          .set({ arrivedAt: new Date(), arrivedSource: 'detected' })
+          .where(eq(stops.id, second!.id));
+        arrivalWritten();
+        await held;
+      });
+      await written;
+
+      // 2. The save removing stop 2 starts, and blocks on the lock.
+      const saving = saveLoadEdit(db as never, {
+        ...DISPATCH,
+        edit: LoadEdit.parse({
+          loadId: load!.id,
+          truckId: truck.id,
+          version: version!,
+          loadStatus: 'DISPATCHED',
+          stops: [
+            { stopId: first!.id, stopType: 'PU', addressLine: null, city: 'A', state: 'IL', zip: null, appointment: null },
+          ],
+          removedStopIds: [second!.id],
+        }),
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await waitForLockWait(db);
+
+      // 3. The worker commits; the save goes on and reads the arrival.
+      release();
+      await worker;
+      const error = await saving;
+
+      expect(error).toBeInstanceOf(StopEditError);
+      expect((error as StopEditError).message).toMatch(/reached this stop/);
+      const left = await db.select({ id: stops.id }).from(stops).where(eq(stops.loadId, load!.id));
+      expect(left).toHaveLength(2);
+      const [audit] = await db.select({ n: count() }).from(auditLog);
+      expect(audit!.n).toBe(0);
+    } finally {
+      await db.delete(stops).where(eq(stops.loadId, load!.id));
+      await db.delete(loads).where(eq(loads.id, load!.id));
+      await db.delete(trucks).where(eq(trucks.id, truck.id));
+    }
+  });
+});
+
+/** Until some backend is waiting on a lock — the save, queued behind the worker. */
+async function waitForLockWait(db: ReturnType<typeof commitDb>) {
+  for (let i = 0; i < 100; i += 1) {
+    const rows = (await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`,
+    )) as unknown as { n: number }[];
+    if (rows[0]!.n > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('The save never waited on the lock.');
+}
 
 describeDb('Reopen reads a close made by a multi-stop save (§12.107)', () => {
   it('finds the close, and reopens the load to the status it had', async () => {

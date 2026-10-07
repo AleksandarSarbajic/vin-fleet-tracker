@@ -8877,6 +8877,107 @@ a stop reached after the modal opened is the one selected and asked about.
 save is that one stop (D3); otherwise the question says "To enter the next
 trip, close this load with Clear stop."
 
+### Stage 4b — Add stop and Remove stop
+
+Still the app only: no migration and no worker change. The server took a
+load-shaped save with appends and removals in stage 2 (§12.117), so this is
+the form.
+
+**Add stop** sits under the stop list (last in the row of tabs below 1008px),
+outside the tablist, so the arrows still move between stops only. It appends
+a stop of the other type to the last one — a delivery after a pickup — with
+its appointment ticked, on the last stop's date and in its zone, and no
+time. The time is the one thing that cannot be guessed, and a ticked
+appointment without one is an error (S4-A), so the stop cannot be saved
+until it has one. The new stop is selected and the cursor is put in its
+street address. At ten stops it is off: "A load holds at most 10 stops."
+(D6, re-counted under the lock on the server).
+
+**Remove stop** sits at the right of the stop's header. It is off for a
+stop the truck reached — "Can't remove: the truck arrived here at 13:55
+CDT." in the stop's own clock, for an arrived stop and a departed one alike —
+and that reason is written under the stop's header, in the departed note's
+style, as well as in the button's tooltip, and describes the button for a
+screen reader. It is off for a load's only stop too: "A load needs at least
+one stop.", a tooltip and the button's description only, since it says
+nothing about the stop. A stop the form added goes at once and leaves no trace: the form
+is clean again if nothing else changed. A saved stop goes into the save's
+`removedStopIds`; the list renumbers, and the banner names it as it was
+numbered when the form opened — "stop 2 (Joliet, IL) removed". Cancel drops
+the form, so the stop is still on the load when it is opened again. The
+server re-checks every removal against the stops it has locked: a stop the
+worker reached while the modal was open is refused, and nothing is written.
+`load-edit.test.ts` runs that race on two connections — the save waits on
+the stop's row lock while the worker's arrival is uncommitted, then reads
+it — and fails when `for update` is taken off the stops read.
+
+**What a save sends.** The stops with unsaved changes, every stop the form
+added, and on a NEW load of several stops every stop, the untouched first
+one included: a new load is all of its stops. A one-stop save is unchanged,
+byte for byte (`one-stop-body.test.tsx`). A removal with nothing else
+changed sends the next stop alongside `removedStopIds`, as a load-only
+change does.
+
+**"Next trip" (D3)** is also not offered when the save adds or removes a
+stop: that is an edit of this load, and the server refuses a next trip that
+carries either.
+
+**The delivery-before-pickup note.** Under a delivery's appointment when a
+pickup above it is later — "This delivery is before the pickup above it
+(stop 1, Oct 8 08:00 CDT)." — compared as instants, so two zones compare
+correctly, and shown in the pickup's own clock. Display only: never sent,
+never an error, never in the way of Save.
+
+**Clear stop** on a load of several stops says how many it never reached:
+"2 of its stops were never reached; they stay on record as not reached."
+("1 of its stops was never reached; it stays on record as not reached." for
+one.) Nothing marks them done; a one-stop load keeps its timeline sentence.
+
+**Tests that commit have their own database.** `fleet_commit`, beside
+`fleet_test` and `fleet_e2e`, migrated and emptied by vitest's global setup
+each run (`commitDb()` in `src/test/db.ts`). The race test first committed
+into `fleet_test`, and the suites running beside it saw its rows, emptied
+every table under it, and deadlocked: 12 failures that were none of theirs.
+
+**Baselines.** 7f is new: a new load right after Add stop, at 1440. Every
+edit-modal baseline moved with it — 7 at all six widths, 7b, 7c, 7d and 7e —
+because Add stop and Remove stop are on every edit modal. The plan named 7f
+alone; that was wrong.
+
+**Readers pinned before the first real one.** Three readers had never run on
+a load of several stops and got a test each: the health strip counts STOPS —
+a pickup and a delivery due today are two remaining, then one done and one
+remaining, then two done (`health.test.ts`); the ETA log settles each stop's
+predictions with that stop's own arrival, and logs nothing for the delivery
+while the pickup is the board's stop (`eta-marks.test.ts`); and the popup
+and the phone sheet, rendered from the board's real row, name the pickup
+while the truck is at it and the delivery once it is left, with no "open
+loads" count and no stop count yet (`two-stop-surfaces.test.tsx`).
+
+### The first live multi-stop load — what to look at
+
+Read-only, once a real load of two stops or more has been saved.
+
+1. **Board.** The row shows stop 1 with its ETA. On arrival it says ARRIVED
+   and stays on stop 1; only the departure (detected, or ticked by hand)
+   moves it to stop 2, with a new ETA. The map line goes to the stop the row
+   names.
+2. **Timeline.** Every stop in sequence, in one load: the reached ones
+   arrived and departed, the rest pending.
+3. **History.** Once a pickup and its delivery are both reached: one entry,
+   on the pickup's day, the delivery paired. Before that, the pickup alone.
+4. **Health strip.** Today's count moves by the number of the load's stops
+   due today — it counts stops, so that can be two.
+5. **Worker journal.** `arrival detected` and `departure detected` name
+   stop 1's `stopId` first; no `arrival detected` for stop 2 before stop 1's
+   departure; `routeOutcomes` holds one lane for the truck;
+   `routeCallsThisMonth` rises by about one as each stop becomes next; no
+   `warn` or `error`.
+6. **`eta_marks`.** Rows for stop 1 only while the truck is at or before it;
+   stop 2's first row (`mark_miles` null) logged after stop 1's
+   `departed_at`; after the hourly settle, each stop's rows carry that stop's
+   own `arrived_at`.
+
 # 13. Still open
 
 The contradictions found during extraction, plus what real use has since

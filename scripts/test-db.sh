@@ -23,6 +23,10 @@ DB="fleet_test"
 # §12.119. The browser suite's own database, so a commit's unit run and a
 # running browser suite never touch the same tables.
 E2E_DB="fleet_e2e"
+# §12.119. For the few unit tests that must COMMIT — a lock is only a lock
+# between two transactions. fleet_test's guard empties every table it finds
+# holding committed rows, mid-run, so those tests cannot live there.
+COMMIT_DB="fleet_commit"
 LOG="${PGDIR}/postgres.log"
 
 if [ ! -x "${PGBIN}/pg_ctl" ]; then
@@ -52,9 +56,9 @@ create() {
 
 start() {
   running || "${PGBIN}/pg_ctl" -D "${PGDIR}" -l "${LOG}" -w -t 30 start >/dev/null
-  # Both databases, every time: a cluster made before fleet_e2e existed gets
-  # it on its next `up`. createdb refuses one that exists, which is fine.
-  for name in "${DB}" "${E2E_DB}"; do
+  # Every database, every time: a cluster made before one existed gets it on
+  # its next `up`. createdb refuses one that exists, which is fine.
+  for name in "${DB}" "${E2E_DB}" "${COMMIT_DB}"; do
     "${PGBIN}/createdb" -h 127.0.0.1 -p "${PORT}" -U postgres "${name}" 2>/dev/null || true
   done
 }

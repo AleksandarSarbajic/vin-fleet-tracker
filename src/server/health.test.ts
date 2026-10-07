@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { loads, stops } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
 import { makeTruck } from '@/test/fleet';
@@ -166,6 +167,32 @@ describeDb('the day’s outcome (§14 feature 8)', () => {
         { seq: 2, apptStart: todayAt(17) },
       ]);
       expect(await health(tx)).toMatchObject({ onTime: 1, remaining: 1 });
+    });
+  });
+
+  /**
+   * §12.119. Pinned: the strip counts STOPS, not loads. A pickup and a
+   * delivery both due today are two in `remaining`; the pickup reached is one
+   * done and one remaining; both reached are two done. A dispatcher reading
+   * "4 remaining" on a board of three trucks is reading stops.
+   */
+  it('counts a two-stop load due today as two stops, before, during and after', async () => {
+    await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      await addLoad(tx, truck.id, [
+        { seq: 1, apptStart: todayAt(8) },
+        { seq: 2, apptStart: todayAt(16) },
+      ]);
+      expect(await health(tx)).toMatchObject({ onTime: 0, late: 0, unscheduled: 0, remaining: 2 });
+
+      await tx.execute(sql`update stops set arrived_at = ${todayAt(7, 55).toISOString()}::timestamptz, arrived_source = 'detected',
+                                        departed_at = ${todayAt(8, 40).toISOString()}::timestamptz, departed_source = 'detected'
+                            where sequence = 1`);
+      expect(await health(tx)).toMatchObject({ onTime: 1, late: 0, remaining: 1 });
+
+      await tx.execute(sql`update stops set arrived_at = ${todayAt(16, 30).toISOString()}::timestamptz, arrived_source = 'detected'
+                            where sequence = 2`);
+      expect(await health(tx)).toMatchObject({ onTime: 1, late: 1, remaining: 0 });
     });
   });
 

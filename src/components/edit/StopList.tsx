@@ -3,7 +3,7 @@
 import { useRef, useSyncExternalStore } from 'react';
 import { isIanaZone } from '@/lib/appointment';
 import { timeInZone, zoneAbbreviation } from '@/lib/format';
-import type { StopForm, StopFlags } from './load-form';
+import { ADD_STOP_FULL, type StopForm, type StopFlags } from './load-form';
 
 /**
  * §12.119. The load's stops, beside the form at 1008px and up — the 960px
@@ -11,6 +11,9 @@ import type { StopForm, StopFlags } from './load-form';
  * below that. One tablist either way, so the keys and what a screen reader
  * says do not depend on the width: arrows move between stops, and the
  * selected stop's form is the tab panel.
+ *
+ * Add stop sits under the list, or last in the row of tabs — outside the
+ * tablist, so the arrows still move between stops only.
  */
 
 export const STOP_FORM_ID = 'edit-load-stop-form';
@@ -66,6 +69,9 @@ export function StopList({
   dirtyKeys,
   errorKeys,
   onSelect,
+  mayEdit,
+  addBlocked,
+  onAdd,
 }: {
   stops: StopForm[];
   flags: StopFlags[];
@@ -73,6 +79,10 @@ export function StopList({
   dirtyKeys: ReadonlySet<string>;
   errorKeys: ReadonlySet<string>;
   onSelect: (index: number) => void;
+  mayEdit: boolean;
+  /** Why Add stop is off — a full load, or the role — or null. */
+  addBlocked: string | null;
+  onAdd: () => void;
 }) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const twoPane = useTwoPane();
@@ -190,6 +200,21 @@ export function StopList({
             );
           })}
         </div>
+        <button
+          type="button"
+          data-add-stop=""
+          disabled={!mayEdit || addBlocked !== null}
+          title={addBlocked ?? undefined}
+          onClick={onAdd}
+          className="flex h-9 min-w-[120px] shrink-0 items-center justify-center gap-1.5 border border-dashed border-line-hair px-3 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-secondary hover:border-accent hover:text-accent disabled:opacity-45 disabled:hover:border-line-hair disabled:hover:text-text-secondary min-[1008px]:min-w-0"
+        >
+          <span aria-hidden="true">+</span> Add stop
+        </button>
+        {addBlocked === ADD_STOP_FULL ? (
+          <p className="shrink-0 self-center text-small text-text-mutedOnOverlay min-[1008px]:self-auto">
+            {ADD_STOP_FULL}
+          </p>
+        ) : null}
       </div>
     </div>
   );

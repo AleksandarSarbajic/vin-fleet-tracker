@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPooledDb } from '@/db/connection';
 import type { Tx } from '@/server/audit';
+import { COMMIT_DATABASE_URL } from './url';
 
 /**
  * The one way a test reaches a database (§12.32).
@@ -26,9 +27,22 @@ const connect = () => (handle ??= createPooledDb(url!));
 /** The pooled handle, for the rare test that needs to commit deliberately. */
 export const testDb = () => connect().db;
 
+let commitHandle: ReturnType<typeof createPooledDb> | null = null;
+
+/**
+ * §12.119. A handle on `fleet_commit` — for a test that must COMMIT, because
+ * what it tests happens between two transactions (a row lock). Never the
+ * shared `fleet_test`: guard 3 below empties every table there the moment it
+ * sees a committed row, and a suite running beside this one would see these.
+ * Clean up what you commit; globalSetup empties it each run regardless.
+ */
+export const commitDb = () => (commitHandle ??= createPooledDb(COMMIT_DATABASE_URL)).db;
+
 afterAll(async () => {
   await handle?.client.end({ timeout: 5 });
   handle = null;
+  await commitHandle?.client.end({ timeout: 5 });
+  commitHandle = null;
 });
 
 /**

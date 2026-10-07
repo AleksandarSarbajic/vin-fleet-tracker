@@ -6,7 +6,12 @@ import { StatusChip } from '@/components/console/StatusChip';
 import { AppointmentFields } from './AppointmentFields';
 import { ArrivalFields } from './ArrivalFields';
 import { Field } from './Field';
-import { LEFT_STOP_NOTE, type StopFlags, type StopForm as StopFormState } from './load-form';
+import {
+  LEFT_STOP_NOTE,
+  type RemoveBlock,
+  type StopFlags,
+  type StopForm as StopFormState,
+} from './load-form';
 import { STOP_FORM_ID, stopTabId } from './StopList';
 
 /**
@@ -38,6 +43,9 @@ export function StopForm({
   notNextNote,
   errorFor,
   onChange,
+  removeBlocked,
+  onRemove,
+  orderNote,
 }: {
   stop: StopFormState;
   index: number;
@@ -57,9 +65,15 @@ export function StopForm({
   notNextNote: string | null;
   errorFor: (field: string) => string | undefined;
   onChange: (patch: Partial<StopFormState>) => void;
+  /** Why this stop cannot be removed — reached, the only one, the role — or null. */
+  removeBlocked: RemoveBlock | null;
+  onRemove: () => void;
+  /** §12.119. The delivery-before-pickup note, under the appointment; display only. */
+  orderNote: string | null;
 }) {
   const locked = flags.departed;
   const lockedTitle = locked ? LEFT_STOP_NOTE : undefined;
+  const removeWhyId = `${STOP_FORM_ID}-remove-why`;
 
   return (
     <div
@@ -106,7 +120,34 @@ export function StopForm({
           </span>
         ) : null}
         {flags.next && computed ? <StatusChip status={computed} /> : null}
+        <button
+          type="button"
+          data-remove-stop=""
+          disabled={removeBlocked !== null}
+          title={removeBlocked?.text}
+          aria-describedby={removeBlocked ? removeWhyId : undefined}
+          onClick={onRemove}
+          className="ml-auto h-[30px] border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:border-status-late-bd hover:text-status-late-fg disabled:opacity-45 disabled:hover:border-line-hair disabled:hover:text-text-secondary"
+        >
+          Remove stop
+        </button>
+        {removeBlocked && !removeBlocked.reached ? (
+          <span id={removeWhyId} className="sr-only">
+            {removeBlocked.text}
+          </span>
+        ) : null}
       </div>
+
+      {/* A stop the truck reached says so, in words, not only on hover. */}
+      {removeBlocked?.reached ? (
+        <p
+          id={removeWhyId}
+          className="border-l border-line-soft pl-3 text-small text-text-mutedOnOverlay"
+          data-remove-why=""
+        >
+          {removeBlocked.text}
+        </p>
+      ) : null}
 
       {locked ? (
         <p className="border-l border-line-soft pl-3 text-small text-text-mutedOnOverlay" data-left-stop-note="">
@@ -177,6 +218,12 @@ export function StopForm({
         dateError={errorFor('appointment.date')}
         endError={errorFor('appointment.endTime')}
       />
+
+      {orderNote ? (
+        <p className="border-l border-line-soft pl-3 text-small text-text-mutedOnOverlay" data-order-note="">
+          {orderNote}
+        </p>
+      ) : null}
 
       <ArrivalFields
         draft={stop.arrival}

@@ -119,6 +119,18 @@ export function confirmLines(input: {
   ];
   if (choice.stops.length > 1) {
     lines.push(`All ${choice.stops.length} of its stops close with it.`);
+    /**
+     * §12.119. Said, because closing is not reaching: the stops the truck
+     * never got to are kept, unreached, and nothing marks them done.
+     */
+    const unreached = choice.stops.filter((s) => s.arrivedAt === null).length;
+    if (unreached === 1) {
+      lines.push('1 of its stops was never reached; it stays on record as not reached.');
+    } else if (unreached > 1) {
+      lines.push(
+        `${unreached} of its stops were never reached; they stay on record as not reached.`,
+      );
+    }
   }
   lines.push('The arrival and departure times are kept as the record.');
   lines.push(timelineSentence(input.stay, input.dispatchTz));

@@ -425,3 +425,46 @@ test('a stop the truck has left, at 1440px, matches its baseline', async ({ page
   await page.mouse.move(2, HEIGHT - 2);
   await shoot(page, '7e-edit-load-left-stop', 1440);
 });
+
+/**
+ * §12.119, stage 4b. A new load right after Add stop: stop 1 a pickup with
+ * its appointment, stop 2 just added — a delivery, its appointment ticked on
+ * stop 1's date with no time (the one error it opens with), selected, the
+ * cursor in its street address. Truck 101's load is taken away first, so the
+ * modal opens as a new load.
+ */
+test('a new load right after Add stop, at 1440px, matches its baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  await seed();
+  const sql = connect();
+  try {
+    await sql`delete from stops where load_id = ${IDS.loadChicago}`;
+    await sql`delete from loads where id = ${IDS.loadChicago}`;
+  } finally {
+    await sql.end();
+  }
+  await page.clock.setFixedTime(FROZEN);
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await open(page);
+  await select101(page);
+  await page.keyboard.press('Enter');
+  const modal = page.getByRole('dialog', { name: 'New load for truck 101' });
+  const form = modal.getByRole('tabpanel');
+  await form.waitFor();
+
+  await modal.getByLabel('Load number').fill('E2E-7F');
+  await form.getByRole('button', { name: 'Pick up' }).click();
+  await form.getByLabel('Street address').fill('1900 N 25th Ave');
+  await form.getByLabel('ZIP').fill('60160');
+  await form.getByLabel('City').fill('Melrose Park');
+  await form.getByLabel('State').fill('IL');
+  await form.getByLabel('This stop has an appointment').check();
+  await form.getByLabel('Date (stop-local)').fill('2026-10-02');
+  await form.getByLabel('Time at the stop').fill('08:00');
+
+  await modal.getByRole('button', { name: 'Add stop' }).click();
+  await expect(form.getByLabel('Street address')).toBeFocused();
+  await page.waitForTimeout(400);
+  await page.mouse.move(2, HEIGHT - 2);
+  await shoot(page, '7f-new-load-added-stop', 1440);
+});
