@@ -461,9 +461,14 @@ describeDb('shared truck lists (§12.90)', () => {
       });
       expect(seen.first).toMatchObject({ added: 1, version: 2 });
       expect(seen.again).toMatchObject({ added: 0, version: 2 });
-      // Create + one real add. The empty add wrote nothing.
+      // Create + one real add. The empty add wrote nothing. Found by its
+      // source, not its place: both rows share the transaction's created_at,
+      // so the select returns them in either order (a flake, 1 run in 7).
       expect(seen.audits).toHaveLength(2);
-      expect(seen.audits[1]!.after).toMatchObject({
+      const add = seen.audits.find(
+        (a) => (a.after as { source?: string } | null)?.source === 'truck-lists-add',
+      );
+      expect(add?.after).toMatchObject({
         added: [622],
         trucks: [621, 622],
         source: 'truck-lists-add',
