@@ -502,15 +502,20 @@ describeDb('shared truck lists (§12.90)', () => {
         return tx
           .select({ before: auditLog.before, after: auditLog.after })
           .from(auditLog)
-          .where(and(eq(auditLog.entity, 'truck_list'), eq(auditLog.entityId, made.id)))
-          .orderBy(auditLog.createdAt);
+          .where(and(eq(auditLog.entity, 'truck_list'), eq(auditLog.entityId, made.id)));
       });
+      // Found by what each row says, not its place: all three share the
+      // transaction's created_at and the ids are random, so no order exists
+      // (the same flake c065c7b fixed beside it; seen again 2026-10-08).
+      type Side = { name?: string; deleted?: boolean } | null;
+      const edit = seen.find((r) => (r.before as Side)?.name === 'Audit');
+      const removal = seen.find((r) => (r.after as Side)?.deleted === true);
       expect(seen).toHaveLength(3);
-      expect(seen[1]).toMatchObject({
+      expect(edit).toMatchObject({
         before: { name: 'Audit', trucks: [631, 632] },
         after: { name: 'Audit 2', trucks: [632, 633], added: [633], removed: [631] },
       });
-      expect(seen[2]).toMatchObject({
+      expect(removal).toMatchObject({
         before: { name: 'Audit 2', trucks: [632, 633] },
         after: { trucks: [], deleted: true },
       });
