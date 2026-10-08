@@ -42,6 +42,9 @@ import {
   localErrors,
   patchStop,
   confirmZone,
+  pasteAddress,
+  undoPaste,
+  takePasted,
   nextTripAllowed,
   reachedAsk as askFor,
   removeBlocked,
@@ -291,12 +294,17 @@ function LoadEditor({
       stops: f.stops.map((s, i) => (i === index ? patchStop(s, patch) : s)),
     }));
   }, []);
-  const confirmStopZone = useCallback((index: number) => {
+  /** One stop, through a rule of load-form's: confirm a zone, paste, undo a paste. */
+  const updateStop = useCallback((index: number, rule: (stop: StopFormState) => StopFormState) => {
     setForm((f) => ({
       ...f,
-      stops: f.stops.map((s, i) => (i === index ? confirmZone(s) : s)),
+      stops: f.stops.map((s, i) => (i === index ? rule(s) : s)),
     }));
   }, []);
+  const confirmStopZone = useCallback(
+    (index: number) => updateStop(index, confirmZone),
+    [updateStop],
+  );
   /**
    * §12.119 stage 4b. Add stop selects the new stop and puts the cursor in
    * its street address — once its form has mounted, so the key is held here
@@ -1031,6 +1039,9 @@ function LoadEditor({
                 errorFor={(field) => errorFor(field, current.key)}
                 onChange={(patch) => setStop(selected, patch)}
                 onConfirmZone={() => confirmStopZone(selected)}
+                onPasteAddress={(pasted) => updateStop(selected, (s) => pasteAddress(s, pasted))}
+                onUndoPaste={() => updateStop(selected, undoPaste)}
+                onTakePasted={() => updateStop(selected, takePasted)}
                 removeBlocked={
                   mayEdit
                     ? removeBlocked(form, selected, dispatchTz)

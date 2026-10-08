@@ -13,6 +13,7 @@ import {
 } from './AppointmentFields';
 import type { ArrivalDraft, DepartureDraft } from './ArrivalFields';
 import { zoneForAddress, type ZoneVerdict } from '@/lib/geo/zone-for-address';
+import type { AddressField, PastedAddress } from '@/lib/paste-address';
 
 /**
  * §12.119. The edit modal's form, for a load with any number of stops — and
@@ -44,7 +45,34 @@ export interface StopForm {
   departure: DepartureDraft;
   /** §12.120. Where the appointment's zone came from, and whether it is settled. */
   zone: ZoneState;
+  /** §12.121. The last address pasted into Street, while there is something to say about it. */
+  paste: PasteState | null;
 }
+
+/** §12.121. */
+export interface PasteState {
+  /** The four fields and the zone as they were, for ⌘/Ctrl+Z; null once one is edited. */
+  before: AddressSnapshot | null;
+  /** The fields the paste filled. */
+  filled: AddressField[];
+  /** Fields the paste could not settle, and why, quoting it. */
+  checks: Partial<Record<AddressField, string>>;
+  /** Fields that kept what the dispatcher had: the field → what the paste said instead. */
+  kept: Partial<Record<AddressField, string>>;
+  /** Lines that went nowhere — a facility name. */
+  leftOut: string[];
+}
+
+export interface AddressSnapshot {
+  addressLine: string;
+  city: string;
+  state: string;
+  zip: string;
+  tz: string;
+  zone: ZoneState;
+}
+
+const ADDRESS_FIELDS: readonly AddressField[] = ['addressLine', 'city', 'state', 'zip'];
 
 /** §12.120. */
 export interface ZoneState {
@@ -161,6 +189,7 @@ export function stopFormFrom(stop: StopRead | null, openedAt: string, key?: stri
       verdict: null,
       confirmed: false,
     },
+    paste: null,
   };
 }
 
@@ -175,6 +204,30 @@ export function stopFormFrom(stop: StopRead | null, openedAt: string, key?: stri
  *   - A saved stop's stored zone (`kept`) never moves.
  */
 export function patchStop(stop: StopForm, patch: Partial<StopForm>): StopForm {
+  return { ...followZone(stop, patch), paste: afterEdit(stop.paste, patch) };
+}
+
+/**
+ * §12.121. A field edited by hand after a paste: undo no longer applies (it
+ * would throw the edit away), and that field's own note has been answered.
+ */
+function afterEdit(paste: PasteState | null, patch: Partial<StopForm>): PasteState | null {
+  if (!paste) return null;
+  const edited = ADDRESS_FIELDS.filter((f) => patch[f] !== undefined);
+  if (edited.length === 0) return paste;
+  const checks = { ...paste.checks };
+  const kept = { ...paste.kept };
+  for (const f of edited) {
+    delete checks[f];
+    delete kept[f];
+  }
+  const rest = { ...paste, before: null, checks, kept };
+  return Object.keys(checks).length + Object.keys(kept).length + rest.leftOut.length === 0
+    ? null
+    : rest;
+}
+
+function followZone(stop: StopForm, patch: Partial<StopForm>): StopForm {
   const next = { ...stop, ...patch };
   if (patch.appointment && patch.appointment.tz !== stop.appointment.tz) {
     return { ...next, zone: { mode: 'chosen', verdict: null, confirmed: false } };
@@ -191,6 +244,100 @@ export function patchStop(stop: StopForm, patch: Partial<StopForm>): StopForm {
     appointment: { ...next.appointment, tz: verdict.zone },
     zone: { mode: 'auto', verdict, confirmed: false },
   };
+}
+
+const sameValue = (field: AddressField, a: string, b: string) =>
+  field === 'zip'
+    ? a.replace(/\D/g, '').slice(0, 5) === b.replace(/\D/g, '').slice(0, 5)
+    : a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * §12.121. An address pasted into Street, filled into the four fields at once.
+ *
+ * Street takes the paste — that is where it was pasted. City, State and ZIP
+ * take it only when empty or already saying the same: anything else there
+ * the dispatcher put there, so it is KEPT, and the stop says what was kept
+ * and offers the pasted value (`takePasted`). Never overwritten silently.
+ *
+ * The zone then follows exactly as for typing (§12.120), and a saved stop's
+ * stored zone stays put.
+ */
+export function pasteAddress(stop: StopForm, pasted: PastedAddress): StopForm {
+  const before: AddressSnapshot = {
+    addressLine: stop.addressLine,
+    city: stop.city,
+    state: stop.state,
+    zip: stop.zip,
+    tz: stop.appointment.tz,
+    zone: stop.zone,
+  };
+  const patch: Partial<Record<AddressField, string>> = {};
+  const kept: PasteState['kept'] = {};
+  for (const field of ADDRESS_FIELDS) {
+    const value = pasted.values[field];
+    if (value === undefined) continue;
+    const mine = stop[field];
+    if (field === 'addressLine' || mine.trim() === '' || sameValue(field, mine, value)) {
+      patch[field] = value;
+    } else {
+      kept[field] = value;
+    }
+  }
+  return {
+    ...followZone(stop, patch),
+    paste: {
+      before,
+      filled: ADDRESS_FIELDS.filter((f) => patch[f] !== undefined),
+      checks: pasted.checks,
+      kept,
+      leftOut: pasted.leftOut,
+    },
+  };
+}
+
+/** §12.121. "Use the pasted ones": what was kept is replaced, and undo still undoes the paste. */
+export function takePasted(stop: StopForm): StopForm {
+  const paste = stop.paste;
+  if (!paste || Object.keys(paste.kept).length === 0) return stop;
+  return {
+    ...followZone(stop, paste.kept),
+    paste: {
+      ...paste,
+      filled: ADDRESS_FIELDS.filter((f) => paste.filled.includes(f) || paste.kept[f] !== undefined),
+      kept: {},
+    },
+  };
+}
+
+/** §12.121. ⌘/Ctrl+Z after a paste: the four fields and the zone as they were, in one step. */
+export function undoPaste(stop: StopForm): StopForm {
+  const before = stop.paste?.before;
+  if (!before) return stop;
+  return {
+    ...stop,
+    addressLine: before.addressLine,
+    city: before.city,
+    state: before.state,
+    zip: before.zip,
+    appointment: { ...stop.appointment, tz: before.tz },
+    zone: before.zone,
+    paste: null,
+  };
+}
+
+/**
+ * §12.121. Where the zone came from, said under it — or null. A saved stop
+ * says so only after a paste, the one time someone might expect it to move.
+ */
+export function zoneSource(stop: StopForm): string | null {
+  const { mode, verdict } = stop.zone;
+  if (mode === 'kept') {
+    return stop.paste ? 'Kept as saved: an address change never moves a saved stop’s zone.' : null;
+  }
+  if (mode !== 'auto' || !verdict) return null;
+  if (verdict.kind === 'zip') return `Set from ZIP ${stop.zip.replace(/\D/g, '').slice(0, 5)}.`;
+  if (verdict.kind === 'state') return `Set from the state, ${stop.state.trim().toUpperCase()}.`;
+  return null;
 }
 
 /** §12.120. "Zone is right": the dispatcher settles an uncertain zone as shown. */

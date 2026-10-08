@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { springForward, YEAR } from '@/test/dst';
 import { timeInZone } from '@/lib/format';
+import { splitPastedAddress } from '@/lib/paste-address';
 import type { LoadForEdit } from '@/lib/load-read';
 import {
   ADD_STOP_FULL,
@@ -10,6 +11,10 @@ import {
   appointmentErrors,
   confirmZone,
   patchStop,
+  pasteAddress,
+  takePasted,
+  undoPaste,
+  zoneSource,
   stopEditOf,
   stopFormFrom,
   deliveryBeforePickup,
@@ -318,5 +323,79 @@ describe('the zone follows the state', () => {
     expect(added.appointment.tz).toBe('America/Denver');
     expect(tzErrors(added)).toEqual([]);
     expect(patchStop(added, { state: 'IL' }).appointment.tz).toBe('America/Chicago');
+  });
+});
+
+/** §12.121. An address pasted into Street, as pure rules. Invented addresses. */
+describe('pasting an address', () => {
+  const pasted = (text: string) => splitPastedAddress(text)!;
+  const fresh = () => {
+    const stop = stopFormFrom(null, OPENED);
+    return patchStop(stop, { appointment: { ...stop.appointment, enabled: true } });
+  };
+
+  it('fills all four fields together, and the zone follows the ZIP', () => {
+    const stop = pasteAddress(fresh(), pasted('4001 Main St\nDickinson, ND 58601'));
+    expect([stop.addressLine, stop.city, stop.state, stop.zip]).toEqual(['4001 Main St', 'Dickinson', 'ND', '58601']);
+    expect(stop.appointment.tz).toBe('America/Denver');
+    expect(stop.paste?.filled).toEqual(['addressLine', 'city', 'state', 'zip']);
+    expect(zoneSource(stop)).toBe('Set from ZIP 58601.');
+  });
+
+  it('says the zone came from the state in a one-zone state', () => {
+    const stop = pasteAddress(fresh(), pasted('1900 Oak Ave, Melrose Park, IL 60160'));
+    expect(zoneSource(stop)).toBe('Set from the state, IL.');
+  });
+
+  it('never overwrites a city, state or ZIP already there: keeps it and says what the paste said', () => {
+    const typed = patchStop(patchStop(fresh(), { city: 'West Fargo' }), { zip: '58078' });
+    const stop = pasteAddress(typed, pasted('4001 Main St\nFargo, ND 58102'));
+    expect([stop.addressLine, stop.city, stop.state, stop.zip]).toEqual(['4001 Main St', 'West Fargo', 'ND', '58078']);
+    expect(stop.paste?.kept).toEqual({ city: 'Fargo', zip: '58102' });
+    expect(stop.paste?.filled).toEqual(['addressLine', 'state']);
+  });
+
+  it('counts the same value written differently as the same, not as a conflict', () => {
+    const typed = patchStop(patchStop(fresh(), { city: 'fargo' }), { zip: '58102-0001' });
+    const stop = pasteAddress(typed, pasted('4001 Main St\nFARGO, ND 58102'));
+    expect(stop.paste?.kept).toEqual({});
+  });
+
+  it('"Use the pasted ones" takes what was kept, and undo still undoes the whole paste', () => {
+    const typed = patchStop(fresh(), { city: 'West Fargo' });
+    const taken = takePasted(pasteAddress(typed, pasted('4001 Main St\nFargo, ND 58102')));
+    expect(taken.city).toBe('Fargo');
+    expect(taken.paste?.kept).toEqual({});
+    expect(undoPaste(taken).city).toBe('West Fargo');
+  });
+
+  it('undo restores the four fields and the zone in one step', () => {
+    const before = patchStop(fresh(), { state: 'IL' });
+    const after = pasteAddress(before, pasted('4001 Main St\nDickinson, ND 58601'));
+    const undone = undoPaste(after);
+    expect([undone.addressLine, undone.city, undone.state, undone.zip]).toEqual(['', '', 'IL', '']);
+    expect(undone.appointment.tz).toBe('America/Chicago');
+    expect(undone.zone).toEqual(before.zone);
+    expect(undone.paste).toBeNull();
+  });
+
+  it('a field typed in after the paste ends the undo, and answers that field’s check', () => {
+    const after = pasteAddress(fresh(), pasted('4001 Main St\nFargo ND'));
+    expect(after.paste?.checks.zip).toBeDefined();
+    const typed = patchStop(after, { zip: '58102' });
+    expect(typed.paste?.before ?? null).toBeNull();
+    expect(typed.paste?.checks.zip).toBeUndefined();
+    expect(undoPaste(typed)).toBe(typed);
+  });
+
+  it('never moves a saved stop’s stored zone', () => {
+    const saved = formOf([{ state: 'IL', zip: '60160', apptTz: 'America/Chicago' }]).stops[0]!;
+    const stop = pasteAddress(saved, pasted('4001 Main St\nDickinson, ND 58601'));
+    // The saved city, state and ZIP are the dispatcher's: kept, and said.
+    expect(stop.paste?.kept).toEqual({ city: 'Dickinson', state: 'ND', zip: '58601' });
+    const taken = takePasted(stop);
+    expect([taken.state, taken.zip]).toEqual(['ND', '58601']);
+    expect(taken.appointment.tz).toBe('America/Chicago');
+    expect(zoneSource(taken)).toBe('Kept as saved: an address change never moves a saved stop’s zone.');
   });
 });

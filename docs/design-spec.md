@@ -9086,6 +9086,61 @@ KS). Both are a confirmation, not a wrong zone.
   edited to another zone's. That is today's behaviour, unchanged.
 - It fills nothing from a PDF. That is stage 3.
 
+## 12.121 Paste an address into Street — rate-confirmation fill, stage 2
+
+An address pasted into a stop's **Street address** is split into street,
+city, state and ZIP (`src/lib/paste-address.ts`, pure), and the four fields
+fill together. It works for every broker and every PDF without parsing a PDF
+at all.
+
+### When it acts
+
+Only on a **paste** into Street — typing the same text splits nothing. A
+single line that does not end in a US state **and** a ZIP is not an address
+to split and goes in exactly as the browser puts it, so a plain street
+pastes unchanged. Several lines with nothing address-like in them, and a
+Canadian address on one line, are left alone the same way.
+
+### What it reads
+
+A street line starts with a house number or a PO box; a unit line (Suite,
+Ste, Unit, Bldg, #…) joins it; the city line is the last one ending in a US
+state, with or without a ZIP, and a ZIP+4 loses its +4 as the save would
+(§12.21's neighbour, `Zip`). A city line may carry the street and a facility
+name before it, comma-separated. Without a ZIP, a line ending in a word that
+is also a state code ("123 Main St NE", "12 Oak Ct") is not taken for a city.
+
+### Certain or marked
+
+What the text does not settle is **marked "Check"** under its field, quoting
+the paste, and not filled: two lines that could each be the street, a missing
+state or ZIP, a street and city run together without a comma. A line that is
+not a street — a facility name — is never put in Street; the stop says it
+was left out. A Canadian address on several lines fills nothing and says so.
+
+### Never overwritten
+
+Street takes the paste — that is where it was pasted. City, State and ZIP
+take it only when empty or already saying the same thing (case and ZIP+4
+aside). Anything else there is the dispatcher's, so it is **kept**, the stop
+says what the paste said instead, and one button, "Use the pasted ones",
+takes them. Chosen over asking first: a question before every paste is a
+step on every paste, and keeping can never lose what someone typed. On a
+saved stop the stored city, state and ZIP count as the dispatcher's too.
+
+### The zone, undo, the save
+
+The zone follows the pasted state and ZIP exactly as typing makes it
+(§12.120), and now says where it came from under the dropdown — "Set from
+ZIP 58601", "Set from the state, IL" — whenever the address set it. A saved
+stop's stored zone never moves, and after a paste the stop says so.
+
+⌘Z or Ctrl+Z straight after a paste puts back the four fields and the zone in
+one step. Once a field is typed in, undo is the browser's again, so it cannot
+throw that typing away. Nothing is saved until Save; the unsaved-changes
+banner names the fields as it does for typing (an added stop reads "new", as
+before).
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

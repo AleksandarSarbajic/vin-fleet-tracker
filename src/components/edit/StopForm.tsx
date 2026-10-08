@@ -6,8 +6,10 @@ import { StatusChip } from '@/components/console/StatusChip';
 import { AppointmentFields } from './AppointmentFields';
 import { ArrivalFields } from './ArrivalFields';
 import { Field } from './Field';
+import { splitPastedAddress, type AddressField } from '@/lib/paste-address';
 import {
   LEFT_STOP_NOTE,
+  zoneSource,
   type RemoveBlock,
   type StopFlags,
   type StopForm as StopFormState,
@@ -44,6 +46,9 @@ export function StopForm({
   errorFor,
   onChange,
   onConfirmZone,
+  onPasteAddress,
+  onUndoPaste,
+  onTakePasted,
   removeBlocked,
   onRemove,
   orderNote,
@@ -68,6 +73,12 @@ export function StopForm({
   onChange: (patch: Partial<StopFormState>) => void;
   /** §12.120. "Zone is right", under an uncertain zone. */
   onConfirmZone: () => void;
+  /** §12.121. An address pasted into Street, already split. */
+  onPasteAddress: (pasted: NonNullable<ReturnType<typeof splitPastedAddress>>) => void;
+  /** §12.121. ⌘/Ctrl+Z straight after a paste. */
+  onUndoPaste: () => void;
+  /** §12.121. "Use the pasted ones" for what was kept. */
+  onTakePasted: () => void;
   /** Why this stop cannot be removed — reached, the only one, the role — or null. */
   removeBlocked: RemoveBlock | null;
   onRemove: () => void;
@@ -75,6 +86,7 @@ export function StopForm({
   orderNote: string | null;
 }) {
   const locked = flags.departed;
+  const paste = stop.paste;
   const lockedTitle = locked ? LEFT_STOP_NOTE : undefined;
   const removeWhyId = `${STOP_FORM_ID}-remove-why`;
 
@@ -164,14 +176,35 @@ export function StopForm({
         </p>
       ) : null}
 
-      <fieldset disabled={!mayEdit || locked} title={lockedTitle} className="border-0 p-0">
+      <fieldset
+        disabled={!mayEdit || locked}
+        title={lockedTitle}
+        className="border-0 p-0"
+        onKeyDown={(e) => {
+          // §12.121. The paste was one step, so its undo is one step — only
+          // until a field is typed in, when the browser's own undo takes over.
+          if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && paste?.before) {
+            e.preventDefault();
+            onUndoPaste();
+          }
+        }}
+      >
         <div className="grid grid-cols-4 gap-x-3 gap-y-2">
           <div className="col-span-4">
             <Field
               label="Street address"
               value={stop.addressLine}
               onChange={(v) => onChange({ addressLine: v })}
+              onPaste={(e) => {
+                // Only a paste, never typing; and text that is not an address to
+                // split goes in exactly as the browser would put it.
+                const pasted = splitPastedAddress(e.clipboardData.getData('text/plain'));
+                if (!pasted) return;
+                e.preventDefault();
+                onPasteAddress(pasted);
+              }}
               error={errorFor('addressLine')}
+              check={paste?.checks.addressLine}
             />
           </div>
           <Field
@@ -179,6 +212,7 @@ export function StopForm({
             value={stop.zip}
             onChange={(v) => onChange({ zip: v })}
             error={errorFor('zip')}
+            check={paste?.checks.zip}
           />
           <div className="col-span-2">
             <Field
@@ -186,6 +220,7 @@ export function StopForm({
               value={stop.city}
               onChange={(v) => onChange({ city: v })}
               error={errorFor('city')}
+              check={paste?.checks.city}
             />
           </div>
           <Field
@@ -194,9 +229,12 @@ export function StopForm({
             onChange={(v) => onChange({ state: v })}
             placeholder="IL"
             error={errorFor('state')}
+            check={paste?.checks.state}
           />
         </div>
       </fieldset>
+
+      {paste ? <PasteNote paste={paste} onTakePasted={onTakePasted} mayEdit={mayEdit && !locked} /> : null}
 
       {/* §12.33: the basis in full, under the address that produced it. */}
       {basisDetails.length > 0 ? (
@@ -221,6 +259,7 @@ export function StopForm({
         dateError={errorFor('appointment.date')}
         endError={errorFor('appointment.endTime')}
         zoneCheck={errorFor('appointment.tz')}
+        zoneSource={zoneSource(stop)}
         onConfirmZone={onConfirmZone}
       />
 
@@ -273,6 +312,65 @@ export function StopForm({
       {notNextNote ? (
         <p className="text-small text-text-mutedOnOverlay" data-override-elsewhere="">
           {notNextNote}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const FIELD_NAMES: Record<AddressField, string> = {
+  addressLine: 'street',
+  city: 'city',
+  state: 'state',
+  zip: 'ZIP',
+};
+
+const listed = (names: string[]) =>
+  names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+/**
+ * §12.121. What the paste did, under the address: what it filled, what it
+ * kept of the dispatcher's and why, and what it left out. Nothing is saved
+ * until Save.
+ */
+function PasteNote({
+  paste,
+  onTakePasted,
+  mayEdit,
+}: {
+  paste: NonNullable<StopFormState['paste']>;
+  onTakePasted: () => void;
+  mayEdit: boolean;
+}) {
+  const kept = (Object.entries(paste.kept) as [AddressField, string][]);
+  return (
+    <div data-paste-note="" className="flex flex-col gap-1 border-l border-line-soft pl-3 text-small">
+      {paste.filled.length > 0 ? (
+        <p className="text-text-secondary">
+          Filled {listed(paste.filled.map((f) => FIELD_NAMES[f]))} from the paste.
+          {paste.before ? ' ⌘Z or Ctrl+Z puts back what was there.' : ''}
+        </p>
+      ) : null}
+      {kept.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p data-paste-kept="" className="text-status-risk-fg">
+            Kept what you had in {listed(kept.map(([f]) => FIELD_NAMES[f]))}. The paste said{' '}
+            {listed(kept.map(([f, v]) => `${FIELD_NAMES[f]} “${v}”`))}.
+          </p>
+          {mayEdit ? (
+            <button
+              type="button"
+              onClick={onTakePasted}
+              className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
+            >
+              Use the pasted ones
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {paste.leftOut.length > 0 ? (
+        <p data-paste-left-out="" className="text-text-mutedOnOverlay">
+          Left out: {paste.leftOut.map((l) => `“${l}”`).join(', ')} — not part of the street.
         </p>
       ) : null}
     </div>

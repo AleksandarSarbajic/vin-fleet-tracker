@@ -53,6 +53,7 @@ export function AppointmentFields({
   dateError,
   zoneCheck,
   onConfirmZone,
+  zoneSource,
   initialFocus = false,
 }: {
   draft: AppointmentDraft;
@@ -74,6 +75,8 @@ export function AppointmentFields({
   zoneCheck?: string | undefined;
   /** §12.120. "Zone is right". */
   onConfirmZone?: () => void;
+  /** §12.121. Where the zone came from, when the address set it. */
+  zoneSource?: string | null | undefined;
   /** Takes the modal's opening focus when the truck already has a driver. */
   initialFocus?: boolean;
 }) {
@@ -333,6 +336,12 @@ export function AppointmentFields({
                 : 'Your clock (read-only): —'}
             </p>
           </div>
+
+          {zoneSource && !zoneCheck ? (
+            <p data-zone-source="" className="mt-1.5 text-small text-text-mutedOnOverlay">
+              Zone: {zoneSource}
+            </p>
+          ) : null}
 
           {/* §12.120. A check, not a fault: the zone shown may be right. */}
           {zoneCheck ? (
