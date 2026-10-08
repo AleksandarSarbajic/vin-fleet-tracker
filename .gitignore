@@ -28,3 +28,7 @@ next-env.d.ts
 logo.png
 e2e/.auth/
 .next-e2e
+
+# Real broker rate confirmations used to study the PDF fill. Rates, broker
+# contacts and driver names: read locally only, never committed.
+.samples/
