@@ -30,6 +30,16 @@ import { DESKTOP_ONLY } from '@/lib/editing';
  * column did not, and "07:00 to 15:00" is the fact a dispatcher needs before
  * phoning a receiver (§12.22).
  */
+/**
+ * §12.119 stage 5. " · stop 2 of 3" after the load number when the load has
+ * several stops: the board's next stop, out of the load's. Nothing for a
+ * one-stop load, so its line reads as it always has. Shared with the phone's
+ * truck sheet, which prints the same line.
+ */
+export function stopOfLoad(stop: NonNullable<FleetRow['nextStop']>): string {
+  return stop.loadStopCount > 1 ? ` · stop ${stop.stopNumber} of ${stop.loadStopCount}` : '';
+}
+
 export function apptLine(stop: NonNullable<FleetRow['nextStop']>): string {
   if (!stop.apptTz || !stop.apptStartUtc) return 'none';
   const from = timeInZone(new Date(stop.apptStartUtc), stop.apptTz, { weekday: true });
@@ -271,6 +281,7 @@ export function MapPopup({
               {row.nextStop.loadNumber ?? (
                 <span className="text-text-muted">no number yet</span>
               )}
+              {stopOfLoad(row.nextStop)}
               {row.openLoadCount > 1 ? ` · ${row.openLoadCount} open loads` : ''}
             </Row>
           ) : null}

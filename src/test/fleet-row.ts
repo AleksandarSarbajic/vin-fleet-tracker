@@ -88,6 +88,9 @@ export function nextStop(over: Partial<NextStop> = {}): NextStop {
     state: 'IL',
     zip: '60601',
     apptStartUtc: null,
+    // One stop, as every fixture load was before §12.119 stage 5.
+    stopNumber: 1,
+    loadStopCount: 1,
     ...over,
   } as NextStop;
 }

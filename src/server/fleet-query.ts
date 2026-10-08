@@ -166,6 +166,14 @@ export interface NextStop {
    * Nothing on the board renders it yet; the detail panel is where it belongs.
    */
   dispatcherNote: string | null;
+  /**
+   * §12.119 stage 5. This stop's place in its load and how many stops the
+   * load has — "stop 2 of 3" in the popup and the sheet when there are
+   * several. Counted, not read off `sequence`, so a gap could never print as
+   * "stop 3 of 2".
+   */
+  stopNumber: number;
+  loadStopCount: number;
 }
 
 /**
@@ -207,6 +215,7 @@ export const LATEST_POSITION_SQL = sql`
     ns.appointment_start_utc, ns.appointment_end_utc, ns.appointment_tz,
     ns.appointment_type, ns.stop_lat, ns.stop_lng, ns.stop_precision,
     ns.stop_accuracy_miles, ns.arrived_at, ns.arrived_source, ns.dispatcher_note,
+    ns.stop_number, ns.load_stop_count,
     ns.route_miles, ns.route_duration_s, ns.route_from_lat, ns.route_from_lng,
     ns.route_straight_miles, ns.route_lane_ratio,
     ns.route_snap_from_m, ns.route_snap_to_m, ns.route_computed_at,
@@ -278,7 +287,11 @@ export const LATEST_POSITION_SQL = sql`
       to_char(s.arrived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                               as arrived_at,
       s.arrived_source::text  as arrived_source,
-      s.dispatcher_note       as dispatcher_note
+      s.dispatcher_note       as dispatcher_note,
+      -- §12.119 stage 5. "stop 2 of 3": counted, so a gap cannot misprint.
+      (select count(*) from stops s2
+        where s2.load_id = l.id and s2.sequence <= s.sequence)::int as stop_number,
+      (select count(*) from stops s3 where s3.load_id = l.id)::int  as load_stop_count
     from loads l
     join stops s on s.load_id = l.id
     left join stop_routes sr on sr.stop_id = s.id
@@ -403,6 +416,8 @@ export const FleetQueryRow = z.object({
   /** §12.57. Paired with `arrived_at` in the database, both ways. */
   arrived_source: z.enum(ARRIVAL_SOURCES).nullable(),
   dispatcher_note: z.string().nullable(),
+  stop_number: z.number().int().positive().nullable(),
+  load_stop_count: z.number().int().positive().nullable(),
 
   forced_status: z.enum(FORCED_STATUSES).nullable(),
   reason: z.enum(OVERRIDE_REASONS).nullable(),
@@ -502,6 +517,9 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
             arrivedAt: raw.arrived_at,
             arrivedSource: raw.arrived_source,
             dispatcherNote: raw.dispatcher_note,
+            // Never null beside a stop; 1 of 1 is the honest fallback.
+            stopNumber: raw.stop_number ?? 1,
+            loadStopCount: raw.load_stop_count ?? 1,
           }
         : null,
     openLoadCount: raw.open_load_count,

@@ -8954,6 +8954,24 @@ and the phone sheet, rendered from the board's real row, name the pickup
 while the truck is at it and the delivery once it is left, with no "open
 loads" count and no stop count yet (`two-stop-surfaces.test.tsx`).
 
+### Stage 5 — "stop 2 of 3" in the popup and the sheet
+
+The load line in the map popup and the phone's truck sheet now says where
+the board's next stop sits in its load when the load has several:
+"VT-TWO · stop 2 of 3". A one-stop load's line is unchanged — the number
+alone — so every popup on today's board reads as it did, and the popup
+baselines did not move. One helper (`stopOfLoad` in `MapPopup.tsx`) prints
+it for both.
+
+No new column. The fleet query's next-stop lookup counts two numbers in the
+same statement: the stop's place in its load (stops at or before its
+sequence) and the load's stops. Counted rather than read off `sequence`, so
+a gap could never print "stop 3 of 2". The lookup's conditions are
+unchanged (`next-stop.test.ts` holds it to the three board conditions).
+`two-stop-surfaces.test.tsx` renders both from the real row: stop 1 of 2 at
+the pickup, stop 2 of 2 once it is left, stop 2 of 3, and a one-stop line
+that is the number alone.
+
 ### The first live multi-stop load — what to look at
 
 Read-only, once a real load of two stops or more has been saved.

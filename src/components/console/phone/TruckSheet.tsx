@@ -10,7 +10,7 @@ import { useReturnFocus } from '@/components/edit/useModalChrome';
 import { DriverName } from '@/components/DriverName';
 import { StatusChip } from '../StatusChip';
 import { etaCaution, etaDetails } from '../TruckRow';
-import { apptLine, projectedLine } from '../map/MapPopup';
+import { apptLine, projectedLine, stopOfLoad } from '../map/MapPopup';
 
 /**
  * §12.96, stage 3 — the truck sheet. On a phone it replaces the map popup
@@ -166,6 +166,7 @@ export function TruckSheet({
             </Fact>
             <Fact field="load" label="Load">
               {stop?.loadNumber ?? <span className="text-text-muted">no number yet</span>}
+              {stop ? stopOfLoad(stop) : ''}
               {row.openLoadCount > 1 ? ` · ${row.openLoadCount} open loads` : ''}
             </Fact>
             {row.override && row.override.forcedStatus !== row.computed ? (
