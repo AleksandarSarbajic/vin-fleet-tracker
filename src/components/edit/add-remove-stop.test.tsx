@@ -177,6 +177,8 @@ describe('Add stop (§12.119)', () => {
     expect(button('Save').disabled).toBe(true);
     expect(banner()).toBe('Unsaved changes — stop 4: new.');
 
+    // North Dakota has two zones: the ZIP settles it (§12.120).
+    await type(field('ZIP'), '58102');
     await type(field('City'), 'Fargo');
     await type(field('State'), 'ND');
     await type(field('Time at the stop'), '09:00');

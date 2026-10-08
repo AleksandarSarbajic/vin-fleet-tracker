@@ -43,6 +43,7 @@ export function StopForm({
   notNextNote,
   errorFor,
   onChange,
+  onConfirmZone,
   removeBlocked,
   onRemove,
   orderNote,
@@ -65,6 +66,8 @@ export function StopForm({
   notNextNote: string | null;
   errorFor: (field: string) => string | undefined;
   onChange: (patch: Partial<StopFormState>) => void;
+  /** §12.120. "Zone is right", under an uncertain zone. */
+  onConfirmZone: () => void;
   /** Why this stop cannot be removed — reached, the only one, the role — or null. */
   removeBlocked: RemoveBlock | null;
   onRemove: () => void;
@@ -217,6 +220,8 @@ export function StopForm({
         error={errorFor('appointment.time')}
         dateError={errorFor('appointment.date')}
         endError={errorFor('appointment.endTime')}
+        zoneCheck={errorFor('appointment.tz')}
+        onConfirmZone={onConfirmZone}
       />
 
       {orderNote ? (

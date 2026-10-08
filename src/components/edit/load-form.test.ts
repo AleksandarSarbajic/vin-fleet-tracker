@@ -7,6 +7,11 @@ import {
   REMOVE_LAST_STOP,
   addBlocked,
   addStop,
+  appointmentErrors,
+  confirmZone,
+  patchStop,
+  stopEditOf,
+  stopFormFrom,
   deliveryBeforePickup,
   dirtyLabels,
   dirtyOf,
@@ -225,5 +230,93 @@ describe('the delivery-before-pickup note', () => {
     // 01:30 CST and 03:30 CDT are one hour apart, not two.
     const form = at(at(two, 0, { date: day, time: '03:30' }), 1, { date: day, time: '01:30' });
     expect(deliveryBeforePickup(form, 1)).toMatch(/stop 1/);
+  });
+});
+
+/** §12.120. The zone follows the address, as pure rules. */
+describe('the zone follows the state', () => {
+  const blank = () => {
+    const stop = stopFormFrom(null, OPENED);
+    return patchStop(stop, { appointment: { ...stop.appointment, enabled: true } });
+  };
+  const tzErrors = (stop: StopForm) =>
+    appointmentErrors({ ...formOf([{}]), stops: [stop] }).filter((e) => e.field === 'appointment.tz');
+
+  it('opening a saved stop never changes its zone, and decides nothing', () => {
+    const form = formOf([{ state: 'IL', apptTz: 'America/Denver' }, { state: 'ND', zip: '58854' }]);
+    expect(form.stops.map((s) => s.appointment.tz)).toEqual(['America/Denver', TZ]);
+    expect(form.stops.map((s) => s.zone.mode)).toEqual(['kept', 'kept']);
+    expect(appointmentErrors(form)).toEqual([]);
+  });
+
+  it('a saved stop with no stored zone opens on its state’s, as before, and is not asked', () => {
+    const form = formOf([{ state: 'ND', zip: '58601', apptTz: null, apptStartUtc: null, apptEndUtc: null }]);
+    const stop = form.stops[0]!;
+    expect(stop.appointment.tz).toBe('America/Chicago');
+    expect(stop.zone).toEqual({ mode: 'auto', verdict: null, confirmed: false });
+    // Ticking the appointment asks the address: the ZIP is Mountain.
+    const ticked = patchStop(stop, { appointment: { ...stop.appointment, enabled: true } });
+    expect(ticked.appointment.tz).toBe('America/Denver');
+  });
+
+  it('a saved stop with a recorded arrival keeps its zone, so the arrival cannot move', () => {
+    const arrivedAt = '2026-10-08T14:00:00.000Z';
+    const form = formOf([
+      { state: 'ND', zip: '58102', apptTz: null, apptStartUtc: null, apptEndUtc: null, arrivedAt },
+    ]);
+    const stop = form.stops[0]!;
+    expect(stop.zone.mode).toBe('kept');
+    const moved = patchStop(stop, { zip: '58601' });
+    expect(moved.appointment.tz).toBe('America/Chicago');
+    // The arrival goes back as the same instant it came in as.
+    const edit = stopEditOf(form, moved, TRUCK);
+    expect(edit.arrivedAt).toMatchObject({ tz: 'America/Chicago' });
+    expect(timeInZone(new Date(arrivedAt), 'America/Chicago', { zone: false })).toBe(moved.arrival.time);
+  });
+
+  it('a stored zone is never moved by a new state or ZIP', () => {
+    const stop = formOf([{ state: 'IL', apptTz: 'America/Denver' }]).stops[0]!;
+    const moved = patchStop(patchStop(stop, { state: 'ND' }), { zip: '58854' });
+    expect(moved.appointment.tz).toBe('America/Denver');
+    expect(tzErrors(moved)).toEqual([]);
+  });
+
+  it('a new stop follows the state, with no error in a one-zone state', () => {
+    for (const [state, zone] of [['IL', 'America/Chicago'], ['MN', 'America/Chicago'], ['CO', 'America/Denver']]) {
+      const stop = patchStop(blank(), { state: state! });
+      expect(stop.appointment.tz).toBe(zone);
+      expect(tzErrors(stop)).toEqual([]);
+    }
+  });
+
+  it('in a two-zone state, waits for a ZIP or a confirmation', () => {
+    const nd = patchStop(blank(), { state: 'ND' });
+    expect(tzErrors(nd)).toHaveLength(1);
+    expect(tzErrors(confirmZone(nd))).toEqual([]);
+    expect(tzErrors(patchStop(nd, { zip: '58102' }))).toEqual([]);
+    // A confirmation is for the address it was given.
+    expect(tzErrors(patchStop(confirmZone(nd), { zip: '58854' }))).toHaveLength(1);
+  });
+
+  it('a zone picked by hand is kept, and settles the question', () => {
+    const nd = patchStop(blank(), { state: 'ND' });
+    const picked = patchStop(nd, { appointment: { ...nd.appointment, tz: 'America/Denver' } });
+    expect(picked.zone.mode).toBe('chosen');
+    expect(tzErrors(picked)).toEqual([]);
+    const moved = patchStop(patchStop(picked, { state: 'IL' }), { zip: '60018' });
+    expect(moved.appointment.tz).toBe('America/Denver');
+  });
+
+  it('an unticked appointment is never asked about', () => {
+    const stop = stopFormFrom(null, OPENED);
+    expect(tzErrors(patchStop(stop, { state: 'ND' }))).toEqual([]);
+  });
+
+  it('Add stop carries the last stop’s zone until the new stop has a state', () => {
+    const form = formOf([{ apptTz: 'America/Denver', state: 'CO' }]);
+    const added = addStop(form, OPENED).form.stops[1]!;
+    expect(added.appointment.tz).toBe('America/Denver');
+    expect(tzErrors(added)).toEqual([]);
+    expect(patchStop(added, { state: 'IL' }).appointment.tz).toBe('America/Chicago');
   });
 });

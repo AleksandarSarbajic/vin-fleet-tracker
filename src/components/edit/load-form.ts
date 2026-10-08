@@ -12,6 +12,7 @@ import {
   type AppointmentDraft,
 } from './AppointmentFields';
 import type { ArrivalDraft, DepartureDraft } from './ArrivalFields';
+import { zoneForAddress, type ZoneVerdict } from '@/lib/geo/zone-for-address';
 
 /**
  * §12.119. The edit modal's form, for a load with any number of stops — and
@@ -41,6 +42,26 @@ export interface StopForm {
   appointment: AppointmentDraft;
   arrival: ArrivalDraft;
   departure: DepartureDraft;
+  /** §12.120. Where the appointment's zone came from, and whether it is settled. */
+  zone: ZoneState;
+}
+
+/** §12.120. */
+export interface ZoneState {
+  /**
+   * `kept`   — a saved stop's stored zone. Its address never moves it.
+   * `auto`   — follows the state, and in a state with two zones the ZIP.
+   * `chosen` — picked by hand in this form. Nothing overrides it.
+   */
+  mode: 'kept' | 'auto' | 'chosen';
+  /**
+   * What the address last said. Null until the state or ZIP is typed, or the
+   * appointment ticked: opening a stop decides nothing, so a stop opened to
+   * change its note is never asked about its zone.
+   */
+  verdict: ZoneVerdict | null;
+  /** "Zone is right" was pressed for this verdict. */
+  confirmed: boolean;
 }
 
 export interface LoadForm {
@@ -129,7 +150,70 @@ export function stopFormFrom(stop: StopRead | null, openedAt: string, key?: stri
       date: isoDate(stop?.departedAt ?? null, zone) || isoDate(openedAt, zone),
       time: isoTime(stop?.departedAt ?? null, zone) || isoTime(openedAt, zone),
     },
+    /**
+     * §12.120. A stored zone stays; without one the zone follows the address
+     * — unless the truck's arrival is recorded. That arrival is shown, and
+     * saved back, as wall time in this zone, so a zone that moved under it
+     * would move the arrival itself by the difference.
+     */
+    zone: {
+      mode: stop?.apptTz || stop?.arrivedAt ? 'kept' : 'auto',
+      verdict: null,
+      confirmed: false,
+    },
   };
+}
+
+/**
+ * §12.120. A change to one stop's form, with the zone following the address.
+ *
+ *   - A zone picked in the dropdown is the dispatcher's: `chosen`, for good.
+ *   - Otherwise, on a stop whose zone follows (`auto`), a new state or ZIP —
+ *     or ticking the appointment — asks the address again, and the zone
+ *     becomes its answer. An uncertain answer offers the state's usual zone
+ *     and asks for a confirmation (`zoneErrors`).
+ *   - A saved stop's stored zone (`kept`) never moves.
+ */
+export function patchStop(stop: StopForm, patch: Partial<StopForm>): StopForm {
+  const next = { ...stop, ...patch };
+  if (patch.appointment && patch.appointment.tz !== stop.appointment.tz) {
+    return { ...next, zone: { mode: 'chosen', verdict: null, confirmed: false } };
+  }
+  const asks =
+    patch.state !== undefined ||
+    patch.zip !== undefined ||
+    (patch.appointment?.enabled === true && !stop.appointment.enabled);
+  if (stop.zone.mode !== 'auto' || !asks) return next;
+  const verdict = zoneForAddress(next.state, next.zip);
+  if (!verdict) return { ...next, zone: { ...stop.zone, verdict: null, confirmed: false } };
+  return {
+    ...next,
+    appointment: { ...next.appointment, tz: verdict.zone },
+    zone: { mode: 'auto', verdict, confirmed: false },
+  };
+}
+
+/** §12.120. "Zone is right": the dispatcher settles an uncertain zone as shown. */
+export function confirmZone(stop: StopForm): StopForm {
+  return { ...stop, zone: { ...stop.zone, confirmed: true } };
+}
+
+/** §12.120. The words under an unsettled zone — and, while they show, Save waits. */
+export function zoneCheckMessage(stop: StopForm): string | null {
+  const { verdict, mode, confirmed } = stop.zone;
+  if (mode !== 'auto' || confirmed || verdict?.kind !== 'uncertain') return null;
+  const state = stop.state.trim().toUpperCase();
+  const zip = stop.zip.trim();
+  switch (verdict.reason) {
+    case 'no-zip':
+      return `${state} has more than one time zone. Enter the ZIP, or check the zone and confirm it.`;
+    case 'zip-crosses':
+      return `ZIP ${zip} crosses a time zone line. Check the zone, then confirm it.`;
+    case 'zip-unknown':
+      return `${state} has more than one time zone, and ZIP ${zip} isn't one we can place. Check the zone, then confirm it.`;
+    case 'not-a-state':
+      return `${state} isn't a US state, so the zone can't be worked out. Check it, then confirm it.`;
+  }
 }
 
 /** The form as it opens: the load read, or — with none — a new load's one stop. */
@@ -323,6 +407,9 @@ export function appointmentErrors(form: LoadForm): FieldError[] {
   return form.stops.flatMap((s) => {
     if (!s.appointment.enabled) return [];
     const errors: FieldError[] = [];
+    // §12.120. An uncertain zone, unconfirmed, is the stop's to settle.
+    const zoneCheck = zoneCheckMessage(s);
+    if (zoneCheck) errors.push({ field: 'appointment.tz', message: zoneCheck, stopKey: s.key });
     if (s.appointment.date.trim() === '') {
       errors.push({ field: 'appointment.date', message: APPOINTMENT_DATE_MISSING, stopKey: s.key });
     }

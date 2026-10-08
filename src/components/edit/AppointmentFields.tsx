@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { WINDOW_OPTIONS, endsNextDay, fcfsEndDate, isIanaZone } from '@/lib/appointment';
+import { ZONES, zoneForState } from '@/lib/geo/zone-by-state';
 import {
   timeInZone,
   wallTimeInstant,
@@ -38,40 +39,8 @@ export interface AppointmentDraft {
 export const FCFS_DEFAULT_EARLIEST = '07:00';
 export const FCFS_DEFAULT_LATEST = '15:00';
 
-/** A guess at the facility's zone from its state. Always overridable. */
-const ZONE_BY_STATE: Record<string, string> = {
-  AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix',
-  AR: 'America/Chicago', CA: 'America/Los_Angeles', CO: 'America/Denver',
-  CT: 'America/New_York', DC: 'America/New_York', DE: 'America/New_York',
-  FL: 'America/New_York', GA: 'America/New_York', HI: 'Pacific/Honolulu',
-  IA: 'America/Chicago', ID: 'America/Boise', IL: 'America/Chicago',
-  IN: 'America/Indiana/Indianapolis', KS: 'America/Chicago', KY: 'America/New_York',
-  LA: 'America/Chicago', MA: 'America/New_York', MD: 'America/New_York',
-  ME: 'America/New_York', MI: 'America/Detroit', MN: 'America/Chicago',
-  MO: 'America/Chicago', MS: 'America/Chicago', MT: 'America/Denver',
-  NC: 'America/New_York', ND: 'America/Chicago', NE: 'America/Chicago',
-  NH: 'America/New_York', NJ: 'America/New_York', NM: 'America/Denver',
-  NV: 'America/Los_Angeles', NY: 'America/New_York', OH: 'America/New_York',
-  OK: 'America/Chicago', OR: 'America/Los_Angeles', PA: 'America/New_York',
-  PR: 'America/Puerto_Rico', RI: 'America/New_York', SC: 'America/New_York',
-  SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago',
-  UT: 'America/Denver', VA: 'America/New_York', VT: 'America/New_York',
-  WA: 'America/Los_Angeles', WI: 'America/Chicago', WV: 'America/New_York',
-  WY: 'America/Denver',
-};
-
-/**
- * A DEFAULT, never an answer. Several states are split — North Dakota runs
- * Central and Mountain, and this fleet has trucks in both halves of it — and
- * there is no geocoder in this product to settle it. The dispatcher sees the
- * zone and its current abbreviation and can change it.
- */
-export function zoneForState(state: string | null): string {
-  if (!state) return 'America/Chicago';
-  return ZONE_BY_STATE[state.toUpperCase()] ?? 'America/Chicago';
-}
-
-const ZONES = [...new Set(Object.values(ZONE_BY_STATE))].sort();
+/** §12.120: the state map moved to lib, where the ZIP table's build reads it too. */
+export { zoneForState };
 
 export function AppointmentFields({
   draft,
@@ -82,6 +51,8 @@ export function AppointmentFields({
   error,
   endError,
   dateError,
+  zoneCheck,
+  onConfirmZone,
   initialFocus = false,
 }: {
   draft: AppointmentDraft;
@@ -99,6 +70,10 @@ export function AppointmentFields({
   endError?: string | undefined;
   /** §12.119. A ticked appointment with no date. */
   dateError?: string | undefined;
+  /** §12.120. Why the zone is not settled; Save waits while it shows. */
+  zoneCheck?: string | undefined;
+  /** §12.120. "Zone is right". */
+  onConfirmZone?: () => void;
   /** Takes the modal's opening focus when the truck already has a driver. */
   initialFocus?: boolean;
 }) {
@@ -337,6 +312,7 @@ export function AppointmentFields({
               </span>
               <select
                 value={draft.tz}
+                aria-describedby={zoneCheck ? 'zone-check' : undefined}
                 onChange={(e) => set({ tz: e.target.value })}
                 className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
               >
@@ -357,6 +333,28 @@ export function AppointmentFields({
                 : 'Your clock (read-only): —'}
             </p>
           </div>
+
+          {/* §12.120. A check, not a fault: the zone shown may be right. */}
+          {zoneCheck ? (
+            <div
+              data-zone-check=""
+              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-status-risk-bd bg-status-risk-bg px-3 py-2"
+            >
+              <p id="zone-check" className="text-small text-status-risk-fg">
+                {zoneCheck}
+              </p>
+              {onConfirmZone ? (
+                <button
+                  type="button"
+                  onClick={onConfirmZone}
+                  aria-describedby="zone-check"
+                  className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
+                >
+                  Zone is right
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {error || endError ? (
             <p className="mt-2 text-small text-status-late-fg">{error ?? endError}</p>

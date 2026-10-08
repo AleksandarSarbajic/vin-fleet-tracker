@@ -40,6 +40,8 @@ import {
   dirtyOf,
   loadFormFrom,
   localErrors,
+  patchStop,
+  confirmZone,
   nextTripAllowed,
   reachedAsk as askFor,
   removeBlocked,
@@ -285,7 +287,14 @@ function LoadEditor({
   const setStop = useCallback((index: number, patch: Partial<StopFormState>) => {
     setForm((f) => ({
       ...f,
-      stops: f.stops.map((s, i) => (i === index ? { ...s, ...patch } : s)),
+      // §12.120: through patchStop, so the zone follows the address.
+      stops: f.stops.map((s, i) => (i === index ? patchStop(s, patch) : s)),
+    }));
+  }, []);
+  const confirmStopZone = useCallback((index: number) => {
+    setForm((f) => ({
+      ...f,
+      stops: f.stops.map((s, i) => (i === index ? confirmZone(s) : s)),
     }));
   }, []);
   /**
@@ -1021,6 +1030,7 @@ function LoadEditor({
                 }
                 errorFor={(field) => errorFor(field, current.key)}
                 onChange={(patch) => setStop(selected, patch)}
+                onConfirmZone={() => confirmStopZone(selected)}
                 removeBlocked={
                   mayEdit
                     ? removeBlocked(form, selected, dispatchTz)

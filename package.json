@@ -45,7 +45,8 @@
     "test:db:up": "scripts/test-db.sh up",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx src/worker/index.ts"
+    "worker": "tsx src/worker/index.ts",
+    "zip-zones:build": "tsx scripts/build-zip-zones.mts"
   },
   "dependencies": {
     "@sentry/nextjs": "^11.0.0",
