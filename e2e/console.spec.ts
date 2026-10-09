@@ -26,24 +26,47 @@ test('the first paint carries the fleet, before any JavaScript runs', async ({ r
 });
 
 /**
- * §12.29's first bug, across the RSC boundary. Vitest can assert render
- * PURITY; it cannot render `page.tsx`.
+ * §12.124. The server renders in this machine's zone; the browser must be in
+ * ANOTHER one, or text that reads the zone while rendering matches by luck —
+ * which is how React #418 reached production with this test green. Picked
+ * from the machine's own zone, so it differs wherever the suite runs.
  */
-test('the console hydrates without a React hydration error', async ({ page }) => {
-  const complaints: string[] = [];
-  page.on('console', (message) => {
-    const text = message.text();
-    if (/hydrat|did not match|Text content does not match/i.test(text)) complaints.push(text);
-  });
-  page.on('pageerror', (error) => {
-    if (/hydrat/i.test(error.message)) complaints.push(error.message);
-  });
+const SERVER_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const BROWSER_ZONE = SERVER_ZONE === 'Asia/Tokyo' ? 'America/Los_Angeles' : 'Asia/Tokyo';
 
-  await page.goto('/');
-  await expect(page.getByLabel('Search the fleet')).toBeVisible();
-  await page.waitForTimeout(1_500); // hydration warnings arrive after paint
+/**
+ * Hydration complaints, as a production build words them too: there React
+ * says only "Minified React error #418" (#419, #423, #425), never "hydrat".
+ */
+const HYDRATION =
+  /hydrat|did not match|Text content does not match|React error #4(18|19|23|25)\b|react\.dev\/errors\/4(18|19|23|25)\b/i;
 
-  expect(complaints, complaints.join('\n')).toEqual([]);
+test.describe('in a browser zone the server is not in', () => {
+  test.use({ timezoneId: BROWSER_ZONE });
+
+  /**
+   * §12.29's first bug, across the RSC boundary. Vitest can assert render
+   * PURITY; it cannot render `page.tsx`.
+   */
+  test('the console hydrates without a React hydration error', async ({ page }) => {
+    expect(
+      await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
+    ).not.toBe(SERVER_ZONE);
+    const complaints: string[] = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      if (HYDRATION.test(text)) complaints.push(text);
+    });
+    page.on('pageerror', (error) => {
+      if (HYDRATION.test(error.message)) complaints.push(error.message);
+    });
+
+    await page.goto('/');
+    await expect(page.getByLabel('Search the fleet')).toBeVisible();
+    await page.waitForTimeout(1_500); // hydration warnings arrive after paint
+
+    expect(complaints, complaints.join('\n')).toEqual([]);
+  });
 });
 
 test('search narrows the list to one truck and clears back', async ({ page }) => {
