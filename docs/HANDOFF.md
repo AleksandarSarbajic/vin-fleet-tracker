@@ -1,8 +1,9 @@
 # Handoff
 
-State on 2026-10-09. Last code commit: `99365d0` (stale-poll "Not updating",
-§12.123), deployed to production (Vercel deployment 6959715840, success).
-`master` and `origin/master` match; the working tree is clean.
+State on 2026-10-09. Last code commit: `2eba5a1` (React #418 fixed,
+§12.124), deployed to production (Vercel deployment 6962860702, success).
+After it: the hydration e2e now runs in a browser zone the server is not in,
+and this document plus `docs/llm-reader-vendors.md`. `git log` has the newest.
 
 Read `CLAUDE.md` first. Build from `docs/design-spec.md`; each feature below
 names its § there.
@@ -18,6 +19,7 @@ names its § there.
 | `aed14ae` | Baseline 7f re-saved with the one-line fill strip | 12.122 |
 | `ccddd9b` | E2e runs say at the end whether the machine slept | — |
 | `99365d0` | The board says "Not updating" when its poll has stopped | 12.123 |
+| `2eba5a1` | React #418 fixed: the board hydrates as the server rendered it, in any zone and on any clock | 12.124 |
 
 PDF fill reads three layouts (label rows, stops section, PU/SO blocks). It
 never sends the file anywhere. Real use so far: 5 loads, 2 filled, 1 scan
@@ -32,42 +34,56 @@ with no text layer, 2 "layout not recognised".
 - No real document goes to any outside service. Do not choose a vendor.
 - `git ls-files | grep -iE "\.pdf|expected\.json|samples"` must print nothing.
 
-## Waiting on Alex
+## Open decisions, waiting on Alex
 
-1. **Fourth layout** (a 4-stop, 9-page confirmation; correctly refused today):
-   is "Route #" the load number; what does "Scheduling: Open" mean; can more
-   samples from that broker be had? Nothing is built until answered.
-2. **Language-model reader** for layouts and scans the templates miss.
-   Proposal given in the session of 2026-10-09: send only the page text (or
-   page images for scans) of the stop pages, with rates and contacts removed
-   in the browser first. Needs a vendor decision after reading their
-   retention, training and sub-processor terms. Nothing chosen, nothing sent.
-3. **Sleep check:** Alex runs e2e, closes the lid mid-run, and confirms the
+1. **Language-model reader: yes or no.** It would cover layouts and scans
+   the templates miss. Proposal (2026-10-09): send only the text of the stop
+   pages (scans: read with OCR in the browser first), with rates and contacts
+   removed in the browser, through our server. Nothing is built, nothing has
+   been sent, and no vendor is chosen.
+2. **Broker confidentiality.** Rate confirmations often carry
+   confidentiality clauses. These may rule out sending even redacted text to
+   any vendor. This has to be answered before the vendor question matters.
+3. **Vendor terms**, if the answer to 1 is yes. Researched 2026-10-09; see
+   [`llm-reader-vendors.md`](llm-reader-vendors.md) (vendor defaults, may
+   change, not legal advice). In short:
+   - Every vendor read says no training on API data by default, except
+     Mistral, which is unconfirmed.
+   - Anthropic's own API has no EU processing option today.
+   - AWS Bedrock stores no prompts by default, except for some models.
+   - Azure, OpenAI and Google offer EU processing, each with conditions.
+   - Still to read: data-processing agreements, sub-processors, what
+     "flagged" means in practice, and SOC 2/ISO reports.
+4. **Sentry read token.** `SENTRY_READ_TOKEN` in `.env.local` returns 401
+   "Invalid token". A new read-only token is needed before any Sentry
+   question can be answered, including confirming that #418 has stopped and
+   the tracing report (re-run once there are 10+ real sign-ins).
+5. **Sleep test.** Alex runs e2e, closes the lid mid-run, and confirms the
    end-of-run line names the sleep.
-4. **Sentry read token** (`SENTRY_READ_TOKEN` in `.env.local`) now returns
-   401 "Invalid token". A new read-only token is needed before any Sentry
-   question can be answered, including the tracing report (re-run once there
-   are 10+ real sign-ins).
-5. **Stage 4 scope:** the window-order and date-range checks cover filled
+6. **The "worker feeding knowledge" question**, as Alex named it on
+   2026-10-09. It isn't written down in any session so far: get the question
+   from Alex before doing anything with it.
+7. **Fourth layout** (a 4-stop, 9-page confirmation; correctly refused
+   today): is "Route #" the load number; what does "Scheduling: Open" mean;
+   can more samples from that broker be had?
+8. **Stage 4 scope.** The window-order and date-range checks cover filled
    stops only. Should typed stops get them too?
 
-## Open problem: React error #418 on production
+## React #418: fixed
 
-A hydration mismatch, seen in Alex's console. Not confirmed in Sentry (token
-above). The likely cause is found in code: `HeaderClocks`
-(`src/components/console/HeaderStatus.tsx`) reads the viewer's time zone
-while rendering. The server renders in UTC, and a browser in Europe renders
-in its own zone. The "YOU" clock text and its title differ on every load of
-the board and the history page. That code dates from phase 3 (2026-09-17),
-so the mismatch is older than `99365d0`. E2e cannot see it: the test server
-and the browser share the machine's zone.
+Fixed in `2eba5a1` (§12.124). The header's "YOU" clock and the dispatch
+clock's title read the viewer's zone while rendering. "Not updating" compared
+the server's fetch instant with the browser's clock. Both now wait until the
+page has loaded.
 
-Proposed fix (not built): render the viewer clock only after mount. Keep the
-zone in state as `null` on the first render, set it in an effect, and show
-the "YOU" clock and title once known. The same change should keep
-"Not updating" off until mount. Today it compares the server's fetch instant
-with the browser's clock, so a browser clock more than 60 s behind would also
-mismatch.
+- `src/components/console/hydration.test.tsx` renders the whole board under
+  `TZ=UTC` and hydrates it in Europe/Belgrade, and again with the browser's
+  clock 5 minutes behind.
+- The e2e "the console hydrates without a React hydration error"
+  (`e2e/console.spec.ts`) now runs in a browser zone the server is not in.
+  It also matches the production wording ("Minified React error #418"). On
+  the pre-fix code it fails with exactly that error.
+- Not yet confirmed in Sentry (item 4).
 
 ## How to run the checks
 
@@ -88,7 +104,5 @@ npm run gate             # check + preflight + db:verify + e2e
 
 ## Next
 
-1. On Alex's OK: fix #418 as above, with a test that renders on the server in
-   one zone and hydrates in another.
-2. Then, in the order Alex picks: Stage 4 scope, the fourth layout, the
-   language-model reader.
+Nothing is in progress. Wait for Alex on the open decisions above, then work
+in the order Alex picks.
