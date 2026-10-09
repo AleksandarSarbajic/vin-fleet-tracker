@@ -384,10 +384,29 @@ async function openTwoStops(page: Page, width: number, height: number): Promise<
   await page.mouse.move(2, height - 2);
   /*
    * At 720 tall the truck list behind the scrim has to scroll to bring 101
-   * into view, and it does so smoothly: a shot taken while it was still
-   * moving caught the rows part of a row out, once in three runs. Shot when
-   * the list has held still for three looks running.
+   * into view. Shot while it was still moving, the rows were part of a row
+   * out (5c8a386). Shot still, it could STILL be a row out — one run in ten
+   * on 2026-10-09, with "captured a stable screenshot" — because where the
+   * list comes to rest is the CLICK's doing, not the app's: Playwright
+   * scrolls a row into view before clicking it, and a click it retries
+   * scrolls again with another alignment.
+   *
+   * So at 720 the list is put where the approved shot has it: 37 px down,
+   * which is where a first, unretried click leaves it (12 runs of 12,
+   * measured that day; no standard alignment gives it — "end" is 65, "start"
+   * and "center" 109). Taller shots never scroll the list and are left alone.
+   * Then the shot waits for the list to hold still for a second and for
+   * every animation that ends to have ended.
    */
+  if (height === 720) {
+    await page.locator('[data-row-id]').first().evaluate((row) => {
+      let el: HTMLElement | null = row.parentElement;
+      while (el && !(el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY !== 'visible')) {
+        el = el.parentElement;
+      }
+      if (el) el.scrollTop = 37;
+    });
+  }
   await page.waitForFunction(() => {
     const row = document.querySelector('[data-row-id]');
     let el: Element | null = row?.parentElement ?? null;
@@ -397,7 +416,12 @@ async function openTwoStops(page: Page, width: number, height: number): Promise<
     const w = window as unknown as { __listTop?: number[] };
     const seen = (w.__listTop ??= []);
     seen.push(el ? el.scrollTop : 0);
-    return seen.length >= 3 && seen.slice(-3).every((v) => v === seen[seen.length - 1]);
+    const still = seen.length >= 7 && seen.slice(-7).every((v) => v === seen[seen.length - 1]);
+    // A looping animation (a pulsing marker) never ends; only those that do are waited for.
+    const settled = document
+      .getAnimations()
+      .every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity);
+    return still && settled;
   }, undefined, { polling: 150 });
 }
 
