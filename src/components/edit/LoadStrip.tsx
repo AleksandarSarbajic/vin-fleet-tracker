@@ -26,6 +26,8 @@ export function LoadStrip({
   saving,
   lockedReason,
   loadNumberError,
+  loadNumberSource,
+  loadNumberCheck,
   onDriver,
   onDriverCreated,
   onLoadNumber,
@@ -46,6 +48,9 @@ export function LoadStrip({
   saving: boolean;
   lockedReason: string;
   loadNumberError: string | undefined;
+  /** §12.122. Where a fill got the load number, and what to check about it. */
+  loadNumberSource?: string | undefined;
+  loadNumberCheck?: string | undefined;
   onDriver: (id: string | null) => void;
   onDriverCreated: () => void;
   onLoadNumber: (value: string) => void;
@@ -108,6 +113,8 @@ export function LoadStrip({
           value={loadNumber}
           onChange={onLoadNumber}
           error={loadNumberError}
+          source={loadNumberSource}
+          check={loadNumberCheck}
           help="Any format the broker uses, or leave it blank (§12.21)"
         />
         <label className="block">

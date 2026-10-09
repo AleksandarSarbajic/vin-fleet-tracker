@@ -9141,6 +9141,109 @@ throw that typing away. Nothing is saved until Save; the unsaved-changes
 banner names the fields as it does for typing (an added stop reads "new", as
 before).
 
+## 12.122 Fill a new load from a rate confirmation — stage 3
+
+A **Fill from rate confirmation** strip sits above the stop list on a new
+load, or one whose stops are all unsaved. Drop a PDF, choose one, or paste
+its text. The load number and every stop fill, in the document's order;
+nothing is saved until Save.
+
+It is **one 36 px line** — the label, "Drop a PDF or paste text", Choose
+PDF, the paste box — until a PDF or text is given. Then what the read did,
+the Replace question, and the session's counts open under it, and fold away
+the moment the dispatcher types into the load. "N fields to check" sits on
+the line itself, so folding never hides it. A saved load never shows the
+strip at all.
+
+### Read in the browser, kept nowhere
+
+`src/lib/ratecon/read-pdf.ts`. The bytes are read into memory and given to
+pdf.js (`isEvalSupported: false`, no font face, no XFA), whose worker is
+bundled with the app (`pdf.worker.ts`) — loaded only when a PDF is dropped,
+~97 KB gzipped for pdf.js and ~394 KB for its worker, none of it on the
+console's first load. The file is never uploaded, stored, cached or logged,
+and no message quotes it: a parse error is named, never repeated.
+
+Refused, in words: a file whose first bytes are not `%PDF-` (the name and
+the browser's type are not evidence), more than 5 MB, more than 10 pages, a
+password, a damaged file — and a PDF with next to no text (under 40
+characters): "This is a scan; there's no text to read." No OCR.
+
+### Three layouts, recognised by their labels
+
+`src/lib/ratecon/templates.ts`. Each layout is used only when **every** label
+it is recognised by is present, and only when exactly one layout is.
+Anything else: "Layout not recognised, nothing filled." Never part of a load
+from a layout we do not know.
+
+| Layout | Recognised by | Load number | Stops |
+|---|---|---|---|
+| label rows | ORDER CONFIRMATION, Order ID, PICKUP DATE, DELIVERY DATE, CITY, STATE | the number under "Order ID" | each PICKUP/DELIVERY DATE block: ADDRESS, CITY, STATE |
+| a Stops section | Rate Confirmation, LOAD ID:, Stops, Stop n Pickup/Drop, Customer | LOAD ID: | the Stops section only; the date column split from the address column by the "Date:" label's x |
+| PU / SO blocks | PU/SO … Name:, Address:, Driver Load:, Order: or Load Number: | Order: or Load Number: (two different → none, said) | Name/Date, Address/second date, the city line within three (a facility code may sit between) |
+
+An SO (stop-off) before the last stop is read as a delivery and **said**: a
+stop-off can be a pickup. Pasted text has no pages or positions; the readers
+work on the same lines either way.
+
+No pattern looks at the rate, broker, contacts, phones, emails, driver,
+trailer, notes or instructions, so none of them can be filled. Status and
+Active are untouched.
+
+### Appointments
+
+`ratecon-fill.ts` `appointmentFrom`, the same for every layout:
+
+- one time → APPT, no window;
+- a start and end two hours or less apart → APPT with that window — 90
+  minutes stays 90 (the window menu offers a filled value as it is);
+- longer → FCFS receiving hours, marked "Check" with why (and "The PDF calls
+  it APPT" when it does); one that runs into the next morning is overnight
+  (§12.114) and says so;
+- a window that ends before it starts, or runs longer than a day → left
+  blank and marked — **never** read as overnight without a mark;
+- anything else → left blank, "Couldn't read: “…”", quoted. A 12-hour time
+  needs its AM/PM: a bare "8:00" is not guessed.
+
+A blank time on a ticked appointment cannot be saved (§12.119 S4-A), so a
+couldn't-read stop is always seen to.
+
+### Review
+
+Every filled field says where it came from — "From p.2: “Dickinson, ND
+58601 APPT”", the exact line — and loses that the moment it is edited. The
+strip counts what is left to look at ("4 fields to check"): every mark the
+fill left, every zone still waiting for "Zone is right" (§12.120), every ZIP
+whose first three digits never occur in its state, and a delivery before a
+pickup. The ZIP check (`src/lib/geo/zip-state.ts`, from the Census
+relationship file — public domain, 7 KB) also speaks under any ZIP entered
+or changed by hand.
+
+A date already past, or more than 30 days out, is marked. More than ten stops
+fills nothing and says so. A fill over a load number or address already
+typed asks first: Replace, or Keep mine.
+
+### Counts, not content
+
+`session-counts.ts`: "not recognised" and "filled fields edited afterwards",
+in this browser tab's session, shown in the strip. Counts only — never which
+file, field or value — and sent nowhere.
+
+### `npm run ratecon:score`
+
+Reads `.samples/rate-confirmations/` only when it exists (git-ignored), and
+scores each PDF through the same read-and-fill code against that folder's
+own hand-written `expected.json` — ground truth that holds real values and so
+lives with the samples, never in the repo. It prints files by number and
+fields by pass/FAIL, never a value or a file name. Appointments score
+`exact`, `marked`, or `WRONG` (filled, unmarked, and not what the PDF says);
+only WRONG fails. On 2026-10-08: **6 of 6** on the load number, stop count,
+order and type, street, ZIP, city and state; no appointment silently wrong;
+the seventh sample, a fourth layout, correctly not recognised.
+
+Tests use invented documents only (`src/test/ratecon-fixtures.ts`), read as
+lines or built into a real PDF in memory (`src/test/tiny-pdf.ts`).
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

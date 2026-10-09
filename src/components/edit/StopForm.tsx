@@ -7,6 +7,8 @@ import { AppointmentFields } from './AppointmentFields';
 import { ArrivalFields } from './ArrivalFields';
 import { Field } from './Field';
 import { splitPastedAddress, type AddressField } from '@/lib/paste-address';
+import { zipStateCheck } from '@/lib/geo/zip-state';
+import { sourceLine } from './ratecon-fill';
 import {
   LEFT_STOP_NOTE,
   zoneSource,
@@ -87,6 +89,17 @@ export function StopForm({
 }) {
   const locked = flags.departed;
   const paste = stop.paste;
+  const fill = stop.fill;
+  /**
+   * §12.122. A ZIP that is not in its state — said for a stop being entered
+   * or changed here, not for one opened as it was saved.
+   */
+  const addressTouched =
+    !stop.stored ||
+    stop.stored.state !== (stop.state.trim().toUpperCase() || null) ||
+    stop.stored.zip !== (stop.zip.trim() || null);
+  const zipState = addressTouched ? zipStateCheck(stop.state, stop.zip) : null;
+  const checkOf = (field: AddressField) => paste?.checks[field] ?? fill?.checks[field];
   const lockedTitle = locked ? LEFT_STOP_NOTE : undefined;
   const removeWhyId = `${STOP_FORM_ID}-remove-why`;
 
@@ -153,6 +166,15 @@ export function StopForm({
         ) : null}
       </div>
 
+      {fill?.sources.stopType || fill?.checks.stopType ? (
+        <div data-type-fill="" className="flex flex-col gap-0.5 text-small">
+          {fill.checks.stopType ? <p className="text-status-risk-fg">Check: {fill.checks.stopType}</p> : null}
+          {fill.sources.stopType ? (
+            <p className="break-words text-text-mutedOnOverlay">{sourceLine(fill.sources.stopType)}</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* A stop the truck reached says so, in words, not only on hover. */}
       {removeBlocked?.reached ? (
         <p
@@ -204,7 +226,8 @@ export function StopForm({
                 onPasteAddress(pasted);
               }}
               error={errorFor('addressLine')}
-              check={paste?.checks.addressLine}
+              check={checkOf('addressLine')}
+              source={sourceLine(fill?.sources.addressLine)}
             />
           </div>
           <Field
@@ -212,7 +235,8 @@ export function StopForm({
             value={stop.zip}
             onChange={(v) => onChange({ zip: v })}
             error={errorFor('zip')}
-            check={paste?.checks.zip}
+            check={checkOf('zip') ?? zipState ?? undefined}
+            source={sourceLine(fill?.sources.zip)}
           />
           <div className="col-span-2">
             <Field
@@ -220,7 +244,8 @@ export function StopForm({
               value={stop.city}
               onChange={(v) => onChange({ city: v })}
               error={errorFor('city')}
-              check={paste?.checks.city}
+              check={checkOf('city')}
+              source={sourceLine(fill?.sources.city)}
             />
           </div>
           <Field
@@ -229,7 +254,8 @@ export function StopForm({
             onChange={(v) => onChange({ state: v })}
             placeholder="IL"
             error={errorFor('state')}
-            check={paste?.checks.state}
+            check={checkOf('state')}
+            source={sourceLine(fill?.sources.state)}
           />
         </div>
       </fieldset>
@@ -260,6 +286,8 @@ export function StopForm({
         endError={errorFor('appointment.endTime')}
         zoneCheck={errorFor('appointment.tz')}
         zoneSource={zoneSource(stop)}
+        fillSource={sourceLine(fill?.sources.appointment)}
+        fillCheck={fill?.checks.appointment}
         onConfirmZone={onConfirmZone}
       />
 

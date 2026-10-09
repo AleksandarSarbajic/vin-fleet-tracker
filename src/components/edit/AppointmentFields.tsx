@@ -54,6 +54,8 @@ export function AppointmentFields({
   zoneCheck,
   onConfirmZone,
   zoneSource,
+  fillSource,
+  fillCheck,
   initialFocus = false,
 }: {
   draft: AppointmentDraft;
@@ -77,6 +79,9 @@ export function AppointmentFields({
   onConfirmZone?: () => void;
   /** §12.121. Where the zone came from, when the address set it. */
   zoneSource?: string | null | undefined;
+  /** §12.122. Where a fill got the appointment, and what to check about it. */
+  fillSource?: string | undefined;
+  fillCheck?: string | undefined;
   /** Takes the modal's opening focus when the truck already has a driver. */
   initialFocus?: boolean;
 }) {
@@ -153,7 +158,12 @@ export function AppointmentFields({
   }, [draft.type, draft.date, draft.time, draft.tz, draft.windowMinutes]);
 
   const windowChoices = [
-    ...new Set([...WINDOW_OPTIONS, ...(storedWindow === undefined ? [] : [storedWindow])]),
+    ...new Set([
+      ...WINDOW_OPTIONS,
+      ...(storedWindow === undefined ? [] : [storedWindow]),
+      // §12.122. A filled window (90 min, say) is offered as it is, not shown as another.
+      draft.windowMinutes,
+    ]),
   ].sort((a, b) => a - b);
 
   return (
@@ -161,6 +171,17 @@ export function AppointmentFields({
       <legend className="mb-2 w-full border-b border-line-soft pb-1.5 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
         Appointment — as written on the rate confirmation
       </legend>
+
+      {fillCheck || fillSource ? (
+        <div data-appointment-fill="" className="mb-3 flex flex-col gap-1 border-l border-line-soft pl-3 text-small">
+          {fillCheck ? (
+            <p data-appointment-check="" className="text-status-risk-fg">
+              {fillCheck}
+            </p>
+          ) : null}
+          {fillSource ? <p className="break-words text-text-mutedOnOverlay">{fillSource}</p> : null}
+        </div>
+      ) : null}
 
       <div className="mb-3 flex items-center gap-2">
         <label className="flex items-center gap-2 text-body text-text-secondary">

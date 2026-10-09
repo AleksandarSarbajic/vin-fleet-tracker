@@ -241,3 +241,21 @@ describe('an uncertain zone waits for the dispatcher (§12.120)', () => {
     expect(zoneCheck()).toBeNull();
   });
 });
+
+describe('a ZIP that is not in its state (§12.122)', () => {
+  const zipCheck = () => labelled('ZIP').querySelector('[data-field-check]')?.textContent ?? null;
+
+  it('is said under the ZIP of a stop being entered', async () => {
+    await render();
+    await newStopAt({ zip: '58102', city: 'Fargo', state: 'IL' });
+    expect(zipCheck()).toBe('Check: ZIP 58102 is in ND, not IL.');
+    await type(field('State'), 'ND');
+    expect(zipCheck()).toBeNull();
+  });
+
+  it('is not said for a saved stop opened as it was saved', async () => {
+    await render();
+    await click(rows()[1]!);
+    expect(zipCheck()).toBeNull();
+  });
+});

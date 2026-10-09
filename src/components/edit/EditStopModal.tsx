@@ -45,6 +45,8 @@ import {
   pasteAddress,
   undoPaste,
   takePasted,
+  fillFieldsIn,
+  type FillField,
   nextTripAllowed,
   reachedAsk as askFor,
   removeBlocked,
@@ -61,6 +63,9 @@ import {
 } from './load-form';
 import { LoadStrip } from './LoadStrip';
 import { STOP_FORM_ID, StopList } from './StopList';
+import { RateconStrip } from './RateconStrip';
+import { fieldsToCheck, fillLoad, sourceLine } from './ratecon-fill';
+import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
 
 /**
@@ -287,13 +292,31 @@ function LoadEditor({
   /** The stops the last request carried, in its order — a field error's `stops.<i>`. */
   const sentKeys = useRef<string[]>([]);
 
-  const setStop = useCallback((index: number, patch: Partial<StopFormState>) => {
-    setForm((f) => ({
-      ...f,
-      // §12.120: through patchStop, so the zone follows the address.
-      stops: f.stops.map((s, i) => (i === index ? patchStop(s, patch) : s)),
-    }));
+  /** §12.122. Bumped when a filled field is edited, so the strip's counts re-read. */
+  const [countsVersion, setCountsVersion] = useState(0);
+  /** §12.122. Bumped whenever the dispatcher types into the load: the fill strip folds. */
+  const [editsVersion, setEditsVersion] = useState(0);
+  const countEdits = useCallback((n: number) => {
+    if (n === 0) return;
+    bumpCount('editedAfterFill', n);
+    setCountsVersion((v) => v + 1);
   }, []);
+  /** How many of these fields a fill had filled, or marked, on this stop. */
+  const filledAmong = (stop: StopFormState | undefined, fields: FillField[]) =>
+    fields.filter((f) => stop?.fill && (f in stop.fill.sources || f in stop.fill.checks)).length;
+
+  const setStop = useCallback(
+    (index: number, patch: Partial<StopFormState>) => {
+      countEdits(filledAmong(form.stops[index], fillFieldsIn(patch)));
+      setEditsVersion((v) => v + 1);
+      setForm((f) => ({
+        ...f,
+        // §12.120: through patchStop, so the zone follows the address.
+        stops: f.stops.map((s, i) => (i === index ? patchStop(s, patch) : s)),
+      }));
+    },
+    [countEdits, form.stops],
+  );
   /** One stop, through a rule of load-form's: confirm a zone, paste, undo a paste. */
   const updateStop = useCallback((index: number, rule: (stop: StopFormState) => StopFormState) => {
     setForm((f) => ({
@@ -975,10 +998,43 @@ function LoadEditor({
                 // The picker holds the new driver itself until this lands.
                 void queryClient.invalidateQueries({ queryKey: ['fleet'] });
               }}
-              onLoadNumber={(value) => setForm((f) => ({ ...f, loadNumber: value }))}
+              onLoadNumber={(value) => {
+                // §12.122. A filled load number edited by hand is the dispatcher's now.
+                if (form.fill?.loadNumber || form.fill?.loadNumberCheck) countEdits(1);
+                setEditsVersion((v) => v + 1);
+                setForm((f) => ({
+                  ...f,
+                  loadNumber: value,
+                  fill: f.fill ? { ...f.fill, loadNumber: null, loadNumberCheck: null } : null,
+                }));
+              }}
+              loadNumberSource={sourceLine(form.fill?.loadNumber ?? undefined)}
+              loadNumberCheck={form.fill?.loadNumberCheck ?? undefined}
               onLoadStatus={(value) => setForm((f) => ({ ...f, loadStatus: value }))}
               onActive={setActive}
             />
+
+            {/* §12.122. Only while every stop is unsaved: a fill replaces stops. */}
+            {mayEdit && !saving && form.stops.every((s) => s.stored === null) ? (
+              <RateconStrip
+                hasEntries={
+                  form.loadNumber.trim() !== '' ||
+                  form.stops.some((s) =>
+                    [s.addressLine, s.city, s.state, s.zip, s.appointment.time].some((v) => v.trim() !== ''),
+                  )
+                }
+                toCheck={form.fill ? fieldsToCheck(form) : null}
+                countsVersion={countsVersion}
+                editsVersion={editsVersion}
+                onFill={(read) => {
+                  const filled = fillLoad(form, read, openedAt, new Date());
+                  if (!filled.ok) return filled.message;
+                  setForm(filled.form);
+                  setSelected(0);
+                  return null;
+                }}
+              />
+            ) : null}
 
             <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr]">
               <StopList
@@ -1039,7 +1095,11 @@ function LoadEditor({
                 errorFor={(field) => errorFor(field, current.key)}
                 onChange={(patch) => setStop(selected, patch)}
                 onConfirmZone={() => confirmStopZone(selected)}
-                onPasteAddress={(pasted) => updateStop(selected, (s) => pasteAddress(s, pasted))}
+                onPasteAddress={(pasted) => {
+                  countEdits(filledAmong(current, Object.keys(pasted.values) as FillField[]));
+                  setEditsVersion((v) => v + 1);
+                  updateStop(selected, (s) => pasteAddress(s, pasted));
+                }}
                 onUndoPaste={() => updateStop(selected, undoPaste)}
                 onTakePasted={() => updateStop(selected, takePasted)}
                 removeBlocked={

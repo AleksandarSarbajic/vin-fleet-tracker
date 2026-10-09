@@ -14,6 +14,7 @@ import {
 import type { ArrivalDraft, DepartureDraft } from './ArrivalFields';
 import { zoneForAddress, type ZoneVerdict } from '@/lib/geo/zone-for-address';
 import type { AddressField, PastedAddress } from '@/lib/paste-address';
+import type { LayoutId, Source } from '@/lib/ratecon/templates';
 
 /**
  * §12.119. The edit modal's form, for a load with any number of stops — and
@@ -47,6 +48,25 @@ export interface StopForm {
   zone: ZoneState;
   /** §12.121. The last address pasted into Street, while there is something to say about it. */
   paste: PasteState | null;
+  /** §12.122. Where a fill from a rate confirmation got each field, and what to check. */
+  fill: StopFill | null;
+}
+
+/** §12.122. */
+export type FillField = 'stopType' | AddressField | 'appointment';
+
+export interface StopFill {
+  /** The exact text each filled field came from, and its page. */
+  sources: Partial<Record<FillField, Source>>;
+  /** What to look at, per field. */
+  checks: Partial<Record<FillField, string>>;
+}
+
+/** §12.122. The load's side of a fill. */
+export interface LoadFill {
+  layout: LayoutId;
+  loadNumber: Source | null;
+  loadNumberCheck: string | null;
 }
 
 /** §12.121. */
@@ -99,6 +119,8 @@ export interface LoadForm {
   stops: StopForm[];
   /** §12.119 stage 4b. Saved stops taken off the load by this form, in the order removed. */
   removed: string[];
+  /** §12.122. Set by a fill from a rate confirmation; cleared field by field as they are edited. */
+  fill: LoadFill | null;
 }
 
 export interface FieldError {
@@ -190,6 +212,7 @@ export function stopFormFrom(stop: StopRead | null, openedAt: string, key?: stri
       confirmed: false,
     },
     paste: null,
+    fill: null,
   };
 }
 
@@ -204,7 +227,36 @@ export function stopFormFrom(stop: StopRead | null, openedAt: string, key?: stri
  *   - A saved stop's stored zone (`kept`) never moves.
  */
 export function patchStop(stop: StopForm, patch: Partial<StopForm>): StopForm {
-  return { ...followZone(stop, patch), paste: afterEdit(stop.paste, patch) };
+  return {
+    ...followZone(stop, patch),
+    paste: afterEdit(stop.paste, patch),
+    fill: fillAfterEdit(stop.fill, patch),
+  };
+}
+
+/** §12.122. The fields a patch from the dispatcher touches, in a fill's terms. */
+export function fillFieldsIn(patch: Partial<StopForm>): FillField[] {
+  const fields: FillField[] = ADDRESS_FIELDS.filter((f) => patch[f] !== undefined);
+  if (patch.stopType !== undefined) fields.push('stopType');
+  if (patch.appointment !== undefined) fields.push('appointment');
+  return fields;
+}
+
+/**
+ * §12.122. A filled field edited by hand is the dispatcher's now: its source
+ * and its check go. (The modal counts them — `editedAfterFill`.)
+ */
+function fillAfterEdit(fill: StopFill | null, patch: Partial<StopForm>): StopFill | null {
+  if (!fill) return null;
+  const fields = fillFieldsIn(patch);
+  if (fields.length === 0) return fill;
+  const sources = { ...fill.sources };
+  const checks = { ...fill.checks };
+  for (const f of fields) {
+    delete sources[f];
+    delete checks[f];
+  }
+  return Object.keys(sources).length + Object.keys(checks).length === 0 ? null : { sources, checks };
 }
 
 /**
@@ -285,6 +337,7 @@ export function pasteAddress(stop: StopForm, pasted: PastedAddress): StopForm {
   }
   return {
     ...followZone(stop, patch),
+    fill: fillAfterEdit(stop.fill, patch),
     paste: {
       before,
       filled: ADDRESS_FIELDS.filter((f) => patch[f] !== undefined),
@@ -374,6 +427,7 @@ export function loadFormFrom(
     loadStatus: read?.status ?? 'AVAILABLE',
     driverId,
     removed: [],
+    fill: null,
     stops: read && read.stops.length > 0
       ? read.stops.map((s) => stopFormFrom(s, openedAt))
       : [stopFormFrom(null, openedAt)],

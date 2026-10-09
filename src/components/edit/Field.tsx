@@ -14,6 +14,7 @@ export function Field({
   inputRef,
   onPaste,
   check,
+  source,
 }: {
   label: string;
   value: string;
@@ -26,6 +27,8 @@ export function Field({
   onPaste?: (event: React.ClipboardEvent<HTMLInputElement>) => void;
   /** §12.121. Something to look at, not a fault: said in the at-risk colour. */
   check?: string | undefined;
+  /** §12.122. Where a fill got this value: the exact text, and its page. */
+  source?: string | undefined;
 }) {
   return (
     <label className="block">
@@ -48,8 +51,13 @@ export function Field({
         <span data-field-check="" className="mt-1 block text-small text-status-risk-fg">
           Check: {check}
         </span>
-      ) : help ? (
+      ) : help && !source ? (
         <span className="mt-1 block text-small text-text-mutedOnOverlay">{help}</span>
+      ) : null}
+      {source ? (
+        <span data-field-source="" className="mt-1 block break-words text-small text-text-mutedOnOverlay">
+          {source}
+        </span>
       ) : null}
     </label>
   );
