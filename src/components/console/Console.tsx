@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useGoKeys } from '@/hooks/useGoKeys';
 import { FLEET_POLL_MS, useFleet, type FleetResponse } from '@/hooks/useFleet';
+import { usePageVisible } from '@/hooks/usePageVisible';
+import { HttpError } from '@/lib/http-error';
+import type { PollHealth } from '@/lib/sync-state';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
@@ -176,7 +179,24 @@ export function Console({
     syncUrl,
   );
 
-  const { data, refetch, isFetching, isError } = useFleet(initial);
+  const { data, refetch, isFetching, isError, dataUpdatedAt, error, errorUpdatedAt } = useFleet(initial);
+  /**
+   * §12.123. The board's own link to us, for the header's and the phone bar's
+   * "Not updating". Retry asks now — cancelling a request that hung — unless a
+   * 429 asked us to wait.
+   */
+  const pageVisible = usePageVisible();
+  const poll: PollHealth = {
+    lastSuccessAt: dataUpdatedAt,
+    visible: pageVisible.visible,
+    visibleSince: pageVisible.visibleSince,
+    retrying: isFetching,
+    retryBlockedUntil:
+      error instanceof HttpError && error.status === 429 && error.retryAfterSeconds
+        ? errorUpdatedAt + error.retryAfterSeconds * 1000
+        : null,
+    onRetry: () => void refetch(),
+  };
   /**
    * §12.96. Back from the background: refetch now, and say so until it
    * lands. The phone's top bar shows the marker; the desktop draws nothing
@@ -879,6 +899,7 @@ export function Console({
           fetchedAt={data?.fetchedAt ?? null}
           feedNewestAt={data?.feedNewestAt ?? null}
           feedStale={feedStale}
+          poll={poll}
           dispatchTz={dispatchTz}
           user={user}
           scope={{ count: scopeCount, fleetCount, viewCount, onClear: clearScope }}
@@ -902,6 +923,7 @@ export function Console({
           feedNewestAt={data?.feedNewestAt ?? null}
           feedStale={feedStale}
           updating={updating}
+          poll={poll}
           user={user}
           views={headerViews}
           scope={{ count: scopeCount, fleetCount, viewCount, onClear: clearScope }}

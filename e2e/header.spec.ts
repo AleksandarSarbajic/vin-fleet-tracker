@@ -24,7 +24,7 @@ const SPARE_FLOOR = 80;
 /** 40 characters, VIEW_NAME_MAX: the longest name a view can put in the header. */
 const LONG_VIEW = 'Late on the I-80 and I-94 corridors west';
 
-type StateId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
+type StateId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 
 const STATES: Record<StateId, string> = {
   A: 'default',
@@ -33,7 +33,20 @@ const STATES: Record<StateId, string> = {
   D: 'feed down',
   E: 'Drivers only, with its hidden note',
   F: 'worst case: list + 40-character view + feed down + three notes + a selected truck',
+  G: 'not updating (§12.123)',
+  H: 'feed down, and not updating (§12.123)',
 };
+
+/**
+ * §12.123. The board stops hearing from us: every /api/fleet refused, and the
+ * browser's clock moved on 70 s, past the one minute that turns the sync dot
+ * into "Not updating". The polls in between fire and fail, as they would.
+ */
+async function stopUpdating(page: Page): Promise<void> {
+  await page.route('**/api/fleet', (route) => route.abort());
+  await page.clock.fastForward(70_000);
+  await page.locator('[data-console-header] [data-not-updating]').waitFor();
+}
 
 async function feedDown(): Promise<void> {
   const sql = connect();
@@ -106,8 +119,9 @@ async function open(page: Page, state: StateId, width: number): Promise<void> {
   if (state === 'F') url = `/?list=${await seedList(true)}&chips=drivers`;
   if (state === 'C') await withView(page, []);
   if (state === 'F') await withView(page, ['drivers']);
-  if (state === 'D' || state === 'F') await feedDown();
+  if (state === 'D' || state === 'F' || state === 'H') await feedDown();
   if (state === 'E') url = '/?chips=drivers';
+  if (state === 'G' || state === 'H') await page.clock.install();
 
   await page.setViewportSize({ width, height: 800 });
   await page.goto(url);
@@ -115,6 +129,7 @@ async function open(page: Page, state: StateId, width: number): Promise<void> {
   if (state === 'F') await page.locator('[data-row-id]').first().click();
   // Fonts decide every width below.
   await page.evaluate(() => document.fonts.ready);
+  if (state === 'G' || state === 'H') await stopUpdating(page);
 }
 
 interface Measured {
@@ -318,6 +333,16 @@ for (const width of WIDTHS) {
         await expect(page.locator('[data-feed-announce]')).toHaveText(
           /^Feed down\. Last sync \d{2}:\d{2}\.$/,
         );
+      }
+      if (state === 'G') {
+        await expect(page.locator('[data-sync-stopped] [data-not-updating]')).toHaveText(/^Not updating \d+[sm]$/);
+        await expect(page.locator('[data-sync-retry]')).toBeVisible();
+      }
+      if (state === 'H') {
+        await expect(page.locator('[data-feed-down] [data-sync-label] > span').first()).toHaveText(
+          /^Last sync \d{2}:\d{2} · \d+m ago$/,
+        );
+        await expect(page.locator('[data-feed-down] [data-not-updating]')).toHaveText(/^Not updating \d+[sm]$/);
       }
       if (state === 'E' || state === 'F') {
         await expect(page.locator('[data-note="drivers"]')).toHaveAttribute(
@@ -631,4 +656,13 @@ test.describe('below 1024px the search is an icon', () => {
     await expect(page.getByLabel('Search the fleet')).toBeVisible();
     await expect(page.getByRole('button', { name: /^Search/ })).toBeHidden();
   });
+});
+
+/** §12.123. Retry brings the board back, and the green dot with it. */
+test('Not updating clears when Retry gets an answer', async ({ page }) => {
+  await open(page, 'G', 1440);
+  await page.unroute('**/api/fleet');
+  await page.locator('[data-sync-retry]').click();
+  await expect(page.locator('[data-console-header] [data-not-updating]')).toHaveCount(0);
+  await expect(page.locator('[data-console-header] [data-sync-visible]')).toBeVisible();
 });

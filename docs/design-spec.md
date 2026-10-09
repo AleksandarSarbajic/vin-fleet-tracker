@@ -9244,6 +9244,49 @@ the seventh sample, a fourth layout, correctly not recognised.
 Tests use invented documents only (`src/test/ratecon-fixtures.ts`), read as
 lines or built into a real PDF in memory (`src/test/tiny-pdf.ts`).
 
+## 12.123 The board says when it is not updating
+
+**The gap.** The header's dot stayed green while "Synced 12m ago" grew: the
+red feed-down block (§9.1) is the SERVER saying Samsara is stale, and a
+browser that has stopped hearing from the server cannot be told that. On
+2026-10-08 a Mac asleep with its lid closed showed exactly this board (the
+cause there was the machine, not the app — `e2e/run-clock.ts`), and nothing
+on screen said the numbers were old.
+
+**The rule** (`src/lib/sync-state.ts`, pure). Not updating when the tab is
+visible and the last successful `/api/fleet` is more than 60 s old — three
+missed 20 s polls — by the BROWSER's clock (`dataUpdatedAt`): a skewed
+laptop clock would read the server's `fetchedAt` wrongly, and a test that
+freezes the browser's clock would read every answer as fresh. Never while
+the tab is hidden (TanStack does not poll a hidden tab, by design), and not
+for 10 s after it comes back, while the refetch on return lands.
+
+**What it shows.**
+
+| | Header | Phone top bar |
+|---|---|---|
+| alone | an amber block, "Not updating 2m", and Retry | one amber line, "Not updating 2m · Retry", 44 px tall, the whole line the button |
+| feed already down | the red block kept, its line folded to "Last sync 06:35 · 25m ago", the amber "Not updating 2m" under it, and Retry | "Feed down 25m", and the amber line under it |
+
+Amber, never red: red is the feed, and only the server can say that. The
+live region says "Not updating. Last update 2m ago." once, as it changes.
+Retry asks now — cancelling a request that hung — except while a 429 asked
+us to wait ("Wait 12s"); it says "Retrying…" while a request is out. The
+"fetch failed" banner (§14 feature 7) still shows under the header when a
+poll errors; this is the state that also covers a poll that never answers.
+
+The healthy header and phone bar are unchanged to the byte (a component test
+compares the markup), so no baseline moved. The driver history page's header
+does not take the new state; it has no poll of its own to recover.
+
+**Tests.** `sync-state.test.ts` (the thresholds, a hidden tab, the grace,
+Retry after a 429); `HeaderSync.test.tsx`; `PhoneTopBar.test.tsx`;
+`e2e/header.spec.ts` states G and H at 1280, 1440, 1680 and 1920 — no
+scroll, no overlap, at least 80 px spare (least: 217 px, H at 1440) — and
+Retry clearing it; `e2e/phone.spec.ts` at 320, 390, 430 and 667x375 —
+nothing cut off, every control 44 px, no text under 12 px, no sideways
+scroll. Each e2e refuses `/api/fleet` and moves the browser's clock on 70 s.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

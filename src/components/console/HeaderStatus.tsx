@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { elapsed, timeInZone, zoneAbbreviation } from '@/lib/format';
+import { isNotUpdating, retryWaitSeconds, type PollHealth } from '@/lib/sync-state';
 
 /**
  * The right-hand end of the header's first row — sync and clocks — shared by
@@ -81,14 +82,24 @@ export function HeaderSync({
   feedNewestAt,
   feedStale,
   dispatchTz,
+  poll,
 }: {
   now: Date;
   fetchedAt: string | null;
   feedNewestAt: string | null;
   feedStale: boolean;
   dispatchTz: string;
+  /** §12.123. The board's own link to us; without it the dot never says "not updating". */
+  poll?: PollHealth;
 }) {
   const age = elapsed(fetchedAt, now);
+  /**
+   * §12.123. This browser has not heard from us for a minute: nothing on the
+   * board is current, including whether the feed is down. Amber, not red —
+   * red is the feed, and the server is the one that says so.
+   */
+  const notUpdating = poll ? isNotUpdating(poll, now.getTime()) : false;
+  const lastAge = poll ? elapsed(new Date(poll.lastSuccessAt).toISOString(), now) : null;
   /** The age of the POSITIONS, which is a different number from `age`. */
   const feedAge = elapsed(feedNewestAt, now);
   const lastSync = feedNewestAt
@@ -103,8 +114,18 @@ export function HeaderSync({
             ? `Feed down. Last sync ${lastSync}.`
             : 'Feed down. No positions yet.'
           : ''}
+        {notUpdating ? `${feedStale ? ' ' : ''}Not updating. Last update ${lastAge} ago.` : ''}
       </span>
-      {feedStale ? (
+      {notUpdating && poll ? (
+        <NotUpdating
+          feedStale={feedStale}
+          lastSync={lastSync}
+          feedAge={feedAge}
+          lastAge={lastAge}
+          poll={poll}
+          now={now}
+        />
+      ) : feedStale ? (
         <div
           data-feed-down=""
           className="flex h-9 shrink-0 items-center gap-2 border border-status-late-bd bg-feed-downBg px-[10px]"
@@ -176,6 +197,75 @@ export function HeaderSync({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * §12.123. The board has stopped hearing from us. Alone: an amber block,
+ * "Not updating 2m". With the feed already down: the red block stays, its
+ * line folded to one, and the amber line sits under it. Retry asks now — it
+ * cancels a request that has hung — except while a 429 asked us to wait.
+ */
+function NotUpdating({
+  feedStale,
+  lastSync,
+  feedAge,
+  lastAge,
+  poll,
+  now,
+}: {
+  feedStale: boolean;
+  lastSync: string | null;
+  feedAge: string | null;
+  lastAge: string | null;
+  poll: PollHealth;
+  now: Date;
+}) {
+  const wait = retryWaitSeconds(poll, now.getTime());
+  const amber = (
+    <span
+      data-not-updating=""
+      className="whitespace-nowrap font-sans text-[12.5px] font-semibold leading-none text-status-risk-fg"
+    >
+      Not updating {lastAge}
+    </span>
+  );
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      {feedStale ? (
+        <div
+          data-feed-down=""
+          className="flex h-9 shrink-0 items-center gap-2 border border-status-late-bd bg-feed-downBg px-[10px]"
+        >
+          <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 bg-feed-down" />
+          <span data-sync-label="" className="flex flex-col gap-[3px] whitespace-nowrap">
+            <span className="font-cond text-micro font-semibold uppercase leading-none tracking-[.1em] text-status-late-fg">
+              {lastSync ? `Last sync ${lastSync}${feedAge ? ` · ${feedAge} ago` : ''}` : 'No positions yet'}
+            </span>
+            {amber}
+          </span>
+        </div>
+      ) : (
+        <div
+          data-sync-stopped=""
+          className="flex h-9 shrink-0 items-center gap-2 border border-status-risk-bd bg-status-risk-bg px-[10px]"
+        >
+          <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 bg-status-risk-fg" />
+          <span data-sync-label="">{amber}</span>
+        </div>
+      )}
+      <button
+        type="button"
+        data-sync-retry=""
+        onClick={poll.onRetry}
+        disabled={wait > 0}
+        aria-busy={poll.retrying}
+        title={wait > 0 ? `The server asked us to wait ${wait}s.` : 'Ask for the board now.'}
+        className="h-9 shrink-0 border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg disabled:opacity-60"
+      >
+        {wait > 0 ? `Wait ${wait}s` : poll.retrying ? 'Retrying…' : 'Retry'}
+      </button>
+    </div>
   );
 }
 

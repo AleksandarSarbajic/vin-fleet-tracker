@@ -268,6 +268,55 @@ check(
   { signedIn: false },
 );
 
+/**
+ * §12.123. "Not updating": every /api/fleet refused and the browser's clock
+ * moved on 70 s. The line is the Retry, 44 px tall; nothing is cut off and no
+ * text is under 12 px. With the feed already down, "Feed down" stays above it.
+ */
+const STOPPED_SIZES = [SIZES[0], SIZES[3], SIZES[4], SIZES[5]] as const;
+async function stopUpdating(page: Page): Promise<void> {
+  await page.route('**/api/fleet', (route) => route.abort());
+  await page.clock.fastForward(70_000);
+  await page.locator('[data-phone-feed] [data-not-updating]').waitFor();
+}
+async function stoppedHolds(page: Page, size: (typeof SIZES)[number]): Promise<void> {
+  const line = page.locator('[data-phone-feed] [data-not-updating]');
+  await expect.soft(line, `${size.name}: the line`).toContainText(/^Not updating \d+[sm]/);
+  const box = (await line.boundingBox())!;
+  expect.soft(Math.round(box.height), `${size.name}: Retry height`).toBeGreaterThanOrEqual(44);
+  expect.soft(box.x + box.width, `${size.name}: Retry on screen`).toBeLessThanOrEqual(size.width);
+  expect
+    .soft((await controls(page, size.width)).filter((c) => c.cut).map((c) => c.name), `${size.name}: controls cut off`)
+    .toEqual([]);
+  expect.soft(await under44(page, size.width), `${size.name}: controls under 44px`).toEqual([]);
+  expect.soft(await smallText(page), `${size.name}: text under 12px`).toEqual([]);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect.soft(overflow, `${size.name}: sideways scroll`).toBeLessThanOrEqual(0);
+}
+
+check(
+  'not updating: one amber line that retries, and it fits',
+  async (page, size) => {
+    await page.clock.install();
+    await board(page);
+    await stopUpdating(page);
+    await stoppedHolds(page, size);
+  },
+  { sizes: STOPPED_SIZES },
+);
+
+check(
+  'feed down and not updating: both said, and it fits',
+  async (page, size) => {
+    await page.clock.install();
+    await board(page);
+    await stopUpdating(page);
+    await expect.soft(page.locator('[data-phone-feed]'), `${size.name}: feed down kept`).toContainText(/Feed down/);
+    await stoppedHolds(page, size);
+  },
+  { sizes: STOPPED_SIZES, feedDown: true },
+);
+
 check(
   'feed down is visible, its sentence whole',
   async (page, size) => {

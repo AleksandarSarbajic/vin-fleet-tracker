@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EDIT_MIN_WIDTH_PX } from '@/lib/editing';
 import { PHONE_BELOW_PX, PHONE_MEDIA } from '@/lib/phone';
+import type { PollHealth } from '@/lib/sync-state';
 import tailwindConfig from '../../../../tailwind.config';
 import defaultTheme from 'tailwindcss/defaultTheme';
 
@@ -45,7 +46,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const render = (props: { feedStale?: boolean; updating?: boolean; query?: string }) =>
+const render = (props: { feedStale?: boolean; updating?: boolean; query?: string; poll?: PollHealth }) =>
   act(() => {
     root.render(
       createElement(PhoneTopBar, {
@@ -57,6 +58,7 @@ const render = (props: { feedStale?: boolean; updating?: boolean; query?: string
         feedNewestAt: NEWEST,
         feedStale: props.feedStale ?? false,
         updating: props.updating ?? false,
+        ...(props.poll ? { poll: props.poll } : {}),
         user: { fullName: 'Sam Leasar', email: 's@x.test', role: 'admin' as const },
         views: {
           saved: [],
@@ -125,5 +127,40 @@ describe('one width decides it', () => {
     expect(defaultTheme.screens.md).toBe(`${PHONE_BELOW_PX}px`);
     expect(PHONE_BELOW_PX).toBe(EDIT_MIN_WIDTH_PX);
     expect(PHONE_MEDIA).toBe('(max-width: 767px)');
+  });
+});
+
+describe('Not updating on the phone (§12.123)', () => {
+  const stopped = (over: Partial<PollHealth> = {}): PollHealth => ({
+    lastSuccessAt: new Date('2026-09-18T11:58:00.000Z').getTime(),
+    visible: true,
+    visibleSince: null,
+    retrying: false,
+    retryBlockedUntil: null,
+    onRetry: vi.fn(),
+    ...over,
+  });
+  const feed = () => container.querySelector<HTMLElement>('[data-phone-feed]')!;
+
+  it('is one amber line that retries when tapped', () => {
+    const poll = stopped();
+    render({ poll });
+    const line = feed().querySelector<HTMLButtonElement>('button[data-not-updating]')!;
+    expect(line.textContent).toBe('Not updating 2m· Retry');
+    act(() => line.click());
+    expect(poll.onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps "Feed down" when the feed was down, with the amber line under it', () => {
+    render({ feedStale: true, poll: stopped() });
+    const parts = [...feed().children].filter((c) => !c.classList.contains('sr-only')).map((c) => c.textContent);
+    expect(parts).toEqual(['Feed down 25m', 'Not updating 2m· Retry']);
+  });
+
+  it('says nothing new within a minute, or while it is "Updating…" after a return', () => {
+    render({ poll: stopped({ lastSuccessAt: new Date('2026-09-18T11:59:50.000Z').getTime() }) });
+    expect(feed().querySelector('[data-not-updating]')).toBeNull();
+    render({ updating: true, poll: stopped() });
+    expect(feed().querySelector('[data-not-updating]')).toBeNull();
   });
 });

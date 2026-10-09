@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { SearchField } from './SearchField';
 import { HeaderClocks, HeaderSync, useHeaderNow } from './HeaderStatus';
+import type { PollHealth } from '@/lib/sync-state';
 import { FilterChips, type FilterKey } from './FilterChips';
 import { AccountMenu, type AccountUser } from './AccountMenu';
 import type { FleetRow } from '@/server/fleet-query';
@@ -70,6 +71,8 @@ interface Props {
   feedNewestAt: string | null;
   /** §5.9. True when the positions are too old to colour a schedule with. */
   feedStale: boolean;
+  /** §12.123. The board's own link to us, for "Not updating". */
+  poll?: PollHealth;
   dispatchTz: string;
   /**
    * The whole account, not just its initials (§12.45). The circle used to be
@@ -117,6 +120,7 @@ export function ConsoleHeader({
   fetchedAt,
   feedNewestAt,
   feedStale,
+  poll,
   dispatchTz,
   user,
   views,
@@ -291,6 +295,7 @@ export function ConsoleHeader({
           fetchedAt={fetchedAt}
           feedNewestAt={feedNewestAt}
           feedStale={feedStale}
+          {...(poll ? { poll } : {})}
           dispatchTz={dispatchTz}
         />
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { elapsed } from '@/lib/format';
+import { isNotUpdating, retryWaitSeconds, type PollHealth } from '@/lib/sync-state';
 import { BRAND } from '@/lib/brand';
 import { AccountMenu, type AccountUser } from '../AccountMenu';
 import { ScopeMenu, type ListsMenu } from '../SavedViews';
@@ -37,6 +38,8 @@ interface Props {
   feedStale: boolean;
   /** Back from the background and refetching (`useResumeRefetch`). */
   updating: boolean;
+  /** §12.123. The board's own link to us, for "Not updating". */
+  poll?: PollHealth;
   user: AccountUser;
   views: {
     saved: SavedView[];
@@ -65,6 +68,7 @@ export function PhoneTopBar({
   feedNewestAt,
   feedStale,
   updating,
+  poll,
   user,
   views,
   scope,
@@ -178,6 +182,7 @@ export function PhoneTopBar({
         feedNewestAt={feedNewestAt}
         feedStale={feedStale}
         updating={updating}
+        {...(poll ? { poll } : {})}
         inline={!searching}
       />
     </div>
@@ -195,12 +200,14 @@ function PhoneFeed({
   feedNewestAt,
   feedStale,
   updating,
+  poll,
   inline,
 }: {
   fetchedAt: string | null;
   feedNewestAt: string | null;
   feedStale: boolean;
   updating: boolean;
+  poll?: PollHealth;
   /** On a short screen, inside row 1 rather than a line of its own. */
   inline: boolean;
 }) {
@@ -218,6 +225,46 @@ function PhoneFeed({
 
   const age = elapsed(fetchedAt, now);
   const feedAge = elapsed(feedNewestAt, now);
+  // §12.123. As the desktop header: a minute without hearing from us, while visible.
+  const notUpdating = poll && !updating ? isNotUpdating(poll, now.getTime()) : false;
+  const lastAge = poll ? elapsed(new Date(poll.lastSuccessAt).toISOString(), now) : null;
+  const wait = poll ? retryWaitSeconds(poll, now.getTime()) : 0;
+
+  if (notUpdating && poll) {
+    return (
+      <div
+        data-phone-feed=""
+        className={`flex w-full flex-col items-start gap-1 px-3 py-1 font-sans text-[12px] ${
+          inline ? '[@media(max-height:480px)]:order-1 [@media(max-height:480px)]:w-auto [@media(max-height:480px)]:shrink-0 [@media(max-height:480px)]:px-0' : ''
+        }`}
+      >
+        <span role="status" aria-live="polite" className="sr-only">
+          {`${feedStale ? 'Feed down. ' : ''}Not updating. Last update ${lastAge} ago.`}
+        </span>
+        {feedStale ? (
+          <span className="flex h-6 items-center gap-2 border border-status-late-bd bg-feed-downBg px-2 font-semibold text-status-late-fg">
+            <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 bg-feed-down" />
+            Feed down{feedAge ? ` ${feedAge}` : ''}
+          </span>
+        ) : null}
+        {/* The whole line is the Retry: 44 px tall, as every phone control is. */}
+        <button
+          type="button"
+          data-not-updating=""
+          onClick={poll.onRetry}
+          disabled={wait > 0}
+          aria-busy={poll.retrying}
+          className="flex h-11 items-center gap-2 border border-status-risk-bd bg-status-risk-bg px-2.5 font-semibold text-status-risk-fg disabled:opacity-60"
+        >
+          <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 bg-status-risk-fg" />
+          Not updating {lastAge}
+          <span className="font-cond text-micro uppercase tracking-[.09em]">
+            · {wait > 0 ? `Wait ${wait}s` : poll.retrying ? 'Retrying…' : 'Retry'}
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
