@@ -271,9 +271,17 @@ function NotUpdating({
 
 /** The dispatch clock, and from 1440 the viewer's own beside it. */
 export function HeaderClocks({ now, dispatchTz }: { now: Date; dispatchTz: string }) {
-  // The browser's own zone — "CET · YOU" for a dispatcher working from Europe.
-  const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const localTime = `${timeInZone(now, viewerZone).split(' ')[0] ?? ''} ${zoneAbbreviation(now, viewerZone)} · you`;
+  /**
+   * The browser's own zone — "CET · YOU" for a dispatcher working from Europe.
+   * Read after load, never while rendering: the server renders in UTC, and
+   * its "11:35 UTC" against the browser's "13:35 CEST" is React #418. Until
+   * then the clock and the title are simply not there.
+   */
+  const [viewerZone, setViewerZone] = useState<string | null>(null);
+  useEffect(() => setViewerZone(Intl.DateTimeFormat().resolvedOptions().timeZone), []);
+  const localTime = viewerZone
+    ? `${timeInZone(now, viewerZone).split(' ')[0] ?? ''} ${zoneAbbreviation(now, viewerZone)} · you`
+    : undefined;
   return (
     <div className="flex shrink-0 items-center gap-3 border-l border-line-hair pl-3">
       <Clock
@@ -281,10 +289,10 @@ export function HeaderClocks({ now, dispatchTz }: { now: Date; dispatchTz: strin
         zone={dispatchTz}
         label="DISPATCH"
         primary
-        title={localTime}
+        {...(localTime ? { title: localTime } : {})}
       />
       <span className="hidden min-[1440px]:flex">
-        <Clock instant={now} zone={viewerZone} label="YOU" />
+        {viewerZone ? <Clock instant={now} zone={viewerZone} label="YOU" /> : null}
       </span>
     </div>
   );

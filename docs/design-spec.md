@@ -9287,6 +9287,31 @@ Retry clearing it; `e2e/phone.spec.ts` at 320, 390, 430 and 667x375 —
 nothing cut off, every control 44 px, no text under 12 px, no sideways
 scroll. Each e2e refuses `/api/fleet` and moves the browser's clock on 70 s.
 
+## 12.124 The board hydrates as the server rendered it (React #418)
+
+Production logged React #418, a hydration mismatch, in a dispatcher's
+browser in Europe. The server renders in UTC; the browser hydrates in its
+own zone, on its own clock. Two things read those while rendering:
+
+- **The "YOU" clock** (`HeaderClocks`, since phase 3): "11:35 UTC · YOU"
+  from the server, "13:35 GMT+2 · YOU" from the browser, and the same in the
+  dispatch clock's title. On every load of the board and the history page.
+- **"Not updating"** (§12.123): the first render compares the server's fetch
+  instant with the browser's clock. A browser clock more than 60 s behind
+  the server's says it where the server did not.
+
+The viewer's zone is now read after load: on the first render the "YOU"
+clock and the title are absent, and they appear a moment later. The tab's
+visibility is not known until load and reads as not visible until then, so
+"Not updating" is never said on the first render. Nothing else changed; no
+baseline moved.
+
+E2e could not see either. The test server and the browser share one
+machine, one zone and one clock. **Tests.** `hydration.test.tsx` renders the
+whole board to a string under `TZ=UTC`, then hydrates it under
+Europe/Belgrade, and again with the browser's clock 5 minutes behind. It
+fails on any recoverable error, and both failed before the fix.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
