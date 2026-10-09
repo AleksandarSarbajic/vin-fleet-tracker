@@ -9312,6 +9312,61 @@ whole board to a string under `TZ=UTC`, then hydrates it under
 Europe/Belgrade, and again with the browser's clock 5 minutes behind. It
 fails on any recoverable error, and both failed before the fix.
 
+## 12.125 A fourth reader: Pickup # / Delivery # columns
+
+One broker's rate confirmations, three pages each:
+- **Page 1:** a header (repeated on every page), a load block, rate details.
+- **Page 2:** the stops, then the billing address.
+- **Page 3:** terms.
+
+Each stop is a "Pickup #n" or "Delivery #n" heading, then a label row
+("Pickup Address", "Appointment", …) that sets two columns:
+- **Address column:** the facility, the street, then the city line.
+- **Appointment column:** one date and a 24-hour time, or "Earliest" and
+  "Latest", each with a date and time. Below them, "Appt. Type" says
+  "By Appointment" (APPT) or "FCFS".
+
+The zone word after each time is not read; the stop's address sets the
+zone (§12.120).
+
+**Recognised by:** "Shipment ID", "Total Miles", "LineHaul" and the
+"Pickup #n" and "Delivery #n" headings. None of these is one of the other
+three readers' labels, so no document is claimed by two readers. A test
+checks this both ways.
+
+**Load number:** the value beside "Arrive Order", not "Load #" and not
+"Shipment ID". The source line under the field reads
+"Arrive Order  <number>".
+
+**Read by column, so the PDF is needed.** Pasted text has no positions, and
+its columns can't be told apart, so it is not read.
+
+**Strict.** Every city line in the document must be one of:
+- a stop's (exactly one per address column, and last in it);
+- the page header's (lines found among the first four of every page);
+- the single billing address after the last stop, with no "Appointment"
+  label near it.
+
+Anything else is refused with "Layout not recognised, nothing filled":
+- a second address in a stop;
+- an unlabelled address between the stops, or a second one after them;
+- a stop without a city line;
+- a heading without its label row;
+- no Pickup heading, or no Delivery heading.
+
+Never read: rates, line haul, totals, carrier, broker, phone, fax, email,
+PO and appointment numbers, commodity, weight. Sources carry only the
+address and appointment cells, never the whole printed line.
+
+**Tests.**
+- `templates.test.ts`: 11 tests on an invented three-page fixture
+  (`pickupDeliveryColumns` in `src/test/ratecon-fixtures.ts`).
+- `read-pdf.test.ts`: one test reading the fixture through a real PDF and
+  pdf.js.
+
+**On the local samples:** files 9, 10 and 11 are now read; every other
+sample gives the same result as before.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

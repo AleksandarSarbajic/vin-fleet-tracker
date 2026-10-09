@@ -187,3 +187,128 @@ export const PU_SO_PASTED = [
   'DICKINSON ND 58601 Contact: Dock',
   'Phone: (555) 010-0000 Driver Load: N',
 ].join('\n');
+
+export interface ColumnsStop {
+  kind: 'Pickup' | 'Delivery';
+  name: string;
+  street: string;
+  /** The whole city line, as one run: "Fargo, ND 58102". */
+  cityLine: string;
+  /** One date and time, or Earliest and Latest. "Oct 12, 2026", "14:00 CDT". */
+  when: { date: string; time: string } | { from: [string, string]; to: [string, string] };
+  appt: 'By Appointment' | 'FCFS';
+}
+
+/**
+ * §12.125. Pickup # / Delivery # blocks: three pages like the layout's —
+ * a header on every page (its own address in one run), the load page with
+ * "Arrive Order", "Load #" and "Shipment ID" side by side and the rate
+ * details, the stops page with the billing address after the last stop,
+ * and a terms page. Address and appointment in their own columns.
+ */
+export function pickupDeliveryColumns(stops: ColumnsStop[]): TinyRun[][] {
+  const header = (): TinyRun[] => [
+    run(212, 772, 'Example Freight Partners, an Example company'),
+    run(212, 762, '9000 Sample Pkwy | Suite 100, Austin, TX 78701 | Phone: (555) 010-0100'),
+    run(212, 752, 'Questions? Call carrier sales for load information'),
+    run(212, 742, 'at (555) 010-0101 and reference order 4455001'),
+  ];
+  const loadPage: TinyRun[] = [
+    ...header(),
+    run(22, 700, 'Load'),
+    run(208, 700, 'Carrier'),
+    run(401, 700, 'Truck'),
+    run(23, 688, 'Arrive Order'),
+    run(110, 688, '4455001'),
+    run(209, 688, 'Carrier'),
+    run(299, 688, 'Sample Carrier LLC'),
+    run(402, 688, 'Equipment'),
+    run(490, 688, 'Van'),
+    run(23, 676, 'Load #'),
+    run(110, 676, '5566001'),
+    run(23, 664, 'Total Miles'),
+    run(110, 664, '612 Miles'),
+    run(23, 652, 'Shipment ID'),
+    run(110, 652, '7788990'),
+    run(23, 630, 'Rate Details'),
+    run(23, 618, 'LineHaul'),
+    run(158, 618, '$1,900.00'),
+    run(23, 606, 'Total'),
+    run(151, 606, '$1,900.00'),
+    run(52, 560, 'PAYMENT TERMS'),
+    run(82, 548, 'Example payment terms apply to this load.'),
+  ];
+  const stopsPage: TinyRun[] = header();
+  let y = 712;
+  for (const [i, s] of stops.entries()) {
+    const nth = stops.slice(0, i + 1).filter((t) => t.kind === s.kind).length;
+    stopsPage.push(
+      run(22, y, `${s.kind} #${nth}`),
+      run(23, y - 12, `${s.kind} Address`),
+      run(135, y - 12, 'Appointment'),
+      run(222, y - 12, 'PO#'),
+      run(366, y - 12, 'Commodity'),
+      run(478, y - 12, 'Weight'),
+      run(23, y - 24, s.name),
+      run(223, y - 24, 'Appointment #'),
+      run(294, y - 24, `A-${100 + i}`),
+      run(366, y - 24, 'General Freight'),
+      run(478, y - 24, '20000 lbs'),
+      run(23, y - 36, s.street),
+      run(223, y - 36, 'PO #'),
+      run(294, y - 36, `P-${200 + i}`),
+      run(23, y - 48, s.cityLine),
+    );
+    const column =
+      'date' in s.when
+        ? [s.when.date, s.when.time]
+        : ['Earliest Time', ...s.when.from, 'Latest Time', ...s.when.to];
+    column.forEach((text, k) => stopsPage.push(run(135, y - 36 - 12 * k, text)));
+    let z = y - 36 - 12 * column.length;
+    stopsPage.push(
+      run(135, z, 'Load Type'),
+      run(135, z - 12, 'Live Load'),
+      run(135, z - 24, 'Appt. Type'),
+      run(135, z - 36, s.appt),
+      run(22, z - 48, 'Driver Instructions:'),
+      run(93, z - 48, s.appt.toUpperCase()),
+      run(22, z - 60, `${s.kind} Notes:`),
+      run(92, z - 60, 'Bring the BOL; check in at the window.'),
+    );
+    z -= 60;
+    y = z - 24;
+  }
+  stopsPage.push(
+    run(201, y, 'Please email invoices or mail to:'),
+    run(242, y - 12, 'Example Freight Partners, an Example company'),
+    run(254, y - 24, '9000 Sample Pkwy | Suite 100'),
+    run(275, y - 36, 'Austin, TX 78701'),
+    run(231, y - 48, 'Ph# (555) 010-0100 FAX (555) 010-0102'),
+  );
+  const termsPage: TinyRun[] = [
+    ...header(),
+    run(22, 700, 'Load requirements: the driver must check in on arrival.'),
+    run(43, 680, '1.'),
+    run(52, 680, 'Example terms and conditions apply to this load.'),
+  ];
+  return [loadPage, stopsPage, termsPage];
+}
+
+export const COLUMNS_STOPS: ColumnsStop[] = [
+  {
+    kind: 'Pickup',
+    name: 'Prairie Cold Storage',
+    street: '4001 Main St',
+    cityLine: 'Fargo, ND 58102',
+    when: { date: 'Oct 12, 2026', time: '14:30 CDT' },
+    appt: 'By Appointment',
+  },
+  {
+    kind: 'Delivery',
+    name: 'Lakeside DC',
+    street: '1200 Harbor Rd',
+    cityLine: 'Dickinson, ND 58601',
+    when: { from: ['Oct 13, 2026', '07:00 MDT'], to: ['Oct 13, 2026', '09:00 MDT'] },
+    appt: 'FCFS',
+  },
+];

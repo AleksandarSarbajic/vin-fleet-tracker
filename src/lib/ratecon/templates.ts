@@ -17,12 +17,13 @@ import type { Line } from './lines';
  * notes, instructions. No pattern below looks at them.
  */
 
-export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks';
+export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
   'label-rows': 'label rows (PICKUP DATE / SHIPPER / CONSIGNEE)',
   'stops-section': 'a Stops section (Stop 1 Pickup, Stop 2 Drop)',
   'pu-so-blocks': 'PU / SO blocks (Name, Address, Date)',
+  'pickup-delivery-columns': 'Pickup # / Delivery # blocks (address and appointment columns)',
 };
 
 export interface Source {
@@ -374,12 +375,165 @@ function readBlocks(lines: Line[]): RateconRead {
   };
 }
 
+/* ------------------- Pickup # / Delivery # columns (§12.125) ------------------- */
+
+/**
+ * Each stop is a "Pickup #1" or "Delivery #1" heading, then a label row
+ * ("Pickup Address", "Appointment", …) that sets the columns. Under it the
+ * address column holds the facility, the street and the city line, in that
+ * order, and the appointment column holds one date and time, or "Earliest"
+ * and "Latest" each with a date and a time, then "Appt. Type" and its value.
+ * Times are 24-hour, followed by a zone word the stop's address overrules.
+ *
+ * Read by COLUMN, so it needs a PDF's positions: pasted text, whose columns
+ * cannot be told apart, is not read. The load number is the one beside
+ * "Arrive Order" — not "Load", not "Shipment ID".
+ *
+ * Strict, because a wrong stop is worse than none: every city line in the
+ * document must be a stop's, the page header's (the same lines on every
+ * page), or the one billing address after the last stop. Anything else —
+ * an address column with two city lines or none, an unlabelled address
+ * between the stops, a heading without its label row — and nothing is read.
+ */
+const COLUMNS = {
+  recognise: [/^Shipment ID\b/, /^Total Miles\b/, /^Line ?Haul\b/i, /^Pickup #\d+$/, /^Delivery #\d+$/],
+  heading: /^(Pickup|Delivery) #\d+$/,
+  addressLabel: /^(Pickup|Delivery) Address$/,
+  end: /^(Driver Instructions:|Pickup Notes:|Delivery Notes:)/,
+  date: /^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),\s*(\d{4})$/,
+  clock: /^(\d{2}):(\d{2})(?:\s+[A-Z]{2,4})?$/,
+  /** The page header: lines found among the first few of every page. */
+  headerDepth: 4,
+};
+
+const MONTH_ABBR = MONTHS.map((m) => m.slice(0, 3).toLowerCase());
+
+function columnsWhen(date: string, clock: string): { date: string; time: string } | null {
+  const d = COLUMNS.date.exec(date.trim());
+  const c = COLUMNS.clock.exec(clock.trim());
+  if (!d || !c) return null;
+  const [y, mo, day, h, mi] = [Number(d[3]), MONTH_ABBR.indexOf(d[1]!.toLowerCase()) + 1, Number(d[2]), Number(c[1]), Number(c[2])];
+  return mo > 0 && validDate(y, mo, day) && validClock(h, mi) ? { date: iso(y, mo, day), time: hhmm(h, mi) } : null;
+}
+
+function columnsTime(entries: string[], flagText: string | null, source: Source): TimeRead {
+  if (entries.length === 0) return { kind: 'none', source: null };
+  const flag: Flag = flagText === null ? null : /^By Appointment$/i.test(flagText) ? 'APPT' : /^FCFS$/i.test(flagText) ? 'FCFS' : null;
+  if (entries.length === 2) {
+    const at = columnsWhen(entries[0]!, entries[1]!);
+    if (at) return { kind: 'exact', ...at, flag, source };
+  }
+  if (entries.length === 6 && /^Earliest\b/i.test(entries[0]!) && /^Latest\b/i.test(entries[3]!)) {
+    const from = columnsWhen(entries[1]!, entries[2]!);
+    const to = columnsWhen(entries[4]!, entries[5]!);
+    if (from && to) return { kind: 'range', ...from, endDate: to.date, endTime: to.time, flag, source };
+  }
+  const firstDate = entries.map((e) => COLUMNS.date.exec(e.trim())).find(Boolean);
+  const date = firstDate ? columnsWhen(firstDate[0], '00:00')?.date ?? null : null;
+  return { kind: 'unreadable', date, quoted: entries.join(' '), source };
+}
+
+function readColumns(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'pickup-delivery-columns', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const headings = lines.flatMap((l, i) => (COLUMNS.heading.test(l.text) ? [i] : []));
+  const kinds = headings.map((i) => (/^Pickup/.test(lines[i]!.text) ? 'PU' : 'DEL'));
+  if (!kinds.includes('PU') || !kinds.includes('DEL')) return refuse;
+
+  const stopCities = new Set<Line['cells'][number]>();
+  const stops: StopRead[] = [];
+  let lastEnd = -1;
+  for (const [n, h] of headings.entries()) {
+    const heading = lines[h]!;
+    const word = /^(Pickup|Delivery)/.exec(heading.text)![1]!;
+    const labels = lines[h + 1];
+    const addressLabel = labels?.cells[0] && COLUMNS.addressLabel.exec(labels.cells[0].text);
+    const appointment = labels?.cells.find((c) => c.text === 'Appointment');
+    if (!labels || !addressLabel || addressLabel[1] !== word || !appointment) return refuse;
+    const apptX = appointment.x!;
+    const nextX = Math.min(...labels.cells.filter((c) => c.x! > apptX).map((c) => c.x!), Infinity);
+
+    let end = h + 2;
+    const stopAt = headings[n + 1] ?? lines.length;
+    while (end < stopAt && !COLUMNS.end.test(lines[end]!.cells[0]?.text ?? '')) end += 1;
+    lastEnd = end;
+
+    const address: { cell: Line['cells'][number]; page: number | null }[] = [];
+    const column: string[] = [];
+    for (let j = h + 2; j < end; j += 1) {
+      const cells = lines[j]!.cells;
+      for (const cell of cells.filter((c) => c.x! < apptX - 4)) address.push({ cell, page: lines[j]!.page });
+      for (const cell of cells.filter((c) => c.x! >= apptX - 4 && c.x! < nextX - 4)) column.push(cell.text);
+    }
+    // The appointment's own lines end at the first "… Type" label; "Appt. Type" says APPT or FCFS.
+    const typeAt = column.findIndex((t) => /\bType$/.test(t));
+    const appt = typeAt === -1 ? column : column.slice(0, typeAt);
+    const flagAt = column.indexOf('Appt. Type');
+    const flagText = flagAt === -1 ? null : (column[flagAt + 1] ?? null);
+
+    const cityAt = address.flatMap((a, i) => (cityLine(a.cell.text) ? [i] : []));
+    // One city line, and it closes the address column.
+    if (cityAt.length !== 1 || cityAt[0] !== address.length - 1) return refuse;
+    const place = address[cityAt[0]!]!;
+    stopCities.add(place.cell);
+    const parsed = cityLine(place.cell.text)!;
+    const streetAt = address[cityAt[0]! - 1];
+    const timeSource: Source = {
+      text: [...appt, ...(flagText ? [flagText] : [])].join(' · '),
+      page: heading.page,
+    };
+    stops.push({
+      type: { value: kinds[n]!, source: src(heading) },
+      typeCheck: null,
+      street: streetAt ? { value: streetAt.cell.text.replace(/[\s,]+$/, ''), source: { text: streetAt.cell.text, page: streetAt.page } } : null,
+      city: { value: parsed.city, source: { text: place.cell.text, page: place.page } },
+      state: { value: parsed.state, source: { text: place.cell.text, page: place.page } },
+      zip: { value: parsed.zip, source: { text: place.cell.text, page: place.page } },
+      time: columnsTime(appt, flagText, timeSource),
+    });
+  }
+
+  // Every other city line is the page header's or the billing address's.
+  const pages = [...new Set(lines.map((l) => l.page!))];
+  const firstOf = (page: number) => lines.filter((l) => l.page === page).slice(0, COLUMNS.headerDepth).map((l) => l.text);
+  const header = new Set(pages.length > 1 ? firstOf(pages[0]!).filter((t) => pages.every((p) => firstOf(p).includes(t))) : []);
+  const others = lines.flatMap((l, i) =>
+    header.has(l.text) ? [] : l.cells.filter((c) => cityLine(c.text) && !stopCities.has(c)).map(() => i),
+  );
+  if (others.length > 1) return refuse;
+  if (others.length === 1) {
+    const at = others[0]!;
+    const near = lines.slice(Math.max(0, at - 3), at + 1);
+    if (at <= lastEnd || near.some((l) => l.cells.some((c) => c.text === 'Appointment'))) return refuse;
+  }
+
+  const numbers = lines.flatMap((l) =>
+    l.cells[0]?.text === 'Arrive Order' && l.cells[1] && /^[A-Za-z0-9-]+$/.test(l.cells[1].text)
+      ? [{ value: l.cells[1].text, source: { text: `Arrive Order  ${l.cells[1].text}`, page: l.page } }]
+      : [],
+  );
+  const distinct = new Set(numbers.map((x) => x.value));
+  const loadNumber = distinct.size === 1 ? numbers[0]! : null;
+  return {
+    layout: 'pickup-delivery-columns',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : distinct.size > 1
+        ? `More than one number is beside “Arrive Order”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`
+        : 'No number beside “Arrive Order”.',
+    stops,
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
   { id: 'label-rows', labels: LABEL_ROWS.recognise, read: readLabelRows },
   { id: 'stops-section', labels: SECTION.recognise, read: readStopsSection },
   { id: 'pu-so-blocks', labels: BLOCKS.recognise, read: readBlocks },
+  { id: 'pickup-delivery-columns', labels: COLUMNS.recognise, read: readColumns },
 ];
 
 /** Which layouts have every one of their labels here. */

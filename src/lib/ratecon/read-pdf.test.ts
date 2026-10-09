@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { LABEL_ROWS, PU_SO, puSoBlocks } from '@/test/ratecon-fixtures';
+import { COLUMNS_STOPS, LABEL_ROWS, PU_SO, pickupDeliveryColumns, puSoBlocks } from '@/test/ratecon-fixtures';
 import { tinyPdf } from '@/test/tiny-pdf';
 import { PDF_LIMITS, PDF_MESSAGES, linesFromPdf } from './read-pdf';
 import { readRatecon } from './templates';
@@ -24,6 +24,17 @@ describe('reading a PDF', () => {
     expect(out.ok).toBe(true);
     const read = readRatecon(out.ok ? out.lines : []);
     expect(read.ok && read.read.stops.map((s) => s.city?.value)).toEqual(['FARGO', 'DICKINSON']);
+  });
+
+  it('reads the Pickup # / Delivery # layout by its columns, through a real PDF (§12.125)', async () => {
+    const out = await linesFromPdf(tinyPdf(pickupDeliveryColumns(COLUMNS_STOPS)), pdfjs);
+    const read = readRatecon(out.ok ? out.lines : []);
+    expect(read.ok && read.read.layout).toBe('pickup-delivery-columns');
+    expect(read.ok && read.read.loadNumber?.value).toBe('4455001');
+    expect(read.ok && read.read.stops.map((s) => [s.street?.value, s.city?.value, s.time.kind])).toEqual([
+      ['4001 Main St', 'Fargo', 'exact'],
+      ['1200 Harbor Rd', 'Dickinson', 'range'],
+    ]);
   });
 
   it('keeps the page each line came from', async () => {
