@@ -1,9 +1,8 @@
 # Handoff
 
-State on 2026-10-09. Last code commit: `2eba5a1` (React #418 fixed,
-§12.124), deployed to production (Vercel deployment 6962860702, success).
-After it: the hydration e2e now runs in a browser zone the server is not in,
-and this document plus `docs/llm-reader-vendors.md`. `git log` has the newest.
+State on 2026-10-09. Last code commit: `9e13148`, a fourth rate-confirmation
+reader (§12.125). `git log` has the newest; the deploy is checked with the
+curl calls under "How to run the checks".
 
 Read `CLAUDE.md` first. Build from `docs/design-spec.md`; each feature below
 names its § there.
@@ -20,10 +19,26 @@ names its § there.
 | `ccddd9b` | E2e runs say at the end whether the machine slept | — |
 | `99365d0` | The board says "Not updating" when its poll has stopped | 12.123 |
 | `2eba5a1` | React #418 fixed: the board hydrates as the server rendered it, in any zone and on any clock | 12.124 |
+| `a89504d` | The hydration e2e runs in a browser zone the server is not in | 12.124 |
+| `9e13148` | A fourth reader: Pickup # / Delivery # columns, load number beside "Arrive Order" | 12.125 |
 
-PDF fill reads three layouts (label rows, stops section, PU/SO blocks). It
-never sends the file anywhere. Real use so far: 5 loads, 2 filled, 1 scan
-with no text layer, 2 "layout not recognised".
+PDF fill reads four layouts: label rows, a Stops section, PU/SO blocks,
+and Pickup # / Delivery # columns. It never sends the file anywhere.
+
+**Local samples (21 PDFs in `.samples/`, scored 2026-10-09, counts only):**
+- 13 read: 1 label rows, 3 Stops section, 6 PU/SO blocks, 3 Pickup/Delivery
+  columns.
+- 3 scans with no text layer.
+- 5 not recognised:
+  - the known fourth layout (9 pages, "Route #"), waiting on Alex;
+  - two form-like files;
+  - two single-column files that each look different.
+- Every read file filled its load number and every address field. 25 of 26
+  appointment times were filled; the one missing time blocks Save until it is
+  typed.
+
+Files are numbered by name order in the counts-only scripts; no names or
+values are written down anywhere.
 
 ## Rules for rate confirmations (from Alex, standing)
 
@@ -54,18 +69,20 @@ with no text layer, 2 "layout not recognised".
    - Azure, OpenAI and Google offer EU processing, each with conditions.
    - Still to read: data-processing agreements, sub-processors, what
      "flagged" means in practice, and SOC 2/ISO reports.
-4. **Sentry read token.** `SENTRY_READ_TOKEN` in `.env.local` returns 401
-   "Invalid token". A new read-only token is needed before any Sentry
-   question can be answered, including confirming that #418 has stopped and
-   the tracing report (re-run once there are 10+ real sign-ins).
+4. **Sentry hydration filter.** The new read token works. The Sentry project
+   drops React hydration errors on arrival: its stats show "filtered
+   (react-hydration-errors)". This is why #418 never showed as an issue.
+   Keep the filter, or turn it off so these errors show? Not changed. The
+   tracing report still waits for 10+ real sign-ins.
 5. **Sleep test.** Alex runs e2e, closes the lid mid-run, and confirms the
    end-of-run line names the sleep.
 6. **The "worker feeding knowledge" question**, as Alex named it on
    2026-10-09. It isn't written down in any session so far: get the question
    from Alex before doing anything with it.
-7. **Fourth layout** (a 4-stop, 9-page confirmation; correctly refused
-   today): is "Route #" the load number; what does "Scheduling: Open" mean;
-   can more samples from that broker be had?
+7. **The 9-page "Route #" layout** (4 stops; correctly refused today): is
+   "Route #" the load number; what does "Scheduling: Open" mean; can more
+   samples from that broker be had? Not the same as the Pickup/Delivery
+   columns reader, which is built.
 8. **Stage 4 scope.** The window-order and date-range checks cover filled
    stops only. Should typed stops get them too?
 
@@ -83,7 +100,10 @@ page has loaded.
   (`e2e/console.spec.ts`) now runs in a browser zone the server is not in.
   It also matches the production wording ("Minified React error #418"). On
   the pre-fix code it fails with exactly that error.
-- Not yet confirmed in Sentry (item 4).
+- In Sentry: filtered hydration errors arrived nearly every day up to the
+  13:00 UTC hour on 2026-10-09. None arrived after the fix went live at 14:14
+  UTC (checked 16:33 UTC). At a few a day, a longer window is still worth a
+  look.
 
 ## How to run the checks
 
