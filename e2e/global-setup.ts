@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { config as loadEnv } from 'dotenv';
 import { connect, TEST_DATABASE_URL } from './fixtures';
 import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
+import { markRunStart } from './run-clock';
 
 /**
  * Runs once, before the web server is started.
@@ -14,6 +15,12 @@ import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
  */
 export default async function globalSetup(): Promise<void> {
   loadEnv({ path: '.env.local' });
+  // Read at the end against the end of the run: did the machine sleep? (run-clock.ts)
+  try {
+    markRunStart();
+  } catch (error) {
+    console.warn(`e2e: no sleep check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
+  }
 
   const host = new URL(TEST_DATABASE_URL.replace(/^postgres(ql)?:/, 'http:')).hostname;
   if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { FullConfig } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
 import { redactRun, secretsFromEnv, type RedactReport } from './redact';
+import { runSleepReport } from './run-clock';
 import {
   envFromProcess,
   signOutE2eAccount,
@@ -74,6 +75,9 @@ export default async function globalTeardown(config: FullConfig): Promise<void> 
   } else {
     problems.push(`the e2e account was NOT signed out. ${result.reason}`);
   }
+
+  // Said before anything can throw below it, so a failed run still says whether the machine slept.
+  console.info(runSleepReport());
 
   if (problems.length > 0) throw new Error(`e2e teardown: ${problems.join(' ')}`);
 }
