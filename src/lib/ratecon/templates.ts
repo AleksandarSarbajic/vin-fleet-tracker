@@ -2,7 +2,7 @@ import { ZONE_BY_STATE } from '../geo/zone-by-state';
 import type { Line } from './lines';
 
 /**
- * §12.122. The three rate-confirmation layouts this fleet receives, each
+ * §12.122. The four rate-confirmation layouts this fleet receives, each
  * recognised by its labels and read by them. Pure.
  *
  * A layout is used only when EVERY label it is recognised by is present, and

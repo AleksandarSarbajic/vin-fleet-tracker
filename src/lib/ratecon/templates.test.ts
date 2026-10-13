@@ -13,7 +13,7 @@ import type { TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns, linesFromText, type Line } from './lines';
 import { readRatecon, recognisedLayouts, type ReadOutcome, type RateconRead } from './templates';
 
-/** §12.122. The three layouts, read from INVENTED documents (src/test/ratecon-fixtures.ts). */
+/** §12.122. The four layouts, read from INVENTED documents (src/test/ratecon-fixtures.ts). */
 
 const lines = (pages: TinyRun[][]): Line[] =>
   linesFromRuns(pages.flatMap((runs, i) => runs.map((r) => ({ page: i + 1, ...r }))));
