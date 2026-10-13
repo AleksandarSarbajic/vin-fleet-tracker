@@ -3,8 +3,22 @@ import { LABEL_ROWS, PU_SO, STOPS_SECTION, puSoBlocks, type BlockStop } from '@/
 import type { TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns } from '@/lib/ratecon/lines';
 import { readRatecon, type RateconRead, type Source, type TimeRead } from '@/lib/ratecon/templates';
+import { MODEL_REPLY, UNKNOWN_LAYOUT, pdfLine } from '@/test/model-read-fixtures';
+import type { Line } from '@/lib/ratecon/lines';
+import type { ModelAppointment, ModelRead } from '@/lib/ratecon/model-read';
+import { prepareForReading } from '@/lib/ratecon/redact';
+import { NOT_IN_TEXT, verifyRead } from '@/lib/ratecon/verify-read';
 import { loadFormFrom, patchStop, type LoadForm } from './load-form';
-import { TOO_MANY_STOPS, appointmentFrom, fieldsToCheck, fillLoad, sourceLine } from './ratecon-fill';
+import {
+  TOO_MANY_STOPS,
+  aiMarks,
+  appointmentFrom,
+  confirmAiLoadNumber,
+  confirmAiStop,
+  fieldsToCheck,
+  fillLoad,
+  sourceLine,
+} from './ratecon-fill';
 
 /** §12.122. A read, put into the form — by rules that are the same for every layout. Invented documents. */
 
@@ -152,5 +166,92 @@ describe('"fields to check"', () => {
       stops: form.stops.map((s, i) => (i === 1 ? { ...s, appointment: { ...s.appointment, date: '2026-10-11' } } : s)),
     };
     expect(fieldsToCheck(early) - fieldsToCheck(form)).toBe(1);
+  });
+});
+
+/* ----------- the language-model reader (docs/llm-reader-design.md §3) ----------- */
+
+describe('a model read, filled', () => {
+  /** The invented document, sent as redaction sends it, the scripted reply checked against it. */
+  const modelRead = (reply: ModelRead = MODEL_REPLY, lines: Line[] = UNKNOWN_LAYOUT): RateconRead => {
+    const prepared = prepareForReading(lines);
+    if (!prepared.ok) throw new Error(prepared.reason);
+    const out = verifyRead(reply, prepared.lines, NOW);
+    if (!out.ok) throw new Error(out.reason);
+    return out.read;
+  };
+
+  it('fills through the same rules, and every filled field carries an AI mark', () => {
+    const form = fill(modelRead());
+    expect(form.loadNumber).toBe('EX-40417');
+    expect(form.stops.map((s) => [s.stopType, s.addressLine, s.city, s.state, s.zip])).toEqual([
+      ['PU', '4001 Main St', 'Fargo', 'ND', '58102'],
+      ['DEL', '220 Harbor Rd', 'Duluth', 'MN', '55802'],
+    ]);
+    expect(form.stops[0]!.appointment).toMatchObject({ enabled: true, type: 'APPT', date: '2026-10-14', time: '08:00', windowMinutes: 120 });
+    // Load number 1; the pickup's type, four address fields and appointment 6; the delivery's type and address 5.
+    expect(aiMarks(form)).toEqual({ stops: 2, fields: 12 });
+  });
+
+  it('a blank appointment is a check, not an AI mark: alternatives are quoted, never chosen', () => {
+    const delivery = fill(modelRead()).stops[1]!;
+    expect(delivery.appointment).toMatchObject({ enabled: true, time: '' });
+    expect(delivery.fill?.checks.appointment).toBe("Couldn't read: “Delivery same day by 8 PM, or next day 7-10 AM”.");
+  });
+
+  it('AI marks are their own kind: "fields to check" does not count them, and confirming them does not move it', () => {
+    const form = fill(modelRead());
+    const confirmed = confirmAiLoadNumber(form.stops.reduce((f, s) => confirmAiStop(f, s.key), form));
+    expect(aiMarks(confirmed)).toEqual({ stops: 0, fields: 0 });
+    expect(fieldsToCheck(confirmed)).toBe(fieldsToCheck(form));
+  });
+
+  it('"Looks right" clears one stop\'s AI marks and keeps where each came from', () => {
+    const form = fill(modelRead());
+    const once = confirmAiStop(form, form.stops[0]!.key);
+    expect(aiMarks(once)).toEqual({ stops: 1, fields: 1 + 5 });
+    expect(once.stops[0]!.fill?.sources.addressLine).toEqual({ text: '4001 Main St', page: 2 });
+  });
+
+  it('editing a field clears its AI mark, as it clears its source', () => {
+    const form = fill(modelRead());
+    const edited = { ...form, stops: form.stops.map((s, i) => (i === 0 ? patchStop(s, { addressLine: '4003 Main St' }) : s)) };
+    expect(aiMarks(edited)).toEqual({ stops: 2, fields: 11 });
+  });
+
+  it('the load number\'s AI mark clears when it is confirmed, or when the modal drops its source on an edit', () => {
+    const form = fill(modelRead());
+    expect(aiMarks(confirmAiLoadNumber(form)).fields).toBe(11);
+    // What EditStopModal does when the load number is typed in.
+    const typed = { ...form, loadNumber: 'X1', fill: form.fill ? { ...form.fill, loadNumber: null, loadNumberCheck: null } : null };
+    expect(aiMarks(typed).fields).toBe(11);
+  });
+
+  it('a field the verifier could not confirm is blank and says why', () => {
+    const reply = structuredClone(MODEL_REPLY);
+    reply.stops[0]!.street = { value: '4001 Main St', quote: { line: 12, text: '4001 Main Street' } };
+    const pickup = fill(modelRead(reply)).stops[0]!;
+    expect(pickup.addressLine).toBe('');
+    expect(pickup.fill?.checks.addressLine).toBe(NOT_IN_TEXT);
+  });
+
+  it('a window over two hours becomes FCFS receiving hours, marked; the zone follows the state', () => {
+    const reply = structuredClone(MODEL_REPLY);
+    const lines = UNKNOWN_LAYOUT.map((l) => (l.text.startsWith('Pick up 10/14') ? pdfLine(2, 'Pick up 10/14/2026 0800-1100 APPT') : l));
+    reply.stops[0]!.appointment = { ...(reply.stops[0]!.appointment as Extract<ModelAppointment, { kind: 'range' }>), endTime: '11:00', dateQuote: { line: 14, text: 'Pick up 10/14/2026 0800-1100 APPT' }, timeQuote: { line: 14, text: '0800-1100' } };
+    const pickup = fill(modelRead(reply, lines)).stops[0]!;
+    expect(pickup.appointment).toMatchObject({ type: 'FCFS', time: '08:00', endTime: '11:00', tz: 'America/Chicago' });
+    expect(pickup.fill?.checks.appointment).toContain('filled as FCFS receiving hours');
+    expect(fill(modelRead()).stops[1]!.appointment.tz).toBe('America/Chicago');
+  });
+
+  it('a template read carries no AI marks, and its fill is shaped exactly as before', () => {
+    const form = fill(readOf(LABEL_ROWS));
+    expect(aiMarks(form)).toEqual({ stops: 0, fields: 0 });
+    expect(Object.keys(form.fill ?? {}).sort()).toEqual(['layout', 'loadNumber', 'loadNumberCheck']);
+    expect(form.stops.map((s) => Object.keys(s.fill ?? {}).sort())).toEqual([
+      ['checks', 'sources'],
+      ['checks', 'sources'],
+    ]);
   });
 });

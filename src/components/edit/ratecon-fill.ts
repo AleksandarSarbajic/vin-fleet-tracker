@@ -8,6 +8,8 @@ import {
   patchStop,
   stopFormFrom,
   zoneCheckMessage,
+  type FillField,
+  type LoadFill,
   type LoadForm,
   type StopFill,
   type StopForm,
@@ -125,23 +127,23 @@ function dateCheck(date: string, tz: string, now: Date): string | null {
   return null;
 }
 
-function fillStop(blank: StopForm, read: StopRead, now: Date): StopForm {
+function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean): StopForm {
   const sources: StopFill['sources'] = { stopType: read.type.source };
   const checks: StopFill['checks'] = {};
   if (read.typeCheck) checks.stopType = read.typeCheck;
 
   const address: Partial<StopForm> = { stopType: read.type.value };
-  for (const [field, value] of [
-    ['addressLine', read.street],
-    ['city', read.city],
-    ['state', read.state],
-    ['zip', read.zip],
+  for (const [field, readField, value] of [
+    ['addressLine', 'street', read.street],
+    ['city', 'city', read.city],
+    ['state', 'state', read.state],
+    ['zip', 'zip', read.zip],
   ] as const) {
     if (value) {
       address[field] = value.value;
       sources[field] = value.source;
     } else {
-      checks[field] = 'Not found in the PDF.';
+      checks[field] = read.fieldChecks?.[readField] ?? 'Not found in the PDF.';
     }
   }
   // The address first, so the zone follows it (§12.120)…
@@ -153,7 +155,7 @@ function fillStop(blank: StopForm, read: StopRead, now: Date): StopForm {
   const when = dateCheck(stop.appointment.enabled ? stop.appointment.date : '', stop.appointment.tz, now);
   const said = [appointment.check, when].filter(Boolean).join(' ');
   if (said) checks.appointment = said;
-  return { ...stop, fill: { sources, checks } };
+  return { ...stop, fill: byModel ? { sources, checks, ai: true } : { sources, checks } };
 }
 
 /**
@@ -169,25 +171,75 @@ export function fillLoad(
 ): { ok: true; form: LoadForm } | { ok: false; message: string } {
   if (read.stops.length > MAX_STOPS_PER_LOAD) return { ok: false, message: TOO_MANY_STOPS(read.stops.length) };
   const firstKey = form.stops[0]?.key ?? 'new-1';
+  const byModel = read.layout === 'model';
+  const loadFill: LoadFill = {
+    layout: read.layout,
+    loadNumber: read.loadNumber?.source ?? null,
+    loadNumberCheck: read.loadNumberCheck,
+  };
   let next: LoadForm = {
     ...form,
     loadNumber: read.loadNumber?.value ?? form.loadNumber,
     stops: [stopFormFrom(null, openedAt, firstKey)],
-    fill: {
-      layout: read.layout,
-      loadNumber: read.loadNumber?.source ?? null,
-      loadNumberCheck: read.loadNumberCheck,
-    },
+    fill: byModel && read.loadNumber ? { ...loadFill, ai: true } : loadFill,
   };
   read.stops.forEach((stopRead, i) => {
     if (i > 0) next = addStop(next, openedAt).form;
     const at = next.stops.length - 1;
     next = {
       ...next,
-      stops: next.stops.map((s, j) => (j === at ? fillStop(s, stopRead, now) : s)),
+      stops: next.stops.map((s, j) => (j === at ? fillStop(s, stopRead, now, byModel) : s)),
     };
   });
   return { ok: true, form: next };
+}
+
+/**
+ * The fields a stop's AI marks are on: what the language-model read filled
+ * and nobody has confirmed or edited since. A blank the read left is a
+ * check, not an AI mark — there is nothing filled to confirm.
+ */
+function aiMarkedFields(stop: StopForm): FillField[] {
+  if (!stop.fill?.ai) return [];
+  const filled: Record<FillField, boolean> = {
+    stopType: true,
+    addressLine: stop.addressLine !== '',
+    city: stop.city !== '',
+    state: stop.state !== '',
+    zip: stop.zip !== '',
+    appointment: stop.appointment.enabled && stop.appointment.time !== '',
+  };
+  return (Object.keys(stop.fill.sources) as FillField[]).filter((f) => filled[f]);
+}
+
+/**
+ * The language-model reader's marks, counted apart from "fields to check":
+ * how many stops still have one, and how many fields in all (the load
+ * number's included). Cleared by "Looks right", or field by field by an edit.
+ */
+export function aiMarks(form: LoadForm): { stops: number; fields: number } {
+  const perStop = form.stops.map((s) => aiMarkedFields(s).length);
+  const loadNumber = form.fill?.ai && form.fill.loadNumber ? 1 : 0;
+  return { stops: perStop.filter((n) => n > 0).length, fields: loadNumber + perStop.reduce((a, b) => a + b, 0) };
+}
+
+/** "Looks right" on one stop: its AI marks go; where each field came from stays. */
+export function confirmAiStop(form: LoadForm, key: string): LoadForm {
+  return {
+    ...form,
+    stops: form.stops.map((s) => {
+      if (s.key !== key || !s.fill?.ai) return s;
+      const { ai: _confirmed, ...fill } = s.fill;
+      return { ...s, fill };
+    }),
+  };
+}
+
+/** The load number's AI mark goes; its source stays. */
+export function confirmAiLoadNumber(form: LoadForm): LoadForm {
+  if (!form.fill?.ai) return form;
+  const { ai: _confirmed, ...fill } = form.fill;
+  return { ...form, fill };
 }
 
 /**

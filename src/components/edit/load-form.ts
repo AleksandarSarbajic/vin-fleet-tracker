@@ -60,6 +60,13 @@ export interface StopFill {
   sources: Partial<Record<FillField, Source>>;
   /** What to look at, per field. */
   checks: Partial<Record<FillField, string>>;
+  /**
+   * Read by the language-model reader and not yet confirmed: every field
+   * this fill FILLED carries an AI mark, a kind of its own, counted apart
+   * from `checks` and cleared by "Looks right" or by editing the field.
+   * Absent on a template fill.
+   */
+  ai?: true;
 }
 
 /** §12.122. The load's side of a fill. */
@@ -67,6 +74,8 @@ export interface LoadFill {
   layout: LayoutId;
   loadNumber: Source | null;
   loadNumberCheck: string | null;
+  /** The load number was filled by the language-model reader and is not yet confirmed. Absent on a template fill. */
+  ai?: true;
 }
 
 /** §12.121. */
@@ -256,7 +265,7 @@ function fillAfterEdit(fill: StopFill | null, patch: Partial<StopForm>): StopFil
     delete sources[f];
     delete checks[f];
   }
-  return Object.keys(sources).length + Object.keys(checks).length === 0 ? null : { sources, checks };
+  return Object.keys(sources).length + Object.keys(checks).length === 0 ? null : { ...fill, sources, checks };
 }
 
 /**
