@@ -151,6 +151,17 @@ anywhere.
 - **Still open:** vendor, EU processing, flagged content, the basis for
   "allowed". Build nothing vendor-specific.
 
+**Closing phase 2a** (Alex, 2026-10-13):
+
+- **The e2e server's reader settings** come from the `e2e` script in
+  `package.json` (`df97d08`): `LLM_READER_ENABLED=true
+  LLM_READER_VENDOR=fake LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json
+  playwright test`. `playwright.config.ts` is not touched. `npm run gate`
+  runs `npm run e2e`, so it gets them too. `e2e:ui` does not; run the AI
+  spec there with the three variables set by hand.
+- **The `b0bc35b` comparison for the baseline flake is skipped.** See
+  "The 'Synced 0s ago' flake" below for the reason.
+
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor.** Not chosen. Build nothing
@@ -252,7 +263,7 @@ no network call to any vendor. `LLM_READER_ENABLED` is off by default.
 | `src/lib/ratecon/read-codes.ts`, `read-client.ts` | The wire contract and the browser's call (35 s, Cancel) |
 | `src/lib/sentry-reader.ts` | `scrubReaderEvent` and `withoutAiIntegrations`, wired in `sentry.server.config.ts` |
 | `src/components/edit/RateconStrip.tsx`, `StopForm.tsx`, `LoadStrip.tsx`, `Field.tsx` | Read with AI, Show what is sent, Cancel, the AI marks, Looks right, the load number's confirm |
-| `e2e/ratecon-ai.spec.ts` | Through the route and the fake; skipped until the e2e server has the reader's env (below) |
+| `e2e/ratecon-ai.spec.ts` | Through the route and the fake. Runs under `npm run e2e`, which gives the server the reader's env. It still skips, and says why, on a server where the reader is off |
 
 **Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake`
 only; refused in production), `LLM_READER_MODEL`, `LLM_READER_API_KEY`
@@ -265,23 +276,58 @@ be applied to production before the route can count there.
 Every way the build differs from the design, phases 1 and 2a, is listed in
 `llm-reader-design.md` §11.
 
-**E2e, 2026-10-13:**
-- **Full run:** 241 passed, 1 skipped (the AI e2e: the reader is off on the
-  e2e server), 1 did not run.
-- **Two failed:** desktop baselines `1-default` at 768 and 1920 px, by 35
-  and 155 pixels. The only difference was "Synced 0s ago" beside the
-  header's dot, present in the run and absent in the baseline: the first
-  poll landing before the shot.
-- **Rerun on the same code** (`--update-snapshots=none`): all 13 desktop
-  baselines passed.
-- Nothing was re-saved. The timing of that text is a flake worth fixing in
-  the spec, separately.
+**E2e, phase 2a build (2026-10-13), with the reader still off on the e2e server:**
+
+- **Result:** 241 passed, 1 skipped (the AI spec) and 1 did not run.
+- **Failures:** two desktop `1-default` baselines failed, the flake below.
+- **Rerun:** all 13 desktop baselines passed.
+
+**E2e, closing 2a (2026-10-13), with the reader on through the `e2e` script:**
+
+- **First full run:** 243 passed, 1 failed and 1 did not run.
+  - The failure was the AI spec itself, at the paste: "NotAllowedError:
+    Failed to execute 'writeText' on 'Clipboard': Write permission
+    denied."
+  - The spec never granted clipboard permission. `60b802f` grants
+    `clipboard-read` and `clipboard-write` before the paste, as
+    `paste-address.spec.ts` does. It is a test fix only; no app code
+    changed.
+- **Second full run:** 245 passed, exit 0.
+  - The AI spec ran, not skipped, and passed.
+  - It made exactly one `ratecon_ai_reads` row, `{outcome: 'ok', lines_sent: 23}`, and saved no stops.
+  - No baseline moved, and nothing was re-saved.
+
+**The "Synced 0s ago" flake** (a desktop baseline, not a 2a bug):
+
+- **Symptom:** `e2e/desktop-baseline.spec.ts`, shot `1-default`, sometimes
+  differs from its baseline. The run shows "Synced 0s ago" beside the
+  header's dot, and the baseline does not. The first poll lands before the
+  shot.
+- **At HEAD (`60b802f`):** `npm run e2e -- e2e/desktop-baseline.spec.ts -g
+  "desktop at" --repeat-each=5 --update-snapshots=none` gave 28 passed and
+  3 failed.
+
+  | Width | Passed | Failures |
+  |---|---|---|
+  | 768 px | 3 of 5 | `1-default`, 35 px each |
+  | 1920 px | 4 of 5 | `1-default`, 155 px |
+  | 1024, 1280, 1440, 1680 px | 5 of 5 | — |
+
+- **It predates 2a,** so the comparison at `b0bc35b` was skipped (Alex,
+  option 3). In `git diff b0bc35b..HEAD`, the board changes only in one
+  boolean prop, `aiReader`, passed through `src/app/page.tsx` and
+  `src/components/console/Console.tsx`. No header, poll or sync code
+  changed.
+- **It blocks `npm run gate`:** on a bad draw, the gate's e2e step fails.
+- **Not fixed and not re-saved.** It needs its own small phase.
 
 ## Next
 
-Phase 2a waits for Alex's approval, and for one decision. The e2e server
-needs `LLM_READER_ENABLED=true`, `LLM_READER_VENDOR=fake` and
-`LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json`, which means a Playwright
-config change, the npm script, or `.env.local`; until then the AI e2e is
-skipped. Phase 2b (one real adapter) needs the vendor chosen first. Other
-open decisions are above.
+- **Phase 2a waits for Alex's approval.** It is built, and its e2e runs and
+  passes.
+- **A small phase for the "Synced 0s ago" baseline flake,** above. Until it
+  lands, `npm run gate` can fail on it.
+- **Phase 2b (one real adapter)** needs the vendor chosen first.
+- **Before the route can count in production,** migration 0026 must be
+  applied there.
+- Other open decisions are above.
