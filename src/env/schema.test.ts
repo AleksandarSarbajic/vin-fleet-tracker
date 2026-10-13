@@ -253,7 +253,15 @@ describe('the app and the worker share no credential (§12.75)', () => {
   it('the app starts with none of the worker\'s variables', () => {
     expect(AppEnv.safeParse(validApp).success).toBe(true);
     const r = AppEnv.safeParse({ ...validApp, ...validWorker, DATABASE_URL: TRANSACTION });
-    expect(r.success && Object.keys(r.data).sort()).toEqual(['DATABASE_URL', 'DISPATCH_TZ', 'NODE_ENV']);
+    // The reader's three defaulted settings are the app's own; no worker variable is here.
+    expect(r.success && Object.keys(r.data).sort()).toEqual([
+      'DATABASE_URL',
+      'DISPATCH_TZ',
+      'LLM_READER_DAILY_CAP',
+      'LLM_READER_ENABLED',
+      'LLM_READER_USER_DAILY_CAP',
+      'NODE_ENV',
+    ]);
   });
 
   it('and each refuses to stand in for the other', () => {
@@ -387,5 +395,72 @@ describe('a blank optional variable is an absent one', () => {
 
   it('accepts a blank client DSN too', () => {
     expect(ClientEnv.safeParse({ ...validClient, NEXT_PUBLIC_SENTRY_DSN: '' }).success).toBe(true);
+  });
+});
+
+describe("the language-model reader's settings (docs/llm-reader-design.md §4)", () => {
+  const withPublic = <T>(vars: Record<string, string>, run: () => T): T => {
+    const before = { ...process.env };
+    Object.assign(process.env, vars);
+    try {
+      return run();
+    } finally {
+      for (const key of Object.keys(vars)) delete process.env[key];
+      Object.assign(process.env, before);
+    }
+  };
+  const app = (vars: Record<string, string>) => AppEnv.safeParse({ ...validApp, ...vars });
+
+  it('is off, with no vendor, and caps of 25 a user and 100 in all, when nothing is set', () => {
+    const r = app({});
+    expect(r.success && r.data).toMatchObject({
+      LLM_READER_ENABLED: false,
+      LLM_READER_USER_DAILY_CAP: 25,
+      LLM_READER_DAILY_CAP: 100,
+    });
+    expect(r.success && r.data.LLM_READER_VENDOR).toBeUndefined();
+  });
+
+  it.each([
+    ['true', true],
+    ['1', true],
+    ['false', false],
+    ['0', false],
+    ['', false],
+  ])('reads the flag %j as %s', (value, on) => {
+    const r = app({ LLM_READER_ENABLED: value });
+    expect(r.success && r.data.LLM_READER_ENABLED).toBe(on);
+  });
+
+  it('refuses a flag that is neither on nor off', () => {
+    expect(errorOn(app({ LLM_READER_ENABLED: 'yes please' }), 'LLM_READER_ENABLED')).toBeDefined();
+  });
+
+  it('takes the fake vendor, and no other until a real adapter is built', () => {
+    expect(app({ LLM_READER_VENDOR: 'fake' }).success).toBe(true);
+    expect(app({ LLM_READER_VENDOR: 'some-vendor' }).success).toBe(false);
+  });
+
+  it('refuses the fake vendor in production, and takes it in a preview or locally', () => {
+    expect(errorOn(app({ LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'production' }), 'LLM_READER_VENDOR')).toMatch(/production/);
+    expect(app({ LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'preview' }).success).toBe(true);
+    expect(app({ LLM_READER_VENDOR: 'fake' }).success).toBe(true);
+  });
+
+  it('takes caps as whole positive numbers', () => {
+    const r = app({ LLM_READER_USER_DAILY_CAP: '3', LLM_READER_DAILY_CAP: '7' });
+    expect(r.success && [r.data.LLM_READER_USER_DAILY_CAP, r.data.LLM_READER_DAILY_CAP]).toEqual([3, 7]);
+    expect(app({ LLM_READER_DAILY_CAP: '0' }).success).toBe(false);
+    expect(app({ LLM_READER_USER_DAILY_CAP: '2.5' }).success).toBe(false);
+  });
+
+  it('refuses a key that is ALSO published under any NEXT_PUBLIC_ name', () => {
+    const r = withPublic({ NEXT_PUBLIC_ANYTHING: 'reader-secret' }, () => app({ LLM_READER_API_KEY: 'reader-secret' }));
+    expect(errorOn(r, 'LLM_READER_API_KEY')).toContain('ships to every browser');
+  });
+
+  it('accepts a key that is nowhere in the client bundle', () => {
+    const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.abc' }, () => app({ LLM_READER_API_KEY: 'reader-secret' }));
+    expect(r.success).toBe(true);
   });
 });

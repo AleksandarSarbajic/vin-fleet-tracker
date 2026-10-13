@@ -220,6 +220,46 @@ const serverShape = z.object({
       .refine(isIanaZone, { message: 'DISPATCH_TZ must be a valid IANA zone' })
       .default('America/Chicago'),
 
+    /**
+     * The language-model reader (docs/llm-reader-design.md §4). OFF unless
+     * set: "true" or "1". Off, the route answers 404 and the strip never
+     * shows "Read with AI".
+     */
+    LLM_READER_ENABLED: blankIsAbsent(z.enum(['true', 'false', '1', '0']).optional()).transform(
+      (v) => v === 'true' || v === '1',
+    ),
+
+    /**
+     * Which adapter reads. Only `fake` exists until Alex chooses a vendor;
+     * a real one is added with its adapter, never before. Unset, the reader
+     * is off whatever the flag says.
+     */
+    LLM_READER_VENDOR: blankIsAbsent(z.enum(['fake']).optional()),
+
+    /** The vendor's model id, recorded by its adapter. Unused by the fake. */
+    LLM_READER_MODEL: blankIsAbsent(z.string().min(1).optional()),
+
+    /**
+     * The vendor's credential. SERVER ONLY — refused at boot if any
+     * `NEXT_PUBLIC_*` value equals it, as HERE_API_KEY is. No code reads it
+     * until a real adapter exists.
+     */
+    LLM_READER_API_KEY: blankIsAbsent(z.string().min(1).optional()),
+
+    /** The fake's script: a JSON file of steps (e2e and local runs). Ignored by a real vendor. */
+    LLM_READER_FAKE_SCRIPT: blankIsAbsent(z.string().min(1).optional()),
+
+    /**
+     * Reads a user may start in a dispatch-zone day, and reads in all
+     * (Alex, 2026-10-13: 25 and 100). Counted in Postgres, compared, never
+     * projected (§12.60).
+     */
+    LLM_READER_USER_DAILY_CAP: z.coerce.number().int().positive().default(25),
+    LLM_READER_DAILY_CAP: z.coerce.number().int().positive().default(100),
+
+    /** Set by Vercel on every deployment; absent locally and in e2e. */
+    VERCEL_ENV: blankIsAbsent(z.enum(['production', 'preview', 'development']).optional()),
+
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 
@@ -275,6 +315,34 @@ const HERE_KEY_IS_NOT_PUBLIC = {
 };
 
 /**
+ * The language-model reader's key must not be any value that reaches a
+ * browser — the same rule as HERE_API_KEY's, for the same reason: a metered
+ * key in a network tab is somebody else's to spend.
+ */
+const readerKeyIsNotPublic = (e: { LLM_READER_API_KEY?: string | undefined }): boolean =>
+  e.LLM_READER_API_KEY === undefined || publicValues().every((v) => v !== e.LLM_READER_API_KEY);
+
+const READER_KEY_IS_NOT_PUBLIC = {
+  path: ['LLM_READER_API_KEY'],
+  message:
+    'LLM_READER_API_KEY is also exposed as a NEXT_PUBLIC_* variable, which ' +
+    'ships to every browser. Keep the key server-side.',
+};
+
+/**
+ * The fake reader answers from a script, not from the document. It is for
+ * e2e and local runs; in production it would put scripted stops on a real
+ * load. `VERCEL_ENV`, not `NODE_ENV`: the e2e run is a production build too.
+ */
+const noFakeReaderInProduction = (e: { LLM_READER_VENDOR?: string | undefined; VERCEL_ENV?: string | undefined }) =>
+  !(e.LLM_READER_VENDOR === 'fake' && e.VERCEL_ENV === 'production');
+
+const NO_FAKE_READER_IN_PRODUCTION = {
+  path: ['LLM_READER_VENDOR'],
+  message: 'LLM_READER_VENDOR=fake is refused in production (VERCEL_ENV=production): it answers from a script.',
+};
+
+/**
  * What the NEXT APP needs, and nothing else (§12.75).
  *
  * The app used to be validated against every server variable at once, which
@@ -293,11 +361,22 @@ const HERE_KEY_IS_NOT_PUBLIC = {
  * `src/env/app-env.test.ts` holds it: the app's schema accepts an environment
  * with none of the worker's variables in it.
  */
-export const AppEnv = serverShape.pick({
-  DATABASE_URL: true,
-  DISPATCH_TZ: true,
-  NODE_ENV: true,
-});
+export const AppEnv = serverShape
+  .pick({
+    DATABASE_URL: true,
+    DISPATCH_TZ: true,
+    NODE_ENV: true,
+    LLM_READER_ENABLED: true,
+    LLM_READER_VENDOR: true,
+    LLM_READER_MODEL: true,
+    LLM_READER_API_KEY: true,
+    LLM_READER_FAKE_SCRIPT: true,
+    LLM_READER_USER_DAILY_CAP: true,
+    LLM_READER_DAILY_CAP: true,
+    VERCEL_ENV: true,
+  })
+  .refine(readerKeyIsNotPublic, READER_KEY_IS_NOT_PUBLIC)
+  .refine(noFakeReaderInProduction, NO_FAKE_READER_IN_PRODUCTION);
 
 /**
  * What `npm run db:migrate` needs: the session pooler and nothing else.
