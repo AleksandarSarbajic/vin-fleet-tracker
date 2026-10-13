@@ -143,10 +143,20 @@ describeDb('the cap under concurrency (fleet_commit)', () => {
     await db().execute(sql`delete from ratecon_ai_reads where user_id in (${ME}, ${YOU})`);
   });
 
+  /**
+   * Backends waiting on THIS table or on the reservation's own advisory key
+   * (0x72636169, below 2^31, so classid 0) — not on any lock: other suites
+   * in fleet_commit hold row locks of their own, and the route's tests may
+   * be reserving too, so at least two, not exactly two.
+   */
   const waitingOnLocks = async () =>
     ((await db().execute<{ n: number }>(sql`
-      select count(*)::int as n from pg_stat_activity
-      where datname = current_database() and wait_event_type = 'Lock'`)) as unknown as { n: number }[])[0]!.n;
+      select count(distinct pid)::int as n from pg_locks
+      where not granted and database = (select oid from pg_database where datname = current_database())
+        and ((locktype = 'relation' and relation = 'ratecon_ai_reads'::regclass)
+          or (locktype = 'advisory' and classid = 0 and objid = ${0x7263_6169} and objsubid = 1))`)) as unknown as {
+      n: number;
+    }[])[0]!.n;
 
   it('two reservations at cap−1, let go together: exactly one goes through', async () => {
     await db().execute(sql`insert into ratecon_ai_reads (user_id, vendor, lines_sent, outcome) values (${ME}, 'fake', 1, 'ok')`);
@@ -155,7 +165,7 @@ describeDb('the cap under concurrency (fleet_commit)', () => {
       await holder.execute(sql`lock table ratecon_ai_reads in share mode`);
       racing = Promise.all([reserve(db(), ME, 2), reserve(db(), ME, 2)]);
       for (let i = 0; i < 200 && (await waitingOnLocks()) < 2; i += 1) await new Promise((r) => setTimeout(r, 10));
-      expect(await waitingOnLocks()).toBe(2);
+      expect(await waitingOnLocks()).toBeGreaterThanOrEqual(2);
     });
     const results = await racing!;
     expect(results.filter((r) => 'id' in r)).toHaveLength(1);
