@@ -83,7 +83,7 @@ const validDate = (y: number, m: number, d: number) => {
 /** "ROCKFORD, IL 61109", "FARGO  ND  58102", "MN 56560" merged — city, state, ZIP. */
 const CITY_LINE = /^(.+?)[,\s]+([A-Z]{2})[,\s]+(\d{5})(?:-\d{4})?\b/;
 
-function cityLine(text: string): { city: string; state: string; zip: string } | null {
+export function cityLine(text: string): { city: string; state: string; zip: string } | null {
   const match = CITY_LINE.exec(text.trim());
   if (!match || !US.has(match[2]!)) return null;
   return { city: match[1]!.replace(/[\s,]+$/, ''), state: match[2]!, zip: match[3]! };
