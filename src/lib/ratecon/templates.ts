@@ -17,13 +17,15 @@ import type { Line } from './lines';
  * notes, instructions. No pattern below looks at them.
  */
 
-export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns';
+/** The four templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
+export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
   'label-rows': 'label rows (PICKUP DATE / SHIPPER / CONSIGNEE)',
   'stops-section': 'a Stops section (Stop 1 Pickup, Stop 2 Drop)',
   'pu-so-blocks': 'PU / SO blocks (Name, Address, Date)',
   'pickup-delivery-columns': 'Pickup # / Delivery # blocks (address and appointment columns)',
+  model: 'an AI read',
 };
 
 export interface Source {
@@ -55,6 +57,8 @@ export interface StopRead {
   state: Sourced<string> | null;
   zip: Sourced<string> | null;
   time: TimeRead;
+  /** Why an address field is blank, when it is not simply absent. Only a model read says (`verify-read.ts`). */
+  fieldChecks?: Partial<Record<'street' | 'city' | 'state' | 'zip', string>>;
 }
 
 export interface RateconRead {

@@ -33,6 +33,8 @@ const CITY_LINE = /^(.*?)[,\s]+([A-Za-z]{2})\.?(?:[,\s]+(\d{5})(?:[-\s]?\d{4})?)
 const ZIP_ONLY = /^(.*?)[,\s]+(\d{5})(?:[-\s]?\d{4})?$/;
 /** A house number, or a PO box: what a street line starts with. */
 const STREET = /^(\d+[A-Za-z]?(?:-\d+)?\s+\S|p\.?\s*o\.?\s*box\b)/i;
+/** The same rule, for the language-model reader's verifier: a value that does not start so is not a street. */
+export const startsLikeStreet = (text: string): boolean => STREET.test(text.trim());
 /** A unit inside a building — belongs on the street line. */
 const UNIT = /^(suite|ste|unit|bldg|building|apt|floor|fl|room|rm|dock|door)\b\.?\s*\S|^#\s*\w/i;
 const COUNTRY = /^(usa|us|u\.s\.a?\.?|united states( of america)?)$/i;
