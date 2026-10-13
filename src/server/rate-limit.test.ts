@@ -265,7 +265,16 @@ describe('every route handler is rate limited', () => {
     return found;
   }
 
-  const files = routeFiles(API).map((f) => ({ path: f, body: readFileSync(f, 'utf8') }));
+  /**
+   * A route whose body lives in a handler module (`@/server/…/handle-*`, as
+   * /api/ratecon/read's does, so its checks can be tested with injected
+   * dependencies) is read together with that module: the guards are judged
+   * where the code is, not where the export is.
+   */
+  const SRC = join(import.meta.dirname, '..');
+  const withHandlers = (body: string) =>
+    [body, ...[...body.matchAll(/from '@\/(server\/[\w/-]*\/handle-[\w-]+)'/g)].map((m) => readFileSync(join(SRC, `${m[1]}.ts`), 'utf8'))].join('\n');
+  const files = routeFiles(API).map((f) => ({ path: f, body: withHandlers(readFileSync(f, 'utf8')) }));
 
   it('finds the API routes, so the scan cannot pass by finding nothing', () => {
     // A directory rename would otherwise turn every assertion below green.
@@ -295,7 +304,7 @@ describe('every route handler is rate limited', () => {
     const offenders = files
       .filter(({ body }) => /require(User|Role)\(/.test(body))
       .filter(
-        ({ body }) => !/enforceRateLimit\('(read|read\.heavy|write|geocode)'/.test(body),
+        ({ body }) => !/enforceRateLimit\('(read|read\.heavy|write|geocode|llm)'/.test(body),
       )
       .map(({ path }) => path.split('/api/')[1]!);
 

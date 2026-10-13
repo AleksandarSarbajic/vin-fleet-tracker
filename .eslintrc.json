@@ -17,6 +17,7 @@
   "overrides": [
     {
       "files": ["src/lib/ratecon/**", "src/components/edit/RateconStrip.tsx", "src/app/api/ratecon/**", "src/server/ratecon-reader/**"],
+      "excludedFiles": ["**/*.test.ts", "**/*.test.tsx"],
       "rules": {
         "no-console": "error",
         "no-restricted-globals": [

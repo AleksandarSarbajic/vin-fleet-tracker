@@ -155,6 +155,15 @@ export const LIMITS = {
   geocode: { capacity: 15, refillPerSecond: 0.25 },
 
   /**
+   * `/api/ratecon/read`: each read is a paid call to a language-model vendor
+   * (docs/llm-reader-design.md §4). Three at once, then one a minute — a
+   * dispatcher reads one rate confirmation at a time. In memory, so on a
+   * serverless host it is per instance and weak; the daily cap in Postgres
+   * (`ratecon_ai_reads`) is the guard that holds.
+   */
+  llm: { capacity: 3, refillPerSecond: 1 / 60 },
+
+  /**
    * Per client address, checked BEFORE authentication and therefore spent by
    * every request, signed in or not.
    *
