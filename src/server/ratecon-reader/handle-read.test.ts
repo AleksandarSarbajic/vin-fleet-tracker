@@ -330,6 +330,39 @@ describeDb('POST /api/ratecon/read: through the real Anthropic adapter, on an in
     expect(await rows(id)).toEqual([{ outcome: 'ok', vendor: 'anthropic', lines_sent: 20, input_tokens: 2900, output_tokens: 700 }]);
   });
 
+  it('the prepaid balance run dry: vendor_capped, and the vendor\'s status reaches the log', async () => {
+    const id = newUser();
+    const r = await handleRead(
+      request(BODY),
+      viaAnthropic(
+        answer(400, {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: `Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits. ${KEY}`,
+          },
+        }),
+      ),
+    );
+    expect([r.status, await json(r)]).toEqual([503, { ok: false, code: 'vendor_capped' }]);
+    expect((await rows(id))[0]).toMatchObject({ outcome: 'vendor_capped', vendor: 'anthropic' });
+    expect(consoleSpies[3]!.mock.calls).toEqual([
+      ['ratecon read failed', { reference: expect.stringMatching(/^RATECON-503-/), code: 'vendor_capped', errorName: 'AdapterFailure', vendorStatus: 400 }],
+    ]);
+    expect(JSON.stringify(consoleSpies.flatMap((s) => s.mock.calls))).not.toContain(KEY);
+  });
+
+  it('an undocumented 4xx stays unavailable, and its status still reaches the log', async () => {
+    newUser();
+    await handleRead(
+      request(BODY),
+      viaAnthropic(answer(400, { type: 'error', error: { type: 'invalid_request_error', message: `something new ${KEY}` } })),
+    );
+    expect(consoleSpies[3]!.mock.calls).toEqual([
+      ['ratecon read failed', { reference: expect.stringMatching(/^RATECON-503-/), code: 'unavailable', errorName: 'AdapterFailure', vendorStatus: 400 }],
+    ]);
+  });
+
   it('the account\'s spend limit: 503 vendor_capped, and neither the key nor the text in the body, the log or the row', async () => {
     const id = newUser();
     const r = await handleRead(

@@ -402,6 +402,20 @@ describe('every vendor failure is one fixed code, and carries neither the key no
       402,
       vendorError(402, 'billing_error', 'payment method declined'),
     ],
+    // The documented out-of-credit message; its status is not documented, so each 4xx.
+    ...([400, 402, 403, 429] as const).map(
+      (status) =>
+        [
+          `${status}, the prepaid balance run dry`,
+          'vendor_capped',
+          status,
+          vendorError(
+            status,
+            'invalid_request_error',
+            'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+          ),
+        ] as const,
+    ),
     [
       'a gateway page, not JSON',
       'unavailable',
@@ -414,6 +428,32 @@ describe('every vendor failure is one fixed code, and carries neither the key no
     expect(result).toEqual({ ok: false, code, vendorStatus });
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
     expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('the credit message on a 5xx is an outage, not a cap: it counts only on a 4xx', async () => {
+    const { fetch } = transport(
+      vendorError(
+        500,
+        'api_error',
+        'Your credit balance is too low to access the Anthropic API.',
+      ),
+    );
+    expect(await read(fetch)).toEqual({
+      ok: false,
+      code: 'unavailable',
+      vendorStatus: 500,
+    });
+  });
+
+  it('the credit message only counts at the start', async () => {
+    const { fetch } = transport(
+      vendorError(400, 'invalid_request_error', 'quoted: Your credit balance is too low'),
+    );
+    expect(await read(fetch)).toEqual({
+      ok: false,
+      code: 'unavailable',
+      vendorStatus: 400,
+    });
   });
 
   it('"You have reached your specified" only counts at the start of a 400', async () => {

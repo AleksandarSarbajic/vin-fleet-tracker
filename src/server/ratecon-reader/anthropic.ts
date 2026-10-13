@@ -78,6 +78,16 @@ const SPEND_LIMIT_PREFIX = 'You have reached your specified';
 const TIER_CAP_CODE = 'enforced_spend_limit_reached';
 
 /**
+ * A prepaid balance run dry — the limit Alex is likeliest to meet. Anthropic
+ * documents the MESSAGE ("Your credit balance is too low to access the
+ * Anthropic API. Please go to Plans & Billing to upgrade or purchase
+ * credits.", about-claude/api-credits-for-subscribers, read 2026-10-14) but
+ * not its HTTP status or error type, so it is matched on any 4xx. Only the
+ * prefix is compared; the status still reaches the log.
+ */
+const CREDIT_PREFIX = 'Your credit balance is too low';
+
+/**
  * The JSON keywords Anthropic's structured outputs accept (docs,
  * build-with-claude/structured-outputs, read 2026-10-13). Anything else is
  * dropped: `minLength`/`maxLength`, `minimum`/`maximum`, `maxItems`,
@@ -269,17 +279,26 @@ function bodyField(body: unknown, ...path: string[]): unknown {
   return at;
 }
 
-/** The account's own money is spent: the 400 of a spend limit it set, a tier's 429 cap, or a 402. */
+/**
+ * The account's own money is spent: a 402; a tier's 429 cap; the 400 of a
+ * spend limit it set; or, on any 4xx, the documented out-of-credit message.
+ */
 function spendStopped(error: InstanceType<typeof Anthropic.APIError>): boolean {
-  if (error.status === 402) return true;
-  if (error.status === 429)
-    return bodyField(error.error, 'error', 'details', 'error_code') === TIER_CAP_CODE;
-  if (error.status !== 400) return false;
+  const status = error.status ?? 0;
+  if (status < 400 || status > 499) return false;
+  if (status === 402) return true;
   const message = bodyField(error.error, 'error', 'message');
-  return typeof message === 'string' && message.startsWith(SPEND_LIMIT_PREFIX);
+  if (typeof message === 'string' && message.startsWith(CREDIT_PREFIX)) return true;
+  if (status === 429)
+    return bodyField(error.error, 'error', 'details', 'error_code') === TIER_CAP_CODE;
+  return (
+    status === 400 &&
+    typeof message === 'string' &&
+    message.startsWith(SPEND_LIMIT_PREFIX)
+  );
 }
 
-/** Any error, as a code. The error's message is never read past the spend-limit prefix. */
+/** Any error, as a code. The error's message is never read past the spend-limit and credit prefixes. */
 export function failureOf(error: unknown, signal: AbortSignal): AdapterResult {
   if (
     signal.aborted ||
