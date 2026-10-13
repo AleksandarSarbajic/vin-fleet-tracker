@@ -1,8 +1,9 @@
 # Handoff
 
-State on 2026-10-09. Last code commit: `9e13148`, a fourth rate-confirmation
-reader (§12.125). `git log` has the newest; the deploy is checked with the
-curl calls under "How to run the checks".
+State on 2026-10-13. Last code commit: `9e13148`, a fourth rate-confirmation
+reader (§12.125); everything since is docs. `npm run check` passed on
+2026-10-13 (157 files, 2109 tests). `git log` has the newest; the deploy is
+checked with the curl calls under "How to run the checks".
 
 Read `CLAUDE.md` first. Build from `docs/design-spec.md`; each feature below
 names its § there.
@@ -25,20 +26,43 @@ names its § there.
 PDF fill reads four layouts: label rows, a Stops section, PU/SO blocks,
 and Pickup # / Delivery # columns. It never sends the file anywhere.
 
-**Local samples (21 PDFs in `.samples/`, scored 2026-10-09, counts only):**
+**Local samples (28 PDFs in `.samples/`, triaged 2026-10-13, counts only).**
+This replaces the 21-PDF count of 2026-10-09.
 - 13 read: 1 label rows, 3 Stops section, 6 PU/SO blocks, 3 Pickup/Delivery
-  columns.
+  columns. The same 13 as on 2026-10-09; none of the new files is read.
 - 3 scans with no text layer.
-- 5 not recognised:
-  - the known fourth layout (9 pages, "Route #"), waiting on Alex;
-  - two form-like files;
-  - two single-column files that each look different.
+- 12 not recognised, all with a text layer (was 5).
 - Every read file filled its load number and every address field. 25 of 26
   appointment times were filled; the one missing time blocks Save until it is
-  typed.
+  typed (item (a), not touched). 16 of 26 stops are marked Check.
+- `expected.json` (ground truth) covers only 7 of the 28: six read files, all
+  passing the bar with no appointment silently wrong, and the "Route #" file,
+  correctly refused. The other 21 have no ground truth, so
+  `npm run ratecon:score` skips them. The 7 read files among them filled every
+  field, but that is not checked against what the PDF says.
+- 10 PDFs carry the date 2026-10-13, though only 7 are net new. So 3 earlier
+  files were replaced or re-saved: two of the three scans and one not
+  recognised file. Ask Alex whether these are the unsigned originals in (c).
+  If so, the two scans still have no text layer.
 
-Files are numbered by name order in the counts-only scripts; no names or
-values are written down anywhere.
+**The 12 not recognised, by label signature** (the `recognise` lists in
+`templates.ts`). No file has more than one label of any layout, and every
+label found is a common word: "Rate Confirmation", "LineHaul", "Address:",
+"Order:". So none is an existing layout with a few labels changed. Every
+group is a new layout, and the signature does not prove that the files in
+one group share a layout.
+
+| Group | Files | Labels found | Pages / lines |
+|---|---|---|---|
+| G1 | 2 | SS "Rate Confirmation", PD "LineHaul" | 3/75, 3/78 |
+| G2 | 3 | SS "Rate Confirmation" | 5/174, 5/143, 2/64 |
+| G3 | 1 | SS "Rate Confirmation", PS "Address:", PD "LineHaul" | 2/49 |
+| G4 | 1 | SS "Rate Confirmation", PS "Order:" | 7/327 |
+| G5 | 5 | none, including the 9-page "Route #" file | 6/222, 2/60, 9/282, 6/175, 5/152 |
+
+Files are numbered by name order in the counts-only scripts. The numbers
+shift whenever a file is added, so they are not written down here. No names
+or values are written down anywhere.
 
 ## Rules for rate confirmations (from Alex, standing)
 
@@ -48,6 +72,15 @@ values are written down anywhere.
 - No report prints a rate, broker contact, phone, email or driver name.
 - No real document goes to any outside service. Do not choose a vendor.
 - `git ls-files | grep -iE "\.pdf|expected\.json|samples"` must print nothing.
+
+## Decided by Alex, 2026-10-13
+
+- **Sentry hydration filter: keep it.** The Sentry config is not changed.
+  (Was open decision 4.)
+- **FCFS windows, question (b): yes.** A start and end more than two hours
+  apart, filled as FCFS receiving hours and marked Check, is what Alex would
+  enter. The rule in `design-spec.md` (Appointments, under §12.122) stays as
+  it is.
 
 ## Open decisions, waiting on Alex
 
@@ -69,11 +102,10 @@ values are written down anywhere.
    - Azure, OpenAI and Google offer EU processing, each with conditions.
    - Still to read: data-processing agreements, sub-processors, what
      "flagged" means in practice, and SOC 2/ISO reports.
-4. **Sentry hydration filter.** The new read token works. The Sentry project
-   drops React hydration errors on arrival: its stats show "filtered
-   (react-hydration-errors)". This is why #418 never showed as an issue.
-   Keep the filter, or turn it off so these errors show? Not changed. The
-   tracing report still waits for 10+ real sign-ins.
+4. ~~Sentry hydration filter.~~ Decided 2026-10-13: keep it (above). The
+   Sentry project drops React hydration errors on arrival, which is why #418
+   never showed as an issue. The tracing report still waits for 10+ real
+   sign-ins.
 5. **Sleep test.** Alex runs e2e, closes the lid mid-run, and confirms the
    end-of-run line names the sleep.
 6. **The "worker feeding knowledge" question**, as Alex named it on
