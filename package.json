@@ -18,7 +18,7 @@
     "db:verify": "tsx scripts/verify-db.mts",
     "demo:relocate": "tsx scripts/relocate-demo-stops.mts",
     "dev": "next dev",
-    "e2e": "LLM_READER_ENABLED=true LLM_READER_VENDOR=fake LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json playwright test",
+    "e2e": "LLM_READER_ENABLED=true LLM_READER_VENDOR=fake LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json LLM_READER_API_KEY=sk-ant-e2e-SYNTHETIC-not-a-real-key-4f1c9a E2E_READER_KEY_SCAN=1 playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:user": "tsx scripts/e2e-user.mts",
     "eta:score": "tsx scripts/eta-score.mts",
