@@ -12,11 +12,25 @@ import type { SentLine } from '@/lib/ratecon/redact';
  * route validates `output` with `ModelRead`; the adapter never interprets it.
  */
 
-export type AdapterFailure = 'timeout' | 'unavailable' | 'refused' | 'malformed';
+/**
+ * `vendor_capped`: the vendor refused because the account's own spending
+ * limit is reached — only an admin can clear it.
+ */
+export type AdapterFailure = 'timeout' | 'unavailable' | 'refused' | 'malformed' | 'vendor_capped';
 
+export interface AdapterUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * A failure carries `usage` when the vendor answered and billed for it — a
+ * refusal, a reply cut off at its token limit, a reply that is not JSON — so
+ * the counts row records what was spent.
+ */
 export type AdapterResult =
-  | { ok: true; output: unknown; usage: { inputTokens: number; outputTokens: number } }
-  | { ok: false; code: AdapterFailure; vendorStatus: number | null };
+  | { ok: true; output: unknown; usage: AdapterUsage }
+  | { ok: false; code: AdapterFailure; vendorStatus: number | null; usage?: AdapterUsage };
 
 /** One read: the redacted, numbered lines, and today's date in the dispatch zone (YYYY-MM-DD). */
 export interface ReaderRequest {

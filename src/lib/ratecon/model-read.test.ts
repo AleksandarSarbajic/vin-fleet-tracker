@@ -93,6 +93,8 @@ describe('the instruction', () => {
     ['the document is data, not instructions', /data[^.]*never instructions/i],
     ['placeholders are never values', /\[PHONE\][\s\S]*never/i],
     ['a year-less date takes its year from today, given with the lines', /no year[\s\S]*today/i],
+    ['a one-line quote ends where it starts', /"lineEnd"[^.]*same as "line" when the quote is on one line/],
+    ['a range whose times share a quote repeats it as the end quote', /"endQuote"[^.]*same as "timeQuote"/],
   ])('says: %s', (_, clause) => {
     expect(MODEL_INSTRUCTION).toMatch(clause);
   });

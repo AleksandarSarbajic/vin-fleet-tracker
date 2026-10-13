@@ -23,3 +23,14 @@ export function logReadFailure(entry: {
     vendorStatus: entry.vendorStatus,
   });
 }
+
+/**
+ * The reader is switched on and names Anthropic, but a setting is missing,
+ * so it stays off. Names the settings, never a value: one of them is a key.
+ */
+export function logReaderMisconfigured(missing: readonly ('LLM_READER_API_KEY' | 'LLM_READER_MODEL')[]): void {
+  // eslint-disable-next-line no-restricted-globals -- a configuration fault, said once; names only, no values.
+  console.error('ratecon reader is off: LLM_READER_ENABLED is on and LLM_READER_VENDOR is anthropic, but these are not set', {
+    missing: [...missing],
+  });
+}

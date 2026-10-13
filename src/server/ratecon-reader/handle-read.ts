@@ -58,6 +58,8 @@ const STATUS: Record<ReadFailCode, number> = {
   not_redacted: 422,
   timeout: 504,
   unavailable: 503,
+  // The account's own spending limit: nothing the dispatcher can retry.
+  vendor_capped: 503,
   refused: 422,
   invalid_output: 502,
   // The dispatcher has gone; the status is for the log, not for them.
@@ -71,11 +73,14 @@ const ADAPTER_CODE: Record<AdapterFailure, ReadFailCode & ReadOutcome> = {
   unavailable: 'unavailable',
   refused: 'refused',
   malformed: 'invalid_output',
+  vendor_capped: 'vendor_capped',
 };
 
 const reply = (body: ReadResponse, status: number, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
 const fail = (code: ReadFailCode) => reply({ ok: false, code }, STATUS[code]);
+
+const newReference = (status: number) => `RATECON-${status}-${Date.now().toString(36).toUpperCase()}`;
 
 /** The dispatch zone's calendar date, YYYY-MM-DD. */
 const dayIn = (tz: string, at: Date) =>
@@ -165,7 +170,11 @@ export async function handleRead(request: Request, deps: ReadDeps): Promise<Resp
     if (!result.ok) {
       vendorStatus = result.vendorStatus;
       const code: ReadFailCode & ReadOutcome = request.signal.aborted ? 'cancelled' : ADAPTER_CODE[result.code];
-      await finishRead(deps.db, reservation, { outcome: code });
+      // A refusal or a cut-off reply was billed: its tokens go in the row.
+      await finishRead(deps.db, reservation, { outcome: code, ...result.usage });
+      // The vendor's status is the only way to tell a revoked key (401) from
+      // an outage (5xx) after the fact. Code and status only, never text.
+      if (code !== 'cancelled') logReadFailure({ reference: newReference(STATUS[code]), code, errorName: 'AdapterFailure', vendorStatus });
       return fail(code);
     }
     const parsed = ModelRead.safeParse(result.output);
@@ -180,7 +189,7 @@ export async function handleRead(request: Request, deps: ReadDeps): Promise<Resp
     // The 429 every route gives; the browser reads a 429 with no code as rate_limited.
     if (error instanceof RateLimitError) return rateLimitResponse(error);
     if (error instanceof AuthError) return reply({ ok: false, code: 'forbidden' }, error.status);
-    const reference = `RATECON-500-${Date.now().toString(36).toUpperCase()}`;
+    const reference = newReference(500);
     logReadFailure({
       reference,
       code: 'error',

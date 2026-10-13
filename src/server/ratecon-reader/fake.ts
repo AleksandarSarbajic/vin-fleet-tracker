@@ -1,5 +1,5 @@
 import 'server-only';
-import type { AdapterFailure, AdapterResult, ReaderAdapter, ReaderRequest } from './adapter';
+import type { AdapterFailure, AdapterResult, AdapterUsage, ReaderAdapter, ReaderRequest } from './adapter';
 
 /**
  * A scripted vendor for tests and e2e (docs/llm-reader-design.md §6). Makes
@@ -14,8 +14,8 @@ import type { AdapterFailure, AdapterResult, ReaderAdapter, ReaderRequest } from
  */
 
 export type FakeStep =
-  | { reply: unknown; usage?: { inputTokens: number; outputTokens: number } }
-  | { fail: AdapterFailure; vendorStatus?: number | null }
+  | { reply: unknown; usage?: AdapterUsage }
+  | { fail: AdapterFailure; vendorStatus?: number | null; usage?: AdapterUsage }
   | { delayMs: number; then: FakeStep };
 
 const TIMEOUT: AdapterResult = { ok: false, code: 'timeout', vendorStatus: null };
@@ -51,7 +51,10 @@ export class FakeReaderAdapter implements ReaderAdapter {
       });
       return finished ? this.play(step.then, signal) : TIMEOUT;
     }
-    if ('fail' in step) return { ok: false, code: step.fail, vendorStatus: step.vendorStatus ?? null };
+    if ('fail' in step) {
+      const failed: AdapterResult = { ok: false, code: step.fail, vendorStatus: step.vendorStatus ?? null };
+      return step.usage ? { ...failed, usage: step.usage } : failed;
+    }
     return { ok: true, output: step.reply, usage: step.usage ?? { inputTokens: 0, outputTokens: 0 } };
   }
 }

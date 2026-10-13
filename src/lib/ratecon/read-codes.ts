@@ -36,6 +36,7 @@ export type ReadFailCode =
   | 'not_redacted'
   | 'timeout'
   | 'unavailable'
+  | 'vendor_capped'
   | 'refused'
   | 'invalid_output'
   | 'cancelled'
@@ -53,6 +54,7 @@ export const READ_MESSAGES: Readonly<Record<ReadFailCode, string>> = {
   not_redacted: 'This document could not be prepared for reading; nothing was sent.',
   timeout: 'The AI read took too long. Nothing was filled.',
   unavailable: 'The AI reader is not available right now. Nothing was filled.',
+  vendor_capped: 'The AI reader’s spending limit is reached. Tell an admin.',
   refused: 'The AI reader declined this document. Nothing was filled.',
   invalid_output: 'The AI read came back unusable. Nothing was filled.',
   cancelled: 'Cancelled. Nothing was filled.',

@@ -38,6 +38,7 @@ vi.mock('@/lib/auth', async () => {
 
 const { AuthError, requireUser } = await import('@/lib/auth');
 const { FakeReaderAdapter } = await import('./fake');
+const { AnthropicReaderAdapter } = await import('./anthropic');
 const { handleRead } = await import('./handle-read');
 type FakeStep = ConstructorParameters<typeof FakeReaderAdapter>[0][number];
 
@@ -223,6 +224,7 @@ describeDb('POST /api/ratecon/read: when the vendor fails, nothing is returned b
   it.each([
     ['timeout', 504, 'timeout'],
     ['unavailable', 503, 'unavailable'],
+    ['vendor_capped', 503, 'vendor_capped'],
     ['refused', 422, 'refused'],
     ['malformed', 502, 'invalid_output'],
   ] as const)('%s: %i %s', async (fail, status, code) => {
@@ -269,3 +271,83 @@ describeDb('POST /api/ratecon/read: when the vendor fails, nothing is returned b
     expect(errorSpy.mock.calls).toEqual([['ratecon read failed', { reference: body.reference, code: 'error', errorName: 'Error', vendorStatus: null }]]);
   });
 });
+
+describeDb('POST /api/ratecon/read: what a failed read leaves behind', () => {
+  it('a refusal the vendor billed: its tokens are in the row', async () => {
+    const id = newUser();
+    await handleRead(request(BODY), deps({ steps: [{ fail: 'refused', usage: { inputTokens: 3000, outputTokens: 12 } }] }).deps);
+    expect(await rows(id)).toEqual([{ outcome: 'refused', vendor: 'fake', lines_sent: 20, input_tokens: 3000, output_tokens: 12 }]);
+  });
+
+  it('one log line: the code and the vendor\'s status, so a revoked key shows as a 401 — nothing else', async () => {
+    newUser();
+    await handleRead(request(BODY), deps({ steps: [{ fail: 'unavailable', vendorStatus: 401 }] }).deps);
+    expect(consoleSpies[3]!.mock.calls).toEqual([
+      ['ratecon read failed', { reference: expect.stringMatching(/^RATECON-503-[0-9A-Z]+$/), code: 'unavailable', errorName: 'AdapterFailure', vendorStatus: 401 }],
+    ]);
+  });
+
+  it('a cancel is not a fault, and is not logged', async () => {
+    newUser();
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 30);
+    await handleRead(request(BODY, { signal: abort.signal }), deps({ steps: [{ delayMs: 5_000, then: { reply: MODEL_REPLY } }] }).deps);
+    expect(consoleSpies[3]!.mock.calls).toEqual([]);
+  });
+});
+
+describeDb('POST /api/ratecon/read: through the real Anthropic adapter, on an injected transport', () => {
+  const KEY = 'sk-ant-api03-INVENTED-route-test-key';
+  const viaAnthropic = (answer: Response) => {
+    const fetch = (async () => answer) as unknown as typeof globalThis.fetch;
+    const { deps: d } = deps();
+    return {
+      ...d,
+      settings: { ...d.settings, vendor: 'anthropic' as const },
+      adapter: () => new AnthropicReaderAdapter({ apiKey: KEY, model: 'claude-haiku-5-5', fetch }),
+    };
+  };
+  const answer = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+  it('a structured reply: 200 with the read, and the row counts Anthropic\'s tokens', async () => {
+    const id = newUser();
+    const r = await handleRead(
+      request(BODY),
+      viaAnthropic(
+        answer(200, {
+          id: 'msg_invented',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-haiku-5-5',
+          content: [{ type: 'text', text: JSON.stringify(MODEL_REPLY) }],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 2900, output_tokens: 700 },
+        }),
+      ),
+    );
+    expect([r.status, await json(r)]).toEqual([200, { ok: true, read: MODEL_REPLY }]);
+    expect(await rows(id)).toEqual([{ outcome: 'ok', vendor: 'anthropic', lines_sent: 20, input_tokens: 2900, output_tokens: 700 }]);
+  });
+
+  it('the account\'s spend limit: 503 vendor_capped, and neither the key nor the text in the body, the log or the row', async () => {
+    const id = newUser();
+    const r = await handleRead(
+      request(BODY),
+      viaAnthropic(
+        answer(400, {
+          type: 'error',
+          error: { type: 'invalid_request_error', message: `You have reached your specified API usage limits. ${SENTINEL} ${KEY}` },
+        }),
+      ),
+    );
+    const body = await r.text();
+    expect([r.status, JSON.parse(body)]).toEqual([503, { ok: false, code: 'vendor_capped' }]);
+    const row = await rows(id);
+    expect(row).toEqual([{ outcome: 'vendor_capped', vendor: 'anthropic', lines_sent: 20, input_tokens: null, output_tokens: null }]);
+    const everything = JSON.stringify([body, row, consoleSpies.flatMap((s) => s.mock.calls)]);
+    expect(everything).not.toContain(KEY);
+    expect(everything).not.toContain(SENTINEL);
+  });
+});
+

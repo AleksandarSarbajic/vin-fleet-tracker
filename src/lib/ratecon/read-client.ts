@@ -1,5 +1,5 @@
 import { ModelRead } from './model-read';
-import { READ_ROUTE, type ReadFailCode } from './read-codes';
+import { READ_MESSAGES, READ_ROUTE, type ReadFailCode } from './read-codes';
 import { REDACTION_VERSION, type PreparedLine } from './redact';
 
 /**
@@ -16,23 +16,8 @@ export const BROWSER_TIMEOUT_MS = 35_000;
 
 export type ClientReadOutcome = { ok: true; reply: ModelRead } | { ok: false; code: ReadFailCode; reference?: string };
 
-const CODES: ReadonlySet<string> = new Set<ReadFailCode>([
-  'disabled',
-  'forbidden',
-  'rate_limited',
-  'capped',
-  'too_large',
-  'bad_request',
-  'outdated',
-  'not_redacted',
-  'timeout',
-  'unavailable',
-  'refused',
-  'invalid_output',
-  'cancelled',
-  'nothing_confirmed',
-  'error',
-]);
+/** Every code the server can send: the keys of its messages, so a new code cannot be missed here. */
+const CODES: ReadonlySet<string> = new Set(Object.keys(READ_MESSAGES));
 
 /** When the body names no code this side knows: the status alone. */
 function byStatus(status: number): ReadFailCode {

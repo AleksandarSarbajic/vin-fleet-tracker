@@ -56,6 +56,13 @@ describe('what comes back', () => {
     expect(await requestModelRead(LINES, live(), answer(status, { ok: false, code }))).toEqual({ ok: false, code });
   });
 
+  it('every code the server can send is read as itself — vendor_capped is not mistaken for unavailable by its 503', async () => {
+    const { READ_MESSAGES } = await import('./read-codes');
+    for (const code of Object.keys(READ_MESSAGES)) {
+      expect(await requestModelRead(LINES, live(), answer(503, { ok: false, code })), code).toEqual({ ok: false, code });
+    }
+  });
+
   it('the shared 429, which carries no code, is rate_limited', async () => {
     const out = await requestModelRead(LINES, live(), answer(429, { error: 'Too many requests.', retryAfterSeconds: 40 }));
     expect(out).toEqual({ ok: false, code: 'rate_limited' });

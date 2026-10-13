@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { MODEL_REPLY } from '@/test/model-read-fixtures';
 
 /**
@@ -19,7 +19,9 @@ const dirs: string[] = [];
 
 async function live(vars: Record<string, string>) {
   vi.resetModules();
-  for (const key of ['LLM_READER_ENABLED', 'LLM_READER_VENDOR', 'LLM_READER_FAKE_SCRIPT', 'VERCEL_ENV']) vi.stubEnv(key, undefined);
+  for (const key of ['LLM_READER_ENABLED', 'LLM_READER_VENDOR', 'LLM_READER_FAKE_SCRIPT', 'LLM_READER_API_KEY', 'LLM_READER_MODEL', 'VERCEL_ENV']) {
+    vi.stubEnv(key, undefined);
+  }
   for (const [key, value] of Object.entries({ ...BASE, ...vars })) vi.stubEnv(key, value);
   return import('./live');
 }
@@ -84,3 +86,81 @@ describe("the fake's script", () => {
     expect(() => deps.adapter()).not.toThrow(/qqfileqq/);
   });
 });
+
+const KEY = 'sk-ant-api03-INVENTED-live-test-key';
+const ANTHROPIC = { LLM_READER_ENABLED: 'true', LLM_READER_VENDOR: 'anthropic', LLM_READER_API_KEY: KEY, LLM_READER_MODEL: 'claude-haiku-5-5' };
+
+describe('Anthropic, wired from the env', () => {
+  it('offered, and the route runs with vendor anthropic, when the key and the model are set', async () => {
+    const m = await live(ANTHROPIC);
+    expect(m.readerOffered('dispatcher')).toBe(true);
+    expect(m.liveReadDeps().settings.vendor).toBe('anthropic');
+  });
+
+  it('the model and the key the env names are the ones that go out', async () => {
+    const deps = (await live({ ...ANTHROPIC, LLM_READER_MODEL: 'claude-sonnet-5-5' })).liveReadDeps();
+    const sent: { body: { model?: unknown }; key: string | null }[] = [];
+    // Guard 4 is replaced for this one adapter by a recorder: still no network.
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ body: JSON.parse(String(init?.body)) as { model?: unknown }, key: new Headers(init?.headers).get('x-api-key') });
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }), { status: 529 });
+    }) as typeof fetch;
+    const adapter = deps.adapter();
+    expect([adapter.vendor, adapter.model]).toEqual(['anthropic', 'claude-sonnet-5-5']);
+    expect(await adapter.read({ lines: [{ n: 1, text: 'x' }], today: '2026-10-13' }, new AbortController().signal)).toEqual({
+      ok: false,
+      code: 'unavailable',
+      vendorStatus: 529,
+    });
+    expect(sent).toEqual([{ body: expect.objectContaining({ model: 'claude-sonnet-5-5' }), key: KEY }]);
+  });
+});
+
+describe('misconfigured, the reader FAILS CLOSED: off, said once, never a crash', () => {
+  let errors: MockInstance;
+  beforeEach(() => {
+    errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => errors.mockRestore());
+
+  it.each([
+    ['no key', { LLM_READER_API_KEY: '' }, ['LLM_READER_API_KEY']],
+    ['no model', { LLM_READER_MODEL: '' }, ['LLM_READER_MODEL']],
+    ['neither', { LLM_READER_API_KEY: '', LLM_READER_MODEL: '' }, ['LLM_READER_API_KEY', 'LLM_READER_MODEL']],
+  ] as const)('%s: not offered, the route says disabled, and the log names what is missing', async (_, over, missing) => {
+    const m = await live({ ...ANTHROPIC, ...over });
+    expect(m.readerOffered('admin')).toBe(false);
+    expect(m.liveReadDeps().settings).toMatchObject({ enabled: true, vendor: null });
+    m.readerOffered('dispatcher');
+    expect(errors.mock.calls).toEqual([[expect.stringContaining('ratecon reader is off'), { missing }]]);
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(KEY);
+  });
+
+  it('with the flag off, a missing key is not a fault, and nothing is said', async () => {
+    const m = await live({ ...ANTHROPIC, LLM_READER_ENABLED: 'false', LLM_READER_API_KEY: '' });
+    expect(m.readerOffered('admin')).toBe(false);
+    expect(errors).not.toHaveBeenCalled();
+  });
+});
+
+describe('readerWiring', () => {
+  const env = { LLM_READER_ENABLED: true } as const;
+  it('none named: off, nothing missing', async () => {
+    const { readerWiring } = await live({});
+    expect(readerWiring(env)).toEqual({ wiring: { vendor: null }, missing: [] });
+  });
+
+  it('the fake needs neither a key nor a model', async () => {
+    const { readerWiring } = await live({});
+    expect(readerWiring({ ...env, LLM_READER_VENDOR: 'fake' })).toEqual({ wiring: { vendor: 'fake' }, missing: [] });
+  });
+
+  it('Anthropic carries its key and model', async () => {
+    const { readerWiring } = await live({});
+    expect(readerWiring({ ...env, LLM_READER_VENDOR: 'anthropic', LLM_READER_API_KEY: KEY, LLM_READER_MODEL: 'claude-haiku-5-5' })).toEqual({
+      wiring: { vendor: 'anthropic', apiKey: KEY, model: 'claude-haiku-5-5' },
+      missing: [],
+    });
+  });
+});
+
