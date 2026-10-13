@@ -38,6 +38,7 @@ async function db<T>(body: (sql: ReturnType<typeof connect>) => Promise<T>): Pro
 
 test('after a template miss, Read with AI goes through the route and the fake vendor, and fills only what follows from the text', async ({
   page,
+  context,
 }) => {
   // The route answers 404 when the reader is off: then this is skipped, and says why, rather than failing the gate.
   const probe = await page.request.post('/api/ratecon/read', { data: {} });
@@ -53,6 +54,8 @@ test('after a template miss, Read with AI goes through the route and the fake ve
     await sql`delete from loads where id = ${IDS.loadChicago}`;
     await sql`delete from ratecon_ai_reads`;
   });
+  // The paste goes through the real clipboard, as paste-address.spec.ts's does.
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.locator(`[data-row-id="${IDS.truckChicago}"]`).click();
