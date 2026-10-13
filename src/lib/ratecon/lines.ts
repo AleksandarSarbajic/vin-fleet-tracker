@@ -1,5 +1,5 @@
 /**
- * §12.122. A rate confirmation as lines of text, the one shape all three
+ * §12.122. A rate confirmation as lines of text, the one shape all four
  * template readers read — whether it came from a PDF's text layer or from
  * text pasted out of one. Pure.
  */
