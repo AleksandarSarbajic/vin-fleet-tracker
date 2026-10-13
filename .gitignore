@@ -32,3 +32,6 @@ e2e/.auth/
 # Real broker rate confirmations used to study the PDF fill. Rates, broker
 # contacts and driver names: read locally only, never committed.
 .samples/
+
+# The fake reader's script, written by e2e/ratecon-ai.spec.ts for the e2e server.
+e2e/.fake-reader.json
