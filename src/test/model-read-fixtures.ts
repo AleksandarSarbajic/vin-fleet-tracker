@@ -1,4 +1,5 @@
 import type { Line } from '@/lib/ratecon/lines';
+import type { ModelRead } from '@/lib/ratecon/model-read';
 
 /**
  * The language-model reader's invented documents (docs/llm-reader-design.md).
@@ -54,3 +55,40 @@ export const UNKNOWN_LAYOUT: Line[] = [
   pdfLine(3, 'Carrier agrees to the example terms printed here.'),
   pdfLine(3, 'Questions? Call Riley Example any time.'),
 ];
+
+/**
+ * A good reply for UNKNOWN_LAYOUT as `prepareForReading` sends it (L1–L20;
+ * redact.test.ts pins those lines). Stop 2's time offers two choices, so it
+ * comes back 'unclear', as the instruction requires.
+ */
+export const MODEL_REPLY: ModelRead = {
+  schemaVersion: 1,
+  loadNumber: { value: 'EX-40417', quote: { line: 2, text: 'Load # EX-40417' } },
+  stops: [
+    {
+      type: { value: 'PU', quote: { line: 10, text: 'Pick Up 1' } },
+      street: { value: '4001 Main St', quote: { line: 12, text: '4001 Main St' } },
+      city: { value: 'Fargo', quote: { line: 13, text: 'Fargo, ND 58102' } },
+      state: { value: 'ND', quote: { line: 13, text: 'Fargo, ND 58102' } },
+      zip: { value: '58102', quote: { line: 13, text: 'Fargo, ND 58102' } },
+      appointment: {
+        kind: 'range',
+        date: '2026-10-14',
+        time: '08:00',
+        endDate: '2026-10-14',
+        endTime: '10:00',
+        flag: 'APPT',
+        dateQuote: { line: 14, text: 'Pick up 10/14/2026 0800-1000 APPT' },
+        timeQuote: { line: 14, text: '0800-1000' },
+      },
+    },
+    {
+      type: { value: 'DEL', quote: { line: 15, text: 'Deliver 2' } },
+      street: { value: '220 Harbor Rd', quote: { line: 17, text: '220 Harbor Rd' } },
+      city: { value: 'Duluth', quote: { line: 18, text: 'Duluth, MN 55802' } },
+      state: { value: 'MN', quote: { line: 18, text: 'Duluth, MN 55802' } },
+      zip: { value: '55802', quote: { line: 18, text: 'Duluth, MN 55802' } },
+      appointment: { kind: 'unclear', quote: { line: 19, text: 'Delivery same day by 8 PM, or next day 7-10 AM' } },
+    },
+  ],
+};
