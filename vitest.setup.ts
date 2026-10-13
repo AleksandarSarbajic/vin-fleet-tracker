@@ -75,6 +75,15 @@ for (const key of [
   'HERE_API_KEY',
   'NEXT_PUBLIC_MAPBOX_TOKEN',
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  // The language-model reader's key (phase 2b), and the variables Anthropic's
+  // SDK reads on its own. A test that needs a reader setting stubs it.
+  'LLM_READER_API_KEY',
+  'LLM_READER_ENABLED',
+  'LLM_READER_VENDOR',
+  'LLM_READER_MODEL',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
 ]) {
   delete process.env[key];
 }

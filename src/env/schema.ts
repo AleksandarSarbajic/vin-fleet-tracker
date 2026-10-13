@@ -102,6 +102,25 @@ export function isIanaZone(tz: string): boolean {
   }
 }
 
+/**
+ * The language-model reader's models (Alex, 2026-10-13/14): Haiku 5.5 reads,
+ * Sonnet 5.5 is the fallback, switched by env alone. Exact ids, no date
+ * suffix. Nothing else is allowed: Fable and Mythos require 30-day retention,
+ * and Opus costs far more for a job Haiku is chosen for. An unlisted id
+ * refuses to boot, as an unknown vendor does; an ABSENT one turns the reader
+ * off (live.ts), because a missing setting is not a wrong one.
+ */
+export const READER_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'] as const;
+export type ReaderModel = (typeof READER_MODELS)[number];
+
+const readerModel = z.enum(READER_MODELS, {
+  errorMap: () => ({
+    message:
+      `LLM_READER_MODEL must be one of ${READER_MODELS.join(', ')}, exactly. ` +
+      'Other models are refused: Fable and Mythos require 30-day retention, and Opus costs far more.',
+  }),
+});
+
 const serverShape = z.object({
     DATABASE_URL: z
       .string()
@@ -230,19 +249,19 @@ const serverShape = z.object({
     ),
 
     /**
-     * Which adapter reads. Only `fake` exists until Alex chooses a vendor;
-     * a real one is added with its adapter, never before. Unset, the reader
-     * is off whatever the flag says.
+     * Which adapter reads: `fake` (a script, never in production) or
+     * `anthropic` (Alex, 2026-10-13/14). Unset, the reader is off whatever the
+     * flag says.
      */
-    LLM_READER_VENDOR: blankIsAbsent(z.enum(['fake']).optional()),
+    LLM_READER_VENDOR: blankIsAbsent(z.enum(['fake', 'anthropic']).optional()),
 
-    /** The vendor's model id, recorded by its adapter. Unused by the fake. */
-    LLM_READER_MODEL: blankIsAbsent(z.string().min(1).optional()),
+    /** The model the vendor runs: one of READER_MODELS. Unused by the fake. */
+    LLM_READER_MODEL: blankIsAbsent(readerModel.optional()),
 
     /**
      * The vendor's credential. SERVER ONLY — refused at boot if any
-     * `NEXT_PUBLIC_*` value equals it, as HERE_API_KEY is. No code reads it
-     * until a real adapter exists.
+     * `NEXT_PUBLIC_*` value equals it, as HERE_API_KEY is. Read only by
+     * live.ts, which hands it to the adapter; never logged, never returned.
      */
     LLM_READER_API_KEY: blankIsAbsent(z.string().min(1).optional()),
 
@@ -377,6 +396,14 @@ export const AppEnv = serverShape
   })
   .refine(readerKeyIsNotPublic, READER_KEY_IS_NOT_PUBLIC)
   .refine(noFakeReaderInProduction, NO_FAKE_READER_IN_PRODUCTION);
+
+/**
+ * What `npm run reader:smoke` needs: the key and the model, both present, and
+ * the key in no `NEXT_PUBLIC_*` value. Nothing else from `.env.local` is read.
+ */
+export const ReaderSmokeEnv = z
+  .object({ LLM_READER_API_KEY: z.string().trim().min(1), LLM_READER_MODEL: readerModel })
+  .refine(readerKeyIsNotPublic, READER_KEY_IS_NOT_PUBLIC);
 
 /**
  * What `npm run db:migrate` needs: the session pooler and nothing else.

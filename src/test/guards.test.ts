@@ -32,6 +32,10 @@ describe('guard 1 — production credentials do not exist in this process', () =
       // `.env.local` is exactly the credential it exists to strip.
       'MAPBOX_DIRECTIONS_TOKEN',
       'HERE_API_KEY',
+      // Phase 2b: the reader's key, and what Anthropic's SDK would pick up by itself.
+      'LLM_READER_API_KEY',
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
     ]) {
       expect(process.env[key]).toBeUndefined();
     }

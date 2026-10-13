@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AppEnv, ClientEnv, MigrateEnv, WorkerEnv, isIanaZone } from './schema';
+import { AppEnv, ClientEnv, MigrateEnv, ReaderSmokeEnv, WorkerEnv, isIanaZone } from './schema';
 
 const REF = 'ywfotpjljshxrgxlgcdp';
 const POOLER = 'aws-1-eu-west-1.pooler.supabase.com';
@@ -436,9 +436,36 @@ describe("the language-model reader's settings (docs/llm-reader-design.md §4)",
     expect(errorOn(app({ LLM_READER_ENABLED: 'yes please' }), 'LLM_READER_ENABLED')).toBeDefined();
   });
 
-  it('takes the fake vendor, and no other until a real adapter is built', () => {
+  it('takes the fake and Anthropic, and no other vendor', () => {
     expect(app({ LLM_READER_VENDOR: 'fake' }).success).toBe(true);
+    expect(app({ LLM_READER_VENDOR: 'anthropic' }).success).toBe(true);
     expect(app({ LLM_READER_VENDOR: 'some-vendor' }).success).toBe(false);
+  });
+
+  it('takes Anthropic in production: only the fake is refused there', () => {
+    expect(app({ LLM_READER_VENDOR: 'anthropic', VERCEL_ENV: 'production' }).success).toBe(true);
+  });
+
+  it.each(['claude-haiku-5-5', 'claude-sonnet-5-5'])('takes the model %s', (model) => {
+    const r = app({ LLM_READER_MODEL: model });
+    expect(r.success && r.data.LLM_READER_MODEL).toBe(model);
+  });
+
+  it.each([
+    ['Fable, which requires 30-day retention', 'claude-fable-5-1'],
+    ['Mythos, likewise', 'claude-mythos-5-1'],
+    ['Opus, which costs far more', 'claude-opus-5-5'],
+    ['an older Haiku', 'claude-haiku-4-5'],
+    ['a date suffix', 'claude-haiku-5-5-20261001'],
+    ['another case', 'Claude-Haiku-5-5'],
+    ['padding', ' claude-haiku-5-5'],
+  ])('refuses %s (%s), saying which two it takes', (_, model) => {
+    expect(errorOn(app({ LLM_READER_MODEL: model }), 'LLM_READER_MODEL')).toMatch(/claude-haiku-5-5, claude-sonnet-5-5/);
+  });
+
+  it('a blank model is an absent one, which leaves the reader off rather than refusing to boot', () => {
+    const r = app({ LLM_READER_MODEL: '' });
+    expect(r.success && r.data.LLM_READER_MODEL).toBeUndefined();
   });
 
   it('refuses the fake vendor in production, and takes it in a preview or locally', () => {
@@ -462,5 +489,21 @@ describe("the language-model reader's settings (docs/llm-reader-design.md §4)",
   it('accepts a key that is nowhere in the client bundle', () => {
     const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.abc' }, () => app({ LLM_READER_API_KEY: 'reader-secret' }));
     expect(r.success).toBe(true);
+  });
+});
+
+describe('what `npm run reader:smoke` needs', () => {
+  it('a key and an allowed model, both', () => {
+    expect(ReaderSmokeEnv.safeParse({ LLM_READER_API_KEY: 'k', LLM_READER_MODEL: 'claude-haiku-5-5' }).success).toBe(true);
+    expect(ReaderSmokeEnv.safeParse({ LLM_READER_MODEL: 'claude-haiku-5-5' }).success).toBe(false);
+    expect(ReaderSmokeEnv.safeParse({ LLM_READER_API_KEY: '  ', LLM_READER_MODEL: 'claude-haiku-5-5' }).success).toBe(false);
+    expect(ReaderSmokeEnv.safeParse({ LLM_READER_API_KEY: 'k' }).success).toBe(false);
+    expect(ReaderSmokeEnv.safeParse({ LLM_READER_API_KEY: 'k', LLM_READER_MODEL: 'claude-opus-5-5' }).success).toBe(false);
+  });
+
+  it('never quotes the key in its refusal', () => {
+    const r = ReaderSmokeEnv.safeParse({ LLM_READER_API_KEY: 'qqkeyqq', LLM_READER_MODEL: 'claude-fable-5-1' });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).not.toContain('qqkeyqq');
   });
 });
