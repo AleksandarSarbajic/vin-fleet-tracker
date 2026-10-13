@@ -24,23 +24,14 @@ import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type StopForm } from '../src/components/edit/load-form';
 import { linesFromPdf } from '../src/lib/ratecon/read-pdf';
 import { readRatecon } from '../src/lib/ratecon/templates';
+import { inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
 
 const DIR = '.samples/rate-confirmations';
 
-interface ExpectedStop {
-  type: 'PU' | 'DEL';
-  street: string;
-  city: string;
-  state: string;
-  zip: string;
-  appointment:
-    | { couldntRead: true; date: string }
-    | { type: 'APPT'; date: string; time: string; windowMinutes: number; marked?: boolean }
-    | { type: 'FCFS'; date: string; time: string; endTime: string; marked?: boolean };
-}
+/** The entries' shape is `ratecon-expected.mts`; an entry still blank in places is skipped. */
 interface Expected {
   scoredAt: string;
-  files: Record<string, { notRecognised: true } | { loadNumber: string; stops: ExpectedStop[] }>;
+  files: Record<string, unknown>;
 }
 
 const mark = (ok: boolean) => (ok ? 'pass' : 'FAIL');
@@ -52,7 +43,9 @@ function appointmentScore(
   const marked = Boolean(stop.fill?.checks.appointment);
   const a = stop.appointment;
   const right =
-    'couldntRead' in want
+    'none' in want
+      ? !a.enabled
+      : 'couldntRead' in want
       ? a.enabled && a.date === want.date && a.time === ''
       : a.enabled &&
         a.type === want.type &&
@@ -85,11 +78,21 @@ async function main() {
   let barOf = 0;
   for (const [n, file] of files.entries()) {
     const label = `sample ${n + 1}`;
-    const want = expected.files[file];
-    if (!want) {
+    if (!(file in expected.files)) {
       console.info(`${label}: no ground truth in expected.json — skipped`);
       continue;
     }
+    const inspected = inspect(expected.files[file]);
+    if (inspected.state === 'incomplete') {
+      console.info(`${label}: ground truth not written yet (${inspected.blanks} blank) — skipped`);
+      continue;
+    }
+    if (inspected.state === 'invalid') {
+      console.info(`${label}: FAIL — expected.json entry is the wrong shape (npm run ratecon:check-expected)`);
+      failures += 1;
+      continue;
+    }
+    const want: CompleteEntry = inspected.entry;
     const pdf = await linesFromPdf(new Uint8Array(readFileSync(join(DIR, file))), pdfjs);
     if (!pdf.ok) {
       console.info(`${label}: FAIL — the PDF was not read (${pdf.message})`);
@@ -100,6 +103,12 @@ async function main() {
     if ('notRecognised' in want) {
       console.info(`${label}: layout not recognised — ${outcome.ok ? 'FAIL, it was read as a known layout' : 'pass (expected: not one of the four layouts)'}`);
       if (outcome.ok) failures += 1;
+      continue;
+    }
+    if (!outcome.ok && want.priority === 1) {
+      // Priority 1 is a layout no template reads: ground truth for the AI
+      // reader's evaluation, not a template failure.
+      console.info(`${label}: not a template layout — ground truth for the AI evaluation only`);
       continue;
     }
     barOf += 1;
