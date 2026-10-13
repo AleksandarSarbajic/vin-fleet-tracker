@@ -301,8 +301,8 @@ Every way the build differs from the design, phases 1 and 2a, is listed in
 
 - **Symptom:** `e2e/desktop-baseline.spec.ts`, shot `1-default`, sometimes
   differs from its baseline. The run shows "Synced 0s ago" beside the
-  header's dot, and the baseline does not. The first poll lands before the
-  shot.
+  header's dot, and the baseline does not. (The cause is not the first poll,
+  as first written here; see "Fixed" below.)
 - **At HEAD (`60b802f`):** `npm run e2e -- e2e/desktop-baseline.spec.ts -g
   "desktop at" --repeat-each=5 --update-snapshots=none` gave 28 passed and
   3 failed.
@@ -318,15 +318,71 @@ Every way the build differs from the design, phases 1 and 2a, is listed in
   boolean prop, `aiReader`, passed through `src/app/page.tsx` and
   `src/components/console/Console.tsx`. No header, poll or sync code
   changed.
-- **It blocks `npm run gate`:** on a bad draw, the gate's e2e step fails.
-- **Not fixed and not re-saved.** It needs its own small phase.
+- **It blocked `npm run gate`:** on a bad draw, the gate's e2e step failed.
+
+**Fixed, 2026-10-13: the spec's timing only.** No app code, no baseline,
+no threshold, no retry, and `playwright.config.ts` is not touched.
+
+- **The cause:** a race between the spec's fixed wait and the header's first
+  one-second tick.
+  - From hydration until that tick, the header's `now` is the server's
+    fetch instant, which is real time. The poll's last success is on the
+    frozen browser clock (FROZEN, 2026-10-01), days earlier.
+  - So for about a second `isNotUpdating` is true, and the header shows
+    "Not updating" with a Retry button.
+  - The tick sets `now` to FROZEN, and the healthy "Synced" label comes back
+    as a NEW element.
+  - `open()` waited a fixed 1200 ms. That cleared the tick by about 150 ms.
+  - When it did not, `hideLiveValues` tagged the outgoing label, and the
+    shot pictured the new one untagged.
+  - It was never the 20 s poll.
+- **Measured:** probes, not committed, on 18 page loads at every width.
+  - "Not updating" appeared 270–400 ms after navigation, and the healthy
+    label 1.05–1.3 s after that.
+  - The tag ran at 1.5–2.6 s. All three failures were tagged at
+    1517–1599 ms, before the tick.
+  - Passes at 1280 and 1440 cleared the tick by only 180–300 ms.
+- **Why only 768 and 1920:** chance, not width. The race is the same at
+  every width.
+- **The fix:** `open()` keeps its 1200 ms and then waits for two things.
+  - The page has hydrated: the dispatch clock has its "· you" title.
+  - The Retry button (`[data-sync-retry]`) is gone.
+
+  A probe on 28 page loads saw the title and "Not updating" arrive in the
+  same render every time, so the wait cannot pass before the tick. It
+  follows 7c's pattern (`6e90a91`): put the page in the state the approved
+  shot has, by a condition rather than a longer sleep.
+- **Proof:** with `--update-snapshots=none`.
+
+  | Widths | Runs each | Passed |
+  |---|---|---|
+  | 768, 1920 | 10 | 10 of 10 each |
+  | 1024, 1280, 1440, 1680 | 3 | 3 of 3 each |
+
+  Then one full `npm run e2e`: 243 passed, 1 failed and 1 did not run. Every
+  desktop baseline and the AI spec passed. The failure is the next item.
+
+**Two other intermittent hangs, seen while proving the fix.** Neither is
+fixed; both are follow-ups.
+
+- **`e2e/truck-lists.spec.ts:59`** ("create Bob's trucks…"), in the full
+  run.
+  - After "Add to list", the dialog sat on "Adding…" for the whole 10 s.
+  - Run alone 5 times, it passed 5 of 5.
+- **`e2e/desktop-baseline.spec.ts`, desktop at 1920, step `6-timeline`,**
+  in a diagnostic run.
+  - The Timeline dialog sat on "Loading…" for 15 s.
+  - It did not recur in any later desktop run that day.
+- **In both,** a request from the page did not answer in time. Not
+  investigated.
 
 ## Next
 
 - **Phase 2a waits for Alex's approval.** It is built, and its e2e runs and
   passes.
-- **A small phase for the "Synced 0s ago" baseline flake,** above. Until it
-  lands, `npm run gate` can fail on it.
+- **The two intermittent hangs above** (truck-lists "Adding…", timeline
+  "Loading…"). Either can fail `npm run gate`; each may want its own small
+  phase.
 - **Phase 2b (one real adapter)** needs the vendor chosen first.
 - **Before the route can count in production,** migration 0026 must be
   applied there.
