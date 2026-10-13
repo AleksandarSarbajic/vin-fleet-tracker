@@ -1,10 +1,11 @@
 # Handoff
 
-State on 2026-10-14. Phase 2b of the language-model reader is built: the
-Anthropic adapter, behind `LLM_READER_ENABLED` (off by default, and OFF in
-production; nothing went to Vercel). It has been called live only with
-invented text. See "Language-model reader" below. `npm run check` passed on
-2026-10-14 (169 files, 2431 tests).
+State on 2026-10-14. Phase 2b of the language-model reader is built, with its
+follow-up: the Anthropic adapter, behind `LLM_READER_ENABLED` (off by
+default, and OFF in production; nothing went to Vercel), and reader settings
+that fail closed. It has been called live only with invented text. See
+"Language-model reader" below. `npm run check` passed on 2026-10-14
+(169 files, 2453 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
 "How to run the checks".
 
@@ -172,6 +173,24 @@ anywhere.
 - **Misconfigured** (on, `anthropic`, no key or no model): reader off, one
   log line, never a crash.
 
+**Phase 2b follow-up: config safety** (Alex, 2026-10-14):
+
+- **The reader's settings fail CLOSED.** They are parsed apart from
+  `AppEnv`. Any problem turns the reader off, logs one server line naming
+  the setting, never its value, and never stops the app booting: unknown
+  vendor, model outside the allow-list, invalid caps, missing key or model,
+  the fake in production, a flag that is neither on nor off. A blank cap is
+  the default.
+- **One exception:** a key equal to any `NEXT_PUBLIC_*` value still refuses
+  boot.
+- **A synthetic key in the e2e run,** and an e2e spec that scans the build's
+  static files for it.
+- **`inference_geo` stays `global`** (standard price; `us` is 1.1×). This
+  closes the open question from 2b.
+- **A prepaid balance run dry** is the likeliest limit: map it to
+  `vendor_capped` only if Anthropic documents it, otherwise keep it
+  `unavailable` with the status in the log. Outcome: below.
+
 **Closing phase 2a** (Alex, 2026-10-13):
 
 - **The e2e server's reader settings** come from the `e2e` script in
@@ -297,12 +316,69 @@ nothing was deployed.
 | `scripts/reader-smoke.mts` | `READER_SMOKE=yes npm run reader:smoke`: ONE live call with the invented fixture |
 | `src/test/reader-key-bundle.test.ts` | The key cannot reach the browser bundle, shown from the import graph |
 
-**Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake` —
-refused in production — or `anthropic`), `LLM_READER_MODEL`
-(`claude-haiku-5-5` or `claude-sonnet-5-5`, nothing else),
-`LLM_READER_API_KEY` (refused if any `NEXT_PUBLIC_*` equals it),
-`LLM_READER_FAKE_SCRIPT`, `LLM_READER_USER_DAILY_CAP` (25),
-`LLM_READER_DAILY_CAP` (100). Now listed in `.env.example`.
+**Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake` or
+`anthropic`), `LLM_READER_MODEL` (`claude-haiku-5-5` or `claude-sonnet-5-5`,
+nothing else), `LLM_READER_API_KEY`, `LLM_READER_FAKE_SCRIPT`,
+`LLM_READER_USER_DAILY_CAP` (25), `LLM_READER_DAILY_CAP` (100). Listed in
+`.env.example`.
+
+**How they are read (2b follow-up):** `parseReaderEnv` (`src/env/schema.ts`),
+exported parsed as `readerEnv` from `src/env/server.ts`. It never throws.
+
+- **Checked only when the flag is on,** and then only what the named vendor
+  uses: the fake needs no key or model, Anthropic no script.
+- **Any problem** turns the reader off: no button, and the route says
+  `disabled`. `live.ts` logs it ONCE per server instance:
+  `ratecon reader is off: its settings have problems`,
+  `{ problems: [{ setting, fault }] }`.
+  - The faults are fixed words: `missing`, `invalid`, `not allowed`,
+    `refused in production`.
+  - No value is ever logged.
+- **`AppEnv` reads only the key,** for its one boot refusal: the key may
+  equal no `NEXT_PUBLIC_*` value.
+- **Tests:**
+  - `schema.test.ts`: every case, each problem named.
+  - `app-env.test.ts`: the real `@/env/server` loads with every bad value at
+    once, and still refuses a published key.
+  - `live.test.ts`: not offered, `disabled`, one log line with no value.
+
+**The key in the browser bundle, checked on the build (2b follow-up):**
+
+- **The synthetic key:** the `e2e` script sets
+  `LLM_READER_API_KEY=sk-ant-e2e-SYNTHETIC-not-a-real-key-4f1c9a` and
+  `E2E_READER_KEY_SCAN=1`. Playwright's `webServer` inherits them, so the
+  e2e build and server start with them. `playwright.config.ts` is not
+  touched.
+- **The spec,** `e2e/reader-key-bundle.spec.ts`, scans every file under
+  `.next-e2e/static` (the e2e build's directory) for that key.
+  - A control first: the e2e Sentry DSN, which Next does inline, must be
+    found by the same scan.
+  - Skipped unless `E2E_READER_KEY_SCAN=1`, so the real key is never read
+    or compared.
+- **Run 2026-10-14:** `npm run e2e -- e2e/reader-key-bundle.spec.ts
+  e2e/ratecon-ai.spec.ts` gave 3 passed (setup, the AI spec, the scan).
+- **Mutation:** the key planted as a literal in `RateconStrip.tsx` (split
+  and joined; the minifier folded it back) made the scan fail on
+  `.next-e2e/static/chunks/app/page-….js`. Reverted.
+
+**A prepaid balance run dry (2b follow-up):**
+
+- **What Anthropic documents:** the message only. On
+  [API credits for Max and Team plans](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers),
+  under "When the balance is exhausted, requests return":
+  "Your credit balance is too low to access the Anthropic API. Please go to
+  Plans & Billing to upgrade or purchase credits."
+  - The HTTP status and error type are NOT documented, and the errors page
+    does not mention it. Read 2026-10-14.
+- **So the message is matched on any 4xx** (its prefix, `Your credit balance
+  is too low`) and is `vendor_capped`. On a 5xx it stays `unavailable`.
+- **The status always reaches the log:** every vendor failure is logged with
+  its `vendorStatus`. A test sends the credit message on a 400 and finds
+  `{ code: 'vendor_capped', vendorStatus: 400 }` in the one log line; an
+  undocumented 4xx logs `{ code: 'unavailable', vendorStatus: 400 }`.
+- **Caveat:** the page is about Max and Team credits, but its wording
+  ("if the organization has no credits left") covers any exhausted
+  organization balance.
 
 **Not applied anywhere but the local test cluster:** migrations 0026 and
 0027. Both must be applied to production before the route can count there.
@@ -317,7 +393,21 @@ UNKNOWN_LAYOUT fixture, 20 lines). 4 of the 5 allowed calls; one unused.
 | 3 | the same | Every property required, the nullable flag one enum: not enough |
 | 4 | `ok` | Each reused part defined once under `$defs`. Tokens: input 3117, output 1565. `ModelRead` passes; verified: 10 values stood, 0 did not |
 
-A 400 bills nothing; run 4 cost about $0.001 at Haiku's rates.
+**Measured cost** (Anthropic's pricing page, read 2026-10-14). A 400 bills
+nothing; run 4 billed 3117 input and 1565 output tokens.
+
+| Model | Input | Output | One read |
+|---|---|---|---|
+| Haiku 5.5, measured (prompt ≤ 100K: $0.10 / $0.50 per MTok) | $0.00031 | $0.00078 | **$0.0011** |
+| Sonnet 5.5, the same tokens ($2 / $10 per MTok) | $0.0062 | $0.0157 | $0.022 |
+
+- **At the daily cap of 100 reads:** about $0.11 a day on Haiku, $2.19 on
+  Sonnet.
+- **Against the $5 prepaid balance:** about 4,500 reads on Haiku, about 230
+  on Sonnet (2.3 days at the cap).
+- **Not counted:** thinking, at effort `low`, is inside the 1565 output
+  tokens, and a real document is longer than the 20-line fixture (design §7).
+- **`global` routing,** so no 1.1× multiplier.
 
 ```
 model: claude-haiku-5-5
@@ -331,17 +421,15 @@ verified against the invented text: yes — 10 values stood, 0 did not
 **Where 2b differs from Alex's prompt** (all in `llm-reader-design.md` §11,
 items 17–24):
 
-- **`vendor_capped` covers two more cases than the 400 named:** the 429 of a
-  tier's monthly cap (`enforced_spend_limit_reached`) and a 402. Both mean
-  "no money, an admin must act", per Anthropic's docs. A prepaid balance
-  run dry is not covered: its wording is not documented; it shows as
-  `unavailable`, with the status in the log.
+- **`vendor_capped` covers more cases than the 400 named:** the 429 of a
+  tier's monthly cap (`enforced_spend_limit_reached`), a 402, and (2b
+  follow-up) the documented out-of-credit message on any 4xx.
 - **Migration 0027 adds an outcome too** (`vendor_capped`), not only the
   vendor: the counts row stores the outcome as an enum.
 - **`inference_geo: 'global'` is sent.** The prompt listed what to send and
   did not name it; design §6 requires the region set in code. `global` is
   the default and costs 1× (`us` is 1.1×). Anthropic has no EU option and
-  no per-request no-storage option.
+  no per-request no-storage option. Alex kept `global` (2026-10-14).
 - **The SDK does not prepare the schema.** Its 0.133 transform demotes
   `enum` and `const` to description text; the adapter cuts the schema to the
   documented keywords itself.
@@ -364,15 +452,11 @@ items 17–24):
 - **No server-side `fallbacks`.** Haiku 5.5 has none (a 400). On Sonnet 5.5
   it could hand a refused read to another model, outside the allow-list.
 
-**Proposed, not built: a `.next/static` scan for the key's value.** It
-needs a production build with the key in the environment. The e2e run
-already builds once; a step after that build could grep `.next-e2e/static`
-for `LLM_READER_API_KEY`'s value and fail on a hit. Waiting on Alex: it
-would put the real key in the e2e build's environment.
+**Built in the follow-up, both from 2b:**
 
-**Found, not fixed:** a BLANK `LLM_READER_USER_DAILY_CAP=` or
-`LLM_READER_DAILY_CAP=` is read as 0 and refuses boot (the caps are not
-wrapped in `blankIsAbsent`). `.env.example` leaves them commented out.
+- **The `.next/static` scan:** with a synthetic key, not the real one
+  (above).
+- **The blank-cap boot refusal is gone:** a blank cap is now its default.
 
 Every way the build differs from the design, phases 1 and 2a, is listed in
 `llm-reader-design.md` §11.
@@ -479,17 +563,16 @@ fixed; both are follow-ups.
 
 ## Next
 
-- **Phase 2b waits for Alex's approval.** Built, `npm run check` green,
-  one successful live call with invented text. Not deployed; the reader is
-  off in production.
-- **Decisions for Alex from 2b:**
-  - An unlisted `LLM_READER_MODEL` refuses to boot the WHOLE app, as an
-    unknown vendor already does (every route imports `serverEnv`). A
-    missing one only turns the reader off. Keep, or make an unlisted id
-    turn the reader off too?
-  - The `.next/static` key scan (above): worth the real key in the e2e
-    build's environment?
-  - `inference_geo`: `global` (1×) or `us` (1.1×)?
+- **The 2b follow-up waits for Alex's approval.** `npm run check` is
+  green, and the two e2e specs pass. Not deployed; the reader is off in
+  production.
+- **2b's three decisions are closed** (Alex, 2026-10-14):
+  - every reader setting fails closed;
+  - the bundle scan uses a synthetic key;
+  - `inference_geo` stays `global`.
+- **One live call is left** of 2b's five. None was made in the follow-up.
+- **A full `npm run e2e`** was not run in the follow-up, only the two
+  reader specs.
 - **The two intermittent hangs above** (truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.

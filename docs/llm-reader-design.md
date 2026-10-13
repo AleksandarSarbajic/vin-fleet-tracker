@@ -316,12 +316,13 @@ request refused for its body never spends a read:
    nothing but the counts row.
 
 **Keys.**
-- `LLM_READER_API_KEY` (or the vendor's equivalent credentials, §6),
-  `LLM_READER_VENDOR` and `LLM_READER_MODEL` go in `serverShape` in
-  `src/env/schema.ts`.
+- The reader's settings are parsed by `parseReaderEnv` in
+  `src/env/schema.ts`, apart from the app's (2b follow-up). Any problem
+  turns the reader OFF and is logged once by setting name, never by value.
+  No reader setting stops the app booting, with one exception.
 - Never `NEXT_PUBLIC_*`.
-- A refine generalised from `hereKeyIsNotPublic` refuses to boot if the key
-  equals any public value.
+- **The exception:** a refine generalised from `hereKeyIsNotPublic`, in
+  `AppEnv`, refuses to boot if the key equals any public value.
 - Every module with code behind the seam — the fake, the handler, the
   counts, the log line, the live wiring — imports `server-only`, so a
   client import fails the build. Tests mock it per file, as this repo's
@@ -329,9 +330,11 @@ request refused for its body never spends a read:
 - **Built in 2b, without a build:** `src/test/reader-key-bundle.test.ts`
   walks the import graph from every `'use client'` module and shows that
   none reaches server code, the env loader, `server-only` or the SDK, and
-  none reads the key; only the env schema, the wiring and the log line name
-  it. A scan of `.next/static` for the key's VALUE after a production build
-  is still not built: it needs a build, and is proposed in `HANDOFF.md`.
+  none reads the key; only the env schema names it.
+- **Built in the 2b follow-up, on the build:** `e2e/reader-key-bundle.spec.ts`
+  scans the e2e build's static files for a SYNTHETIC key that `npm run e2e`
+  gives the build. It checks itself first: the e2e Sentry DSN, which Next
+  inlines, must be found by the same scan.
 
 ## 5. Failure modes
 
@@ -348,7 +351,7 @@ a constant that never includes vendor or document text.
 | `not_redacted` | a detector hit, in the browser or on the server | "This document could not be prepared for reading; nothing was sent." |
 | `timeout` | 25 s on the server, or 35 s in the browser | "The AI read took too long. Nothing was filled." |
 | `unavailable` | vendor 5xx, network failure, 429, 401/403, any other 4xx | "The AI reader is not available right now. Nothing was filled." |
-| `vendor_capped` | the vendor's account is out of money: Anthropic's 400 "You have reached your specified…" (a spend limit the account set), its 429 `enforced_spend_limit_reached` (a tier's monthly cap), or a 402 | "The AI reader’s spending limit is reached. Tell an admin." |
+| `vendor_capped` | the vendor's account is out of money: Anthropic's 400 "You have reached your specified…" (a spend limit the account set), its 429 `enforced_spend_limit_reached` (a tier's monthly cap), a 402, or "Your credit balance is too low…" on any 4xx (a prepaid balance run dry) | "The AI reader’s spending limit is reached. Tell an admin." |
 | `refused` | the vendor declined, or a content filter fired | "The AI reader declined this document. Nothing was filled." |
 | `invalid_output` | the reply failed `ModelRead` | "The AI read came back unusable. Nothing was filled." |
 | `cancelled` | the dispatcher pressed Cancel | "Cancelled. Nothing was filled." |
@@ -462,7 +465,8 @@ export interface ReaderAdapter {
 - **`FakeReaderAdapter`** for tests and e2e. It is given a script (an
   output, an error code, or a delay), records the `SentLine[]` it was
   handed, and makes no network call. `LLM_READER_VENDOR=fake` selects it.
-  The env schema refuses `fake` when `VERCEL_ENV` is `production`.
+  With `VERCEL_ENV` `production`, `fake` turns the reader off
+  (`parseReaderEnv`).
   `NODE_ENV` would not work, because the e2e run is a production build too.
 
 **What each vendor would need from us** (from
@@ -763,9 +767,8 @@ Phase 2b (Anthropic, 2026-10-14):
     vendor). Besides the 400 Alex named, it covers two cases the docs give
     that mean the same — no money, an admin must act: the 429 of a tier's
     monthly cap (`error.details.error_code: enforced_spend_limit_reached`)
-    and a 402 `billing_error`. A prepaid balance that runs dry is NOT
-    covered: its wording is not in the docs read, so it shows as
-    `unavailable` with the vendor's status in the log.
+    and a 402 `billing_error`. A prepaid balance run dry was added in the
+    follow-up (item 26).
 19. **A failed read keeps what it cost.** A refusal or a cut-off reply is
     billed, so its tokens go in the counts row; and every vendor failure
     but a cancel is logged as one line, code and vendor status, so a revoked
@@ -792,4 +795,23 @@ Phase 2b (Anthropic, 2026-10-14):
 24. **The browser's list of codes is derived** from `READ_MESSAGES`. The
     hand-kept list would have read `vendor_capped` as `unavailable` by its
     503; a test now runs every code through it.
+
+Phase 2b follow-up (config safety, Alex 2026-10-14):
+
+25. **Reader settings fail closed.** In 2b an unknown vendor, an unlisted
+    model, a blank or invalid cap, or the fake in production each refused to
+    boot the whole app, because every route imports `serverEnv`.
+    `parseReaderEnv` now parses them apart and never throws: any problem
+    turns the reader off and is logged once as `{ setting, fault }`. Only a
+    key equal to a `NEXT_PUBLIC_*` value still refuses boot. A blank cap is
+    the default.
+26. **A prepaid balance run dry is `vendor_capped`.** Anthropic documents
+    the message ("Your credit balance is too low to access the Anthropic
+    API…", api-credits-for-subscribers, read 2026-10-14) but not its status
+    or error type, so it is matched on any 4xx. The vendor's status is in the
+    log line either way.
+27. **The key scan on the build** (§4, Keys) uses a synthetic key: the real
+    one never enters the e2e run.
+28. **`inference_geo` stays `global`** (Alex). Standard pricing; `us` would
+    be 1.1×.
 
