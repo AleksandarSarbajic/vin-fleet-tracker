@@ -1055,3 +1055,47 @@ export const feedStalls = pgTable(
     check('feed_stalls_positive', sql`seconds > 0`),
   ],
 );
+
+/* ---------------------------- ratecon_ai_reads ---------------------------- */
+
+/** docs/llm-reader-design.md §4 (migration 0026). */
+export const rateconAiOutcome = pgEnum('ratecon_ai_outcome', [
+  'pending',
+  'ok',
+  'timeout',
+  'unavailable',
+  'refused',
+  'invalid_output',
+  'cancelled',
+  'error',
+]);
+
+/** Only the fake until a vendor is chosen; a real one is added with its adapter. */
+export const rateconAiVendor = pgEnum('ratecon_ai_vendor', ['fake']);
+
+/**
+ * The language-model reader's counts: one row a read, reserved before the
+ * vendor is called, its outcome after. COUNTS ONLY — no text column, ever.
+ * What the daily caps count (`src/server/ratecon-reader/reads.ts`).
+ */
+export const rateconAiReads = pgTable(
+  'ratecon_ai_reads',
+  {
+    id: uuid('id').primaryKey().default(newId),
+    /** Provenance for a count; no foreign key, so it never blocks removing a user. */
+    userId: uuid('user_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    outcome: rateconAiOutcome('outcome').notNull().default('pending'),
+    vendor: rateconAiVendor('vendor').notNull(),
+    linesSent: integer('lines_sent').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+  },
+  (t) => [
+    index('ratecon_ai_reads_created_idx').on(t.createdAt),
+    check(
+      'ratecon_ai_reads_counts',
+      sql`lines_sent >= 0 AND (input_tokens IS NULL OR input_tokens >= 0) AND (output_tokens IS NULL OR output_tokens >= 0)`,
+    ),
+  ],
+);
