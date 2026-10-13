@@ -50,6 +50,7 @@
     "zip-zones:build": "tsx scripts/build-zip-zones.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@sentry/nextjs": "^11.0.0",
     "@sentry/node": "^11.0.0",
     "@supabase/ssr": "^0.5.2",
