@@ -469,7 +469,7 @@ Local only: no network, no API call, no use of the key. `ratecon:eval-ai`
 
 | File | What |
 |---|---|
-| `scripts/ratecon-samples.mts` | The samples by number; reads a PDF the way the browser does. Prints nothing |
+| `scripts/ratecon-corpus.mts` | The samples by number; reads a PDF the way the browser does. Prints nothing |
 | `scripts/ratecon-redact-report.mts` | `npm run ratecon:redact-report`: step 0, counts per file |
 | `scripts/ratecon-review-redacted.mts`, `scripts/ratecon-review-server.mts` | `npm run ratecon:review-redacted <n>`: one local page for Alex |
 | `src/lib/ratecon/redact.ts` | `redactedForReview`: the lines the send would use, each with its re-scan hits. For the viewer only; the send path is unchanged |

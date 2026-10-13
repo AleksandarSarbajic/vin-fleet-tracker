@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readRatecon } from '../src/lib/ratecon/templates';
-import { EXPECTED_PATH, readSample, sampleFiles } from './ratecon-samples.mts';
+import { EXPECTED_PATH, readSample, sampleFiles } from './ratecon-corpus.mts';
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 

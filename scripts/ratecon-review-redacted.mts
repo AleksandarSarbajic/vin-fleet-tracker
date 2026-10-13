@@ -13,7 +13,7 @@
 import { redactedForReview } from '../src/lib/ratecon/redact';
 import { readRatecon } from '../src/lib/ratecon/templates';
 import { reviewPage, startReviewServer } from './ratecon-review-server.mts';
-import { readSample, sampleByNumber, sampleFiles } from './ratecon-samples.mts';
+import { readSample, sampleByNumber, sampleFiles } from './ratecon-corpus.mts';
 
 const THIRTY_MINUTES = 30 * 60 * 1000;
 

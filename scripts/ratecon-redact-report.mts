@@ -15,7 +15,7 @@
 import { PDF_MESSAGES } from '../src/lib/ratecon/read-pdf';
 import { prepareForReading, type MaskKind } from '../src/lib/ratecon/redact';
 import { readRatecon } from '../src/lib/ratecon/templates';
-import { readSample, sampleFiles } from './ratecon-samples.mts';
+import { readSample, sampleFiles } from './ratecon-corpus.mts';
 
 const KINDS: readonly MaskKind[] = ['email', 'phone', 'amount', 'labelled', 'id', 'url'];
 

@@ -7,7 +7,7 @@
  * name.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { EXPECTED_PATH, sampleFiles } from './ratecon-samples.mts';
+import { EXPECTED_PATH, sampleFiles } from './ratecon-corpus.mts';
 import { ExpectedFile, inspect } from './ratecon-expected.mts';
 
 if (!existsSync(EXPECTED_PATH)) {

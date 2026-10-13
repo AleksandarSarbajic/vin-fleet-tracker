@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { redactedForReview } from '@/lib/ratecon/redact';
 import { SENTINEL, UNKNOWN_LAYOUT, pdfLine } from '@/test/model-read-fixtures';
 import { REVIEW_CSP, reviewPage, startReviewServer, type Review } from '../../scripts/ratecon-review-server.mjs';
-import { sampleByNumber } from '../../scripts/ratecon-samples.mjs';
+import { sampleByNumber } from '../../scripts/ratecon-corpus.mjs';
 
 /**
  * `npm run ratecon:review-redacted` (docs/llm-reader-design.md §8.2), tested
