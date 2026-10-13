@@ -107,8 +107,7 @@ export function isIanaZone(tz: string): boolean {
  * Sonnet 5.5 is the fallback, switched by env alone. Exact ids, no date
  * suffix. Nothing else is allowed: Fable and Mythos require 30-day retention,
  * and Opus costs far more for a job Haiku is chosen for. An unlisted id
- * refuses to boot, as an unknown vendor does; an ABSENT one turns the reader
- * off (live.ts), because a missing setting is not a wrong one.
+ * turns the reader off (`parseReaderEnv`); it never stops the app booting.
  */
 export const READER_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'] as const;
 export type ReaderModel = (typeof READER_MODELS)[number];
@@ -240,44 +239,12 @@ const serverShape = z.object({
       .default('America/Chicago'),
 
     /**
-     * The language-model reader (docs/llm-reader-design.md §4). OFF unless
-     * set: "true" or "1". Off, the route answers 404 and the strip never
-     * shows "Read with AI".
-     */
-    LLM_READER_ENABLED: blankIsAbsent(z.enum(['true', 'false', '1', '0']).optional()).transform(
-      (v) => v === 'true' || v === '1',
-    ),
-
-    /**
-     * Which adapter reads: `fake` (a script, never in production) or
-     * `anthropic` (Alex, 2026-10-13/14). Unset, the reader is off whatever the
-     * flag says.
-     */
-    LLM_READER_VENDOR: blankIsAbsent(z.enum(['fake', 'anthropic']).optional()),
-
-    /** The model the vendor runs: one of READER_MODELS. Unused by the fake. */
-    LLM_READER_MODEL: blankIsAbsent(readerModel.optional()),
-
-    /**
-     * The vendor's credential. SERVER ONLY — refused at boot if any
-     * `NEXT_PUBLIC_*` value equals it, as HERE_API_KEY is. Read only by
-     * live.ts, which hands it to the adapter; never logged, never returned.
+     * The language-model reader's credential, here for ONE check only: it
+     * must equal no `NEXT_PUBLIC_*` value, and that still refuses boot (Alex,
+     * 2026-10-14). Every other reader setting — and this one's presence — is
+     * parsed apart by `parseReaderEnv`, which never refuses boot.
      */
     LLM_READER_API_KEY: blankIsAbsent(z.string().min(1).optional()),
-
-    /** The fake's script: a JSON file of steps (e2e and local runs). Ignored by a real vendor. */
-    LLM_READER_FAKE_SCRIPT: blankIsAbsent(z.string().min(1).optional()),
-
-    /**
-     * Reads a user may start in a dispatch-zone day, and reads in all
-     * (Alex, 2026-10-13: 25 and 100). Counted in Postgres, compared, never
-     * projected (§12.60).
-     */
-    LLM_READER_USER_DAILY_CAP: z.coerce.number().int().positive().default(25),
-    LLM_READER_DAILY_CAP: z.coerce.number().int().positive().default(100),
-
-    /** Set by Vercel on every deployment; absent locally and in e2e. */
-    VERCEL_ENV: blankIsAbsent(z.enum(['production', 'preview', 'development']).optional()),
 
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
@@ -349,19 +316,6 @@ const READER_KEY_IS_NOT_PUBLIC = {
 };
 
 /**
- * The fake reader answers from a script, not from the document. It is for
- * e2e and local runs; in production it would put scripted stops on a real
- * load. `VERCEL_ENV`, not `NODE_ENV`: the e2e run is a production build too.
- */
-const noFakeReaderInProduction = (e: { LLM_READER_VENDOR?: string | undefined; VERCEL_ENV?: string | undefined }) =>
-  !(e.LLM_READER_VENDOR === 'fake' && e.VERCEL_ENV === 'production');
-
-const NO_FAKE_READER_IN_PRODUCTION = {
-  path: ['LLM_READER_VENDOR'],
-  message: 'LLM_READER_VENDOR=fake is refused in production (VERCEL_ENV=production): it answers from a script.',
-};
-
-/**
  * What the NEXT APP needs, and nothing else (§12.75).
  *
  * The app used to be validated against every server variable at once, which
@@ -385,17 +339,97 @@ export const AppEnv = serverShape
     DATABASE_URL: true,
     DISPATCH_TZ: true,
     NODE_ENV: true,
-    LLM_READER_ENABLED: true,
-    LLM_READER_VENDOR: true,
-    LLM_READER_MODEL: true,
     LLM_READER_API_KEY: true,
-    LLM_READER_FAKE_SCRIPT: true,
-    LLM_READER_USER_DAILY_CAP: true,
-    LLM_READER_DAILY_CAP: true,
-    VERCEL_ENV: true,
   })
-  .refine(readerKeyIsNotPublic, READER_KEY_IS_NOT_PUBLIC)
-  .refine(noFakeReaderInProduction, NO_FAKE_READER_IN_PRODUCTION);
+  .refine(readerKeyIsNotPublic, READER_KEY_IS_NOT_PUBLIC);
+
+/**
+ * The language-model reader's settings, parsed ON THEIR OWN (Alex,
+ * 2026-10-14). The reader is an extra; the console must never depend on it.
+ * So this never throws and never refuses boot: ANY problem turns the reader
+ * OFF and is returned as `{ setting, fault }` — a name and a fixed word,
+ * never the value (one of them is a key). live.ts logs them once.
+ *
+ * Checked only when the flag is on (a reader that is off has nothing to get
+ * wrong), and then only what the named vendor uses: the fake needs no key or
+ * model, Anthropic no script. A blank variable is an absent one; a blank cap
+ * is its default.
+ *
+ * The one setting still able to refuse boot is a key equal to a
+ * `NEXT_PUBLIC_*` value — `AppEnv` above.
+ */
+export type ReaderSetting =
+  | 'LLM_READER_ENABLED'
+  | 'LLM_READER_VENDOR'
+  | 'LLM_READER_MODEL'
+  | 'LLM_READER_API_KEY'
+  | 'LLM_READER_USER_DAILY_CAP'
+  | 'LLM_READER_DAILY_CAP';
+export type ReaderFault = 'missing' | 'invalid' | 'not allowed' | 'refused in production';
+export interface ReaderProblem {
+  setting: ReaderSetting;
+  fault: ReaderFault;
+}
+
+/** Alex, 2026-10-13: 25 reads a user and 100 in all, per dispatch-zone day. */
+export const READER_DEFAULT_CAPS = { user: 25, daily: 100 } as const;
+
+export type ReaderConfig = { userCap: number; dailyCap: number; problems: ReaderProblem[] } & (
+  | { on: false }
+  | { on: true; vendor: 'fake'; fakeScript: string | null }
+  | { on: true; vendor: 'anthropic'; apiKey: string; model: ReaderModel }
+);
+
+export function parseReaderEnv(env: Readonly<Record<string, string | undefined>>): ReaderConfig {
+  const given = (name: string): string | undefined => {
+    const value = env[name];
+    return value === undefined || value.trim() === '' ? undefined : value;
+  };
+  const problems: ReaderProblem[] = [];
+  const defaults = { userCap: READER_DEFAULT_CAPS.user, dailyCap: READER_DEFAULT_CAPS.daily };
+
+  const flag = given('LLM_READER_ENABLED')?.trim();
+  if (flag !== undefined && !['true', '1', 'false', '0'].includes(flag)) {
+    return { on: false, ...defaults, problems: [{ setting: 'LLM_READER_ENABLED', fault: 'invalid' }] };
+  }
+  if (flag !== 'true' && flag !== '1') return { on: false, ...defaults, problems };
+
+  const cap = (setting: 'LLM_READER_USER_DAILY_CAP' | 'LLM_READER_DAILY_CAP', fallback: number): number => {
+    const value = given(setting);
+    if (value === undefined) return fallback;
+    const n = Number(value.trim());
+    if (Number.isInteger(n) && n > 0) return n;
+    problems.push({ setting, fault: 'invalid' });
+    return fallback;
+  };
+  const userCap = cap('LLM_READER_USER_DAILY_CAP', defaults.userCap);
+  const dailyCap = cap('LLM_READER_DAILY_CAP', defaults.dailyCap);
+  const off = (): ReaderConfig => ({ on: false, userCap, dailyCap, problems });
+
+  const vendor = given('LLM_READER_VENDOR');
+  if (vendor === undefined) problems.push({ setting: 'LLM_READER_VENDOR', fault: 'missing' });
+  else if (vendor !== 'fake' && vendor !== 'anthropic') problems.push({ setting: 'LLM_READER_VENDOR', fault: 'invalid' });
+
+  if (vendor === 'fake') {
+    // The fake answers from a script, not from the document: in production it
+    // would put scripted stops on a real load. VERCEL_ENV, not NODE_ENV — the
+    // e2e run is a production build too.
+    if (env['VERCEL_ENV'] === 'production') problems.push({ setting: 'LLM_READER_VENDOR', fault: 'refused in production' });
+    return problems.length > 0 ? off() : { on: true, vendor, fakeScript: given('LLM_READER_FAKE_SCRIPT') ?? null, userCap, dailyCap, problems };
+  }
+  if (vendor === 'anthropic') {
+    const apiKey = given('LLM_READER_API_KEY');
+    const model = given('LLM_READER_MODEL');
+    if (apiKey === undefined) problems.push({ setting: 'LLM_READER_API_KEY', fault: 'missing' });
+    if (model === undefined) problems.push({ setting: 'LLM_READER_MODEL', fault: 'missing' });
+    const allowed = READER_MODELS.find((m) => m === model);
+    if (model !== undefined && allowed === undefined) problems.push({ setting: 'LLM_READER_MODEL', fault: 'not allowed' });
+    if (problems.length === 0 && apiKey !== undefined && allowed !== undefined) {
+      return { on: true, vendor, apiKey, model: allowed, userCap, dailyCap, problems };
+    }
+  }
+  return off();
+}
 
 /**
  * What `npm run reader:smoke` needs: the key and the model, both present, and

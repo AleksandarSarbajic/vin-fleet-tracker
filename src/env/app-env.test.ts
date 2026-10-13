@@ -82,6 +82,51 @@ describe('the app starts without any worker credential (§12.75)', () => {
 });
 
 /**
+ * The language-model reader is an extra (Alex, 2026-10-14): no reader setting
+ * may stop the console booting — except a key published to the browser.
+ */
+describe("the reader's settings never stop the app booting", () => {
+  async function loadWith(vars: Record<string, string>) {
+    vi.resetModules();
+    for (const key of [...WORKER_ONLY, 'SUPABASE_SECRET_KEY', 'DATABASE_URL']) vi.stubEnv(key, undefined);
+    for (const [key, value] of Object.entries(vars)) vi.stubEnv(key, value);
+    return import('@/env/server');
+  }
+
+  it('every bad value at once: the app loads, and the reader is off with each problem named', async () => {
+    const { serverEnv, readerEnv } = await loadWith({
+      ...VERCEL,
+      LLM_READER_ENABLED: 'true',
+      LLM_READER_VENDOR: 'anthropic',
+      LLM_READER_MODEL: 'claude-fable-5-1',
+      LLM_READER_USER_DAILY_CAP: 'lots',
+      LLM_READER_DAILY_CAP: '0',
+      VERCEL_ENV: 'production',
+    });
+    expect(serverEnv.DATABASE_URL).toBe(VERCEL.DATABASE_URL);
+    expect(readerEnv.on).toBe(false);
+    expect(readerEnv.problems.map((p) => p.setting).sort()).toEqual([
+      'LLM_READER_API_KEY',
+      'LLM_READER_DAILY_CAP',
+      'LLM_READER_MODEL',
+      'LLM_READER_USER_DAILY_CAP',
+    ]);
+  });
+
+  it('an unknown vendor, or the fake in production: still loads, reader off', async () => {
+    expect((await loadWith({ ...VERCEL, LLM_READER_ENABLED: '1', LLM_READER_VENDOR: 'acme' })).readerEnv.on).toBe(false);
+    const fake = await loadWith({ ...VERCEL, LLM_READER_ENABLED: '1', LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'production' });
+    expect(fake.readerEnv.on).toBe(false);
+  });
+
+  it('the one exception: a key equal to a NEXT_PUBLIC_ value still refuses boot', async () => {
+    await expect(
+      loadWith({ ...VERCEL, LLM_READER_API_KEY: 'qq-published-qq', NEXT_PUBLIC_ANYTHING: 'qq-published-qq' }),
+    ).rejects.toThrow(/LLM_READER_API_KEY is also exposed/);
+  });
+});
+
+/**
  * The schema is one half; code is the other. A new `serverEnv.DIRECT_URL` in
  * a route would fail to typecheck now, but a bare `process.env.SAMSARA_…`
  * would not. So app code — everything under src/ except the worker, tests,

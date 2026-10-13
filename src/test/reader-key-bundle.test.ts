@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
  * (1) is walked here, import by import, from every `'use client'` module.
  * (2) is refused at boot by the env schema (`readerKeyIsNotPublic`, tested in
  * schema.test.ts) and checked here by name. (3) is held by naming every
- * module that mentions the key: none renders anything.
+ * module that mentions the key: only the env schema does.
  *
  * Not a substitute for scanning `.next/static` for the key's value after a
  * production build; that needs a build, and is proposed separately.
@@ -136,7 +136,7 @@ describe("the reader's key cannot reach the browser bundle", () => {
 
   it('no client module reads the key from the environment, or reaches the parsed server env', () => {
     const reads =
-      /process\.env(?:\.LLM_READER_API_KEY\b|\[\s*['"]LLM_READER_API_KEY['"]\s*\])|\bserverEnv\b/;
+      /process\.env(?:\.LLM_READER_API_KEY\b|\[\s*['"]LLM_READER_API_KEY['"]\s*\])|\b(?:serverEnv|readerEnv)\b/;
     expect(
       graph.files.filter((f) => reads.test(readFileSync(join(ROOT, f), 'utf8'))),
     ).toEqual([]);
@@ -163,16 +163,8 @@ describe("the reader's key cannot reach the browser bundle", () => {
     );
   });
 
-  it('only the env schema, the wiring and the log line name the key — none of them renders anything', () => {
-    expect(
-      ALL.filter((f) => text.get(f)!.includes('LLM_READER_API_KEY'))
-        .map(rel)
-        .sort(),
-    ).toEqual([
-      'src/env/schema.ts',
-      'src/server/ratecon-reader/live.ts',
-      'src/server/ratecon-reader/log.ts',
-    ]);
+  it('only the env schema names the key — live.ts reads it from the parsed config, and renders nothing', () => {
+    expect(ALL.filter((f) => text.get(f)!.includes('LLM_READER_API_KEY')).map(rel)).toEqual(['src/env/schema.ts']);
   });
 
   it('the SDK is imported only on the server, by modules that import server-only first', () => {

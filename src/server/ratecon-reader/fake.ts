@@ -9,8 +9,8 @@ import type { AdapterFailure, AdapterResult, AdapterUsage, ReaderAdapter, Reader
  * Records each request it was handed — every key, deep-copied at the call —
  * so a test can prove what would have left the server.
  *
- * Selected by `LLM_READER_VENDOR=fake`, which the env schema refuses when
- * `VERCEL_ENV` is `production`.
+ * Selected by `LLM_READER_VENDOR=fake`, which turns the reader off when
+ * `VERCEL_ENV` is `production` (`parseReaderEnv`).
  */
 
 export type FakeStep =

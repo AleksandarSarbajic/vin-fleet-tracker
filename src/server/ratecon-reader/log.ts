@@ -1,4 +1,5 @@
 import 'server-only';
+import type { ReaderProblem } from '@/env/schema';
 import type { ReadFailCode } from '@/lib/ratecon/read-codes';
 
 /**
@@ -25,12 +26,13 @@ export function logReadFailure(entry: {
 }
 
 /**
- * The reader is switched on and names Anthropic, but a setting is missing,
- * so it stays off. Names the settings, never a value: one of them is a key.
+ * The reader's settings have a problem, so it is off (`parseReaderEnv`).
+ * Names each setting and a fixed word for what is wrong — never a value:
+ * one of them is a key.
  */
-export function logReaderMisconfigured(missing: readonly ('LLM_READER_API_KEY' | 'LLM_READER_MODEL')[]): void {
+export function logReaderMisconfigured(problems: readonly ReaderProblem[]): void {
   // eslint-disable-next-line no-restricted-globals -- a configuration fault, said once; names only, no values.
-  console.error('ratecon reader is off: LLM_READER_ENABLED is on and LLM_READER_VENDOR is anthropic, but these are not set', {
-    missing: [...missing],
+  console.error('ratecon reader is off: its settings have problems', {
+    problems: problems.map(({ setting, fault }) => ({ setting, fault })),
   });
 }

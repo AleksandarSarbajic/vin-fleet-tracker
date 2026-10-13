@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AppEnv, ClientEnv, MigrateEnv, ReaderSmokeEnv, WorkerEnv, isIanaZone } from './schema';
+import { AppEnv, ClientEnv, MigrateEnv, ReaderSmokeEnv, WorkerEnv, isIanaZone, parseReaderEnv } from './schema';
 
 const REF = 'ywfotpjljshxrgxlgcdp';
 const POOLER = 'aws-1-eu-west-1.pooler.supabase.com';
@@ -253,15 +253,8 @@ describe('the app and the worker share no credential (§12.75)', () => {
   it('the app starts with none of the worker\'s variables', () => {
     expect(AppEnv.safeParse(validApp).success).toBe(true);
     const r = AppEnv.safeParse({ ...validApp, ...validWorker, DATABASE_URL: TRANSACTION });
-    // The reader's three defaulted settings are the app's own; no worker variable is here.
-    expect(r.success && Object.keys(r.data).sort()).toEqual([
-      'DATABASE_URL',
-      'DISPATCH_TZ',
-      'LLM_READER_DAILY_CAP',
-      'LLM_READER_ENABLED',
-      'LLM_READER_USER_DAILY_CAP',
-      'NODE_ENV',
-    ]);
+    // No worker variable is here; the reader's settings are parsed apart (parseReaderEnv).
+    expect(r.success && Object.keys(r.data).sort()).toEqual(['DATABASE_URL', 'DISPATCH_TZ', 'NODE_ENV']);
   });
 
   it('and each refuses to stand in for the other', () => {
@@ -398,7 +391,7 @@ describe('a blank optional variable is an absent one', () => {
   });
 });
 
-describe("the language-model reader's settings (docs/llm-reader-design.md §4)", () => {
+describe("the reader's key: the one reader setting that still refuses boot", () => {
   const withPublic = <T>(vars: Record<string, string>, run: () => T): T => {
     const before = { ...process.env };
     Object.assign(process.env, vars);
@@ -411,76 +404,6 @@ describe("the language-model reader's settings (docs/llm-reader-design.md §4)",
   };
   const app = (vars: Record<string, string>) => AppEnv.safeParse({ ...validApp, ...vars });
 
-  it('is off, with no vendor, and caps of 25 a user and 100 in all, when nothing is set', () => {
-    const r = app({});
-    expect(r.success && r.data).toMatchObject({
-      LLM_READER_ENABLED: false,
-      LLM_READER_USER_DAILY_CAP: 25,
-      LLM_READER_DAILY_CAP: 100,
-    });
-    expect(r.success && r.data.LLM_READER_VENDOR).toBeUndefined();
-  });
-
-  it.each([
-    ['true', true],
-    ['1', true],
-    ['false', false],
-    ['0', false],
-    ['', false],
-  ])('reads the flag %j as %s', (value, on) => {
-    const r = app({ LLM_READER_ENABLED: value });
-    expect(r.success && r.data.LLM_READER_ENABLED).toBe(on);
-  });
-
-  it('refuses a flag that is neither on nor off', () => {
-    expect(errorOn(app({ LLM_READER_ENABLED: 'yes please' }), 'LLM_READER_ENABLED')).toBeDefined();
-  });
-
-  it('takes the fake and Anthropic, and no other vendor', () => {
-    expect(app({ LLM_READER_VENDOR: 'fake' }).success).toBe(true);
-    expect(app({ LLM_READER_VENDOR: 'anthropic' }).success).toBe(true);
-    expect(app({ LLM_READER_VENDOR: 'some-vendor' }).success).toBe(false);
-  });
-
-  it('takes Anthropic in production: only the fake is refused there', () => {
-    expect(app({ LLM_READER_VENDOR: 'anthropic', VERCEL_ENV: 'production' }).success).toBe(true);
-  });
-
-  it.each(['claude-haiku-5-5', 'claude-sonnet-5-5'])('takes the model %s', (model) => {
-    const r = app({ LLM_READER_MODEL: model });
-    expect(r.success && r.data.LLM_READER_MODEL).toBe(model);
-  });
-
-  it.each([
-    ['Fable, which requires 30-day retention', 'claude-fable-5-1'],
-    ['Mythos, likewise', 'claude-mythos-5-1'],
-    ['Opus, which costs far more', 'claude-opus-5-5'],
-    ['an older Haiku', 'claude-haiku-4-5'],
-    ['a date suffix', 'claude-haiku-5-5-20261001'],
-    ['another case', 'Claude-Haiku-5-5'],
-    ['padding', ' claude-haiku-5-5'],
-  ])('refuses %s (%s), saying which two it takes', (_, model) => {
-    expect(errorOn(app({ LLM_READER_MODEL: model }), 'LLM_READER_MODEL')).toMatch(/claude-haiku-5-5, claude-sonnet-5-5/);
-  });
-
-  it('a blank model is an absent one, which leaves the reader off rather than refusing to boot', () => {
-    const r = app({ LLM_READER_MODEL: '' });
-    expect(r.success && r.data.LLM_READER_MODEL).toBeUndefined();
-  });
-
-  it('refuses the fake vendor in production, and takes it in a preview or locally', () => {
-    expect(errorOn(app({ LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'production' }), 'LLM_READER_VENDOR')).toMatch(/production/);
-    expect(app({ LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'preview' }).success).toBe(true);
-    expect(app({ LLM_READER_VENDOR: 'fake' }).success).toBe(true);
-  });
-
-  it('takes caps as whole positive numbers', () => {
-    const r = app({ LLM_READER_USER_DAILY_CAP: '3', LLM_READER_DAILY_CAP: '7' });
-    expect(r.success && [r.data.LLM_READER_USER_DAILY_CAP, r.data.LLM_READER_DAILY_CAP]).toEqual([3, 7]);
-    expect(app({ LLM_READER_DAILY_CAP: '0' }).success).toBe(false);
-    expect(app({ LLM_READER_USER_DAILY_CAP: '2.5' }).success).toBe(false);
-  });
-
   it('refuses a key that is ALSO published under any NEXT_PUBLIC_ name', () => {
     const r = withPublic({ NEXT_PUBLIC_ANYTHING: 'reader-secret' }, () => app({ LLM_READER_API_KEY: 'reader-secret' }));
     expect(errorOn(r, 'LLM_READER_API_KEY')).toContain('ships to every browser');
@@ -489,6 +412,136 @@ describe("the language-model reader's settings (docs/llm-reader-design.md §4)",
   it('accepts a key that is nowhere in the client bundle', () => {
     const r = withPublic({ NEXT_PUBLIC_MAPBOX_TOKEN: 'pk.abc' }, () => app({ LLM_READER_API_KEY: 'reader-secret' }));
     expect(r.success).toBe(true);
+  });
+
+  it('boots whatever else the reader is given: the app schema no longer reads any other reader setting', () => {
+    const r = app({
+      LLM_READER_ENABLED: 'yes please',
+      LLM_READER_VENDOR: 'some-vendor',
+      LLM_READER_MODEL: 'claude-opus-5-5',
+      LLM_READER_USER_DAILY_CAP: '',
+      LLM_READER_DAILY_CAP: 'lots',
+      VERCEL_ENV: 'production',
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("the reader's own settings FAIL CLOSED (parseReaderEnv; Alex, 2026-10-14)", () => {
+  const ON = { LLM_READER_ENABLED: 'true' };
+  const ANTHROPIC = { ...ON, LLM_READER_VENDOR: 'anthropic', LLM_READER_API_KEY: 'k-invented', LLM_READER_MODEL: 'claude-haiku-5-5' };
+
+  it('nothing set: off, the default caps, no problem — a reader that is off has nothing to get wrong', () => {
+    expect(parseReaderEnv({})).toEqual({ on: false, userCap: 25, dailyCap: 100, problems: [] });
+  });
+
+  it.each([['false'], ['0'], ['']])('the flag %j: off, and nothing else is looked at', (flag) => {
+    expect(parseReaderEnv({ LLM_READER_ENABLED: flag, LLM_READER_VENDOR: 'nonsense', LLM_READER_DAILY_CAP: 'lots' })).toEqual({
+      on: false,
+      userCap: 25,
+      dailyCap: 100,
+      problems: [],
+    });
+  });
+
+  it('Anthropic with a key and an allowed model: on', () => {
+    expect(parseReaderEnv(ANTHROPIC)).toEqual({
+      on: true,
+      vendor: 'anthropic',
+      apiKey: 'k-invented',
+      model: 'claude-haiku-5-5',
+      userCap: 25,
+      dailyCap: 100,
+      problems: [],
+    });
+    expect(parseReaderEnv({ ...ANTHROPIC, LLM_READER_MODEL: 'claude-sonnet-5-5' })).toMatchObject({ on: true, model: 'claude-sonnet-5-5' });
+  });
+
+  it('the fake, with its script: on, and it needs no key or model', () => {
+    expect(parseReaderEnv({ ...ON, LLM_READER_VENDOR: 'fake', LLM_READER_FAKE_SCRIPT: 'e2e/x.json' })).toEqual({
+      on: true,
+      vendor: 'fake',
+      fakeScript: 'e2e/x.json',
+      userCap: 25,
+      dailyCap: 100,
+      problems: [],
+    });
+  });
+
+  it.each([
+    ['a flag that is neither on nor off', { LLM_READER_ENABLED: 'yes please' }, [['LLM_READER_ENABLED', 'invalid']]],
+    ['no vendor', { ...ON }, [['LLM_READER_VENDOR', 'missing']]],
+    ['an unknown vendor', { ...ON, LLM_READER_VENDOR: 'some-vendor' }, [['LLM_READER_VENDOR', 'invalid']]],
+    ['the fake in production', { ...ON, LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'production' }, [['LLM_READER_VENDOR', 'refused in production']]],
+    ['Anthropic with no key', { ...ANTHROPIC, LLM_READER_API_KEY: '' }, [['LLM_READER_API_KEY', 'missing']]],
+    ['Anthropic with a blank key', { ...ANTHROPIC, LLM_READER_API_KEY: '   ' }, [['LLM_READER_API_KEY', 'missing']]],
+    ['Anthropic with no model', { ...ANTHROPIC, LLM_READER_MODEL: '' }, [['LLM_READER_MODEL', 'missing']]],
+    ['Fable (30-day retention)', { ...ANTHROPIC, LLM_READER_MODEL: 'claude-fable-5-1' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['Mythos', { ...ANTHROPIC, LLM_READER_MODEL: 'claude-mythos-5-1' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['Opus (cost)', { ...ANTHROPIC, LLM_READER_MODEL: 'claude-opus-5-5' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['a date suffix', { ...ANTHROPIC, LLM_READER_MODEL: 'claude-haiku-5-5-20261001' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['another case', { ...ANTHROPIC, LLM_READER_MODEL: 'Claude-Haiku-5-5' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['padding', { ...ANTHROPIC, LLM_READER_MODEL: ' claude-haiku-5-5' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['a cap of 0', { ...ANTHROPIC, LLM_READER_DAILY_CAP: '0' }, [['LLM_READER_DAILY_CAP', 'invalid']]],
+    ['a fractional cap', { ...ANTHROPIC, LLM_READER_USER_DAILY_CAP: '2.5' }, [['LLM_READER_USER_DAILY_CAP', 'invalid']]],
+    ['a cap that is a word', { ...ANTHROPIC, LLM_READER_DAILY_CAP: 'lots' }, [['LLM_READER_DAILY_CAP', 'invalid']]],
+    ['a negative cap', { ...ANTHROPIC, LLM_READER_USER_DAILY_CAP: '-3' }, [['LLM_READER_USER_DAILY_CAP', 'invalid']]],
+    [
+      'several at once, each named',
+      { ...ON, LLM_READER_VENDOR: 'anthropic', LLM_READER_DAILY_CAP: 'x' },
+      [
+        ['LLM_READER_DAILY_CAP', 'invalid'],
+        ['LLM_READER_API_KEY', 'missing'],
+        ['LLM_READER_MODEL', 'missing'],
+      ],
+    ],
+  ] as const)('%s: off, and the problem is named', (_, env, problems) => {
+    const config = parseReaderEnv(env);
+    expect(config.on).toBe(false);
+    expect(config.problems).toEqual(problems.map(([setting, fault]) => ({ setting, fault })));
+  });
+
+  it('a blank cap is its default, not a problem', () => {
+    expect(parseReaderEnv({ ...ANTHROPIC, LLM_READER_USER_DAILY_CAP: '', LLM_READER_DAILY_CAP: '  ' })).toMatchObject({
+      on: true,
+      userCap: 25,
+      dailyCap: 100,
+      problems: [],
+    });
+  });
+
+  it('caps as whole positive numbers, spaces allowed', () => {
+    expect(parseReaderEnv({ ...ANTHROPIC, LLM_READER_USER_DAILY_CAP: '3', LLM_READER_DAILY_CAP: ' 7 ' })).toMatchObject({
+      on: true,
+      userCap: 3,
+      dailyCap: 7,
+    });
+  });
+
+  it('only what the named vendor uses is checked: the fake ignores a bad model, Anthropic a script', () => {
+    expect(parseReaderEnv({ ...ON, LLM_READER_VENDOR: 'fake', LLM_READER_MODEL: 'claude-opus-5-5' })).toMatchObject({ on: true });
+    expect(parseReaderEnv({ ...ANTHROPIC, LLM_READER_FAKE_SCRIPT: 'x.json' })).toMatchObject({ on: true, vendor: 'anthropic' });
+  });
+
+  it('never carries a value in a problem — only the setting and a fixed word', () => {
+    const config = parseReaderEnv({ ...ON, LLM_READER_VENDOR: 'qqvendorqq', LLM_READER_DAILY_CAP: 'qqcapqq' });
+    expect(JSON.stringify(config.problems)).not.toMatch(/qq/);
+    expect(config.problems.every((p) => Object.keys(p).sort().join() === 'fault,setting')).toBe(true);
+  });
+
+  it('never throws, whatever it is given', () => {
+    for (const value of ['', ' ', 'true', 'x', '0', '-1', 'NaN', 'Infinity', '1e3', '\u0000']) {
+      expect(() =>
+        parseReaderEnv({
+          LLM_READER_ENABLED: 'true',
+          LLM_READER_VENDOR: value,
+          LLM_READER_MODEL: value,
+          LLM_READER_API_KEY: value,
+          LLM_READER_USER_DAILY_CAP: value,
+          LLM_READER_DAILY_CAP: value,
+        }),
+      ).not.toThrow();
+    }
   });
 });
 

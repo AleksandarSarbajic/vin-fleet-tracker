@@ -19,7 +19,16 @@ const dirs: string[] = [];
 
 async function live(vars: Record<string, string>) {
   vi.resetModules();
-  for (const key of ['LLM_READER_ENABLED', 'LLM_READER_VENDOR', 'LLM_READER_FAKE_SCRIPT', 'LLM_READER_API_KEY', 'LLM_READER_MODEL', 'VERCEL_ENV']) {
+  for (const key of [
+    'LLM_READER_ENABLED',
+    'LLM_READER_VENDOR',
+    'LLM_READER_FAKE_SCRIPT',
+    'LLM_READER_API_KEY',
+    'LLM_READER_MODEL',
+    'LLM_READER_USER_DAILY_CAP',
+    'LLM_READER_DAILY_CAP',
+    'VERCEL_ENV',
+  ]) {
     vi.stubEnv(key, undefined);
   }
   for (const [key, value] of Object.entries({ ...BASE, ...vars })) vi.stubEnv(key, value);
@@ -46,10 +55,6 @@ describe('whether the strip offers "Read with AI"', () => {
 
   it('not with the flag off, whatever else is set', async () => {
     expect((await live({ LLM_READER_VENDOR: 'fake' })).readerOffered('admin')).toBe(false);
-  });
-
-  it('not with the flag on and no vendor', async () => {
-    expect((await live({ LLM_READER_ENABLED: 'true' })).readerOffered('admin')).toBe(false);
   });
 });
 
@@ -116,7 +121,7 @@ describe('Anthropic, wired from the env', () => {
   });
 });
 
-describe('misconfigured, the reader FAILS CLOSED: off, said once, never a crash', () => {
+describe('misconfigured, the reader FAILS CLOSED: off, said once by setting name, and the app still loads', () => {
   let errors: MockInstance;
   beforeEach(() => {
     errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -124,16 +129,32 @@ describe('misconfigured, the reader FAILS CLOSED: off, said once, never a crash'
   afterEach(() => errors.mockRestore());
 
   it.each([
-    ['no key', { LLM_READER_API_KEY: '' }, ['LLM_READER_API_KEY']],
-    ['no model', { LLM_READER_MODEL: '' }, ['LLM_READER_MODEL']],
-    ['neither', { LLM_READER_API_KEY: '', LLM_READER_MODEL: '' }, ['LLM_READER_API_KEY', 'LLM_READER_MODEL']],
-  ] as const)('%s: not offered, the route says disabled, and the log names what is missing', async (_, over, missing) => {
+    ['no vendor', { LLM_READER_VENDOR: '' }, [['LLM_READER_VENDOR', 'missing']]],
+    ['an unknown vendor', { LLM_READER_VENDOR: 'some-vendor' }, [['LLM_READER_VENDOR', 'invalid']]],
+    ['the fake in production', { LLM_READER_VENDOR: 'fake', VERCEL_ENV: 'production' }, [['LLM_READER_VENDOR', 'refused in production']]],
+    ['no key', { LLM_READER_API_KEY: '' }, [['LLM_READER_API_KEY', 'missing']]],
+    ['no model', { LLM_READER_MODEL: '' }, [['LLM_READER_MODEL', 'missing']]],
+    ['a model outside the allow-list', { LLM_READER_MODEL: 'claude-opus-5-5' }, [['LLM_READER_MODEL', 'not allowed']]],
+    ['an invalid cap', { LLM_READER_DAILY_CAP: 'lots' }, [['LLM_READER_DAILY_CAP', 'invalid']]],
+    ['a flag that is neither on nor off', { LLM_READER_ENABLED: 'yes please' }, [['LLM_READER_ENABLED', 'invalid']]],
+  ] as const)('%s: not offered, the route says disabled, one log line names it', async (_, over, problems) => {
     const m = await live({ ...ANTHROPIC, ...over });
     expect(m.readerOffered('admin')).toBe(false);
-    expect(m.liveReadDeps().settings).toMatchObject({ enabled: true, vendor: null });
+    expect(m.liveReadDeps().settings).toMatchObject({ enabled: false, vendor: null });
     m.readerOffered('dispatcher');
-    expect(errors.mock.calls).toEqual([[expect.stringContaining('ratecon reader is off'), { missing }]]);
-    expect(JSON.stringify(errors.mock.calls)).not.toContain(KEY);
+    expect(errors.mock.calls).toEqual([
+      ['ratecon reader is off: its settings have problems', { problems: problems.map(([setting, fault]) => ({ setting, fault })) }],
+    ]);
+    // Never a value: not the key, not the model, not the cap.
+    for (const value of [KEY, 'claude-opus-5-5', 'some-vendor', 'lots', 'yes please']) {
+      expect(JSON.stringify(errors.mock.calls)).not.toContain(value);
+    }
+  });
+
+  it('a blank cap is its default: on, nothing said', async () => {
+    const m = await live({ ...ANTHROPIC, LLM_READER_USER_DAILY_CAP: '', LLM_READER_DAILY_CAP: '' });
+    expect(m.liveReadDeps().settings).toMatchObject({ enabled: true, vendor: 'anthropic', userCap: 25, dailyCap: 100 });
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it('with the flag off, a missing key is not a fault, and nothing is said', async () => {
@@ -142,25 +163,3 @@ describe('misconfigured, the reader FAILS CLOSED: off, said once, never a crash'
     expect(errors).not.toHaveBeenCalled();
   });
 });
-
-describe('readerWiring', () => {
-  const env = { LLM_READER_ENABLED: true } as const;
-  it('none named: off, nothing missing', async () => {
-    const { readerWiring } = await live({});
-    expect(readerWiring(env)).toEqual({ wiring: { vendor: null }, missing: [] });
-  });
-
-  it('the fake needs neither a key nor a model', async () => {
-    const { readerWiring } = await live({});
-    expect(readerWiring({ ...env, LLM_READER_VENDOR: 'fake' })).toEqual({ wiring: { vendor: 'fake' }, missing: [] });
-  });
-
-  it('Anthropic carries its key and model', async () => {
-    const { readerWiring } = await live({});
-    expect(readerWiring({ ...env, LLM_READER_VENDOR: 'anthropic', LLM_READER_API_KEY: KEY, LLM_READER_MODEL: 'claude-haiku-5-5' })).toEqual({
-      wiring: { vendor: 'anthropic', apiKey: KEY, model: 'claude-haiku-5-5' },
-      missing: [],
-    });
-  });
-});
-
