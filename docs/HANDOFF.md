@@ -1,9 +1,10 @@
 # Handoff
 
-State on 2026-10-13. Last code commit: `9e13148`, a fourth rate-confirmation
-reader (§12.125); everything since is docs. `npm run check` passed on
-2026-10-13 (157 files, 2109 tests). `git log` has the newest; the deploy is
-checked with the curl calls under "How to run the checks".
+State on 2026-10-13. Last code commit: `5379ea5`, the end of phase 1 of the
+language-model reader (pure code and tests, nothing wired; see "Language-model
+reader" below). `npm run check` passed on 2026-10-13 (161 files, 2255 tests).
+`git log` has the newest; the deploy is checked with the curl calls under
+"How to run the checks".
 
 Read `CLAUDE.md` first. Build from `docs/design-spec.md`; each feature below
 names its § there.
@@ -102,17 +103,49 @@ anywhere.
   enter. The rule in `design-spec.md` (Appointments, under §12.122) stays as
   it is.
 
+**The language-model reader** (design: [`llm-reader-design.md`](llm-reader-design.md)):
+
+- **Sending is allowed,** redacted text only: rates, broker contacts,
+  phones, emails and driver names are stripped in the browser before
+  anything leaves. (Was open decisions 1 and 2. The basis for "allowed" is
+  still to be written down; see below.)
+- **Templates stay first;** the model is the fallback after "Layout not
+  recognised". No more templates are built.
+- **Scans** are read later, by OCR in the browser (phase 4).
+- **Not authorised:** sending any text from `.samples/` to any vendor. That
+  needs its own go-ahead.
+- **The design's §10:**
+  - Item 1, yes: a per-stop **Looks right** button. AI marks are their own
+    kind, counted and cleared apart from "Check". Phase 1 built the data
+    side; the button and strip text are phase 2.
+  - Item 2, yes: a **Show what is sent** expander, phase 2. Phase 1 makes
+    the sent text available as one value.
+  - Item 3, out of scope, **a decision for later**: the shared rate limiter
+    (`src/server/rate-limit.ts`) keeps its buckets in memory, which is weak
+    on Vercel, where each instance has its own. The reader's real guard is
+    its daily cap in Postgres. Also, `PROJECT_BRIEF.md` around line 310 still
+    says no route is rate-limited; that is stale (at least ten are).
+  - Item 4, accepted: redaction cannot promise that unlabelled names are
+    stripped.
+- **Defaults accepted:**
+  - 25 reads per user per day, 100 per day in all;
+  - dispatchers and admins;
+  - dates with no year only inside the −1/+30 day window, with exactly one
+    candidate year;
+  - counts kept 90 days.
+
 ## Open decisions, waiting on Alex
 
-1. **Language-model reader: yes or no.** It would cover layouts and scans
-   the templates miss. Proposal (2026-10-09): send only the text of the stop
-   pages (scans: read with OCR in the browser first), with rates and contacts
-   removed in the browser, through our server. Nothing is built, nothing has
-   been sent, and no vendor is chosen.
-2. **Broker confidentiality.** Rate confirmations often carry
-   confidentiality clauses. These may rule out sending even redacted text to
-   any vendor. This has to be answered before the vendor question matters.
-3. **Vendor terms**, if the answer to 1 is yes. Researched 2026-10-09; see
+1. **The language-model reader's vendor.** Not chosen. Build nothing
+   vendor-specific until it is. Still open with it:
+   - **EU processing:** is it required? If so, Anthropic's own API is out
+     today.
+   - **Flagged content:** is the vendors' retention of flagged inputs
+     acceptable (up to 2 years at Anthropic)?
+   - **The basis for "sending is allowed":** the brokers' confidentiality
+     clauses, or a business judgment? Write down which.
+2. ~~Broker confidentiality.~~ Folded into 1, above.
+3. **Vendor terms.** Researched 2026-10-09; see
    [`llm-reader-vendors.md`](llm-reader-vendors.md) (vendor defaults, may
    change, not legal advice). In short:
    - Every vendor read says no training on API data by default, except
@@ -174,7 +207,38 @@ npm run gate             # check + preflight + db:verify + e2e
   `https://api.github.com/repos/AleksandarSarbajic/vin-fleet-tracker/deployments?per_page=3`,
   then `/deployments/<id>/statuses?per_page=1`.
 
+## Language-model reader
+
+**Phase 1 is built:** pure code and tests, no route, no UI, no table, no
+network, no vendor SDK. Nothing calls it yet.
+
+| File | What |
+|---|---|
+| `src/lib/ratecon/redact.ts` | Page selection (page 1 and pages with a US city line), typed placeholders, fail-closed re-scan, `REDACTION_VERSION`, size limits; `prepared.text` is the sent text for "Show what is sent" |
+| `src/lib/ratecon/model-read.ts` | The `ModelRead` schema (`zod/v4`, inside the installed zod), the shared instruction, the JSON schema for vendors |
+| `src/lib/ratecon/verify-read.ts` | Every value checked against the lines sent; what stands becomes a `model` read |
+| `src/components/edit/ratecon-fill.ts` | The `model` branch: AI marks (`aiMarks`, `confirmAiStop`, `confirmAiLoadNumber`), apart from "fields to check" |
+| `src/server/ratecon-reader/adapter.ts`, `fake.ts` | The vendor interface (types only) and a scripted fake |
+| `src/test/model-read-fixtures.ts` | Invented documents; every line carries a sentinel |
+
+**Where phase 1 differs from the design:**
+- **No `server-only` import** in the adapter files. Vitest cannot import it,
+  and there is no server code yet. Phase 2's real adapter and route must
+  import it.
+- **HH:MM in a 24-hour quote.** HH:MM counts as 24-hour when the same quote
+  shows a 24-hour clock (a leading zero or an hour past 12), so "08:00 –
+  10:00" reads both. A bare "8:00" or "10:00" alone is still never read.
+- **Marks quote only document text.** A mark quotes only text that is in
+  the document. When the model's quote is not there, the mark says so
+  without repeating it.
+- **Values are the document's spelling.** Values are filled with the
+  quote's spelling, not the model's.
+- **Any `@` fails closed.** Any `@` left after redaction stops the send:
+  half of an email split across two cells is still a leak.
+
 ## Next
 
-Nothing is in progress. Wait for Alex on the open decisions above, then work
-in the order Alex picks.
+Phase 1 of the language-model reader is done and waits for Alex's approval.
+Phase 2 (route, caps table, Sentry hardening, the strip's button, Looks
+right, Show what is sent, one real adapter behind a flag) needs the vendor
+chosen first. Other open decisions are above.
