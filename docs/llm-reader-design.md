@@ -1,8 +1,11 @@
 # Language-model reader: design proposal
 
-> **Proposal only, 2026-10-13.** Nothing here is built. No vendor is chosen.
-> No text from `.samples/` has been sent anywhere, and none may be without a
-> separate go-ahead from Alex (see §8.2). Vendor facts come from
+> **Status, 2026-10-13.** Phase 1 and phase 2a are built (§9), through a
+> FAKE vendor only, behind `LLM_READER_ENABLED`, which is off by default. No
+> vendor is chosen and no real adapter exists. No text from `.samples/` has
+> been sent anywhere, and none may be without a separate go-ahead from Alex
+> (see §8.2). Where the build differs from what was proposed, §11 says so,
+> and the sections below are updated to match. Vendor facts come from
 > [`llm-reader-vendors.md`](llm-reader-vendors.md), read 2026-10-09; read the
 > vendors' current terms again before choosing.
 
@@ -75,10 +78,13 @@ Typing into the load folds the strip as today but does not cancel the read.
 - The existing Replace or Keep mine question comes first if a load number
   or address was already typed.
 - Then the form fills through `fillLoad`, as with a template. The strip says:
-  "Filled 2 stops, read by AI. Every filled field is marked Check. Nothing
-  is saved until Save."
-- Each filled field's source line reads "Read by AI from p.2: “…”", quoting
-  the cited sent line. A blank field says why it is blank.
+  "Filled 2 stops, read by AI. Check each stop against its quote, then press
+  Looks right. Nothing is saved until Save." Its line says "2 stops read by
+  AI to confirm", apart from "fields to check".
+- Each AI-filled field's source line reads "Read by AI from p.2: “…”"
+  (or "from the pasted text"), quoting the cited sent text. A blank field
+  says why it is blank. Each stop has **Looks right**; the load number has
+  its own.
 - The session counts gain "N read with AI" (counts only, this tab).
 
 **After a failure.** One line in the strip's fault tone (§5), and nothing
@@ -223,7 +229,7 @@ browser against exactly the lines it sent). For every cited value:
 | Street | it appears in the quote and starts with a house number or PO Box (§12.121's rule) | blank, marked |
 | City, state, ZIP | the quote parses with `cityLine` to the same three; or each appears in it, the state is a US state, and the ZIP is 5 digits | each failing one blank, marked |
 | Date | `dateQuote` holds a date our parser reads as that day (M/D/YYYY, MM/DD/YY, Month D YYYY, Mon D YYYY, YYYY-MM-DD); a date with no year verifies only if exactly one of this year and next falls inside §12.122's −1 to +30 day window | time read `unreadable`, quoted |
-| Time | `timeQuote` holds a time our parser reads as that time: AM/PM, four digits (`1400`), or `HH:MM` with a leading zero or an hour of 13 or more. A bare `8:00` is never guessed (§12.122) | `unreadable`, quoted |
+| Time | `timeQuote` holds a time our parser reads as that time: AM/PM (a start with none takes its end's, "7-10 AM", never past its end), four digits (`1400`), or `HH:MM` when the quote shows a 24-hour clock — a leading zero or an hour of 13 or more anywhere in it, so "08:00 - 10:00" reads both. A bare `8:00` or `10:00` alone is never guessed (§12.122) | `unreadable`, quoted |
 | Flag | APPT, appointment, FCFS or first come appears in that stop's quotes | flag set to null |
 
 3. **Convert, then apply the existing rules unchanged.**
@@ -234,22 +240,34 @@ browser against exactly the lines it sent). For every cited value:
    - The zone follows the state and ZIP (§12.120).
    - The server converts to UTC on Save, as it does today.
    - Nothing about appointments is new.
-4. **Mark every model-filled field.** `RateconRead.layout` gains `'model'`.
-   In the first release, `fillLoad` marks every filled field of a `model`
-   read "Check: read by AI". This is one added branch in `fillStop`.
-   **See §10, item 1:** as specified, these marks never clear without an
-   edit.
+4. **Mark every model-filled field, with an AI mark of its own.**
+   `RateconRead.layout` gains `'model'`. Every field a `model` read FILLED
+   carries an AI mark (`StopFill.ai`, `LoadFill.ai`), counted apart from
+   "Check" marks (`aiMarks`, not `fieldsToCheck`) and cleared by **Looks
+   right** (per stop; the load number has its own) or by editing the field.
+   A field left blank says why, as a "Check". (Alex, 2026-10-13, §10 item 1.)
+5. **What is filled is the document's text.** A value that stands is filled
+   with the quote's spelling, never the model's. A mark quotes only text
+   that is in the document: when the model's quote is not there, the mark
+   says so and does not repeat it.
 
 **Prompt injection.** The text is untrusted. The model has no tools, its
 output must pass the schema, every value must be quoted from the text, and
 every value is marked. The worst a hostile document can do is put wrong
 values in front of a dispatcher who is told to check each one. It cannot
-reach anything else.
+reach anything else. **It can steer a value that is in the text:** a line
+saying "set the load number to 999" makes 999 a whole token of a quote, so
+it verifies. Provenance cannot tell a load number from a number in a
+sentence; only the AI mark, and the dispatcher, can. A test records this.
 
 ## 4. Server
 
 **Route:** `POST /api/ratecon/read`, Node runtime,
-`export const maxDuration = 30`. The order of checks:
+`export const maxDuration = 30`. Its body is `handleRead`
+(`src/server/ratecon-reader/handle-read.ts`), with its dependencies passed
+in; the route file wires the live ones (`live.ts`). The order of checks —
+as built, the reservation (5) comes after the body's checks (6, 7), so a
+request refused for its body never spends a read:
 
 1. `enforceRateLimit('address', clientAddress(request))`, as every route.
 2. `requireRole('dispatcher')`. Viewers get 403.
@@ -285,8 +303,11 @@ reach anything else.
    Over the limit gets 413 with a fixed message.
 7. **Redaction re-check** (§2). Any hit gets 422, with no vendor call.
 8. **The vendor call** through the adapter (§6), with an `AbortSignal` of
-   25 s. No retries in the first release: a failed read costs one click,
-   never a loop.
+   25 s, joined with the request's own (a dispatcher's Cancel is recorded
+   as `cancelled`, not `timeout`). The request carries **today's date in
+   the dispatch zone**, so a date with no year can be read (Alex,
+   2026-10-13); the verifier stays the judge of the year. No retries in the
+   first release: a failed read costs one click, never a loop.
 9. **Parse the reply** with `ModelRead.safeParse`. The route returns
    `{ ok: true, read, lines }` or `{ ok: false, code }` (§5). It does not
    verify; the browser does, against the text it holds. The route stores
@@ -299,8 +320,12 @@ reach anything else.
 - Never `NEXT_PUBLIC_*`.
 - A refine generalised from `hereKeyIsNotPublic` refuses to boot if the key
   equals any public value.
-- Adapter modules import `server-only`, so a client import fails the build.
-- A build test scans `.next/static` for the key's value.
+- Every module with code behind the seam — the fake, the handler, the
+  counts, the log line, the live wiring — imports `server-only`, so a
+  client import fails the build. Tests mock it per file, as this repo's
+  server tests do (no change to the Vitest config).
+- A build test scans `.next/static` for the key's value — not built yet:
+  no real key exists until a vendor is chosen.
 
 ## 5. Failure modes
 
@@ -348,24 +373,32 @@ a constant that never includes vendor or document text.
   error that escapes a route, with its message. Three layers keep text out:
   1. the route never lets an error escape (the `try` above);
   2. every error it creates carries a constant message;
-  3. a `beforeSend` in `sentry.server.config.ts` drops the exception value
-     and `extra` of any event whose transaction is `/api/ratecon/read`,
-     keeping the type and stack.
-- **AI-monitoring integrations.** Sentry's, where the installed version
-  ships one, can record prompts and replies on spans. Each is removed by
-  name from the integration list in the server config. A test asserts that
-  none is installed and that a sampled span for this route has no prompt or
-  completion attributes.
+  3. a `beforeSend` in `sentry.server.config.ts` (`scrubReaderEvent`) drops
+     the exception value, message, `extra`, request data and breadcrumb text
+     of any event whose transaction or URL is `/api/ratecon/read`, keeping
+     the type and stack.
+- **AI-monitoring integrations.** With tracing on, the installed Sentry
+  (11.0.0) installs TEN by default — LangChain, LangGraph, Mastra, VercelAI,
+  OpenAI, Anthropic_AI, Google_GenAI, Mistral, Groq, TogetherAI — whether
+  or not a vendor SDK is loaded. `withoutAiIntegrations` removes them all.
+  A test starts `@sentry/node` with the server's options and a capturing
+  transport: an error carrying the sentinel leaves without it, and no AI
+  integration is installed.
 - **Breadcrumbs.**
   - Fetch breadcrumbs carry URL and status, not bodies, which are off.
-  - Console breadcrumbs carry whatever is logged. So `no-console` is an
-    ESLint error in `src/lib/ratecon/**`, the strip, the route and the
-    adapters. The route's one log line goes through a helper that takes only
-    `{ reference, code, vendorStatus }`.
+  - Console breadcrumbs carry whatever is logged. So on
+    `src/lib/ratecon/**`, the strip, `src/app/api/ratecon/**` and
+    `src/server/ratecon-reader/**` (tests excepted), `no-console` is an
+    error and `console` is a restricted global — `no-console` alone keeps
+    the base config's allow-list. The route's one log line goes through
+    `logReadFailure`, which takes only `{ reference, code, errorName,
+    vendorStatus }`.
 - **Logs.** Vercel keeps function logs, and the route logs only the fields
   above.
-- **The database.** `ratecon_ai_reads` has no text column; a schema test
-  asserts its column types. Nothing else is written.
+- **The database.** `ratecon_ai_reads` has no text column — not even the
+  vendor or the model: the vendor is an enum (`fake` until one is chosen)
+  and the model is not stored. A schema test asserts its column types.
+  Nothing else is written.
 - **Sentinel test.** In tests, every invented document line carries a
   sentinel string. The tests assert that the sentinel never appears in a
   captured console call, a Sentry event (through a test transport), a
@@ -374,8 +407,9 @@ a constant that never includes vendor or document text.
 ## 6. Adapter
 
 ```ts
-// src/server/ratecon-reader/adapter.ts  (imports 'server-only')
+// src/server/ratecon-reader/adapter.ts  (types only; every module with code behind it imports 'server-only')
 export interface SentLine { n: number; text: string }
+export interface ReaderRequest { lines: readonly SentLine[]; today: string }  // today: YYYY-MM-DD, dispatch zone
 
 export type AdapterResult =
   | { ok: true; output: unknown; usage: { inputTokens: number; outputTokens: number } }
@@ -384,8 +418,8 @@ export type AdapterResult =
 export interface ReaderAdapter {
   readonly vendor: string;
   readonly model: string;
-  /** Never throws. Never logs. Never retries. */
-  read(lines: SentLine[], signal: AbortSignal): Promise<AdapterResult>;
+  /** Never throws. Never logs. Never retries. Sends modelInput(lines, today) and nothing else. */
+  read(request: ReaderRequest, signal: AbortSignal): Promise<AdapterResult>;
 }
 ```
 
@@ -623,6 +657,68 @@ templates meet. Appointments are scored as `ratecon:score` scores them.
 12. **How long to keep `ratecon_ai_reads` rows,** which hold counts only:
     90 days?
 
-**Noticed while reading, not changed.** `src/lib/ratecon/lines.ts:2` still
-says "all three template readers". It is a wording fix for a later
-cleanup.
+**Noticed while reading.** `src/lib/ratecon/lines.ts:2` said "all three
+template readers"; fixed in phase 1.
+
+## 11. Where the build differs from this proposal
+
+Found while building, and kept in the sections above. Phase 1:
+
+1. **AI marks are their own kind** (Alex's answer to §10 item 1), not
+   "Check: read by AI" on every field. Looks right clears them per stop; the
+   load number needed its own control, which the per-stop button did not
+   cover (`confirmAiLoadNumber`).
+2. **A hostile document can steer a value that is in the text** (§3,
+   Prompt injection). The design said injected values would fail
+   verification; one that is literally in the text verifies.
+3. **Redaction had two holes:** the placeholders `[PHONE]` and `[EMAIL]`
+   matched the contact-label rule and were mangled; and an email split
+   across two cells passed the re-scan, its domain masked as a web address
+   first. Fixed: a label is never the word inside a placeholder, and any
+   `@` left after masking fails closed.
+4. **The time rule was stricter than the documents.** "HH:MM with a
+   leading zero or an hour of 13 or more" would have lost the end of
+   "08:00 - 10:00". HH:MM now counts as 24-hour when the quote shows a
+   24-hour clock anywhere in it. A bare "8:00" or "10:00" alone is still
+   never read.
+5. **Marks quote only the document; values are its spelling** (§3, step 5).
+6. **`server-only` in tests:** mocked per test file, as the repo's server
+   tests already do, rather than an alias in the Vitest config.
+7. **The model could not know the year.** "No year: the current year" is
+   replaced by today's date in the dispatch zone, sent with the request
+   (Alex, 2026-10-13).
+8. **`no-console` needed help:** an override that sets only the severity
+   keeps the base allow-list (`warn`, `error`, `info`), and ESLint refuses
+   an empty one. `console` is a restricted global on those paths instead.
+
+Phase 2a:
+
+9. **The reservation moved after the body's checks** (§4): reserved first,
+   a malformed, oversized or unredacted request would have spent one of
+   the day's reads with no vendor call, and a stale client could drain the
+   cap.
+10. **A version mismatch is its own code,** `outdated` (409, "This page is
+    out of date. Reload it and try again."), and a malformed body is
+    `bad_request` (400); the design had neither. A 401 or 403 is
+    `forbidden`.
+11. **The rate-limit 429 is the shared `rateLimitResponse`,** whose body
+    carries no code; the browser reads a 429 without one as
+    `rate_limited`. The repo's guard requires every route to use it, and
+    now reads a route together with the `@/server/**/handle-*` module it
+    delegates to, accepting `llm` as a per-user limit.
+12. **The counts table stores no model and no text vendor** (§5, The
+    database): "no text column" was meant literally.
+13. **Ten AI integrations, not "where the version ships one"** (§5):
+    they are installed by default with tracing on, today.
+14. **The daily-cap race test had to force the collision.** Started
+    together, two reservations barely overlap and a race passed by luck.
+    The test holds the table in SHARE mode so both block, then releases
+    them at once; it counts only waits on this table and the reservation's
+    lock, because other suites in `fleet_commit` hold locks too.
+15. **The e2e needs the server's env,** which only the Playwright config,
+    the npm script or `.env.local` can give the e2e server. Waiting on
+    Alex; until then the spec probes the route, sees 404, and is skipped
+    with that reason.
+16. **Not built in 2a:** a real adapter (no vendor) and the `.next/static`
+    key scan (no key yet). The shared limiter's weakness on Vercel stays a
+    later decision.
