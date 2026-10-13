@@ -45,24 +45,44 @@ This replaces the 21-PDF count of 2026-10-09.
   recognised file. Ask Alex whether these are the unsigned originals in (c).
   If so, the two scans still have no text layer.
 
-**The 12 not recognised, by label signature** (the `recognise` lists in
-`templates.ts`). No file has more than one label of any layout, and every
-label found is a common word: "Rate Confirmation", "LineHaul", "Address:",
-"Order:". So none is an existing layout with a few labels changed. Every
-group is a new layout, and the signature does not prove that the files in
-one group share a layout.
+**The 12 not recognised: new layouts, not old ones changed.** None has more
+than one of any existing layout's `recognise` labels, and the labels it
+does have are common words.
 
-| Group | Files | Labels found | Pages / lines |
+**Clustered by shared lines, 2026-10-13: 8 clusters.** For each pair of the
+12 files, the number of identical distinct lines they share (trimmed,
+whitespace collapsed), divided by the smaller file's distinct-line count.
+Clusters are single-linkage at a ratio of **0.10** or more.
+
+| Cluster | Size | Files | Ratios within |
 |---|---|---|---|
-| G1 | 2 | SS "Rate Confirmation", PD "LineHaul" | 3/75, 3/78 |
-| G2 | 3 | SS "Rate Confirmation" | 5/174, 5/143, 2/64 |
-| G3 | 1 | SS "Rate Confirmation", PS "Address:", PD "LineHaul" | 2/49 |
-| G4 | 1 | SS "Rate Confirmation", PS "Order:" | 7/327 |
-| G5 | 5 | none, including the 9-page "Route #" file | 6/222, 2/60, 9/282, 6/175, 5/152 |
+| C1 | 3 | #2, #4, #10 | 0.12–0.24 |
+| C2 | 2 | #16, #17 | 0.66 |
+| C3 | 2 | #7, #11 | 0.22 |
+| C4–C8 | 1 each | #8, #9, #12 (the 9-page "Route #" file), #21, #28 | ≤ 0.05 to any file |
 
-Files are numbered by name order in the counts-only scripts. The numbers
-shift whenever a file is added, so they are not written down here. No names
-or values are written down anywhere.
+How 0.10 was chosen, on the 13 read files, whose layouts are known:
+- Pairs from different layouts: 57 pairs, never above 0.02.
+- Pairs within one layout: Stops section 0.86–0.92, Pickup/Delivery columns
+  0.74–0.76. PU/SO blocks range from 0.02 to 0.83 (median 0.02).
+- So 0.10 sits above every cross-layout pair. A ratio that high means the
+  same source.
+
+Caveats:
+- **C1 and C3 may split.** At 0.12–0.24 they are well above the cross-layout
+  ceiling but well below a clean same-layout score. That fits template
+  versions from one broker as well as one layout.
+- **Singletons may merge.** The metric cannot see layouts like PU/SO, where
+  label and value share a line, so two files of one such layout can share
+  almost no lines.
+- **Best estimate:** 8 layouts, with a likely range of 7 to 10.
+- **Strongest single layout:** C2, at 0.66, close to the known same-layout
+  scores.
+
+File numbers are by name order across the 28 PDFs in `.samples/` as of
+2026-10-13. They shift whenever a file is added, renamed or removed, so check
+the count is still 28 before using them. No names or values are written down
+anywhere.
 
 ## Rules for rate confirmations (from Alex, standing)
 
