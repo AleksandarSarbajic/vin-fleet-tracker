@@ -1,8 +1,10 @@
 # Handoff
 
-State on 2026-10-13. Last code commit: `5379ea5`, the end of phase 1 of the
-language-model reader (pure code and tests, nothing wired; see "Language-model
-reader" below). `npm run check` passed on 2026-10-13 (161 files, 2255 tests).
+State on 2026-10-13. Phase 2a of the language-model reader is built: the
+route, the counts table, the UI and the Sentry hardening, through a FAKE
+vendor only, behind `LLM_READER_ENABLED` (off by default). See
+"Language-model reader" below. `npm run check` passed on 2026-10-13
+(167 files, 2348 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
 "How to run the checks".
 
@@ -134,6 +136,21 @@ anywhere.
     candidate year;
   - counts kept 90 days.
 
+**The language-model reader, phase 2a** (Alex, 2026-10-13):
+
+- **UI per the design's §10:**
+  - "Read with AI" only after a template miss;
+  - "Show what is sent" (the redacted, numbered lines, browser only);
+  - a per-stop "Looks right", with the source quote beside each field;
+  - a separate confirm for the load number;
+  - AI marks counted apart from "fields to check".
+- **Today's date,** in the dispatch zone, goes with each request, so a
+  date with no year can be read. The verifier stays the judge of the year.
+- **The shared limiter's weakness** is a later decision. The Postgres
+  daily cap is the real guard. Caps are env vars: 25 a user, 100 in all.
+- **Still open:** vendor, EU processing, flagged content, the basis for
+  "allowed". Build nothing vendor-specific.
+
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor.** Not chosen. Build nothing
@@ -209,8 +226,8 @@ npm run gate             # check + preflight + db:verify + e2e
 
 ## Language-model reader
 
-**Phase 1 is built:** pure code and tests, no route, no UI, no table, no
-network, no vendor SDK. Nothing calls it yet.
+**Phase 1:** pure code and tests — redaction, the schema, the verifier, the
+`model` fill branch, the fake. Phase 2a (below) calls it.
 
 | File | What |
 |---|---|
@@ -221,24 +238,50 @@ network, no vendor SDK. Nothing calls it yet.
 | `src/server/ratecon-reader/adapter.ts`, `fake.ts` | The vendor interface (types only) and a scripted fake |
 | `src/test/model-read-fixtures.ts` | Invented documents; every line carries a sentinel |
 
-**Where phase 1 differs from the design:**
-- **No `server-only` import** in the adapter files. Vitest cannot import it,
-  and there is no server code yet. Phase 2's real adapter and route must
-  import it.
-- **HH:MM in a 24-hour quote.** HH:MM counts as 24-hour when the same quote
-  shows a 24-hour clock (a leading zero or an hour past 12), so "08:00 –
-  10:00" reads both. A bare "8:00" or "10:00" alone is still never read.
-- **Marks quote only document text.** A mark quotes only text that is in
-  the document. When the model's quote is not there, the mark says so
-  without repeating it.
-- **Values are the document's spelling.** Values are filled with the
-  quote's spelling, not the model's.
-- **Any `@` fails closed.** Any `@` left after redaction stops the send:
-  half of an email split across two cells is still a leak.
+**Phase 2a is built:** the route, the counts table, the UI and the Sentry
+hardening, through the FAKE vendor only. No real adapter, no vendor SDK,
+no network call to any vendor. `LLM_READER_ENABLED` is off by default.
+
+| File | What |
+|---|---|
+| `src/app/api/ratecon/read/route.ts` | `POST /api/ratecon/read`; wires the live dependencies |
+| `src/server/ratecon-reader/handle-read.ts` | The route's body: limits, role, flag, body checks, then the daily-cap reservation, the vendor under 25 s, the reply's schema. Never lets an error escape |
+| `src/server/ratecon-reader/reads.ts`, `drizzle/0026_ratecon_ai_reads.sql` | The counts table (no text column, RLS deny-all) and the atomic daily caps (advisory lock); applied to the LOCAL test databases only |
+| `src/server/ratecon-reader/live.ts` | Settings from the env; `readerOffered(role)` for the page; the fake's script from `LLM_READER_FAKE_SCRIPT` |
+| `src/server/ratecon-reader/log.ts` | The route's one log line: reference, code, error class name, vendor status |
+| `src/lib/ratecon/read-codes.ts`, `read-client.ts` | The wire contract and the browser's call (35 s, Cancel) |
+| `src/lib/sentry-reader.ts` | `scrubReaderEvent` and `withoutAiIntegrations`, wired in `sentry.server.config.ts` |
+| `src/components/edit/RateconStrip.tsx`, `StopForm.tsx`, `LoadStrip.tsx`, `Field.tsx` | Read with AI, Show what is sent, Cancel, the AI marks, Looks right, the load number's confirm |
+| `e2e/ratecon-ai.spec.ts` | Through the route and the fake; skipped until the e2e server has the reader's env (below) |
+
+**Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake`
+only; refused in production), `LLM_READER_MODEL`, `LLM_READER_API_KEY`
+(refused if any `NEXT_PUBLIC_*` equals it), `LLM_READER_FAKE_SCRIPT`,
+`LLM_READER_USER_DAILY_CAP` (25), `LLM_READER_DAILY_CAP` (100).
+
+**Not applied anywhere but the local test cluster:** migration 0026. It must
+be applied to production before the route can count there.
+
+Every way the build differs from the design, phases 1 and 2a, is listed in
+`llm-reader-design.md` §11.
+
+**E2e, 2026-10-13:**
+- **Full run:** 241 passed, 1 skipped (the AI e2e: the reader is off on the
+  e2e server), 1 did not run.
+- **Two failed:** desktop baselines `1-default` at 768 and 1920 px, by 35
+  and 155 pixels. The only difference was "Synced 0s ago" beside the
+  header's dot, present in the run and absent in the baseline: the first
+  poll landing before the shot.
+- **Rerun on the same code** (`--update-snapshots=none`): all 13 desktop
+  baselines passed.
+- Nothing was re-saved. The timing of that text is a flake worth fixing in
+  the spec, separately.
 
 ## Next
 
-Phase 1 of the language-model reader is done and waits for Alex's approval.
-Phase 2 (route, caps table, Sentry hardening, the strip's button, Looks
-right, Show what is sent, one real adapter behind a flag) needs the vendor
-chosen first. Other open decisions are above.
+Phase 2a waits for Alex's approval, and for one decision. The e2e server
+needs `LLM_READER_ENABLED=true`, `LLM_READER_VENDOR=fake` and
+`LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json`, which means a Playwright
+config change, the npm script, or `.env.local`; until then the AI e2e is
+skipped. Phase 2b (one real adapter) needs the vendor chosen first. Other
+open decisions are above.
