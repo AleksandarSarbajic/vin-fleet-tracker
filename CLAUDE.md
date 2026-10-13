@@ -52,3 +52,12 @@ If you think you need one of these, ask first.
 One phase per session. Stop at each phase boundary and wait for approval.
 Say so when something I asked for is a bad idea, before implementing it.
 Show command output rather than claiming something works.
+
+## Phase protocol (every phase)
+
+Before starting: `git status` and `git log -3`. Before calling a phase done:
+`npm run check` and `git ls-files | grep -iE "\.pdf|expected\.json|samples"`
+(must print nothing). Show all output. Commit in logical commits. Do not
+push. Update docs/HANDOFF.md with any decision made. Report what you built,
+test counts, and anything in the design you found wrong. Then stop and wait
+for approval.
