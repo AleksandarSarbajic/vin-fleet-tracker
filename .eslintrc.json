@@ -13,5 +13,20 @@
         "caughtErrorsIgnorePattern": "^_"
       }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/lib/ratecon/**", "src/components/edit/RateconStrip.tsx", "src/app/api/ratecon/**", "src/server/ratecon-reader/**"],
+      "rules": {
+        "no-console": "error",
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "console",
+            "message": "No console in the language-model reader's code: it reaches Vercel's logs and Sentry's breadcrumbs, and can carry document text. Log through logReadFailure (src/server/ratecon-reader/log.ts)."
+          }
+        ]
+      }
+    }
+  ]
 }

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
+import { scrubReaderEvent, withoutAiIntegrations } from '@/lib/sentry-reader';
 import { sampleTraces } from '@/lib/sentry-sampling';
 
 /**
@@ -37,4 +38,17 @@ Sentry.init({
    * to. Shared across all four runtimes — see src/lib/sentry-privacy.ts.
    */
   dataCollection: SENTRY_DATA_COLLECTION,
+
+  /**
+   * The language-model reader's route never reports text: an event from it
+   * keeps its exception type and stack, and loses the message, `extra` and
+   * breadcrumb text (src/lib/sentry-reader.ts).
+   */
+  beforeSend: scrubReaderEvent,
+
+  /**
+   * No AI-monitoring integration: with tracing on, Sentry installs ten by
+   * default, and they record prompts and replies on spans.
+   */
+  integrations: withoutAiIntegrations,
 });
