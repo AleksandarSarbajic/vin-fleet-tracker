@@ -1,11 +1,12 @@
 # Handoff
 
-State on 2026-10-14. Phase 2b of the language-model reader is built, with its
-follow-up: the Anthropic adapter, behind `LLM_READER_ENABLED` (off by
-default, and OFF in production; nothing went to Vercel), and reader settings
-that fail closed. It has been called live only with invented text. See
+State on 2026-10-14. Phase 3a of the language-model reader is done: the
+evaluation PREP, local only. Nothing was sent anywhere and the API key was
+not used. Phase 2b and its follow-up are built: the Anthropic adapter,
+behind `LLM_READER_ENABLED` (off by default, and OFF in production; nothing
+went to Vercel). It has been called live only with invented text. See
 "Language-model reader" below. `npm run check` passed on 2026-10-14
-(169 files, 2453 tests).
+(170 files, 2471 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
 "How to run the checks".
 
@@ -461,6 +462,131 @@ items 17–24):
 Every way the build differs from the design, phases 1 and 2a, is listed in
 `llm-reader-design.md` §11.
 
+### Phase 3a: evaluation prep (2026-10-14)
+
+Local only: no network, no API call, no use of the key. `ratecon:eval-ai`
+(step 1) is NOT built: it needs Alex's separate written approval.
+
+| File | What |
+|---|---|
+| `scripts/ratecon-samples.mts` | The samples by number; reads a PDF the way the browser does. Prints nothing |
+| `scripts/ratecon-redact-report.mts` | `npm run ratecon:redact-report`: step 0, counts per file |
+| `scripts/ratecon-review-redacted.mts`, `scripts/ratecon-review-server.mts` | `npm run ratecon:review-redacted <n>`: one local page for Alex |
+| `src/lib/ratecon/redact.ts` | `redactedForReview`: the lines the send would use, each with its re-scan hits. For the viewer only; the send path is unchanged |
+| `scripts/ratecon-expected.mts` | The ground truth's shape, shared by the two commands below |
+| `scripts/ratecon-expected-skeleton.mts` | `npm run ratecon:expected-skeleton`: blank entries for the samples that had none |
+| `scripts/ratecon-check-expected.mts` | `npm run ratecon:check-expected`: shape and blanks per file, no values |
+| `docs/ground-truth-howto.md` | How to write each field, with invented examples |
+
+**E2e, full run (2026-10-14), at the start of 3a:**
+
+- **Result:** `npm run e2e` gave 246 passed in 20.4 minutes, exit 0.
+- **Baselines:** none moved; nothing was re-saved.
+- **The two hangs:** neither recurred. The truck-lists spec at line 59
+  passed in 11.2 s, and every timeline step passed.
+- **Sleep:** the end-of-run line said the machine stayed awake.
+
+**Step 0, the redaction report** (`npm run ratecon:redact-report`; counts
+only, by number):
+
+- 28 PDFs: 25 with a text layer, 3 scans (3, 5, 6).
+- **Too large to send: none.** Largest sends: 9 (222 lines, all 6 pages)
+  and 28 (285 lines, 5 of 7 pages).
+- **Residual detector hits: 10 files. They would NOT be sent:** the browser
+  refuses any file with a hit (`not_redacted`).
+  - Unrecognised: 7 (id), 8 (email, phone), 10 (email), 11 (id), 12 (id),
+    16 (email), 21 (email).
+  - Template-read, so the AI is never asked: 13 (email), 15 (email).
+- **So of the 12 unrecognised files, only 5 could be sent today:** 2, 4, 9,
+  17, 28. The other 7 are blocked until Alex says what each hit is: a missed
+  redaction (fix the redaction) or a false alarm (fix the detector). Both
+  are fixed with invented test cases, then step 0 is re-run.
+- Each hit is a category only. Nothing was looked at to find out more: that
+  is for Alex, in the viewer.
+
+| Sample | Template | Lines in | Lines sent | Masks: email / phone / amount / labelled / id / url | Residue |
+|---|---|---|---|---|---|
+| 1 | label-rows | 50 | 50 | 2 / 6 / 3 / 11 / 0 / 0 | 0 |
+| 2 | — | 75 | 53 | 3 / 3 / 5 / 14 / 2 / 0 | 0 |
+| 4 | — | 78 | 55 | 1 / 5 / 4 / 10 / 2 / 0 | 0 |
+| 7 | — | 174 | — | — | id |
+| 8 | — | 143 | — | — | email, phone |
+| 9 | — | 222 | 222 | 22 / 4 / 14 / 10 / 1 / 0 | 0 |
+| 10 | — | 60 | — | — | email |
+| 11 | — | 64 | — | — | id |
+| 12 | — | 282 | — | — | id |
+| 13 | pickup-delivery-columns | 144 | — | — | email |
+| 14 | pickup-delivery-columns | 140 | 140 | 2 / 9 / 10 / 27 / 0 / 4 | 0 |
+| 15 | pickup-delivery-columns | 136 | — | — | email |
+| 16 | — | 175 | — | — | email |
+| 17 | — | 152 | 70 | 3 / 2 / 2 / 7 / 0 / 0 | 0 |
+| 18, 19, 20 | stops-section | 77 each | 77 each | 4 / 5 / 6 / 8 / 2 / 0 each | 0 |
+| 21 | — | 49 | — | — | email |
+| 22, 23, 24, 25 | pu-so-blocks | 47–49 | all | 3 / 6 / 4 / 10–11 / 1 / 0 | 0 |
+| 26, 27 | pu-so-blocks | 103, 99 | all | 6 / 11 / 8 / 16 / 1 / 0 each | 0 |
+| 28 | — | 327 | 285 | 20 / 10 / 2 / 12 / 0 / 6 | 0 |
+
+**The viewer** (`npm run ratecon:review-redacted <n>`):
+
+- **What it is:** a standalone script, outside the Next app. A test holds
+  that nothing under `src/` imports `scripts/`.
+- **How it serves:**
+  - binds 127.0.0.1 on a random port, under a random 32-hex path; every
+    other path is an empty 404;
+  - prints only the URL, and exits on Ctrl-C or after 30 minutes;
+  - writes nothing to disk and logs nothing.
+- **The page:**
+  - no script, link, font or image; a CSP of `default-src 'none'`;
+    `no-store`; the text HTML-escaped;
+  - shows every line that would be sent, with its page, and HIGHLIGHTS the
+    lines the re-scan still flags, so Alex can judge the 10 residue files.
+    A file that sends nothing would otherwise show nothing.
+- **Tested on invented fixtures only** (`src/test/review-redacted.test.ts`,
+  16 tests): loopback, the random path, an unknown number serving nothing,
+  no external URL, escaping, the timeout. Binding 0.0.0.0, or adding a
+  font link, each made a test fail.
+- **Real run:** started once on sample 2 to see that it prints only the
+  URL, then stopped. The page was NOT fetched, opened or captured.
+  Unknown numbers (0, 99, `abc`) and a scan (3) refuse and serve nothing.
+
+**Ground truth** (`.samples/rate-confirmations/expected.json`; the prompt
+said `.samples/expected.json`):
+
+- **Shape, read from its keys only:** `{ note, scoredAt, files }`, `files`
+  keyed by file name.
+  - The 6 complete entries: `{ loadNumber, stops: [{ type, street, city,
+    state, zip, appointment }] }`.
+  - Appointment forms: APPT `{ type, date, time, windowMinutes }`, FCFS
+    `{ type, date, time, endTime, marked }`, `{ couldntRead, date }`.
+  - Sample 12: `{ notRecognised: true }`.
+- **18 skeletons added:**
+  - Priority 1, 11 files: 2, 4, 7, 8, 9, 10, 11, 16, 17, 21, 28.
+  - Priority 2, 7 files: 13, 14, 15, 20, 24, 25, 26.
+  - The 3 scans are skipped.
+- **The 7 existing entries are byte-identical.** The new entries were
+  inserted as text before the end of `files`. The first 3450 bytes (every
+  existing entry, through the last one's closing brace) hash the same
+  before and after (sha256 `f9238f1101978c8e…`), and `cmp` finds them
+  identical.
+  - The original is kept beside it as
+    `expected.json.before-skeleton-2026-10-14` (git-ignored, inside
+    `.samples/`).
+- **Blanks are `null`, not `""`.** `""` is ground truth (a document with no
+  load number, §12.21), so a blank needs its own marker.
+  - `ratecon:check-expected` counts the `null`s: 13 per skeleton.
+  - `ratecon:score` skips an entry while any is left.
+- **A fourth appointment form, `{ "none": true }`** (no date or time), so a
+  stop with no appointment can be written. `ratecon:score` scores it.
+- **`ratecon:score` treats a complete priority-1 entry** that no template
+  reads as AI ground truth, not as a template failure. It is still 6 of 6.
+- **Differs from the prompt:**
+  - **7 read-but-unchecked files, not 6:** 13 template-read, of which 6
+    have ground truth.
+  - **11 priority-1 skeletons, not 12:** sample 12 already had an entry.
+    Its entry has no stops, so the AI cannot be scored on it; giving it
+    stops means changing an entry that must stay byte-identical. Alex's
+    call.
+
 **E2e, phase 2a build (2026-10-13), with the reader still off on the e2e server:**
 
 - **Result:** 241 passed, 1 skipped (the AI spec) and 1 did not run.
@@ -563,21 +689,63 @@ fixed; both are follow-ups.
 
 ## Next
 
-- **The 2b follow-up waits for Alex's approval.** `npm run check` is
-  green, and the two e2e specs pass. Not deployed; the reader is off in
-  production.
-- **2b's three decisions are closed** (Alex, 2026-10-14):
-  - every reader setting fails closed;
-  - the bundle scan uses a synthetic key;
-  - `inference_geo` stays `global`.
-- **One live call is left** of 2b's five. None was made in the follow-up.
-- **A full `npm run e2e`** was not run in the follow-up, only the two
-  reader specs.
+**Phase 3a waits for Alex.** Nothing is sent until step 1 is approved in
+writing.
+
+**What Alex does next, in this order:**
+
+1. **Review the redaction** of each text-layer file:
+   `npm run ratecon:review-redacted <n>`, then open the URL it prints.
+   - Start with the 12 unrecognised files: 2, 4, 7, 8, 9, 10, 11, 12, 16,
+     17, 21, 28.
+   - For files 7, 8, 10, 11, 12, 16 and 21, look at each HIGHLIGHTED line:
+     is it a missed redaction, or a false alarm? Either way, describe the
+     pattern in invented words (no real text); it is fixed with an invented
+     test case, and step 0 is re-run until residue is 0.
+   - For every file, say what is NOT masked that should be: a name, a phone,
+     anything. Or sign the file off.
+2. **Write ground truth,** per `docs/ground-truth-howto.md`.
+   - Priority 1 first, then priority 2.
+   - `npm run ratecon:check-expected` shows what is left.
+   - Decide sample 12: give its entry stops (it changes an existing entry),
+     or leave it out of the evaluation.
+3. **Approve step 1 in writing** (the list below). Then
+   `ratecon:eval-ai` is built, in its own phase.
+
+**What Alex must approve before step 1** (design §8.2). The figures are
+proposals:
+
+- **Vendor, account and settings:**
+  - Anthropic, `claude-haiku-5-5`, effort `low`, no thinking parameter,
+    `inference_geo: global`, one attempt per call. Sonnet 5.5 only if named.
+  - **Retention:** the account's default is deletion within 30 days, and
+    flagged content kept up to 2 years. Zero retention is by agreement only.
+    Is the default acceptable for redacted text?
+  - The key in `.env.local`, in its own workspace, with a spend limit.
+- **Files, by number:** only those that pass all three of these: residue 0
+  after step 0, Alex's redaction sign-off, complete ground truth.
+  - The test group, unrecognised: today 2, 4, 9, 17 and 28 can be sent.
+    7, 8, 10, 11, 12, 16 and 21 only after their hits are resolved.
+  - The control, template-read, which the AI is run on too: 1, 14, 18, 19,
+    20, 22–27 have residue 0. 13 and 15 are blocked by residue.
+- **Runs per file:** proposed 3. With no temperature the model is not
+  deterministic, so one run could mislead.
+- **The spend ceiling:**
+  - **Estimate:** the smoke read was 3117 in and 1565 out on 20 lines
+    ($0.0011). The largest file sends 285 lines; call it 15k in and 3k out,
+    about $0.003 a run on Haiku.
+  - **Worst case:** 23 files × 3 runs is 69 calls, at most about $0.21 on
+    Haiku, or about $4 on Sonnet.
+  - **Proposed:** a hard ceiling of **$1.00** and **75 calls**, both enforced
+    by the script, which stops before a call would pass either.
+
+**Also open:**
+
+- **Full e2e, 2026-10-14:** 246 passed. The 2b follow-up's reader specs ran in it too.
 - **The two intermittent hangs above** (truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
-- **Phase 3** (real samples, §8.2) needs its own go-ahead. Compare
-  `EFFORT`/`THINKING` there; Sonnet 5.5 has not been called yet.
+- **One live call is left** of 2b's five. None was made in 3a.
 - **Before the route can count in production,** migrations 0026 and 0027
   must be applied there.
 - Other open decisions are above.
