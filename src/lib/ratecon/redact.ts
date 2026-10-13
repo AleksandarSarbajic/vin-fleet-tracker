@@ -186,6 +186,26 @@ function selectPages(lines: readonly Line[]): Line[] {
   return lines.filter((l) => l.page === 1 || withCity.has(l.page));
 }
 
+/**
+ * The same chosen, redacted, numbered lines `prepareForReading` would send,
+ * each with what the re-scan still finds in it — for a PERSON to review
+ * locally (`npm run ratecon:review-redacted`, docs/llm-reader-design.md
+ * §8.2). Never sent: `prepareForReading` refuses the whole document on any
+ * hit. Not called by the app.
+ */
+export function redactedForReview(lines: readonly Line[]): {
+  lines: (PreparedLine & { residue: MaskKind[] })[];
+  masks: MaskCounts;
+} {
+  const masks = zero();
+  const out = selectPages(lines).map((line, i) => {
+    const redacted = redactLine(line);
+    for (const k of KINDS) masks[k] += redacted.masks[k];
+    return { n: i + 1, page: line.page, text: redacted.text, residue: residue(redacted.text) };
+  });
+  return { lines: out, masks };
+}
+
 /** The document, made ready to send: chosen, redacted, re-scanned, numbered — or refused, saying why. */
 export function prepareForReading(lines: readonly Line[]): Prepared {
   const chosen = selectPages(lines);

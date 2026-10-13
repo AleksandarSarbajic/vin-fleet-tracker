@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SENTINEL, UNKNOWN_LAYOUT, pastedLine, pdfLine } from '@/test/model-read-fixtures';
-import { REDACTION_VERSION, SEND_LIMITS, prepareForReading, redactLine, residue } from './redact';
+import { REDACTION_VERSION, SEND_LIMITS, prepareForReading, redactLine, redactedForReview, residue } from './redact';
 
 /** The language-model reader, design §2: what is stripped before anything leaves. Invented text only. */
 
@@ -145,3 +145,25 @@ describe('preparing a document to send', () => {
     expect(prepareForReading(Array.from({ length: count }, () => line))).toEqual({ ok: false, reason: 'too-large' });
   });
 });
+
+describe('the review copy (local only, never sent)', () => {
+  it('is exactly what would be sent, line for line, when nothing is left over', () => {
+    const sent = prepareForReading(UNKNOWN_LAYOUT);
+    if (!sent.ok) throw new Error(sent.reason);
+    const review = redactedForReview(UNKNOWN_LAYOUT);
+    expect(review.lines.map(({ n, page, text }) => ({ n, page, text }))).toEqual(sent.lines);
+    expect(review.masks).toEqual(sent.masks);
+    expect(review.lines.every((l) => l.residue.length === 0)).toBe(true);
+  });
+
+  it('keeps a line the send would refuse, and says what the re-scan found in it', () => {
+    // An `@` left behind: the send refuses the whole document.
+    const lines = [...UNKNOWN_LAYOUT, pdfLine(2, 'ops@', 'example')];
+    expect(prepareForReading(lines)).toMatchObject({ ok: false, reason: 'residue' });
+    const flagged = redactedForReview(lines).lines.filter((l) => l.residue.length > 0);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]!.residue).toContain('email');
+    expect(flagged[0]!.text).toContain(SENTINEL);
+  });
+});
+
