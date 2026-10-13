@@ -162,6 +162,26 @@ async function open(page: Page, path = '/'): Promise<void> {
   await page.locator('[data-console-header]').waitFor();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(1200);
+  /*
+   * The header's first tick. From hydration until the header's one-second
+   * interval first fires, its `now` is the server's fetch instant — real
+   * time, days after FROZEN — while the poll's last success is the frozen
+   * browser clock, so for that second the header says "Not updating", with
+   * a Retry button. The tick sets `now` to FROZEN and the healthy "Synced"
+   * label comes back as a NEW element. The fixed wait above cleared that tick
+   * by about 150 ms; when it did not, `hideLiveValues` tagged the outgoing
+   * label and the shot pictured the new one, untagged: "Synced 0s ago" at
+   * 768 and 1920, 3 runs in 30 on 2026-10-13. So the shot waits for the page
+   * to be hydrated (the dispatch clock's "· you" title, set in the same
+   * render that brings "Not updating") and for the Retry button to be gone.
+   */
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-header-row="1"] [title$="· you"]') !== null &&
+      document.querySelector('[data-sync-retry]') === null,
+    undefined,
+    { polling: 50 },
+  );
   // The pointer parks where it lights nothing up.
   await page.mouse.move(2, HEIGHT - 2);
 }
