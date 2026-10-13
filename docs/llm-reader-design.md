@@ -1,20 +1,22 @@
 # Language-model reader: design proposal
 
-> **Status, 2026-10-13.** Phase 1 and phase 2a are built (§9), through a
-> FAKE vendor only, behind `LLM_READER_ENABLED`, which is off by default. No
-> vendor is chosen and no real adapter exists. No text from `.samples/` has
-> been sent anywhere, and none may be without a separate go-ahead from Alex
-> (see §8.2). Where the build differs from what was proposed, §11 says so,
-> and the sections below are updated to match. Vendor facts come from
-> [`llm-reader-vendors.md`](llm-reader-vendors.md), read 2026-10-09; read the
-> vendors' current terms again before choosing.
+> **Status, 2026-10-14.** Phases 1, 2a and 2b are built (§9). The vendor is
+> **Anthropic** (Alex, 2026-10-13/14): `claude-haiku-5-5`, with
+> `claude-sonnet-5-5` as the fallback, switched by env alone. The reader is
+> behind `LLM_READER_ENABLED`, off by default, and OFF in production. No
+> text from `.samples/` has been sent anywhere, and none may be without a
+> separate go-ahead from Alex (see §8.2); the only live calls so far carried
+> invented text (§11, phase 2b). Where the build differs from what was
+> proposed, §11 says so, and the sections below are updated to match.
 
 ## Decisions this rests on (Alex, 2026-10-13)
 
 - Sending a rate confirmation to a vendor is allowed. Scope until Alex says
   otherwise: **redacted text only**. Rates, broker contacts, phones, emails
   and driver names are stripped in the browser before anything leaves.
-- Vendor: not chosen. Alex chooses after reading this.
+- Vendor: **Anthropic** (2026-10-13/14). Models: Haiku 5.5, Sonnet 5.5 as the
+  fallback; no other id is accepted (Fable and Mythos require 30-day
+  retention; Opus costs far more).
 - Templates stay first. The model is the fallback for "Layout not
   recognised", and no more templates are built.
 - Scans are read later, through OCR in the browser (phase 4). Only the
@@ -324,8 +326,12 @@ request refused for its body never spends a read:
   counts, the log line, the live wiring — imports `server-only`, so a
   client import fails the build. Tests mock it per file, as this repo's
   server tests do (no change to the Vitest config).
-- A build test scans `.next/static` for the key's value — not built yet:
-  no real key exists until a vendor is chosen.
+- **Built in 2b, without a build:** `src/test/reader-key-bundle.test.ts`
+  walks the import graph from every `'use client'` module and shows that
+  none reaches server code, the env loader, `server-only` or the SDK, and
+  none reads the key; only the env schema, the wiring and the log line name
+  it. A scan of `.next/static` for the key's VALUE after a production build
+  is still not built: it needs a build, and is proposed in `HANDOFF.md`.
 
 ## 5. Failure modes
 
@@ -341,7 +347,8 @@ a constant that never includes vendor or document text.
 | `too_large` | over the size limits | "This document is too long to send." |
 | `not_redacted` | a detector hit, in the browser or on the server | "This document could not be prepared for reading; nothing was sent." |
 | `timeout` | 25 s on the server, or 35 s in the browser | "The AI read took too long. Nothing was filled." |
-| `unavailable` | vendor 5xx, network failure, 429 | "The AI reader is not available right now. Nothing was filled." |
+| `unavailable` | vendor 5xx, network failure, 429, 401/403, any other 4xx | "The AI reader is not available right now. Nothing was filled." |
+| `vendor_capped` | the vendor's account is out of money: Anthropic's 400 "You have reached your specified…" (a spend limit the account set), its 429 `enforced_spend_limit_reached` (a tier's monthly cap), or a 402 | "The AI reader’s spending limit is reached. Tell an admin." |
 | `refused` | the vendor declined, or a content filter fired | "The AI reader declined this document. Nothing was filled." |
 | `invalid_output` | the reply failed `ModelRead` | "The AI read came back unusable. Nothing was filled." |
 | `cancelled` | the dispatcher pressed Cancel | "Cancelled. Nothing was filled." |
@@ -396,7 +403,7 @@ a constant that never includes vendor or document text.
 - **Logs.** Vercel keeps function logs, and the route logs only the fields
   above.
 - **The database.** `ratecon_ai_reads` has no text column — not even the
-  vendor or the model: the vendor is an enum (`fake` until one is chosen)
+  vendor or the model: the vendor is an enum (`fake`, `anthropic`)
   and the model is not stored. A schema test asserts its column types.
   Nothing else is written.
 - **Sentinel test.** In tests, every invented document line carries a
@@ -411,9 +418,11 @@ a constant that never includes vendor or document text.
 export interface SentLine { n: number; text: string }
 export interface ReaderRequest { lines: readonly SentLine[]; today: string }  // today: YYYY-MM-DD, dispatch zone
 
+export type AdapterUsage = { inputTokens: number; outputTokens: number };
 export type AdapterResult =
-  | { ok: true; output: unknown; usage: { inputTokens: number; outputTokens: number } }
-  | { ok: false; code: 'timeout' | 'unavailable' | 'refused' | 'malformed'; vendorStatus: number | null };
+  | { ok: true; output: unknown; usage: AdapterUsage }
+  // `usage` when the vendor answered and billed: a refusal, a cut-off reply.
+  | { ok: false; code: 'timeout' | 'unavailable' | 'refused' | 'malformed' | 'vendor_capped'; vendorStatus: number | null; usage?: AdapterUsage };
 
 export interface ReaderAdapter {
   readonly vendor: string;
@@ -425,11 +434,31 @@ export interface ReaderAdapter {
 
 - The instruction text and the JSON schema are shared, built once from
   `ModelRead`. Each adapter only translates them to its vendor's request
-  shape and its structured-output or JSON mode, with temperature 0 where
-  offered.
+  shape and its structured-output or JSON mode.
+- **Corrected in 2b: no "temperature 0".** Claude Haiku 5.5 and Sonnet 5.5
+  answer 400 to a non-default `temperature`, any `top_p`/`top_k`, a forced
+  `tool_choice` and an assistant prefill, so none is sent. The shape is held
+  by structured outputs (`output_config.format`), the reply by the route's
+  `ModelRead.safeParse`, and every value by the verifier.
+- **The Anthropic adapter** (`src/server/ratecon-reader/anthropic.ts`), as
+  built: `system` is the instruction; one user message is `modelInput`;
+  `output_config: { effort: 'low', format: json_schema }`; no `thinking`
+  parameter (both models then think adaptively, sized by effort; thinking
+  bills as output); `max_tokens` 8192; `inference_geo: 'global'`; no
+  metadata, no `cache_control`. The client pins `baseURL`, sends no auth
+  token, logs nothing, and makes one attempt (`maxRetries: 0`), under the
+  route's 25 s signal. `EFFORT` and `THINKING` are constants for phase 3 to
+  compare.
+- **The schema Anthropic is sent** is `ModelRead`'s, cut to what its
+  structured outputs accept and made small enough to compile (§11, items
+  21–23): parts used more than once are defined once under `$defs`; every
+  property is required; a nullable enum is one enum listing `null`; bounds
+  and patterns are dropped — `ModelRead` still enforces them on the route.
 - Each adapter sets its vendor's no-storage and region options explicitly
   in code, never by account default alone, and has a test asserting those
-  options are in the request.
+  options are in the request. For Anthropic that is the region only
+  (`inference_geo`): it has no per-request no-storage option; zero retention
+  is an account agreement, outside the code.
 - **`FakeReaderAdapter`** for tests and e2e. It is given a script (an
   output, an error code, or a delay), records the `SentLine[]` it was
   handed, and makes no network call. `LLM_READER_VENDOR=fake` selects it.
@@ -591,6 +620,8 @@ templates meet. Appointments are scored as `ratecon:score` scores them.
      adapter for the vendor Alex picked, and the strip's button and states.
    - **Flag:** off in production.
    - **Needs first:** the vendor choice, and §10's answers on items 1 and 3.
+   - **Built in two parts:** 2a, everything but the adapter, through the
+     fake; 2b, the Anthropic adapter, tried only on invented text.
 3. **Real-sample evaluation,** as §8.2, under its own approval. The result
    decides whether the flag goes on.
 4. **OCR for scans.**
@@ -722,3 +753,43 @@ Phase 2a:
 16. **Not built in 2a:** a real adapter (no vendor) and the `.next/static`
     key scan (no key yet). The shared limiter's weakness on Vercel stays a
     later decision.
+
+Phase 2b (Anthropic, 2026-10-14):
+
+17. **No temperature** (§6): these models refuse it, and every other
+    sampling knob; the design's "temperature 0" is withdrawn.
+18. **A new failure code, `vendor_capped`** (§5), and a matching outcome in
+    the counts table (migration 0027 adds it beside the `anthropic`
+    vendor). Besides the 400 Alex named, it covers two cases the docs give
+    that mean the same — no money, an admin must act: the 429 of a tier's
+    monthly cap (`error.details.error_code: enforced_spend_limit_reached`)
+    and a 402 `billing_error`. A prepaid balance that runs dry is NOT
+    covered: its wording is not in the docs read, so it shows as
+    `unavailable` with the vendor's status in the log.
+19. **A failed read keeps what it cost.** A refusal or a cut-off reply is
+    billed, so its tokens go in the counts row; and every vendor failure
+    but a cancel is logged as one line, code and vendor status, so a revoked
+    key (401) can be told from an outage (5xx). 2a logged only 500s.
+20. **Not the SDK's schema transform.** `@anthropic-ai/sdk` 0.133's
+    `transformJSONSchema` moves `enum` and `const` into description text, so
+    the grammar would no longer pin `kind`, `type`, `flag` or
+    `schemaVersion`. The adapter cuts the schema to the documented keywords
+    itself (`anthropicSchema`); a test holds it to that list.
+21. **"The compiled grammar is too large"** (smoke runs 2 and 3). As
+    generated — the quote inlined 12 times, 13 optional properties, 8 unions
+    — Anthropic refused to compile the schema. Making every property
+    required and sending the nullable flag as one enum did not suffice
+    (run 3). Defining each reused part once under `$defs` did (run 4, 4.2 KB
+    from 9.3 KB). `ModelRead` changed only so: the cited text is one
+    instance (`CitedText`), used five times.
+22. **Two clauses added to the instruction** for the now-required fields:
+    `lineEnd` equals `line` for a one-line quote; a range's `endQuote` is the
+    same as `timeQuote` when both times are in one quote. The verifier
+    already read both so.
+23. **Patterns are not in the grammar.** Anthropic's documented keyword list
+    has no `pattern`, so `HH:MM` and `YYYY-MM-DD` are enforced by
+    `ModelRead` on the route, not by the vendor.
+24. **The browser's list of codes is derived** from `READ_MESSAGES`. The
+    hand-kept list would have read `vendor_capped` as `unavailable` by its
+    503; a test now runs every code through it.
+

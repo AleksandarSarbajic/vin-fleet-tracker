@@ -1,10 +1,10 @@
 # Handoff
 
-State on 2026-10-13. Phase 2a of the language-model reader is built: the
-route, the counts table, the UI and the Sentry hardening, through a FAKE
-vendor only, behind `LLM_READER_ENABLED` (off by default). See
-"Language-model reader" below. `npm run check` passed on 2026-10-13
-(167 files, 2348 tests).
+State on 2026-10-14. Phase 2b of the language-model reader is built: the
+Anthropic adapter, behind `LLM_READER_ENABLED` (off by default, and OFF in
+production; nothing went to Vercel). It has been called live only with
+invented text. See "Language-model reader" below. `npm run check` passed on
+2026-10-14 (169 files, 2431 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
 "How to run the checks".
 
@@ -151,6 +151,27 @@ anywhere.
 - **Still open:** vendor, EU processing, flagged content, the basis for
   "allowed". Build nothing vendor-specific.
 
+**Phase 2b: the vendor** (Alex, 2026-10-13/14):
+
+- **Anthropic.** Model `claude-haiku-5-5` from `LLM_READER_MODEL`;
+  `claude-sonnet-5-5` is the fallback, by env only. The env schema accepts
+  only those two exact ids (Fable and Mythos force 30-day retention; Opus
+  costs far more).
+- **The key** is `LLM_READER_API_KEY` in `.env.local`. Never opened, printed
+  or quoted; read only through the env schema or `node --env-file`. A $5
+  prepaid balance with a spend limit is all the money at risk.
+- **Live calls:** invented text only, at most 5 this phase, through
+  `npm run reader:smoke` (needs `READER_SMOKE=yes`). Nothing from
+  `.samples/` (phase 3, separately approved).
+- **Request rules:** no temperature/top_p/top_k, no forced tool_choice, no
+  prefill; structured outputs; effort `low` and no thinking parameter, as
+  constants; `maxRetries: 0`; 25 s; bounded `max_tokens`; only the lines,
+  the instruction and today's date.
+- **A new code, `vendor_capped`,** for the account's own spend limit: "The
+  AI reader's spending limit is reached. Tell an admin."
+- **Misconfigured** (on, `anthropic`, no key or no model): reader off, one
+  log line, never a crash.
+
 **Closing phase 2a** (Alex, 2026-10-13):
 
 - **The e2e server's reader settings** come from the `e2e` script in
@@ -164,8 +185,8 @@ anywhere.
 
 ## Open decisions, waiting on Alex
 
-1. **The language-model reader's vendor.** Not chosen. Build nothing
-   vendor-specific until it is. Still open with it:
+1. **The language-model reader's vendor: Anthropic** (decided
+   2026-10-13/14; see above). Still open with it:
    - **EU processing:** is it required? If so, Anthropic's own API is out
      today.
    - **Flagged content:** is the vendors' retention of flagged inputs
@@ -265,13 +286,93 @@ no network call to any vendor. `LLM_READER_ENABLED` is off by default.
 | `src/components/edit/RateconStrip.tsx`, `StopForm.tsx`, `LoadStrip.tsx`, `Field.tsx` | Read with AI, Show what is sent, Cancel, the AI marks, Looks right, the load number's confirm |
 | `e2e/ratecon-ai.spec.ts` | Through the route and the fake. Runs under `npm run e2e`, which gives the server the reader's env. It still skips, and says why, on a server where the reader is off |
 
-**Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake`
-only; refused in production), `LLM_READER_MODEL`, `LLM_READER_API_KEY`
-(refused if any `NEXT_PUBLIC_*` equals it), `LLM_READER_FAKE_SCRIPT`,
-`LLM_READER_USER_DAILY_CAP` (25), `LLM_READER_DAILY_CAP` (100).
+**Phase 2b is built:** the Anthropic adapter. Still OFF in production, and
+nothing was deployed.
 
-**Not applied anywhere but the local test cluster:** migration 0026. It must
-be applied to production before the route can count there.
+| File | What |
+|---|---|
+| `src/server/ratecon-reader/anthropic.ts` | The adapter: the request, the schema Anthropic is sent, every outcome as a code. Imports `server-only` and the SDK; never throws, never logs |
+| `src/server/ratecon-reader/live.ts` | `readerWiring`: `anthropic` with its key and model, or OFF with the missing settings named, logged once |
+| `drizzle/0027_ratecon_ai_anthropic.sql` | `anthropic` (vendor) and `vendor_capped` (outcome). Applied to the LOCAL test databases only |
+| `scripts/reader-smoke.mts` | `READER_SMOKE=yes npm run reader:smoke`: ONE live call with the invented fixture |
+| `src/test/reader-key-bundle.test.ts` | The key cannot reach the browser bundle, shown from the import graph |
+
+**Env (server only):** `LLM_READER_ENABLED`, `LLM_READER_VENDOR` (`fake` —
+refused in production — or `anthropic`), `LLM_READER_MODEL`
+(`claude-haiku-5-5` or `claude-sonnet-5-5`, nothing else),
+`LLM_READER_API_KEY` (refused if any `NEXT_PUBLIC_*` equals it),
+`LLM_READER_FAKE_SCRIPT`, `LLM_READER_USER_DAILY_CAP` (25),
+`LLM_READER_DAILY_CAP` (100). Now listed in `.env.example`.
+
+**Not applied anywhere but the local test cluster:** migrations 0026 and
+0027. Both must be applied to production before the route can count there.
+
+**The smoke runs, 2026-10-14** (`claude-haiku-5-5`, the invented
+UNKNOWN_LAYOUT fixture, 20 lines). 4 of the 5 allowed calls; one unused.
+
+| Run | Outcome | What it showed |
+|---|---|---|
+| 1 | `unavailable (HTTP 400)` | A 400 that was not the spend limit. The adapter, rightly, says no more |
+| 2 | `unavailable (HTTP 400)` | The script now prints a 4xx's type and message: "The compiled grammar is too large… Simplify your tool schemas" |
+| 3 | the same | Every property required, the nullable flag one enum: not enough |
+| 4 | `ok` | Each reused part defined once under `$defs`. Tokens: input 3117, output 1565. `ModelRead` passes; verified: 10 values stood, 0 did not |
+
+A 400 bills nothing; run 4 cost about $0.001 at Haiku's rates.
+
+```
+model: claude-haiku-5-5
+lines sent: 20
+outcome: ok
+tokens: input 3117, output 1565
+ModelRead: passes
+verified against the invented text: yes — 10 values stood, 0 did not
+```
+
+**Where 2b differs from Alex's prompt** (all in `llm-reader-design.md` §11,
+items 17–24):
+
+- **`vendor_capped` covers two more cases than the 400 named:** the 429 of a
+  tier's monthly cap (`enforced_spend_limit_reached`) and a 402. Both mean
+  "no money, an admin must act", per Anthropic's docs. A prepaid balance
+  run dry is not covered: its wording is not documented; it shows as
+  `unavailable`, with the status in the log.
+- **Migration 0027 adds an outcome too** (`vendor_capped`), not only the
+  vendor: the counts row stores the outcome as an enum.
+- **`inference_geo: 'global'` is sent.** The prompt listed what to send and
+  did not name it; design §6 requires the region set in code. `global` is
+  the default and costs 1× (`us` is 1.1×). Anthropic has no EU option and
+  no per-request no-storage option.
+- **The SDK does not prepare the schema.** Its 0.133 transform demotes
+  `enum` and `const` to description text; the adapter cuts the schema to the
+  documented keywords itself.
+- **The schema as generated did not compile** ("grammar too large"). Fixed by
+  `$defs`, every property required and the nullable flag as one enum;
+  `ModelRead` gained only a shared `CitedText`; the instruction gained two
+  clauses (`lineEnd` = `line` for one line; `endQuote` = `timeQuote` when
+  shared). The route's `safeParse` is still the authority.
+- **The smoke script prints a 4xx's vendor type and message,** beyond "only
+  outcome, tokens, validates, verifies". Needed to find run 1's cause; safe
+  because the text is invented; the key is masked if it appears. The app has
+  no such path.
+- **Every vendor failure is now logged** (code, vendor status, no text);
+  2a logged only 500s. Without it a revoked key looks like an outage.
+- **The browser derives its code list** from `READ_MESSAGES`; the old list
+  would have shown `vendor_capped` as `unavailable`.
+- **`vitest.setup.ts` deletes the reader's variables and `ANTHROPIC_*`:**
+  vitest loads `.env.local`, where the real key now lives. Guard 1's test
+  checks the key is absent.
+- **No server-side `fallbacks`.** Haiku 5.5 has none (a 400). On Sonnet 5.5
+  it could hand a refused read to another model, outside the allow-list.
+
+**Proposed, not built: a `.next/static` scan for the key's value.** It
+needs a production build with the key in the environment. The e2e run
+already builds once; a step after that build could grep `.next-e2e/static`
+for `LLM_READER_API_KEY`'s value and fail on a hit. Waiting on Alex: it
+would put the real key in the e2e build's environment.
+
+**Found, not fixed:** a BLANK `LLM_READER_USER_DAILY_CAP=` or
+`LLM_READER_DAILY_CAP=` is read as 0 and refuses boot (the caps are not
+wrapped in `blankIsAbsent`). `.env.example` leaves them commented out.
 
 Every way the build differs from the design, phases 1 and 2a, is listed in
 `llm-reader-design.md` §11.
@@ -378,12 +479,22 @@ fixed; both are follow-ups.
 
 ## Next
 
-- **Phase 2a waits for Alex's approval.** It is built, and its e2e runs and
-  passes.
+- **Phase 2b waits for Alex's approval.** Built, `npm run check` green,
+  one successful live call with invented text. Not deployed; the reader is
+  off in production.
+- **Decisions for Alex from 2b:**
+  - An unlisted `LLM_READER_MODEL` refuses to boot the WHOLE app, as an
+    unknown vendor already does (every route imports `serverEnv`). A
+    missing one only turns the reader off. Keep, or make an unlisted id
+    turn the reader off too?
+  - The `.next/static` key scan (above): worth the real key in the e2e
+    build's environment?
+  - `inference_geo`: `global` (1×) or `us` (1.1×)?
 - **The two intermittent hangs above** (truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
-- **Phase 2b (one real adapter)** needs the vendor chosen first.
-- **Before the route can count in production,** migration 0026 must be
-  applied there.
+- **Phase 3** (real samples, §8.2) needs its own go-ahead. Compare
+  `EFFORT`/`THINKING` there; Sonnet 5.5 has not been called yet.
+- **Before the route can count in production,** migrations 0026 and 0027
+  must be applied there.
 - Other open decisions are above.
