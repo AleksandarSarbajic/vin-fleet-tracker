@@ -1,12 +1,13 @@
 # Handoff
 
-State on 2026-10-14. Phase 3a of the language-model reader is done: the
-evaluation PREP, local only. Nothing was sent anywhere and the API key was
-not used. Phase 2b and its follow-up are built: the Anthropic adapter,
-behind `LLM_READER_ENABLED` (off by default, and OFF in production; nothing
-went to Vercel). It has been called live only with invented text. See
-"Language-model reader" below. `npm run check` passed on 2026-10-14
-(170 files, 2471 tests).
+State on 2026-10-14. Phases 3a and 3a-2 of the language-model reader are
+done, local only: the evaluation PREP, and a second redaction pass that lets
+all 25 text-layer samples be prepared. Nothing was sent anywhere and the API
+key was not used. Phase 2b and its follow-up are built: the Anthropic
+adapter, behind `LLM_READER_ENABLED` (off by default, and OFF in production;
+nothing went to Vercel). It has been called live only with invented text.
+See "Language-model reader" below. `npm run check` passed on 2026-10-14
+(170 files, 2503 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
 "How to run the checks".
 
@@ -492,8 +493,11 @@ only, by number):
 - 28 PDFs: 25 with a text layer, 3 scans (3, 5, 6).
 - **Too large to send: none.** Largest sends: 9 (222 lines, all 6 pages)
   and 28 (285 lines, 5 of 7 pages).
-- **Residual detector hits: 10 files. They would NOT be sent:** the browser
-  refuses any file with a hit (`not_redacted`).
+- **Residual detector hits: 9 files, 10 category hits** (sample 8 has two).
+  Corrected 2026-10-14: this line first said "10 files", reading the
+  report's category total as a file count. They would NOT be sent: the
+  browser refuses any file with a hit (`not_redacted`).
+  **Superseded by 3a-2, below: none now.**
   - Unrecognised: 7 (id), 8 (email, phone), 10 (email), 11 (id), 12 (id),
     16 (email), 21 (email).
   - Template-read, so the AI is never asked: 13 (email), 15 (email).
@@ -539,7 +543,8 @@ only, by number):
   - no script, link, font or image; a CSP of `default-src 'none'`;
     `no-store`; the text HTML-escaped;
   - shows every line that would be sent, with its page, and HIGHLIGHTS the
-    lines the re-scan still flags, so Alex can judge the 10 residue files.
+    lines the re-scan still flags, so Alex can judge the residue files (9 in
+    3a, none after 3a-2).
     A file that sends nothing would otherwise show nothing.
 - **Tested on invented fixtures only** (`src/test/review-redacted.test.ts`,
   16 tests): loopback, the random path, an unknown number serving nothing,
@@ -586,6 +591,99 @@ said `.samples/expected.json`):
     Its entry has no stops, so the AI cannot be scored on it; giving it
     stops means changing an entry that must stay byte-identical. Alex's
     call.
+
+### Phase 3a-2: the redaction catches what the re-scan found (2026-10-14)
+
+Local only: no network, no key. Generic fixes from the detectors; no
+document text was read.
+
+**What changed** (`src/lib/ratecon/redact.ts`, `REDACTION_VERSION`
+`redact-2026-10-14.1`):
+
+- **A second masking pass over the JOINED line** (`maskJoined`), with the
+  same detectors as a cell gets: emails, web addresses, MC/DOT ids, phones
+  (and the phone-word rule), `$` and USD amounts. A value split across cells
+  is whole only there. Labels are not re-run; the re-scan still checks
+  them. It is idempotent: a placeholder matches no detector.
+- **Any `@` left takes its whole token** (`maskAtTokens`). At a cell edge,
+  the word touching it across the boundary goes too, outward while each is
+  its cell's only word, and stopping at a placeholder.
+  - `ops` | `@example.com` loses `ops`: a local part can be a name.
+  - Inside a cell, `Pick up @ 08:00` loses only the `@`; the time stays.
+  - The cost: a word next to an email fragment can go with it.
+- **The `$` detector now takes any spaces after the `$`;** it took at most
+  one. `$` | `1,850` in two cells, `$  1,850` joined, passed both the mask
+  and the re-scan whenever no money word was in either cell. This is
+  stronger, not looser: the re-scan is stronger with it.
+- **The re-scan (`residue`) is not loosened,** and no detector is removed
+  or weakened. Tests pin that it still flags each joined shape: an email,
+  a stray `@`, a phone, an MC number, an amount.
+
+**Tests (invented text):**
+
+- **Split shapes:**
+  - an email across 2 cells (three ways) and across 3 cells (two ways);
+  - an `@` at a cell boundary, and the walk stopping at a placeholder or at
+    a cell of several words;
+  - an `@` inside a cell;
+  - a phone across 2 and 3 cells;
+  - MC#, MC | # | number, USDOT, DOT #:;
+  - `$` | amount, with and without a money word.
+- **Kept, unmasked:** a city and its ZIP, a ZIP next to a street number, a
+  time range across cells, a date and a time, a street number and its
+  street, a load number, ten bare digits as an order number, a dashed date
+  and a ZIP.
+- **Idempotence** and mask counts.
+- **Mutations:** with the joined pass off, 11 tests fail; with the walk
+  across cells off, 4; with the old one-space `$` rule, 2.
+- **Two tests that pinned "a split email or phone is refused"** now pin that
+  it is masked and sent.
+- **No invented input is known that the masking leaves for the re-scan.**
+  - So the strip test of the refusal message now forces the refusal (a
+    wrapper around the real `prepareForReading`, that one test only).
+  - The viewer test gives its highlighted line as data.
+
+**Before and after** (`npm run ratecon:redact-report`, which now also prints
+the line numbers of any hit lines, never their text, and a short sha256 of
+what each sendable file would send):
+
+| | Before | After |
+|---|---|---|
+| Files with a residual hit | 9 (10 category hits) | **0** |
+| Files that can be sent | 16 of 25 | **25 of 25** |
+| The 16 that already sent | — | **byte-identical** (all 16 hashes equal) |
+| Too large | 0 | 0 |
+
+The hit lines before, by number as the review page shows them. The
+selection did not change, so the numbers still point at the same lines;
+these are the lines for Alex to look at first:
+
+| Sample | Lines that hit, before 3a-2 |
+|---|---|
+| 7 | L10 (id), L11 (id) |
+| 8 | L24 (phone), L45 (email) |
+| 10 | L38 (email) |
+| 11 | L10 (id), L11 (id) |
+| 12 | L20 (id), L21 (id) |
+| 13 | L81 (email) |
+| 15 | L58 (email) |
+| 16 | L9 (email) |
+| 21 | L34 (email) |
+
+**Found, not fixed: a labelled name split across cells goes through, and
+the re-scan does not catch it.**
+
+- `Dispatcher:` | `Dana` | `Example` sends `Example`.
+- `Contact` | `[PHONE] Dana Example` sends the name.
+- The cause: the re-scan asks only whether a label's value STARTS with a
+  placeholder.
+- This is fail-open, unlike the residue above. The design's §2 now lists it.
+- **Fixing it means deciding where a label's value ends in the joined
+  line.** To the end of the line would mask whatever follows it (a time, a
+  city). Alex's call; until then the review page is where it is caught.
+
+**E2e after 3a-2:** the AI spec and the key-scan spec, 3 passed (with
+setup).
 
 **E2e, phase 2a build (2026-10-13), with the reader still off on the e2e server:**
 
@@ -689,27 +787,31 @@ fixed; both are follow-ups.
 
 ## Next
 
-**Phase 3a waits for Alex.** Nothing is sent until step 1 is approved in
-writing.
+**Phases 3a and 3a-2 wait for Alex.** Nothing is sent until step 1 is
+approved in writing.
 
 **What Alex does next, in this order:**
 
 1. **Review the redaction** of each text-layer file:
    `npm run ratecon:review-redacted <n>`, then open the URL it prints.
    - Start with the 12 unrecognised files: 2, 4, 7, 8, 9, 10, 11, 12, 16,
-     17, 21, 28.
-   - For files 7, 8, 10, 11, 12, 16 and 21, look at each HIGHLIGHTED line:
-     is it a missed redaction, or a false alarm? Either way, describe the
-     pattern in invented words (no real text); it is fixed with an invented
-     test case, and step 0 is re-run until residue is 0.
+     17, 21, 28. All 25 text-layer files now pass the re-scan, so nothing
+     is highlighted.
+   - Look first at the lines that hit before 3a-2 (the table in "Phase
+     3a-2"): are they masked as they should be?
+   - Watch for labelled names whose value runs into the next cell (found in
+     3a-2): the re-scan does not catch those.
    - For every file, say what is NOT masked that should be: a name, a phone,
-     anything. Or sign the file off.
-2. **Write ground truth,** per `docs/ground-truth-howto.md`.
+     anything. Describe the pattern in invented words; it is fixed with an
+     invented test case and step 0 re-run. Or sign the file off.
+2. **Decide the labelled-name gap:** where a label's value ends in the
+   joined line.
+3. **Write ground truth,** per `docs/ground-truth-howto.md`.
    - Priority 1 first, then priority 2.
    - `npm run ratecon:check-expected` shows what is left.
    - Decide sample 12: give its entry stops (it changes an existing entry),
      or leave it out of the evaluation.
-3. **Approve step 1 in writing** (the list below). Then
+4. **Approve step 1 in writing** (the list below). Then
    `ratecon:eval-ai` is built, in its own phase.
 
 **What Alex must approve before step 1** (design §8.2). The figures are
@@ -724,18 +826,19 @@ proposals:
   - The key in `.env.local`, in its own workspace, with a spend limit.
 - **Files, by number:** only those that pass all three of these: residue 0
   after step 0, Alex's redaction sign-off, complete ground truth.
-  - The test group, unrecognised: today 2, 4, 9, 17 and 28 can be sent.
-    7, 8, 10, 11, 12, 16 and 21 only after their hits are resolved.
-  - The control, template-read, which the AI is run on too: 1, 14, 18, 19,
-    20, 22–27 have residue 0. 13 and 15 are blocked by residue.
+  - **The test group, unrecognised:** 2, 4, 7, 8, 9, 10, 11, 12, 16, 17,
+    21 and 28 all pass step 0 since 3a-2. Sample 12 has no stops in its
+    ground truth.
+  - **The control, template-read,** which the AI is run on too: 1, 13, 14,
+    15, 18, 19, 20 and 22–27 all pass step 0.
 - **Runs per file:** proposed 3. With no temperature the model is not
   deterministic, so one run could mislead.
 - **The spend ceiling:**
   - **Estimate:** the smoke read was 3117 in and 1565 out on 20 lines
     ($0.0011). The largest file sends 285 lines; call it 15k in and 3k out,
     about $0.003 a run on Haiku.
-  - **Worst case:** 23 files × 3 runs is 69 calls, at most about $0.21 on
-    Haiku, or about $4 on Sonnet.
+  - **Worst case:** 25 files × 3 runs is 75 calls, at most about $0.23 on
+    Haiku, or about $4.50 on Sonnet.
   - **Proposed:** a hard ceiling of **$1.00** and **75 calls**, both enforced
     by the script, which stops before a call would pass either.
 
@@ -745,7 +848,7 @@ proposals:
 - **The two intermittent hangs above** (truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
-- **One live call is left** of 2b's five. None was made in 3a.
+- **One live call is left** of 2b's five. None was made in 3a or 3a-2.
 - **Before the route can count in production,** migrations 0026 and 0027
   must be applied there.
 - Other open decisions are above.

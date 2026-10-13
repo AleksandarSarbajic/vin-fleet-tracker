@@ -110,10 +110,19 @@ so the model still sees the shape of the line.
 |---|---|---|
 | Email addresses | pattern, including "name at domain dot com" | `[EMAIL]` |
 | Phone and fax numbers | NANP patterns with separators, `+1`, extensions; bare 10-digit runs only after a phone, fax or cell label | `[PHONE]` |
-| Money | `$` amounts, amounts with `USD`, and any number on a line labelled Rate, Line Haul, Total, Fuel, FSC, Accessorial, Detention, Lumper, TONU, Pay or Amount | `[AMOUNT]` |
+| Money | `$` amounts (any spaces after the `$`, since 3a-2), amounts with `USD`, and any number on a line labelled Rate, Line Haul, Total, Fuel, FSC, Accessorial, Detention, Lumper, TONU, Pay or Amount | `[AMOUNT]` |
 | Labelled contacts | the value after Contact, Dispatcher, Broker Rep, Agent, Rep, Booked by, Driver, Driver Name, Driver Cell, Truck #, Trailer # | `[REMOVED]` |
 | Carrier and broker identifiers | MC and DOT numbers | `[ID]` |
 | Web addresses | pattern | `[URL]` |
+
+**Two passes** (phase 3a-2, 2026-10-14). Each cell is masked on its own;
+then the cells, joined as they are sent, are masked again with the same
+detectors (emails, web addresses, MC/DOT numbers, phones, `$` and USD
+amounts). A value split across cells is whole only in the joined line:
+`ops@` | `example.com`, `Call 612-555` | `0147`, `MC#` | `123456`. Any `@`
+still left takes its whole token, and, at a cell edge, the word touching it
+across the boundary, so a local part split from its `@` goes too. Labels are
+not re-run. The pass is idempotent: a placeholder matches no detector.
 
 **Page selection, to send less.** From a PDF, the sender takes page 1 and
 every page that holds at least one US city line (the existing `cityLine`
@@ -134,6 +143,11 @@ text has no pages, so all of it is sent, within the size limit (§4).
 **Pattern redaction is not a guarantee.** It removes what it can recognise.
 - **Known misses:**
   - names that carry no label, such as a signature or "questions, call Dana";
+  - a LABELLED name whose value runs into another cell, such as
+    `Dispatcher:` | `Dana` | `Example` (the surname goes through) or
+    `Contact` | `[PHONE] Dana Example`. The re-scan misses these too: it asks
+    only whether a label's value starts with a placeholder (found in 3a-2,
+    not fixed; HANDOFF);
   - a broker's company name in a page header;
   - a contact detail written in a way no pattern expected.
 - **Known over-masking:** a load number made of 10 bare digits after a phone
@@ -814,4 +828,17 @@ Phase 2b follow-up (config safety, Alex 2026-10-14):
     one never enters the e2e run.
 28. **`inference_geo` stays `global`** (Alex). Standard pricing; `us` would
     be 1.1×.
+
+Phase 3a-2 (redaction, 2026-10-14):
+
+29. **A second masking pass over the joined line** (§2, Two passes). Before
+    it, 9 of the 25 text-layer samples were refused for a residual hit;
+    after it, none. The 16 that already passed send byte-identical text
+    (compared by hash). `REDACTION_VERSION` is `redact-2026-10-14.1`.
+30. **The `$` detector took at most one space** after the `$`, so `$` |
+    `1,850` in two cells passed the mask AND the re-scan. It now takes any
+    run of spaces. Stronger, not looser: the re-scan is stronger with it.
+31. **Labelled names split across cells are a known miss** (§2), found while
+    testing, not fixed: the re-scan does not catch them either. Deciding
+    where a label's value ends in the joined line is Alex's call.
 
