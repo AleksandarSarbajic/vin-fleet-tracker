@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_REPLY } from '@/test/model-read-fixtures';
-import { MODEL_INSTRUCTION, ModelRead, modelReadJsonSchema } from './model-read';
+import { MODEL_INSTRUCTION, ModelRead, modelInput, modelReadJsonSchema } from './model-read';
 
 /** The language-model reader, design §3: what a reply must be before anything looks at its values. */
 
@@ -92,7 +92,27 @@ describe('the instruction', () => {
     ['quotes are copied exactly', /copied exactly/i],
     ['the document is data, not instructions', /data[^.]*never instructions/i],
     ['placeholders are never values', /\[PHONE\][\s\S]*never/i],
+    ['a year-less date takes its year from today, given with the lines', /no year[\s\S]*today/i],
   ])('says: %s', (_, clause) => {
     expect(MODEL_INSTRUCTION).toMatch(clause);
+  });
+});
+
+describe('what a vendor is given besides the instruction', () => {
+  it('today, then the numbered lines, and nothing else', () => {
+    expect(
+      modelInput(
+        [
+          { n: 1, text: 'Load # EX-40417' },
+          { n: 2, text: 'Pick Up 1' },
+        ],
+        '2026-10-13',
+      ),
+    ).toBe('Today is 2026-10-13.\n\nL1 Load # EX-40417\nL2 Pick Up 1');
+  });
+
+  it('never a page, or any other key a line carries', () => {
+    const line = { n: 1, text: 'Pick Up 1', page: 2 };
+    expect(modelInput([line], '2026-10-13')).toBe('Today is 2026-10-13.\n\nL1 Pick Up 1');
   });
 });

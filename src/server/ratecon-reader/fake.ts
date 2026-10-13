@@ -1,16 +1,16 @@
-import type { SentLine } from '@/lib/ratecon/redact';
-import type { AdapterFailure, AdapterResult, ReaderAdapter } from './adapter';
+import 'server-only';
+import type { AdapterFailure, AdapterResult, ReaderAdapter, ReaderRequest } from './adapter';
 
 /**
  * A scripted vendor for tests and e2e (docs/llm-reader-design.md §6). Makes
  * no network call and never throws. Plays its steps in order; once they run
  * out, every read is `unavailable`.
  *
- * Records what each read was handed — every key, deep-copied at the call —
- * so a test can prove what would have left the browser.
+ * Records each request it was handed — every key, deep-copied at the call —
+ * so a test can prove what would have left the server.
  *
- * Phase 2: selected by `LLM_READER_VENDOR=fake`, which the env schema refuses
- * when `VERCEL_ENV` is `production`.
+ * Selected by `LLM_READER_VENDOR=fake`, which the env schema refuses when
+ * `VERCEL_ENV` is `production`.
  */
 
 export type FakeStep =
@@ -23,15 +23,15 @@ const TIMEOUT: AdapterResult = { ok: false, code: 'timeout', vendorStatus: null 
 export class FakeReaderAdapter implements ReaderAdapter {
   readonly vendor = 'fake';
   readonly model = 'fake';
-  readonly received: SentLine[][] = [];
+  readonly received: ReaderRequest[] = [];
   private readonly steps: FakeStep[];
 
   constructor(steps: readonly FakeStep[]) {
     this.steps = [...steps];
   }
 
-  async read(lines: readonly SentLine[], signal: AbortSignal): Promise<AdapterResult> {
-    this.received.push(structuredClone([...lines]));
+  async read(request: ReaderRequest, signal: AbortSignal): Promise<AdapterResult> {
+    this.received.push(structuredClone({ ...request, lines: [...request.lines] }));
     return this.play(this.steps.shift() ?? { fail: 'unavailable' }, signal);
   }
 

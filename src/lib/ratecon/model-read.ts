@@ -88,6 +88,16 @@ export function modelReadJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(ModelRead) as Record<string, unknown>;
 }
 
+/**
+ * What a vendor is given besides the instruction: today's date in the
+ * dispatch zone, so a date with no year can be read, then the numbered lines.
+ * Built from `n` and `text` only: no page, no other key, ever leaves.
+ * The verifier, not the model, stays the judge of the year.
+ */
+export function modelInput(lines: readonly { n: number; text: string }[], today: string): string {
+  return `Today is ${today}.\n\n${lines.map((l) => `L${l.n} ${l.text}`).join('\n')}`;
+}
+
 /** The instruction, the same for every vendor. Its clauses are the contract; the verifier does not trust them. */
 export const MODEL_INSTRUCTION = [
   'You read one US freight rate confirmation and return its load number and its stops as JSON that matches the schema.',
@@ -98,7 +108,7 @@ export const MODEL_INSTRUCTION = [
   '1. Return only what the text says. Never invent, infer or complete a value. If a value is not written, return null, or kind \'none\' for an appointment.',
   '2. Every value cites where it came from: "line" is the number of the line, "lineEnd" the last line when the text runs on (at most two lines further), and "text" is copied exactly, character for character, from those lines.',
   '3. List the stops in the order the document gives them. Type "PU" for a pickup, "DEL" for a delivery.',
-  '4. Give dates as YYYY-MM-DD for the date written. If no year is written, use the current year.',
+  '4. Give dates as YYYY-MM-DD for the date written. If no year is written, use the year that puts the date nearest to today, which is given before the lines.',
   '5. Give times as 24-hour HH:MM, in the stop\'s own local time, exactly as printed. Never convert between time zones, never apply an offset and never add a zone. Never do arithmetic on dates or times: no adding hours, no working out an end from a length of time.',
   '6. One time is kind \'exact\'. A start and an end is kind \'range\'. A deadline, a length of time, or anything that cannot be copied as times is kind \'unclear\', with the quote.',
   '7. When a line offers alternatives or conditions, for example "same day by 8 PM, or next day 7-10 AM", return kind \'unclear\' with the quote. Never choose one.',

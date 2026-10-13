@@ -2,12 +2,9 @@ import type { SentLine } from '@/lib/ratecon/redact';
 
 /**
  * The language-model reader's vendor seam (docs/llm-reader-design.md §6).
- * TYPES ONLY in phase 1: no vendor, no network, no route.
- *
- * Phase 2: every real adapter, and the route that calls one, imports
- * 'server-only' so a client import fails the build. Not imported here: this
- * file holds no code, and vitest cannot import that module outside a server
- * build.
+ * Types only. Every module with code behind this seam — the fake, each real
+ * adapter, the route — imports 'server-only', so a client import fails the
+ * build; tests mock it, as every server test here does.
  *
  * Each adapter turns the shared instruction and JSON schema
  * (`model-read.ts`) into its vendor's request, sets its vendor's no-storage
@@ -21,13 +18,20 @@ export type AdapterResult =
   | { ok: true; output: unknown; usage: { inputTokens: number; outputTokens: number } }
   | { ok: false; code: AdapterFailure; vendorStatus: number | null };
 
+/** One read: the redacted, numbered lines, and today's date in the dispatch zone (YYYY-MM-DD). */
+export interface ReaderRequest {
+  lines: readonly SentLine[];
+  today: string;
+}
+
 export interface ReaderAdapter {
   readonly vendor: string;
   readonly model: string;
   /**
    * Never throws, never logs, never retries. An aborted `signal` is
    * `timeout`. No error text from the vendor is ever carried out: it can
-   * quote the document.
+   * quote the document. A real adapter sends `modelInput(lines, today)`
+   * (`model-read.ts`) and nothing else from the request.
    */
-  read(lines: readonly SentLine[], signal: AbortSignal): Promise<AdapterResult>;
+  read(request: ReaderRequest, signal: AbortSignal): Promise<AdapterResult>;
 }
