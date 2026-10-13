@@ -11,6 +11,10 @@ import { cityLine } from './templates';
  * broker's own name in a header, goes through. Facility names, addresses,
  * dates, times and reference numbers stay on purpose; the read needs them.
  *
+ * Two passes: each cell on its own, then the cells JOINED as they are sent,
+ * with the same detectors — a value split across cells (an email, a phone,
+ * an MC label and its number) is whole again only there.
+ *
  * Fails closed: after masking, the lines exactly as they would be sent are
  * scanned again, and any hit means nothing is sent.
  */
@@ -30,7 +34,7 @@ export const PLACEHOLDER: Readonly<Record<MaskKind, string>> = {
 };
 
 /** Sent with every read; the server refuses a version it does not run (phase 2). */
-export const REDACTION_VERSION = 'redact-2026-10-13.1';
+export const REDACTION_VERSION = 'redact-2026-10-14.1';
 
 /** What may be sent at all, after redaction. A line is counted without its `L<n> ` prefix. */
 export const SEND_LIMITS = { lines: 400, lineChars: 500, totalChars: 24_000 } as const;
@@ -74,7 +78,12 @@ const PHONES = [
 ];
 /** Ten bare digits are a phone only after a phone word: alone, they could be a load number. */
 const PHONE_WORD_DIGITS = /\b(phone|ph|tel|telephone|fax|cell|mobile|call|text)\b(\W{0,6})1?\d{10}\b/gi;
-const AMOUNTS = [/\$\s?\d[\d,]*(?:\.\d+)?/g, /\b\d[\d,]*(?:\.\d+)?\s?(?:USD|dollars)\b/gi];
+/**
+ * `$` then any spaces then a number (2026-10-14: was at most one space, so
+ * "$" | "1,850" in two cells — "$  1,850" joined — passed both the mask and
+ * the re-scan).
+ */
+const AMOUNTS = [/\$\s*\d[\d,]*(?:\.\d+)?/g, /\b\d[\d,]*(?:\.\d+)?\s?(?:USD|dollars)\b/gi];
 /** A cell about money: its numbers, and the next cell's, are amounts. "Rate Confirmation" is a title, not a rate. */
 const MONEY_LABEL = /\b(?:rate(?!\s*con)|line\s?haul|total|fuel|fsc|accessorials?|detention|lumper|tonu|pay|amount|charges?)\b/i;
 const NUMBER = /\d[\d,]*(?:\.\d+)?/g;
@@ -128,7 +137,73 @@ function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: 
   return { text: t, labelOnly: false };
 }
 
-/** One line: each cell masked, a label's value in the next cell masked, money cells' numbers masked. */
+/** Cells are joined with this, as they are sent. */
+const CELL_GAP = '  ';
+const PLACEHOLDER_TOKEN = /^(?:\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\])+$/;
+
+/**
+ * Any `@` the email detectors left is an email's remains. Its whole token
+ * goes. When that token is the first or last of its cell, the token touching
+ * it across the cell boundary goes too, and on outward while each is its
+ * cell's only token: "ops" | "@example.com" loses "ops" with the rest, as a
+ * local part can be a person's name. A placeholder stops the walk: it is
+ * already a mask. An `@` between spaces inside a cell ("Pick up @ 08:00")
+ * takes only itself.
+ */
+function maskAtTokens(cells: readonly string[], counts: MaskCounts): string[] {
+  const tokens = cells.map((c) => c.split(/(\s+)/));
+  /** Indexes of a cell's words (its non-space tokens). */
+  const words = (cell: number) => tokens[cell]!.flatMap((t, k) => (t.trim() === '' ? [] : [k]));
+  const doomed = tokens.map(() => new Set<number>());
+
+  /** Walk from (cell, word) across boundaries in `step` direction, dooming each touching word. */
+  const walk = (cell: number, word: number, step: -1 | 1) => {
+    for (let c = cell, at = word; ; ) {
+      const own = words(c);
+      const edge = step === -1 ? own[0] : own[own.length - 1];
+      if (at !== edge) return;
+      c += step;
+      if (c < 0 || c >= tokens.length) return;
+      const next = words(c);
+      if (next.length === 0) return;
+      at = step === -1 ? next[next.length - 1]! : next[0]!;
+      if (PLACEHOLDER_TOKEN.test(tokens[c]![at]!)) return;
+      doomed[c]!.add(at);
+      if (next.length > 1) return;
+    }
+  };
+
+  tokens.forEach((cell, c) =>
+    cell.forEach((token, k) => {
+      if (!token.includes('@') || doomed[c]!.has(k)) return;
+      counts.email += 1;
+      doomed[c]!.add(k);
+      walk(c, k, -1);
+      walk(c, k, 1);
+    }),
+  );
+  return tokens.map((cell, c) => cell.map((t, k) => (doomed[c]!.has(k) ? PLACEHOLDER.email : t)).join(''));
+}
+
+/**
+ * The second pass, over the line as it is sent: the same detectors as a cell
+ * gets. Idempotent — a placeholder matches none of them. Labels are not
+ * re-run: a label's value is a cell's rest or the next cell, which the first
+ * pass handled; the re-scan still checks them.
+ */
+export function maskJoined(text: string, counts: MaskCounts): string {
+  let t = mask(text, EMAILS, 'email', counts);
+  t = mask(t, URLS, 'url', counts);
+  t = mask(t, IDS, 'id', counts);
+  t = mask(t, PHONES, 'phone', counts);
+  t = t.replace(PHONE_WORD_DIGITS, (_, word: string, gap: string) => {
+    counts.phone += 1;
+    return `${word}${gap}${PLACEHOLDER.phone}`;
+  });
+  return mask(t, AMOUNTS, 'amount', counts);
+}
+
+/** One line: each cell masked, a label's value in the next cell masked, money cells' numbers masked; then the joined line. */
 export function redactLine(line: Line): { text: string; masks: MaskCounts } {
   const counts = zero();
   const cells = line.cells.map((c) => maskCell(c.text, counts));
@@ -150,7 +225,7 @@ export function redactLine(line: Line): { text: string; masks: MaskCounts } {
       });
     }
   });
-  return { text: texts.join('  '), masks: counts };
+  return { text: maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), masks: counts };
 }
 
 /**

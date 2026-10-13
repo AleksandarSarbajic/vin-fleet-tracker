@@ -92,7 +92,10 @@ describe('the page', () => {
   });
 
   it('highlights a line the re-scan still flags, and says the file would not be sent', () => {
-    const html = reviewPage(model([...UNKNOWN_LAYOUT, pdfLine(2, 'ops@', 'example')]));
+    // Given as data: since the joined-line pass (3a-2) no invented line is
+    // known that the masking leaves for the re-scan.
+    const m = model();
+    const html = reviewPage({ ...m, lines: [...m.lines, { n: m.lines.length + 1, page: 2, text: 'left over', residue: ['email'] }] });
     expect(html).toMatch(/<tr class="hit">[^\n]*<td>email<\/td><\/tr>/);
     expect(html).toContain('would NOT be sent');
   });

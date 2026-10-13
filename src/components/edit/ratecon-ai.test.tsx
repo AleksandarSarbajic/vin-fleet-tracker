@@ -15,8 +15,21 @@ import type { ModelRead } from '@/lib/ratecon/model-read';
  * "Read with AI", in the modal (docs/llm-reader-design.md §1, §10): offered
  * only after a template miss, what it says it sends, what it fills, the AI
  * marks and "Looks right", and every failure filling nothing. Through the
- * pasted-text path, with invented text; only `fetch` is replaced.
+ * pasted-text path, with invented text; only `fetch` is replaced — and, in
+ * ONE test, the redaction's verdict: since the joined-line pass (3a-2) no
+ * pasted text is known that the masking leaves for the re-scan to refuse,
+ * so that refusal is forced to show the strip's answer to it.
  */
+
+const redaction = vi.hoisted(() => ({ refuse: false }));
+vi.mock('@/lib/ratecon/redact', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/ratecon/redact')>();
+  return {
+    ...real,
+    prepareForReading: (lines: Parameters<typeof real.prepareForReading>[0]) =>
+      redaction.refuse ? ({ ok: false, reason: 'residue', kinds: ['email'] } as const) : real.prepareForReading(lines),
+  };
+});
 
 const TZ = 'America/Chicago';
 const NOW = new Date('2026-10-10T15:00:00.000Z');
@@ -137,11 +150,22 @@ describe('offered only after a template miss, and only when the server offers it
     for (const removed of ['612', 'dispatch@example.com', '1,850', 'Sam Placeholder', '123456']) expect(text).not.toContain(removed);
   });
 
-  it('a document redaction cannot clear is not offered, and says why', async () => {
+  it('a document the re-scan refuses is not offered, and says why', async () => {
+    redaction.refuse = true;
+    try {
+      await render();
+      await pasteText(`Fargo, ND 58102\nwrite to ops@`);
+      expect(readWithAi()).toBeNull();
+      expect(strip().textContent).toContain('This document could not be prepared for reading; nothing was sent.');
+    } finally {
+      redaction.refuse = false;
+    }
+  });
+
+  it('an email split from its @ is masked now, so the document is offered', async () => {
     await render();
     await pasteText(`Fargo, ND 58102\nwrite to ops@`);
-    expect(readWithAi()).toBeNull();
-    expect(strip().textContent).toContain('This document could not be prepared for reading; nothing was sent.');
+    expect(readWithAi()).not.toBeNull();
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SENTINEL, UNKNOWN_LAYOUT, pastedLine, pdfLine } from '@/test/model-read-fixtures';
-import { REDACTION_VERSION, SEND_LIMITS, prepareForReading, redactLine, redactedForReview, residue } from './redact';
+import { REDACTION_VERSION, SEND_LIMITS, maskJoined, prepareForReading, redactLine, redactedForReview, residue } from './redact';
 
 /** The language-model reader, design §2: what is stripped before anything leaves. Invented text only. */
 
@@ -111,16 +111,16 @@ describe('preparing a document to send', () => {
     expect(out.lines.flatMap((l) => residue(l.text))).toEqual([]);
   });
 
-  it('fails closed when a phone split across two cells is whole in the line it would send', () => {
-    expect(prepareForReading([pdfLine(1, 'Fargo, ND 58102'), pdfLine(1, 'Call 612-555', '0147')])).toEqual({
-      ok: false,
-      reason: 'residue',
-      kinds: ['phone'],
-    });
+  it('a phone split across two cells is masked in the joined line, and the document goes', () => {
+    const out = prepareForReading([pdfLine(1, 'Fargo, ND 58102'), pdfLine(1, 'Call 612-555', '0147')]);
+    if (!out.ok) throw new Error(out.reason);
+    expect(out.lines[1]!.text).toBe(`Call [PHONE] ${SENTINEL}`);
   });
 
-  it('fails closed when an email split across two cells is whole in the line', () => {
-    expect(prepareForReading([pdfLine(1, 'ops@', 'example.com')])).toMatchObject({ ok: false, reason: 'residue' });
+  it('an email split across two cells is masked in the joined line, and the document goes', () => {
+    const out = prepareForReading([pdfLine(1, 'ops@', 'example.com')]);
+    if (!out.ok) throw new Error(out.reason);
+    expect(out.lines[0]!.text).not.toMatch(/ops|example|@/);
   });
 
   it('refuses an empty document', () => {
@@ -156,14 +156,113 @@ describe('the review copy (local only, never sent)', () => {
     expect(review.lines.every((l) => l.residue.length === 0)).toBe(true);
   });
 
-  it('keeps a line the send would refuse, and says what the re-scan found in it', () => {
-    // An `@` left behind: the send refuses the whole document.
-    const lines = [...UNKNOWN_LAYOUT, pdfLine(2, 'ops@', 'example')];
-    expect(prepareForReading(lines)).toMatchObject({ ok: false, reason: 'residue' });
-    const flagged = redactedForReview(lines).lines.filter((l) => l.residue.length > 0);
-    expect(flagged).toHaveLength(1);
-    expect(flagged[0]!.residue).toContain('email');
-    expect(flagged[0]!.text).toContain(SENTINEL);
+  it("each review line's re-scan is exactly what residue() finds in its text, as the send checks it", () => {
+    const lines = [...UNKNOWN_LAYOUT, pdfLine(2, 'ops@', 'example'), pdfLine(2, 'MC#', '123456')];
+    for (const l of redactedForReview(lines).lines) expect(l.residue).toEqual(residue(l.text));
+  });
+});
+
+/** Every invented line's last cell carries the sentinel; these read what is left. */
+const joined = (...cells: string[]) => redactLine(pdfLine(1, ...cells)).text;
+
+describe('a value split across cells is whole only in the joined line, and masked there', () => {
+  it.each([
+    ['across 2 cells, the @ ending the first', ['dispatch@', 'example.com']],
+    ['across 2 cells, the @ starting the second', ['dispatch', '@example.com']],
+    ['across 2 cells, split inside the domain', ['dispatch@exam', 'ple.com']],
+    ['across 3 cells, the @ alone in the middle', ['dana.example', '@', 'example.com']],
+    ['across 3 cells, split on both sides of the @', ['dana', '@exam', 'ple.com']],
+  ])('an email %s', (_, cells) => {
+    const text = joined(...cells);
+    expect(text).not.toMatch(/@|dispatch|dana|exam|ple\.com/);
+    expect(text).toContain('[EMAIL]');
+    expect(residue(text)).toEqual([]);
+  });
+
+  it('an @ at a cell boundary takes each word touching it across the boundary; a cell of several words, or a placeholder, ends the walk', () => {
+    // "dana" is the @'s only neighbour on the left, so it goes; then "Pat", the
+    // last word of a two-word cell, goes and the walk stops: "Name" stays.
+    expect(joined('Name Pat', 'dana', '@', 'example.com')).toBe(`Name [EMAIL]  [EMAIL]  [EMAIL]  [URL] ${SENTINEL}`);
+    // A placeholder is already a mask: the walk does not pass it.
+    expect(joined('Phone: 612-555-0147', 'dana@', 'example.com')).toBe(`Phone: [PHONE]  [EMAIL]  [URL] ${SENTINEL}`);
+  });
+
+  it('an @ between spaces inside one cell takes only itself: the time stays', () => {
+    expect(joined('Pick up @ 08:00')).toBe(`Pick up [EMAIL] 08:00 ${SENTINEL}`);
+  });
+
+  it.each([
+    ['the number cut after the exchange', ['Call 612-555', '0147'], '612'],
+    ['the area code in its own cell', ['(612)', '555-0147'], '0147'],
+    ['three cells', ['612', '555', '0147'], '555'],
+  ])('a phone, %s', (_, cells, digits) => {
+    const text = joined(...cells);
+    expect(text).toContain('[PHONE]');
+    expect(text).not.toContain(digits);
+    expect(residue(text)).toEqual([]);
+  });
+
+  it.each([
+    ['MC#', '123456'],
+    ['MC', '#', '123456'],
+    ['USDOT', '7654321'],
+    ['DOT #:', '1234567'],
+  ])('an MC or DOT label in one cell and its number in the next: %s', (...cells) => {
+    const text = joined(...cells);
+    expect(text).toContain('[ID]');
+    expect(text).not.toMatch(/\d{4}/);
+    expect(residue(text)).toEqual([]);
+  });
+
+  it.each([
+    ['with a money word', ['Total due $', '1,850.00']],
+    ['with no money word anywhere', ['Freight to Duluth', '$', '1,850.00']],
+  ])('a dollar sign in one cell and the amount in the next, %s', (_, cells) => {
+    const text = joined(...cells);
+    expect(text).not.toContain('1,850');
+    expect(residue(text)).toEqual([]);
+  });
+
+  it.each([
+    ['a city and its ZIP', ['Fargo, ND', '58102'], ['Fargo', '58102']],
+    ['a ZIP next to a street number', ['220', '55802'], ['220', '55802']],
+    ['a time range in three cells', ['0800', '-', '1000'], ['0800', '1000']],
+    ['a date and a time', ['10/14/2026', '0800'], ['10/14/2026', '0800']],
+    ['a street number and its street', ['4001', 'Main St'], ['4001', 'Main St']],
+    ['a load number after its label', ['Load #', 'EX-40417'], ['EX-40417']],
+    ['ten bare digits as an order number', ['Order', '1234567890'], ['1234567890']],
+    ['a date with dashes, then a ZIP', ['2026-10-14', '58102'], ['2026-10-14', '58102']],
+  ])('keeps %s', (_, cells, kept) => {
+    const text = joined(...cells);
+    for (const k of kept) expect(text).toContain(k);
+    expect(text).not.toMatch(/\[(?:EMAIL|PHONE|AMOUNT|ID|URL)\]/);
+  });
+});
+
+describe('the joined pass', () => {
+  it('is idempotent: a second run changes nothing, placeholders included', () => {
+    for (const cells of [['dispatch@', 'example.com'], ['Call 612-555', '0147'], ['MC#', '123456'], ['Fargo, ND', '58102']]) {
+      const once = joined(...cells);
+      expect(maskJoined(once, { email: 0, phone: 0, amount: 0, labelled: 0, id: 0, url: 0 })).toBe(once);
+      expect(redactLine(pastedLine(once)).text).toBe(`${once} ${SENTINEL}`);
+    }
+  });
+
+  it('counts what it masks', () => {
+    expect(redactLine(pdfLine(1, 'MC#', '123456')).masks.id).toBe(1);
+    expect(redactLine(pdfLine(1, 'Call 612-555', '0147')).masks.phone).toBe(1);
+  });
+});
+
+describe('the re-scan is unchanged: it still fails closed on the joined shapes', () => {
+  it.each([
+    ['an email', 'dispatch@  [URL]', 'email'],
+    ['a stray @', 'ops  @', 'email'],
+    ['a phone', 'Call 612-555  0147', 'phone'],
+    ['an MC number', 'MC#  123456', 'id'],
+    ['an amount', 'Total $  1,850', 'amount'],
+  ] as const)('%s, left in a line, is a hit', (_, text, kind) => {
+    expect(residue(text)).toContain(kind);
   });
 });
 
