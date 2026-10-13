@@ -1058,7 +1058,7 @@ export const feedStalls = pgTable(
 
 /* ---------------------------- ratecon_ai_reads ---------------------------- */
 
-/** docs/llm-reader-design.md §4 (migration 0026). */
+/** docs/llm-reader-design.md §4 (migration 0026; `vendor_capped`, 0027). */
 export const rateconAiOutcome = pgEnum('ratecon_ai_outcome', [
   'pending',
   'ok',
@@ -1068,10 +1068,11 @@ export const rateconAiOutcome = pgEnum('ratecon_ai_outcome', [
   'invalid_output',
   'cancelled',
   'error',
+  'vendor_capped',
 ]);
 
-/** Only the fake until a vendor is chosen; a real one is added with its adapter. */
-export const rateconAiVendor = pgEnum('ratecon_ai_vendor', ['fake']);
+/** The fake, and the one real vendor Alex chose (migration 0027). */
+export const rateconAiVendor = pgEnum('ratecon_ai_vendor', ['fake', 'anthropic']);
 
 /**
  * The language-model reader's counts: one row a read, reserved before the
