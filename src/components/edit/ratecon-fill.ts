@@ -199,7 +199,7 @@ export function fillLoad(
  * and nobody has confirmed or edited since. A blank the read left is a
  * check, not an AI mark — there is nothing filled to confirm.
  */
-function aiMarkedFields(stop: StopForm): FillField[] {
+export function aiMarkedFields(stop: StopForm): FillField[] {
   if (!stop.fill?.ai) return [];
   const filled: Record<FillField, boolean> = {
     stopType: true,
@@ -256,6 +256,12 @@ export function fieldsToCheck(form: LoadForm): number {
     if (deliveryBeforePickup(form, i)) n += 1;
   });
   return n;
+}
+
+/** Said beside a field that still carries an AI mark: read by AI, from where, exactly. */
+export function aiSourceLine(source: Source | undefined): string | undefined {
+  if (!source) return undefined;
+  return `Read by AI ${source.page === null ? 'from the pasted text' : `from p.${source.page}`}: ${quote(source.text)}`;
 }
 
 /** Said under a filled field: where it came from, exactly. */

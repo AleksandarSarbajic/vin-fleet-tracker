@@ -9,10 +9,12 @@
 export interface FillCounts {
   notRecognised: number;
   editedAfterFill: number;
+  /** Reads by the language-model reader that filled the form. */
+  readWithAi: number;
 }
 
 const KEY = 'ft.ratecon.counts';
-let memory: FillCounts = { notRecognised: 0, editedAfterFill: 0 };
+let memory: FillCounts = { notRecognised: 0, editedAfterFill: 0, readWithAi: 0 };
 
 export function readCounts(): FillCounts {
   try {
@@ -22,6 +24,7 @@ export function readCounts(): FillCounts {
     memory = {
       notRecognised: Number(parsed.notRecognised) || 0,
       editedAfterFill: Number(parsed.editedAfterFill) || 0,
+      readWithAi: Number(parsed.readWithAi) || 0,
     };
     return memory;
   } catch {

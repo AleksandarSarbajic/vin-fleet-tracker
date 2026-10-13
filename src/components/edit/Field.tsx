@@ -15,6 +15,7 @@ export function Field({
   onPaste,
   check,
   source,
+  ai = false,
 }: {
   label: string;
   value: string;
@@ -29,6 +30,8 @@ export function Field({
   check?: string | undefined;
   /** §12.122. Where a fill got this value: the exact text, and its page. */
   source?: string | undefined;
+  /** The language-model reader filled it, and nobody has confirmed it yet: the source is its AI mark. */
+  ai?: boolean;
 }) {
   return (
     <label className="block">
@@ -55,7 +58,11 @@ export function Field({
         <span className="mt-1 block text-small text-text-mutedOnOverlay">{help}</span>
       ) : null}
       {source ? (
-        <span data-field-source="" className="mt-1 block break-words text-small text-text-mutedOnOverlay">
+        <span
+          data-field-source=""
+          {...(ai ? { 'data-field-ai': '' } : {})}
+          className={`mt-1 block break-words text-small ${ai ? 'text-text-secondary' : 'text-text-mutedOnOverlay'}`}
+        >
           {source}
         </span>
       ) : null}

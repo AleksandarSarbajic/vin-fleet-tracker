@@ -64,7 +64,15 @@ import {
 import { LoadStrip } from './LoadStrip';
 import { STOP_FORM_ID, StopList } from './StopList';
 import { RateconStrip } from './RateconStrip';
-import { fieldsToCheck, fillLoad, sourceLine } from './ratecon-fill';
+import {
+  aiMarks,
+  aiSourceLine,
+  confirmAiLoadNumber,
+  confirmAiStop,
+  fieldsToCheck,
+  fillLoad,
+  sourceLine,
+} from './ratecon-fill';
 import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
 
@@ -95,6 +103,12 @@ interface Props {
    * dispatcher asked for that by pressing Reload; nothing is merged.
    */
   onReload?: () => void;
+  /**
+   * The server offers "Read with AI" to this user: the flag, a vendor, a
+   * dispatcher or admin (docs/llm-reader-design.md §4). A prop from the
+   * server, never a NEXT_PUBLIC_ variable. Off unless given.
+   */
+  aiReader?: boolean;
 }
 
 const truckNameOf = (row: FleetRow) =>
@@ -216,6 +230,7 @@ function LoadEditor({
   dispatchTz,
   onClose,
   onReload,
+  aiReader = false,
   read,
 }: Props & { read: LoadForEdit | null }) {
   const queryClient = useQueryClient();
@@ -1008,8 +1023,14 @@ function LoadEditor({
                   fill: f.fill ? { ...f.fill, loadNumber: null, loadNumberCheck: null } : null,
                 }));
               }}
-              loadNumberSource={sourceLine(form.fill?.loadNumber ?? undefined)}
+              loadNumberSource={
+                form.fill?.ai
+                  ? aiSourceLine(form.fill.loadNumber ?? undefined)
+                  : sourceLine(form.fill?.loadNumber ?? undefined)
+              }
               loadNumberCheck={form.fill?.loadNumberCheck ?? undefined}
+              loadNumberAi={Boolean(form.fill?.ai && form.fill.loadNumber)}
+              onConfirmLoadNumber={() => setForm((f) => confirmAiLoadNumber(f))}
               onLoadStatus={(value) => setForm((f) => ({ ...f, loadStatus: value }))}
               onActive={setActive}
             />
@@ -1024,6 +1045,8 @@ function LoadEditor({
                   )
                 }
                 toCheck={form.fill ? fieldsToCheck(form) : null}
+                aiMarks={form.fill ? aiMarks(form) : null}
+                aiReader={aiReader}
                 countsVersion={countsVersion}
                 editsVersion={editsVersion}
                 onFill={(read) => {
@@ -1109,6 +1132,7 @@ function LoadEditor({
                 }
                 onRemove={() => removeOne(current.key)}
                 orderNote={deliveryBeforePickup(form, selected)}
+                onConfirmAi={() => setForm((f) => confirmAiStop(f, current.key))}
               />
             </div>
 

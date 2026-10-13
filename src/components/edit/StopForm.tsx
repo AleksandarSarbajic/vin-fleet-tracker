@@ -8,10 +8,11 @@ import { ArrivalFields } from './ArrivalFields';
 import { Field } from './Field';
 import { splitPastedAddress, type AddressField } from '@/lib/paste-address';
 import { zipStateCheck } from '@/lib/geo/zip-state';
-import { sourceLine } from './ratecon-fill';
+import { aiMarkedFields, aiSourceLine, sourceLine } from './ratecon-fill';
 import {
   LEFT_STOP_NOTE,
   zoneSource,
+  type FillField,
   type RemoveBlock,
   type StopFlags,
   type StopForm as StopFormState,
@@ -54,6 +55,7 @@ export function StopForm({
   removeBlocked,
   onRemove,
   orderNote,
+  onConfirmAi,
 }: {
   stop: StopFormState;
   index: number;
@@ -86,6 +88,8 @@ export function StopForm({
   onRemove: () => void;
   /** §12.119. The delivery-before-pickup note, under the appointment; display only. */
   orderNote: string | null;
+  /** "Looks right": this stop's AI marks go (docs/llm-reader-design.md §10, item 1). */
+  onConfirmAi?: () => void;
 }) {
   const locked = flags.departed;
   const paste = stop.paste;
@@ -100,6 +104,10 @@ export function StopForm({
     stop.stored.zip !== (stop.zip.trim() || null);
   const zipState = addressTouched ? zipStateCheck(stop.state, stop.zip) : null;
   const checkOf = (field: AddressField) => paste?.checks[field] ?? fill?.checks[field];
+  /** Fields the language-model reader filled and nobody has confirmed or edited: their source says "Read by AI". */
+  const aiFields = new Set(aiMarkedFields(stop));
+  const sourceOf = (field: FillField) =>
+    aiFields.has(field) ? aiSourceLine(fill?.sources[field]) : sourceLine(fill?.sources[field]);
   const lockedTitle = locked ? LEFT_STOP_NOTE : undefined;
   const removeWhyId = `${STOP_FORM_ID}-remove-why`;
 
@@ -166,11 +174,27 @@ export function StopForm({
         ) : null}
       </div>
 
+      {aiFields.size > 0 && onConfirmAi ? (
+        <div data-ai-confirm="" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l border-line-soft pl-3 text-small">
+          <p className="text-text-secondary">Read by AI. Check each field against the quote under it.</p>
+          <button
+            type="button"
+            disabled={!mayEdit}
+            onClick={onConfirmAi}
+            className="h-[26px] border border-line-hair px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-secondary disabled:opacity-60"
+          >
+            Looks right
+          </button>
+        </div>
+      ) : null}
+
       {fill?.sources.stopType || fill?.checks.stopType ? (
         <div data-type-fill="" className="flex flex-col gap-0.5 text-small">
           {fill.checks.stopType ? <p className="text-status-risk-fg">Check: {fill.checks.stopType}</p> : null}
           {fill.sources.stopType ? (
-            <p className="break-words text-text-mutedOnOverlay">{sourceLine(fill.sources.stopType)}</p>
+            <p {...(aiFields.has('stopType') ? { 'data-field-ai': '' } : {})} className="break-words text-text-mutedOnOverlay">
+              {sourceOf('stopType')}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -227,7 +251,8 @@ export function StopForm({
               }}
               error={errorFor('addressLine')}
               check={checkOf('addressLine')}
-              source={sourceLine(fill?.sources.addressLine)}
+              source={sourceOf('addressLine')}
+              ai={aiFields.has('addressLine')}
             />
           </div>
           <Field
@@ -236,7 +261,8 @@ export function StopForm({
             onChange={(v) => onChange({ zip: v })}
             error={errorFor('zip')}
             check={checkOf('zip') ?? zipState ?? undefined}
-            source={sourceLine(fill?.sources.zip)}
+            source={sourceOf('zip')}
+            ai={aiFields.has('zip')}
           />
           <div className="col-span-2">
             <Field
@@ -245,7 +271,8 @@ export function StopForm({
               onChange={(v) => onChange({ city: v })}
               error={errorFor('city')}
               check={checkOf('city')}
-              source={sourceLine(fill?.sources.city)}
+              source={sourceOf('city')}
+              ai={aiFields.has('city')}
             />
           </div>
           <Field
@@ -255,7 +282,8 @@ export function StopForm({
             placeholder="IL"
             error={errorFor('state')}
             check={checkOf('state')}
-            source={sourceLine(fill?.sources.state)}
+            source={sourceOf('state')}
+            ai={aiFields.has('state')}
           />
         </div>
       </fieldset>
@@ -286,7 +314,7 @@ export function StopForm({
         endError={errorFor('appointment.endTime')}
         zoneCheck={errorFor('appointment.tz')}
         zoneSource={zoneSource(stop)}
-        fillSource={sourceLine(fill?.sources.appointment)}
+        fillSource={sourceOf('appointment')}
         fillCheck={fill?.checks.appointment}
         onConfirmZone={onConfirmZone}
       />

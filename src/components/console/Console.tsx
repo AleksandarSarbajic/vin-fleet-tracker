@@ -104,6 +104,8 @@ interface Props {
   /** For the edit modal's driver picker. */
   drivers: BoardDriver[];
   role: Role;
+  /** The server offers "Read with AI" to this user (docs/llm-reader-design.md §4). */
+  aiReader?: boolean;
 }
 
 export function Console({
@@ -118,6 +120,7 @@ export function Console({
   initialList = null,
   drivers,
   role,
+  aiReader = false,
 }: Props) {
   const router = useRouter();
   // §12.101. G H — Driver history. Does nothing below 768px (useGoKeys).
@@ -1160,6 +1163,7 @@ export function Console({
             drivers={drivers}
             role={role}
             dispatchTz={dispatchTz}
+            aiReader={aiReader}
             onClose={() => setEditingId(null)}
             onReload={() => setEditOpening((n) => n + 1)}
           />

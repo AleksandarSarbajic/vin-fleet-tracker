@@ -6,6 +6,7 @@ import { loadFleet } from '@/server/fleet';
 import { loadAssignmentBoard } from '@/server/assignments';
 import { loadFleetHealth } from '@/server/health';
 import { loadTruckLists } from '@/server/truck-lists';
+import { readerOffered } from '@/server/ratecon-reader/live';
 import { db } from '@/db';
 
 /** Live positions — never cached. */
@@ -51,6 +52,7 @@ export default async function ConsolePage({
       initialList={first(params['list'])}
       drivers={board.drivers}
       role={user.role}
+      aiReader={readerOffered(user.role)}
     />
   );
 }

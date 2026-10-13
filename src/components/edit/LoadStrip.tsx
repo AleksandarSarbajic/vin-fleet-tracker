@@ -28,6 +28,8 @@ export function LoadStrip({
   loadNumberError,
   loadNumberSource,
   loadNumberCheck,
+  loadNumberAi = false,
+  onConfirmLoadNumber,
   onDriver,
   onDriverCreated,
   onLoadNumber,
@@ -51,6 +53,9 @@ export function LoadStrip({
   /** §12.122. Where a fill got the load number, and what to check about it. */
   loadNumberSource?: string | undefined;
   loadNumberCheck?: string | undefined;
+  /** The language-model reader filled the load number and nobody has confirmed it: its own "Looks right". */
+  loadNumberAi?: boolean;
+  onConfirmLoadNumber?: () => void;
   onDriver: (id: string | null) => void;
   onDriverCreated: () => void;
   onLoadNumber: (value: string) => void;
@@ -115,8 +120,20 @@ export function LoadStrip({
           error={loadNumberError}
           source={loadNumberSource}
           check={loadNumberCheck}
+          ai={loadNumberAi}
           help="Any format the broker uses, or leave it blank (§12.21)"
         />
+        {loadNumberAi && onConfirmLoadNumber ? (
+          <button
+            type="button"
+            data-ai-confirm-load=""
+            disabled={!mayEdit}
+            onClick={onConfirmLoadNumber}
+            className="h-[26px] self-start border border-line-hair px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-secondary disabled:opacity-60"
+          >
+            Looks right
+          </button>
+        ) : null}
         <label className="block">
           <span className="mb-1 block text-small text-text-secondary">Load status</span>
           <select
