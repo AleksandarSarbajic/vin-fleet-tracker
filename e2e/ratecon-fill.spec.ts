@@ -73,12 +73,12 @@ test('an invented rate confirmation PDF fills a new load in the browser, and sav
 
   await expect(editModal(page).getByLabel('Load number')).toHaveValue('88123');
   const form = stopForm(page);
-  await expect(form.getByLabel('City')).toHaveValue('FARGO');
+  await expect(form.getByLabel('City')).toHaveValue('Fargo');
   await expect(form.getByLabel('ZIP')).toHaveValue('58102');
   await expect(form.locator('[data-field-source]').first()).toContainText('From p.1:');
   await expect(editModal(page).getByRole('tab')).toHaveCount(2);
   await editModal(page).getByRole('tab').nth(1).click();
-  await expect(form.getByLabel('City')).toHaveValue('DICKINSON');
+  await expect(form.getByLabel('City')).toHaveValue('Dickinson');
   await expect(form.locator('[data-appointment-check]')).toContainText('filled as FCFS receiving hours');
   await expect(editModal(page)).toContainText('Unsaved changes');
 
@@ -95,7 +95,7 @@ test('an invented rate confirmation PDF fills a new load in the browser, and sav
      where l.truck_id = ${IDS.truckChicago}
      order by s.sequence`);
   expect(saved).toEqual([
-    { load_number: '88123', sequence: 1, type: 'PU', city: 'FARGO', zip: '58102', appointment_type: 'APPT', appointment_tz: 'America/Chicago' },
-    { load_number: '88123', sequence: 2, type: 'DEL', city: 'DICKINSON', zip: '58601', appointment_type: 'FCFS', appointment_tz: 'America/Denver' },
+    { load_number: '88123', sequence: 1, type: 'PU', city: 'Fargo', zip: '58102', appointment_type: 'APPT', appointment_tz: 'America/Chicago' },
+    { load_number: '88123', sequence: 2, type: 'DEL', city: 'Dickinson', zip: '58601', appointment_type: 'FCFS', appointment_tz: 'America/Denver' },
   ]);
 });

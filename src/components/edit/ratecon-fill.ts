@@ -1,5 +1,6 @@
 import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
 import { zipStateCheck } from '@/lib/geo/zip-state';
+import { normalCase } from '@/lib/ratecon/normal-case';
 import type { RateconRead, Source, StopRead, TimeRead } from '@/lib/ratecon/templates';
 import type { AppointmentDraft } from './AppointmentFields';
 import {
@@ -21,7 +22,8 @@ import {
  * Fills the load number and, per stop in the document's order, the type,
  * street, ZIP, city, state and appointment; the zone follows the address by
  * §12.120's rules. Never the rate, broker, contacts, driver, trailer, notes,
- * status or Active — the read does not carry them. Nothing is saved: the
+ * status or Active — the read does not carry them. Street and city are put
+ * in normal case (`normalCase`) on the way in. Nothing is saved: the
  * form is the dispatcher's to look at, change and Save.
  */
 
@@ -133,14 +135,17 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
   if (read.typeCheck) checks.stopType = read.typeCheck;
 
   const address: Partial<StopForm> = { stopType: read.type.value };
-  for (const [field, readField, value] of [
-    ['addressLine', 'street', read.street],
-    ['city', 'city', read.city],
-    ['state', 'state', read.state],
-    ['zip', 'zip', read.zip],
+  // Street and city are shown in normal case (ALL CAPS on the page becomes
+  // "Dallas"); the read, its source line and the verifier's match keep what
+  // was printed. State, ZIP and everything else go in as read.
+  for (const [field, readField, value, shown] of [
+    ['addressLine', 'street', read.street, normalCase],
+    ['city', 'city', read.city, normalCase],
+    ['state', 'state', read.state, (v: string) => v],
+    ['zip', 'zip', read.zip, (v: string) => v],
   ] as const) {
     if (value) {
-      address[field] = value.value;
+      address[field] = shown(value.value);
       sources[field] = value.source;
     } else {
       checks[field] = read.fieldChecks?.[readField] ?? 'Not found in the PDF.';

@@ -257,6 +257,93 @@ describe('a model read, filled', () => {
   });
 });
 
+describe('street and city in normal case (2026-10-14)', () => {
+  /** The same read, as a PDF that prints in capitals would give it. Invented values only. */
+  const shouted = (read: RateconRead): RateconRead => ({
+    ...read,
+    stops: read.stops.map((s) => ({
+      ...s,
+      street: s.street && { value: s.street.value.toUpperCase(), source: { ...s.street.source, text: s.street.source.text.toUpperCase() } },
+      city: s.city && { value: s.city.value.toUpperCase(), source: { ...s.city.source, text: s.city.source.text.toUpperCase() } },
+    })),
+  });
+
+  it('an all-caps read ends up in normal case, street and city only', () => {
+    const form = fill(shouted(readOf(STOPS_SECTION)));
+    expect(form.stops.map((s) => [s.stopType, s.addressLine, s.city, s.state, s.zip])).toEqual([
+      ['PU', '4001 Main St', 'Fargo', 'ND', '58102'],
+      ['DEL', '1200 Harbor Rd', 'Dickinson', 'ND', '58601'],
+    ]);
+    expect(form.loadNumber).toBe('77001');
+  });
+
+  it('a hyphenated, directional and Mc name, in a read', () => {
+    const read = readOf(STOPS_SECTION);
+    const first = read.stops[0]!;
+    const loud: RateconRead = {
+      ...read,
+      stops: [{ ...first, street: { ...first.street!, value: '120 N MCALLEN BLVD' }, city: { ...first.city!, value: 'WINSTON-SALEM' } }, ...read.stops.slice(1)],
+    };
+    const stop = fill(loud).stops[0]!;
+    expect([stop.addressLine, stop.city]).toEqual(['120 N McAllen Blvd', 'Winston-Salem']);
+  });
+
+  it('an already mixed-case read is unchanged', () => {
+    const read = readOf(STOPS_SECTION);
+    const form = fill(read);
+    expect(form.stops.map((s) => [s.addressLine, s.city])).toEqual(read.stops.map((s) => [s.street?.value, s.city?.value]));
+  });
+
+  it('the state stays upper-case, the ZIP is untouched', () => {
+    const read = shouted(readOf(STOPS_SECTION));
+    const stops = read.stops.map((s) => ({ ...s, state: s.state && { ...s.state, value: 'ND' } }));
+    const form = fill({ ...read, stops });
+    expect(form.stops.map((s) => [s.state, s.zip])).toEqual([['ND', '58102'], ['ND', '58601']]);
+  });
+
+  it('the sources keep the printed line, capitals and all', () => {
+    const read = shouted(readOf(STOPS_SECTION));
+    const stop = fill(read).stops[0]!;
+    const printed = read.stops[0]!.street!.source;
+    expect(printed.text).toBe(printed.text.toUpperCase());
+    expect(stop.fill?.sources.addressLine).toEqual(printed);
+    expect(stop.fill?.sources.city).toEqual(read.stops[0]!.city!.source);
+  });
+
+  it('the marks do not change because of normalization: same checks, same count', () => {
+    const base = readOf(puSoBlocks([{ ...PU_SO[0]!, city: 'FARGO', state: 'XX', merged: false }, PU_SO[1]!]));
+    const plain = fill(base);
+    const loud = fill(shouted(base));
+    expect(loud.stops.map((s) => s.fill?.checks)).toEqual(plain.stops.map((s) => s.fill?.checks));
+    expect(loud.stops.map((s) => Object.keys(s.fill?.sources ?? {}))).toEqual(plain.stops.map((s) => Object.keys(s.fill?.sources ?? {})));
+    expect(fieldsToCheck(loud)).toBe(fieldsToCheck(plain));
+    expect(loud.stops[0]!.fill?.checks.city).toBe('Not found in the PDF.');
+  });
+
+  it('a model read in capitals: verified against the printed line, then put in normal case; AI marks as before', () => {
+    const lines = UNKNOWN_LAYOUT.map((l) => {
+      if (l.text.startsWith('4001 Main St')) return pdfLine(2, '4001 MAIN ST');
+      if (l.text.startsWith('Fargo, ND')) return pdfLine(2, 'FARGO, ND 58102');
+      return l;
+    });
+    const reply = structuredClone(MODEL_REPLY);
+    reply.stops[0]!.street = { value: '4001 MAIN ST', quote: { line: 12, text: '4001 MAIN ST' } };
+    reply.stops[0]!.city = { value: 'FARGO', quote: { line: 13, text: 'FARGO, ND 58102' } };
+    reply.stops[0]!.state = { value: 'ND', quote: { line: 13, text: 'FARGO, ND 58102' } };
+    reply.stops[0]!.zip = { value: '58102', quote: { line: 13, text: 'FARGO, ND 58102' } };
+    const prepared = prepareForReading(lines);
+    if (!prepared.ok) throw new Error(prepared.reason);
+    const verified = verifyRead(reply, prepared.lines, NOW);
+    if (!verified.ok) throw new Error(verified.reason);
+    // The verifier saw capitals and the read still carries them…
+    expect(verified.read.stops[0]!.street?.value).toBe('4001 MAIN ST');
+    // …the form is where they change.
+    const form = fill(verified.read);
+    expect([form.stops[0]!.addressLine, form.stops[0]!.city, form.stops[0]!.state]).toEqual(['4001 Main St', 'Fargo', 'ND']);
+    expect(aiMarks(form)).toEqual({ stops: 2, fields: 12 });
+  });
+});
+
 describe('two-read agreement, through the fill (phase 3d)', () => {
   it('a field and an appointment the reads differed on are filled blank, each marked as differing', () => {
     const now = new Date('2026-10-13T15:00:00Z');

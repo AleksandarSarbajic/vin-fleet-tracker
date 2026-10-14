@@ -166,14 +166,14 @@ describe('Fill from rate confirmation (§12.122)', () => {
     expect(loadNumber().value).toBe('88123');
     expect(rows()).toHaveLength(2);
     expect([field('Street address').value, field('City').value, field('State').value, field('ZIP').value]).toEqual([
-      '4001 Main St', 'FARGO', 'ND', '58102',
+      '4001 Main St', 'Fargo', 'ND', '58102',
     ]);
     expect(labelled('City').querySelector('[data-field-source]')?.textContent).toBe(
       'From the pasted text: “FARGO ND 58102 Contact: Dock”',
     );
     expect(zone().value).toBe('America/Chicago');
     await click(rows()[1]!);
-    expect(field('City').value).toBe('DICKINSON');
+    expect(field('City').value).toBe('Dickinson');
     expect(zone().value).toBe('America/Denver');
     expect(form().querySelector('[data-appointment-check]')?.textContent).toContain('filled as FCFS receiving hours');
     expect(strip()!.querySelector('[data-to-check]')?.textContent).toBe('1 field to check');
@@ -229,7 +229,7 @@ describe('Fill from rate confirmation (§12.122)', () => {
     expect(field('City').value).toBe('Moorhead');
     await pasteText(PU_SO_PASTED);
     await click(button('Replace'));
-    expect(field('City').value).toBe('FARGO');
+    expect(field('City').value).toBe('Fargo');
   });
 
   it('keeps a 90-minute window as 90 minutes, though the menu does not list it', async () => {
