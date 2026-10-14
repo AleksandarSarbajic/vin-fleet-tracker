@@ -23,12 +23,13 @@
 import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type LoadForm, type StopForm } from '../src/components/edit/load-form';
 import { uncitedAddressLines } from '../src/lib/ratecon/address-cue';
-import { agreePair, type Agreement } from '../src/lib/ratecon/agree-reads';
+import type { Agreement } from '../src/lib/ratecon/agree-reads';
 import { ModelRead } from '../src/lib/ratecon/model-read';
+import { readPair } from '../src/lib/ratecon/read-pair';
 import { prepareForReading, type PreparedLine } from '../src/lib/ratecon/redact';
 import type { Line } from '../src/lib/ratecon/lines';
 import type { RateconRead } from '../src/lib/ratecon/templates';
-import { verifyRead, type Verified } from '../src/lib/ratecon/verify-read';
+import { verifyRead } from '../src/lib/ratecon/verify-read';
 import type { AdapterFailure, AdapterUsage, ReaderAdapter, ReaderRequest } from '../src/server/ratecon-reader/adapter';
 import { appointmentDiff, appointmentVerdict, inspect, type ExpectedStop } from './ratecon-expected.mjs';
 
@@ -269,7 +270,7 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
       }
 
       totals.calls += perRun;
-      const reads = await Promise.all(Array.from({ length: perRun }, () => readOnce(request, bound, file, deps)));
+      const reads = await Promise.all(Array.from({ length: perRun }, () => readOnce(request, bound, deps)));
       const usage = reads.reduce((u, r) => ({ inputTokens: u.inputTokens + r.usage.inputTokens, outputTokens: u.outputTokens + r.usage.outputTokens }), { inputTokens: 0, outputTokens: 0 });
       const cost = costOf(usage, price);
       totals.inputTokens += usage.inputTokens;
@@ -311,16 +312,17 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
 
       if (perRun === 1) {
         const [only] = reads as [ReadOnce];
-        if (only.verified === null || only.reply === null) {
-          head(only.code, only.vendorStatus === null ? '' : ` (HTTP ${only.vendorStatus})`);
+        const verified = only.reply === null ? null : verifyRead(only.reply, file.lines, deps.now);
+        if (only.reply === null || verified === null || !verified.ok) {
+          head(only.reply === null ? only.code : 'nothing_confirmed', only.vendorStatus === null ? '' : ` (HTTP ${only.vendorStatus})`);
           continue;
         }
-        const filled = fill(only.verified.read);
+        const filled = fill(verified.read);
         if (!filled.ok) {
           head('fill_refused');
           continue;
         }
-        head('ok', ` · ${only.verified.confirmed} values stood, ${only.verified.unconfirmed} did not`);
+        head('ok', ` · ${verified.confirmed} values stood, ${verified.unconfirmed} did not`);
         totals.scored += 1;
         scoreRun(file, scored(filled.form), totals.wrong, say);
         diagnose('A', filled.form, zeroWrong());
@@ -329,17 +331,16 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
         continue;
       }
 
-      // A pair FAILS AS A WHOLE when either read fails (`agreePair`, Alex 2026-10-14): that code, nothing filled, not scored.
+      // A pair is `readPair`'s, the function the app's strip calls: verify each read, `agreePair`
+      // (either read failing fails the pair as a whole: that code, nothing filled, not scored), the cue.
       const [a, b] = reads as [ReadOnce, ReadOnce];
-      const side = (r: ReadOnce) => (r.verified ? { ok: true as const, read: r.verified.read } : { ok: false as const, code: r.code });
-      const pair = agreePair(side(a), side(b));
+      const side = (r: ReadOnce) => (r.reply ? { ok: true as const, reply: r.reply } : { ok: false as const, code: r.code });
+      const pair = readPair(side(a), side(b), file.lines, deps.now);
       if (!pair.ok) {
-        head(pair.code, ` (pair: ${codes()})`);
+        head(pair.code, ` (pair: ${pair.codes.map((c, k) => `${k === 0 ? 'A' : 'B'} ${c}`).join(', ')})`);
         continue;
       }
-      // A pair that agreed has two verified reads, each with its reply.
-      const [va, vb] = [a.verified, b.verified];
-      if (va === null || vb === null || a.reply === null || b.reply === null) throw new Error('A pair that agreed lacks a verified read.');
+      const [va, vb] = [pair.reads[0].verified, pair.reads[1].verified];
       const { agreement } = pair;
       const filled = fill(agreement.read);
       const aloneA = fill(va.read);
@@ -351,14 +352,12 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
       head('ok', ` · A ${va.confirmed} values stood, ${va.unconfirmed} did not; B ${vb.confirmed} stood, ${vb.unconfirmed} did not`);
       totals.scored += 1;
       say(`  ${pairSaid(agreement)}`);
-      if (agreement.stopCounts === null && agreement.differed.length === 0) totals.pairs.agreed += 1;
+      if (pair.agreed) totals.pairs.agreed += 1;
       else totals.pairs.differed += 1;
       scoreRun(file, scored(filled.form), totals.wrong, say);
       diagnose('A', aloneA.form, totals.pairs.wrongReadA);
       diagnose('B', aloneB.form, totals.pairs.wrongReadB);
-      // A line either read cited is used.
-      const citedByB = new Set(uncitedAddressLines(b.reply, file.lines));
-      sayCue(uncitedAddressLines(a.reply, file.lines).filter((n) => citedByB.has(n)));
+      sayCue(pair.cue);
     }
   }
 
@@ -409,12 +408,12 @@ interface ReadOnce {
   usage: AdapterUsage;
   reported: boolean;
   overBound: boolean;
+  /** The schema-valid reply; verified later, by `readPair` for a pair. */
   reply: ModelRead | null;
-  verified: Extract<Verified, { ok: true }> | null;
 }
 
-/** One call, then the route's check and the browser's: the schema, then the verifier against exactly what was sent. */
-async function readOnce(request: ReaderRequest, bound: AdapterUsage, file: EvalFile, deps: EvalDeps): Promise<ReadOnce> {
+/** One call, then the route's check: the schema. The browser's check, the verifier, is `readPair`'s. */
+async function readOnce(request: ReaderRequest, bound: AdapterUsage, deps: EvalDeps): Promise<ReadOnce> {
   const result = await deps.adapter.read(request, AbortSignal.timeout(deps.timeoutMs));
   const base = {
     vendorStatus: result.ok ? null : result.vendorStatus,
@@ -423,14 +422,11 @@ async function readOnce(request: ReaderRequest, bound: AdapterUsage, file: EvalF
     reported: result.usage !== undefined,
     overBound: result.usage !== undefined && result.usage.inputTokens > bound.inputTokens,
     reply: null,
-    verified: null,
   };
   if (!result.ok) return { ...base, code: result.code };
   const parsed = ModelRead.safeParse(result.output);
   if (!parsed.success) return { ...base, code: 'invalid_output' };
-  const verified = verifyRead(parsed.data, file.lines, deps.now);
-  if (!verified.ok) return { ...base, code: 'nothing_confirmed' };
-  return { ...base, code: 'ok', reply: parsed.data, verified };
+  return { ...base, code: 'ok', reply: parsed.data };
 }
 
 /* ----------------------------- the command line ----------------------------- */
