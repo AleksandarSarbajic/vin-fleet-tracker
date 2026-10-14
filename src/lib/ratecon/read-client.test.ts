@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MODEL_REPLY, SENTINEL } from '@/test/model-read-fixtures';
-import { BROWSER_TIMEOUT_MS, requestModelRead } from './read-client';
+import { BROWSER_TIMEOUT_MS, requestModelReads } from './read-client';
 import { REDACTION_VERSION, type PreparedLine } from './redact';
 
 /**
@@ -21,8 +21,8 @@ afterEach(() => vi.useRealTimers());
 
 describe('what is sent', () => {
   it('the redaction version and each line as n and text — never its page', async () => {
-    const fetcher = answer(200, { ok: true, read: MODEL_REPLY });
-    await requestModelRead(LINES, live(), fetcher);
+    const fetcher = answer(200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY] });
+    await requestModelReads(LINES, live(), fetcher);
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/ratecon/read');
     expect(init.method).toBe('POST');
@@ -37,13 +37,23 @@ describe('what is sent', () => {
 });
 
 describe('what comes back', () => {
-  it('a reply that passes the schema', async () => {
-    expect(await requestModelRead(LINES, live(), answer(200, { ok: true, read: MODEL_REPLY }))).toEqual({ ok: true, reply: MODEL_REPLY });
+  it('two replies that pass the schema, A then B', async () => {
+    const other = { ...MODEL_REPLY, loadNumber: null };
+    expect(await requestModelReads(LINES, live(), answer(200, { ok: true, reads: [MODEL_REPLY, other] }))).toEqual({
+      ok: true,
+      replies: [MODEL_REPLY, other],
+    });
   });
 
-  it('a reply that does not is invalid_output, checked again here', async () => {
-    const out = await requestModelRead(LINES, live(), answer(200, { ok: true, read: { ...MODEL_REPLY, notes: 'x' } }));
-    expect(out).toEqual({ ok: false, code: 'invalid_output' });
+  it.each([
+    ['either reply failing the schema (A)', { ok: true, reads: [{ ...MODEL_REPLY, notes: 'x' }, MODEL_REPLY] }],
+    ['either reply failing the schema (B)', { ok: true, reads: [MODEL_REPLY, { ...MODEL_REPLY, notes: 'x' }] }],
+    ['one reply where a pair is due — the old single-read shape', { ok: true, read: MODEL_REPLY }],
+    ['a list of one', { ok: true, reads: [MODEL_REPLY] }],
+    ['a list of three', { ok: true, reads: [MODEL_REPLY, MODEL_REPLY, MODEL_REPLY] }],
+    ['no replies at all', { ok: true }],
+  ])('%s is invalid_output, checked again here: the pair fails as a whole', async (_, body) => {
+    expect(await requestModelReads(LINES, live(), answer(200, body))).toEqual({ ok: false, code: 'invalid_output' });
   });
 
   it.each([
@@ -53,35 +63,35 @@ describe('what comes back', () => {
     [422, 'not_redacted'],
     [409, 'outdated'],
   ] as const)('%i with its code: that code', async (status, code) => {
-    expect(await requestModelRead(LINES, live(), answer(status, { ok: false, code }))).toEqual({ ok: false, code });
+    expect(await requestModelReads(LINES, live(), answer(status, { ok: false, code }))).toEqual({ ok: false, code });
   });
 
   it('every code the server can send is read as itself — vendor_capped is not mistaken for unavailable by its 503', async () => {
     const { READ_MESSAGES } = await import('./read-codes');
     for (const code of Object.keys(READ_MESSAGES)) {
-      expect(await requestModelRead(LINES, live(), answer(503, { ok: false, code })), code).toEqual({ ok: false, code });
+      expect(await requestModelReads(LINES, live(), answer(503, { ok: false, code })), code).toEqual({ ok: false, code });
     }
   });
 
   it('the shared 429, which carries no code, is rate_limited', async () => {
-    const out = await requestModelRead(LINES, live(), answer(429, { error: 'Too many requests.', retryAfterSeconds: 40 }));
+    const out = await requestModelReads(LINES, live(), answer(429, { error: 'Too many requests.', retryAfterSeconds: 40 }));
     expect(out).toEqual({ ok: false, code: 'rate_limited' });
   });
 
   it('a 500 keeps its reference, so the dispatcher can quote it', async () => {
-    const out = await requestModelRead(LINES, live(), answer(500, { ok: false, code: 'error', reference: 'RATECON-500-ABC' }));
+    const out = await requestModelReads(LINES, live(), answer(500, { ok: false, code: 'error', reference: 'RATECON-500-ABC' }));
     expect(out).toEqual({ ok: false, code: 'error', reference: 'RATECON-500-ABC' });
   });
 
   it('a code it does not know, or no JSON at all, is read from the status alone', async () => {
-    expect(await requestModelRead(LINES, live(), answer(403, { ok: false, code: 'something-new' }))).toEqual({ ok: false, code: 'forbidden' });
+    expect(await requestModelReads(LINES, live(), answer(403, { ok: false, code: 'something-new' }))).toEqual({ ok: false, code: 'forbidden' });
     const notJson = vi.fn(async () => new Response('<html>gateway</html>', { status: 502 }));
-    expect(await requestModelRead(LINES, live(), notJson)).toEqual({ ok: false, code: 'unavailable' });
+    expect(await requestModelReads(LINES, live(), notJson)).toEqual({ ok: false, code: 'unavailable' });
   });
 
   it('a network failure is unavailable', async () => {
     const down = vi.fn(async () => Promise.reject(new TypeError('Failed to fetch')));
-    expect(await requestModelRead(LINES, live(), down)).toEqual({ ok: false, code: 'unavailable' });
+    expect(await requestModelReads(LINES, live(), down)).toEqual({ ok: false, code: 'unavailable' });
   });
 });
 
@@ -96,14 +106,14 @@ describe('stopping', () => {
 
   it('Cancel is cancelled', async () => {
     const abort = new AbortController();
-    const pending = requestModelRead(LINES, abort.signal, hanging);
+    const pending = requestModelReads(LINES, abort.signal, hanging);
     abort.abort();
     expect(await pending).toEqual({ ok: false, code: 'cancelled' });
   });
 
   it('the browser gives up after its own timeout, and says timeout', async () => {
     vi.useFakeTimers();
-    const pending = requestModelRead(LINES, live(), hanging);
+    const pending = requestModelReads(LINES, live(), hanging);
     await vi.advanceTimersByTimeAsync(BROWSER_TIMEOUT_MS);
     expect(await pending).toEqual({ ok: false, code: 'timeout' });
   });

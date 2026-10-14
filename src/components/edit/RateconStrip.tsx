@@ -1,15 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addressCueText, uncitedAddressLines } from '@/lib/ratecon/address-cue';
+import { addressCueText } from '@/lib/ratecon/address-cue';
 import { linesFromText, type Line } from '@/lib/ratecon/lines';
-import { READ_MESSAGES, type ReadFailCode } from '@/lib/ratecon/read-codes';
-import { requestModelRead } from '@/lib/ratecon/read-client';
+import { READ_MESSAGES, readFailureMessage, type ReadFailCode } from '@/lib/ratecon/read-codes';
+import { requestModelReads } from '@/lib/ratecon/read-client';
+import { readPair } from '@/lib/ratecon/read-pair';
 import { linesFromPdfFile } from '@/lib/ratecon/read-pdf';
 import { prepareForReading, type Prepared } from '@/lib/ratecon/redact';
 import { bumpCount, readCounts, type FillCounts } from '@/lib/ratecon/session-counts';
 import { LAYOUT_NAME, readRatecon, type RateconRead } from '@/lib/ratecon/templates';
-import { verifyRead } from '@/lib/ratecon/verify-read';
 
 /**
  * §12.122. "Fill from rate confirmation": drop a PDF, choose one, or paste
@@ -28,14 +28,21 @@ import { verifyRead } from '@/lib/ratecon/verify-read';
  * "Read with AI" (docs/llm-reader-design.md §1): when the server offers it,
  * a template miss offers it — never automatically. It says how many lines it
  * sends, shows them on request ("Show what is sent"), sends only those, and
- * fills only what `verifyRead` confirms against them. Every failure is one
- * fixed sentence and fills nothing; the button stays.
+ * fills only what the pair of reads agrees on and `verifyRead` confirms
+ * against them. A read is a PAIR (Alex, 2026-10-14): the server answers with
+ * two model reads, and `readPair` — the same function the evaluation calls —
+ * verifies each, merges them by agreement and works out the cue. There is no
+ * path that fills the form from one AI read. Every failure is one fixed
+ * sentence and fills nothing; the button stays. A pair where either read
+ * failed says the AI read did not complete, then its code's own sentence.
  *
- * After an AI fill, the dropped-stop cue (`address-cue.ts`): sent lines that
- * look like addresses, that no quote used, after the first stop, are named,
- * with what was sent. It cannot catch a dropped first stop.
- * It blocks nothing and changes no mark. Like everything in the detail, it
- * folds away when the load is typed into.
+ * After an AI fill: the notices agreement gives (the two reads found
+ * different stop counts; fields they differed on are blank and marked), and
+ * the dropped-stop cue (`address-cue.ts`): sent lines that look like
+ * addresses, that neither read used, after the first stop, are named, with
+ * what was sent. It cannot catch a dropped first stop. The cue blocks
+ * nothing and changes no mark. Like everything in the detail, both fold away
+ * when the load is typed into.
  */
 
 export const NOT_RECOGNISED = 'Layout not recognised, nothing filled.';
@@ -48,8 +55,8 @@ type Cue = { text: string; sent: string };
 type Status =
   | { kind: 'idle' }
   | { kind: 'reading' }
-  | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue }
-  | { kind: 'confirm'; read: RateconRead; cue?: Cue }
+  | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue; notices?: string[] }
+  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[] }
   /** A template miss, with "Read with AI" offered when the document can be prepared. */
   | { kind: 'missed'; prepared: Prepared; note: Said | null }
   | { kind: 'ai-reading'; prepared: PreparedOk };
@@ -58,7 +65,7 @@ const notPrepared = (prepared: Exclude<Prepared, { ok: true }>): string =>
   READ_MESSAGES[prepared.reason === 'too-large' ? 'too_large' : 'not_redacted'];
 
 const failure = (code: ReadFailCode, reference?: string) =>
-  reference ? `${READ_MESSAGES[code]} Reference ${reference}.` : READ_MESSAGES[code];
+  reference ? `${readFailureMessage(code)} Reference ${reference}.` : readFailureMessage(code);
 
 export function RateconStrip({
   hasEntries,
@@ -106,7 +113,7 @@ export function RateconStrip({
   }, [editsVersion]);
 
   const fill = useCallback(
-    (read: RateconRead, cue?: Cue) => {
+    (read: RateconRead, cue?: Cue, notices?: string[]) => {
       const refused = onFill(read);
       const n = read.stops.length;
       setStatus(
@@ -116,6 +123,7 @@ export function RateconStrip({
               kind: 'said',
               tone: 'done',
               ...(cue ? { cue } : {}),
+              ...(notices && notices.length > 0 ? { notices } : {}),
               text:
                 read.layout === 'model'
                   ? `Filled ${n} ${n === 1 ? 'stop' : 'stops'}, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.`
@@ -149,24 +157,27 @@ export function RateconStrip({
       const abort = new AbortController();
       inFlight.current = abort;
       setStatus({ kind: 'ai-reading', prepared });
-      const out = await requestModelRead(prepared.lines, abort.signal);
+      const out = await requestModelReads(prepared.lines, abort.signal);
       inFlight.current = null;
       const missed = (text: string): Status => ({ kind: 'missed', prepared, note: { tone: 'fault', text } });
       if (!out.ok) {
         setStatus(missed(failure(out.code, out.reference)));
         return;
       }
-      // The verifier, against exactly the lines that were sent, decides what stands.
-      const verified = verifyRead(out.reply, prepared.lines, new Date());
-      if (!verified.ok) {
-        setStatus(missed(READ_MESSAGES.nothing_confirmed));
+      // The pair, by the function the evaluation calls: each reply verified against exactly the lines
+      // that were sent, then agreement. Either reply failing fails the pair; nothing is filled from one.
+      const [a, b] = out.replies;
+      const pair = readPair<ReadFailCode>({ ok: true, reply: a }, { ok: true, reply: b }, prepared.lines, new Date());
+      if (!pair.ok) {
+        setStatus(missed(readFailureMessage(pair.code)));
         return;
       }
       setCounts(bumpCount('readWithAi'));
-      const cueText = addressCueText(uncitedAddressLines(out.reply, prepared.lines));
+      const cueText = addressCueText(pair.cue);
       const cue = cueText ? { text: cueText, sent: prepared.text } : undefined;
-      if (entries.current) setStatus({ kind: 'confirm', read: verified.read, ...(cue ? { cue } : {}) });
-      else fill(verified.read, cue);
+      const { read, notices } = pair.agreement;
+      if (entries.current) setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}) });
+      else fill(read, cue, notices);
     },
     [fill],
   );
@@ -271,6 +282,13 @@ export function RateconStrip({
               {status.text}
             </p>
           ) : null}
+          {status.kind === 'said' && status.notices
+            ? status.notices.map((notice) => (
+                <p key={notice} data-ratecon-notice="" className="text-small text-status-risk-fg">
+                  {notice}
+                </p>
+              ))
+            : null}
           {status.kind === 'said' && status.cue ? (
             <>
               <p data-ratecon-cue="" className="text-small text-status-risk-fg">
@@ -345,7 +363,7 @@ export function RateconStrip({
               </p>
               <button
                 type="button"
-                onClick={() => fill(status.read, status.cue)}
+                onClick={() => fill(status.read, status.cue, status.notices)}
                 className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
               >
                 Replace

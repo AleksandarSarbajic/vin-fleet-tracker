@@ -1,12 +1,13 @@
 import { writeFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { MODEL_REPLY, UNKNOWN_LAYOUT } from '../src/test/model-read-fixtures';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
  * "Read with AI" end to end (docs/llm-reader-design.md §8.1): the real
  * modal, the real POST /api/ratecon/read, the real counts table — and the
- * FAKE vendor, which answers from a script. No real vendor, no network call
+ * FAKE vendor, which answers from a script. A read is a PAIR (Alex,
+ * 2026-10-14): the script holds two steps per read, one for each call. No real vendor, no network call
  * to one, no real document: the text is invented, every line carries the
  * sentinel, and no screenshot is taken.
  *
@@ -36,18 +37,19 @@ async function db<T>(body: (sql: ReturnType<typeof connect>) => Promise<T>): Pro
   }
 }
 
-test('after a template miss, Read with AI goes through the route and the fake vendor, and fills only what follows from the text', async ({
-  page,
-  context,
-}) => {
-  // The route answers 404 when the reader is off: then this is skipped, and says why, rather than failing the gate.
-  const probe = await page.request.post('/api/ratecon/read', { data: {} });
-  test.skip(
-    probe.status() === 404,
-    'The e2e server runs with the reader off. Start it with LLM_READER_ENABLED=true, LLM_READER_VENDOR=fake, LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json.',
-  );
+/** The same step for both calls of a pair. */
+const USAGE = { inputTokens: 3200, outputTokens: 540 };
+const answered = { reply: MODEL_REPLY, usage: USAGE };
 
-  writeFileSync(FAKE_SCRIPT, JSON.stringify([{ reply: MODEL_REPLY, usage: { inputTokens: 3200, outputTokens: 540 } }]));
+/**
+ * Writes the script; opens the new-load modal and pastes the invented layout.
+ * Skips, and says why, when the e2e server runs with the reader off (no
+ * button) rather than failing the gate. It asks the strip, not the route: a
+ * probe of the route would spend one of the user's three reads a minute
+ * (LIMITS.llm), and this file makes exactly three.
+ */
+async function pasteInvented(page: Page, context: BrowserContext, script: unknown[]) {
+  writeFileSync(FAKE_SCRIPT, JSON.stringify(script));
   await resetWorld();
   await db(async (sql) => {
     await sql`delete from stops where load_id = ${IDS.loadChicago}`;
@@ -66,6 +68,19 @@ test('after a template miss, Read with AI goes through the route and the fake ve
   await page.evaluate((text) => navigator.clipboard.writeText(text), CLIP);
   await strip.getByLabel("Or paste the rate confirmation's text").focus();
   await page.keyboard.press('ControlOrMeta+v');
+  await expect(strip.getByText('Layout not recognised, nothing filled.')).toBeVisible();
+  test.skip(
+    !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
+    'The e2e server runs with the reader off. Start it with LLM_READER_ENABLED=true, LLM_READER_VENDOR=fake, LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json.',
+  );
+  return strip;
+}
+
+test('after a template miss, Read with AI makes a PAIR through the route and the fake vendor, and fills only what both reads agree on and follows from the text', async ({
+  page,
+  context,
+}) => {
+  const strip = await pasteInvented(page, context, [answered, answered]);
 
   const readWithAi = strip.getByRole('button', { name: 'Read with AI' });
   await expect(readWithAi, 'the e2e server must run with the reader on and the fake vendor (see the header)').toBeVisible();
@@ -92,13 +107,46 @@ test('after a template miss, Read with AI goes through the route and the fake ve
   await form.getByRole('button', { name: 'Looks right' }).click();
   await expect(strip.locator('[data-ai-to-confirm]')).toHaveText('1 stop read by AI to confirm');
 
-  // Counted once, as a read that answered; nothing saved, because Save was not pressed.
+  // Counted ONCE, as a read that answered — two calls, so both calls' tokens; nothing saved, because Save was not pressed.
   const [rows, stops] = await db((sql) =>
     Promise.all([
-      sql<{ outcome: string; lines_sent: number }[]>`select outcome, lines_sent from ratecon_ai_reads`,
+      sql<{ outcome: string; lines_sent: number; input_tokens: number; output_tokens: number }[]>`
+        select outcome, lines_sent, input_tokens, output_tokens from ratecon_ai_reads`,
       sql<{ n: number }[]>`select count(*)::int as n from stops where load_id = ${IDS.loadChicago}`,
     ]),
   );
-  expect(rows).toEqual([{ outcome: 'ok', lines_sent: 23 }]);
+  expect(rows).toEqual([{ outcome: 'ok', lines_sent: 23, input_tokens: 6400, output_tokens: 1080 }]);
   expect(stops[0]!.n).toBe(0);
+});
+
+test('a pair whose second read fails fills nothing, says the AI read did not complete, and is still one read against the cap', async ({
+  page,
+  context,
+}) => {
+  const strip = await pasteInvented(page, context, [answered, { fail: 'unavailable', vendorStatus: 503 }]);
+  await strip.getByRole('button', { name: 'Read with AI' }).click();
+
+  await expect(strip.locator('[data-ratecon-said]')).toHaveText(
+    'The AI read did not complete. The AI reader is not available right now. Nothing was filled.',
+  );
+  // Read A answered and stood; it is not used.
+  await expect(editModal(page).getByLabel('Load number')).toHaveValue('');
+  await expect(stopForm(page).getByLabel('Street address')).toHaveValue('');
+  await expect(strip.getByRole('button', { name: 'Read with AI' })).toBeVisible();
+
+  const rows = await db((sql) => sql<{ outcome: string; input_tokens: number }[]>`select outcome, input_tokens from ratecon_ai_reads`);
+  expect(rows).toEqual([{ outcome: 'unavailable', input_tokens: 3200 }]);
+});
+
+test('a pair whose reads differ fills what both said, blanks and marks what they did not, and says so', async ({ page, context }) => {
+  const other = structuredClone(MODEL_REPLY);
+  other.stops[0]!.zip = { value: '58103', quote: { line: 13, text: 'Fargo, ND 58102' } };
+  const strip = await pasteInvented(page, context, [answered, { reply: other, usage: USAGE }]);
+  await strip.getByRole('button', { name: 'Read with AI' }).click();
+
+  await expect(strip.locator('[data-ratecon-notice]')).toHaveText('The two AI reads differed on 1 field; each is left blank and marked.');
+  const form = stopForm(page);
+  await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
+  await expect(form.getByLabel('ZIP')).toHaveValue('');
+  await expect(form.getByText('The two AI reads differed. Enter it by hand.')).toBeVisible();
 });

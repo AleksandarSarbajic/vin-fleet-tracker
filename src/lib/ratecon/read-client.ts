@@ -1,3 +1,4 @@
+import { z } from 'zod/v4';
 import { ModelRead } from './model-read';
 import { READ_MESSAGES, READ_ROUTE, type ReadFailCode } from './read-codes';
 import { REDACTION_VERSION, type PreparedLine } from './redact';
@@ -7,14 +8,17 @@ import { REDACTION_VERSION, type PreparedLine } from './redact';
  *
  * Sends the redaction's version and each prepared line as `n` and `text` —
  * never its page — and turns every answer into a code from the closed set.
- * Never throws. The reply is checked against the schema again here: the
- * verifier runs on it next, against exactly these lines.
+ * Never throws. A read is a PAIR (Alex, 2026-10-14): the server answers with
+ * both model reads or with a code. Each is checked against the schema again
+ * here, and a pair with anything else in it — one reply, three, a reply that
+ * fails — is `invalid_output`: the pair fails as a whole. `readPair` verifies
+ * and merges them next, against exactly these lines.
  */
 
 /** Past the server's own 25 s, so the server's timeout is the one that usually speaks. */
 export const BROWSER_TIMEOUT_MS = 35_000;
 
-export type ClientReadOutcome = { ok: true; reply: ModelRead } | { ok: false; code: ReadFailCode; reference?: string };
+export type ClientReadOutcome = { ok: true; replies: [ModelRead, ModelRead] } | { ok: false; code: ReadFailCode; reference?: string };
 
 /** Every code the server can send: the keys of its messages, so a new code cannot be missed here. */
 const CODES: ReadonlySet<string> = new Set(Object.keys(READ_MESSAGES));
@@ -39,7 +43,7 @@ async function bodyOf(response: Response): Promise<Record<string, unknown> | nul
   }
 }
 
-export async function requestModelRead(
+export async function requestModelReads(
   lines: readonly PreparedLine[],
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
@@ -55,8 +59,8 @@ export async function requestModelRead(
     });
     const body = await bodyOf(response);
     if (response.ok && body?.ok === true) {
-      const reply = ModelRead.safeParse(body.read);
-      return reply.success ? { ok: true, reply: reply.data } : { ok: false, code: 'invalid_output' };
+      const replies = z.tuple([ModelRead, ModelRead]).safeParse(body.reads);
+      return replies.success ? { ok: true, replies: replies.data } : { ok: false, code: 'invalid_output' };
     }
     const code = typeof body?.code === 'string' && CODES.has(body.code) ? (body.code as ReadFailCode) : byStatus(response.status);
     return typeof body?.reference === 'string' ? { ok: false, code, reference: body.reference } : { ok: false, code };

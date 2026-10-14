@@ -68,3 +68,17 @@ export const READ_MESSAGES: Readonly<Record<ReadFailCode, string>> = {
  * of either, a code and neither read. The route does not verify.
  */
 export type ReadResponse = { ok: true; reads: [unknown, unknown] } | { ok: false; code: ReadFailCode; reference?: string };
+
+/**
+ * When a PAIR fails (Alex, 2026-10-14) — either read, at the vendor, at the
+ * schema or at the verifier — the strip says the AI read did not complete,
+ * and then the code's own sentence. Not said for a code that stops a read
+ * before any call (the limits, the body, the redaction), for the dispatcher's
+ * own Cancel, or for a fault of the server's own (`error`).
+ */
+export const PAIR_INCOMPLETE = 'The AI read did not complete.';
+const PAIR_FAILURES: ReadonlySet<ReadFailCode> = new Set(['timeout', 'unavailable', 'vendor_capped', 'refused', 'invalid_output', 'nothing_confirmed']);
+
+/** The sentence for a failed read: the code's own, led by "did not complete" when it is a pair's failure. */
+export const readFailureMessage = (code: ReadFailCode): string =>
+  PAIR_FAILURES.has(code) ? `${PAIR_INCOMPLETE} ${READ_MESSAGES[code]}` : READ_MESSAGES[code];

@@ -54,7 +54,7 @@ beforeEach(() => {
   root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   reads.length = 0;
-  readAnswer = respond(200, { ok: true, read: MODEL_REPLY });
+  readAnswer = respond(200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY] });
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/ratecon/read') {
       reads.push(init!);
@@ -220,6 +220,113 @@ describe('a read', () => {
   });
 });
 
+describe('a read is a pair of reads, merged by agreement', () => {
+  const notices = () => [...strip().querySelectorAll('[data-ratecon-notice]')].map((n) => n.textContent);
+  const checkOf = (label: string) => field(form(), label).querySelector('[data-field-check]')?.textContent ?? null;
+  /** "N read with AI" from the counts line, or 0: the count is kept for the whole session, so tests compare. */
+  const aiReadsCounted = () => Number(/(\d+) read with AI/.exec(strip().querySelector('[data-ratecon-counts]')?.textContent ?? '')?.[1] ?? 0);
+
+  it('one request makes one read, whose two replies agree: filled as one read is, with no notice', async () => {
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(reads).toHaveLength(1);
+    expect(notices()).toEqual([]);
+    expect(input(form(), 'ZIP').value).toBe('58102');
+    expect(checkOf('ZIP')).toBeNull();
+  });
+
+  it('counted as ONE read with AI, however many calls made it', async () => {
+    await render();
+    await pasteText(CLIP);
+    const before = aiReadsCounted();
+    await click(readWithAi()!);
+    expect(reads).toHaveLength(1);
+    expect(aiReadsCounted()).toBe(before + 1);
+  });
+
+  it('replies that differ on a field: it is left blank and marked, and the strip says how many', async () => {
+    const other = structuredClone(MODEL_REPLY);
+    other.stops[0]!.zip = { value: '58103', quote: { line: 13, text: 'Fargo, ND 58102' } };
+    readAnswer = respond(200, { ok: true, reads: [MODEL_REPLY, other] });
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(said()).toBe('Filled 2 stops, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.');
+    expect(notices()).toEqual(['The two AI reads differed on 1 field; each is left blank and marked.']);
+    expect(input(form(), 'ZIP').value).toBe('');
+    expect(checkOf('ZIP')).toBe('Check: The two AI reads differed. Enter it by hand.');
+    // What both said stands, with its mark as always.
+    expect(input(form(), 'Street address').value).toBe('4001 Main St');
+    expect(strip().querySelector('[data-to-check]')?.textContent).toMatch(/^\d+ fields? to check$/);
+  });
+
+  it('replies that differ in how many stops they found: the read with more gives them, and both counts are said', async () => {
+    const one: ModelRead = { ...MODEL_REPLY, stops: [MODEL_REPLY.stops[0]!] };
+    readAnswer = respond(200, { ok: true, reads: [one, MODEL_REPLY] });
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(notices()).toEqual(['The two AI reads found 1 and 2 stops. The 2 shown are the read with more; check each against the document.']);
+    expect(said()).toContain('Filled 2 stops, read by AI.');
+  });
+
+  it('the notices come with the Replace question too, and are said once the form is filled', async () => {
+    const other = structuredClone(MODEL_REPLY);
+    other.stops[0]!.zip = { value: '58103', quote: { line: 13, text: 'Fargo, ND 58102' } };
+    readAnswer = respond(200, { ok: true, reads: [MODEL_REPLY, other] });
+    await render();
+    await type(input(container!, 'Load number'), 'MINE-1');
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    await click(buttonIn(strip(), 'Replace')!);
+    expect(notices()).toEqual(['The two AI reads differed on 1 field; each is left blank and marked.']);
+  });
+
+  it('a pair that failed fills NOTHING, says the AI read did not complete with the code\'s own sentence, and leaves the button', async () => {
+    readAnswer = respond(503, { ok: false, code: 'unavailable' });
+    await render();
+    await pasteText(CLIP);
+    const before = aiReadsCounted();
+    await click(readWithAi()!);
+    expect(said()).toBe('The AI read did not complete. The AI reader is not available right now. Nothing was filled.');
+    expect(input(container!, 'Load number').value).toBe('');
+    expect(input(form(), 'Street address').value).toBe('');
+    expect(notices()).toEqual([]);
+    expect(readWithAi()).not.toBeNull();
+    expect(aiReadsCounted()).toBe(before);
+  });
+
+  it('one reply confirming nothing fails the pair: the other, which stood, is NOT used', async () => {
+    const lost = { value: 'Nowhere', quote: { line: 1, text: 'not in the text' } };
+    const nothing: ModelRead = {
+      schemaVersion: 1,
+      loadNumber: lost,
+      stops: [{ type: { value: 'PU', quote: { line: 1, text: 'not in the text' } }, street: lost, city: lost, state: lost, zip: lost, appointment: { kind: 'none' } }],
+    };
+    for (const pair of [[MODEL_REPLY, nothing], [nothing, MODEL_REPLY]]) {
+      readAnswer = respond(200, { ok: true, reads: pair });
+      act(() => root?.unmount());
+      root = createRoot(container!);
+      await render();
+      await pasteText(CLIP);
+      await click(readWithAi()!);
+      expect(said()).toBe('The AI read did not complete. The AI read could not be confirmed against the text. Nothing was filled.');
+      expect(input(container!, 'Load number').value).toBe('');
+      expect(input(form(), 'Street address').value).toBe('');
+    }
+  });
+
+  it('the old single-read answer is not filled from: { ok: true, read } is unusable', async () => {
+    readAnswer = respond(200, { ok: true, read: MODEL_REPLY });
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(said()).toBe('The AI read did not complete. The AI read came back unusable. Nothing was filled.');
+    expect(input(container!, 'Load number').value).toBe('');
+  });
+});
+
 describe('the dropped-stop cue: address-like lines the read did not use', () => {
   const DROPPED: ModelRead = { ...MODEL_REPLY, stops: [MODEL_REPLY.stops[0]!] };
   const cue = () => strip().querySelector('[data-ratecon-cue]');
@@ -232,7 +339,7 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
   });
 
   it('a read that dropped a stop: says which line, and offers what was sent; it fills and marks as always', async () => {
-    readAnswer = respond(200, { ok: true, read: DROPPED });
+    readAnswer = respond(200, { ok: true, reads: [DROPPED, DROPPED] });
     await render();
     await pasteText(CLIP);
     await click(readWithAi()!);
@@ -250,7 +357,7 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
     const clip = `Example Logistics Group, Minneapolis, MN 55401\n${CLIP}`;
     const shifted = (read: ModelRead): ModelRead =>
       JSON.parse(JSON.stringify(read).replace(/"line":(\d+)/g, (_, n: string) => `"line":${Number(n) + 1}`)) as ModelRead;
-    readAnswer = respond(200, { ok: true, read: shifted(MODEL_REPLY) });
+    readAnswer = respond(200, { ok: true, reads: [shifted(MODEL_REPLY), shifted(MODEL_REPLY)] });
     await render();
     await pasteText(clip);
     await click(readWithAi()!);
@@ -259,7 +366,7 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
 
     act(() => root?.unmount());
     root = createRoot(container!);
-    readAnswer = respond(200, { ok: true, read: shifted(DROPPED) });
+    readAnswer = respond(200, { ok: true, reads: [shifted(DROPPED), shifted(DROPPED)] });
     await render();
     await pasteText(clip);
     await click(readWithAi()!);
@@ -267,7 +374,7 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
   });
 
   it('after "Replace", the cue still comes', async () => {
-    readAnswer = respond(200, { ok: true, read: DROPPED });
+    readAnswer = respond(200, { ok: true, reads: [DROPPED, DROPPED] });
     await render();
     await type(input(container!, 'Load number'), 'MINE-1');
     await pasteText(CLIP);
@@ -279,10 +386,10 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
 
 describe('every failure fills nothing, says one fixed sentence, and leaves the button', () => {
   it.each([
-    [503, { ok: false, code: 'unavailable' }, 'The AI reader is not available right now. Nothing was filled.'],
+    [503, { ok: false, code: 'unavailable' }, 'The AI read did not complete. The AI reader is not available right now. Nothing was filled.'],
     [429, { ok: false, code: 'capped' }, 'Today’s AI reads are used up. Type the load, or try tomorrow.'],
     [429, { error: 'Too many requests.', retryAfterSeconds: 40 }, 'Wait a minute and try again.'],
-    [502, { ok: false, code: 'invalid_output' }, 'The AI read came back unusable. Nothing was filled.'],
+    [502, { ok: false, code: 'invalid_output' }, 'The AI read did not complete. The AI read came back unusable. Nothing was filled.'],
   ] as const)('%i %j', async (status, body, sentence) => {
     readAnswer = respond(status, body);
     await render();
@@ -308,11 +415,11 @@ describe('every failure fills nothing, says one fixed sentence, and leaves the b
       loadNumber: lost,
       stops: [{ type: { value: 'PU', quote: { line: 1, text: 'not in the text' } }, street: lost, city: lost, state: lost, zip: lost, appointment: { kind: 'none' } }],
     };
-    readAnswer = respond(200, { ok: true, read: reply });
+    readAnswer = respond(200, { ok: true, reads: [reply, reply] });
     await render();
     await pasteText(CLIP);
     await click(readWithAi()!);
-    expect(said()).toBe('The AI read could not be confirmed against the text. Nothing was filled.');
+    expect(said()).toBe('The AI read did not complete. The AI read could not be confirmed against the text. Nothing was filled.');
     expect(input(container!, 'Load number').value).toBe('');
   });
 
