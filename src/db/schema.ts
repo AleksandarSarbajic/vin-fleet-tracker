@@ -1110,12 +1110,30 @@ export const rateconAiField = pgEnum('ratecon_ai_field', ['load_number', 'stop_t
  * marker, linked to the read's counts row. COUNTS ONLY — no text column,
  * ever. Deleted with the read, after 90 days.
  */
-export const rateconAiOutcomes = pgTable('ratecon_ai_outcomes', {
-  readId: uuid('read_id')
-    .primaryKey()
-    .references(() => rateconAiReads.id, { onDelete: 'cascade' }),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const rateconAiOutcomes = pgTable(
+  'ratecon_ai_outcomes',
+  {
+    readId: uuid('read_id')
+      .primaryKey()
+      .references(() => rateconAiReads.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The read's layout fingerprint (migration 0029; `src/lib/ratecon/layout.ts`): at most 64 hashes of
+     * 8 lower-case hex characters, one per label word in the text that was sent. HASHES ONLY — no label
+     * text, value, name or address. Empty for an outcome recorded without one.
+     */
+    layout: text('layout').array().notNull().default(sql`'{}'::text[]`),
+  },
+  () => [
+    check(
+      'ratecon_ai_outcomes_layout_hashes',
+      sql`cardinality(layout) <= 64
+        AND cardinality(array_remove(layout, NULL)) = cardinality(layout)
+        AND (array_ndims(layout) IS NULL OR array_ndims(layout) = 1)
+        AND array_to_string(layout, ',') ~ '^([0-9a-f]{8}(,[0-9a-f]{8})*)?$'`,
+    ),
+  ],
+);
 
 /**
  * One row a field NAME for an outcome: filled by the read and kept, changed

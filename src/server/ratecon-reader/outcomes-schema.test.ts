@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { describeDb, rolledBack } from '@/test/db';
 import type { Tx } from '@/server/audit';
@@ -23,9 +23,10 @@ const read = async (tx: Tx) =>
   ((await tx.execute(sql`insert into ratecon_ai_reads (user_id, vendor, lines_sent, outcome) values (${ME}, 'fake', 20, 'ok') returning id`)) as unknown as { id: string }[])[0]!.id;
 
 describeDb('ratecon_ai_outcomes and ratecon_ai_outcome_fields: counts only', () => {
-  it('the parent holds no text: a read id and a time', async () => {
+  it('the parent holds no text: a read id, a time, and the layout as an array of 8-hex hashes (0029)', async () => {
     expect(await columnsOf('ratecon_ai_outcomes')).toEqual([
       { name: 'created_at', type: 'timestamp with time zone' },
+      { name: 'layout', type: 'ARRAY' },
       { name: 'read_id', type: 'uuid' },
     ]);
   });
@@ -63,6 +64,53 @@ describeDb('ratecon_ai_outcomes and ratecon_ai_outcome_fields: counts only', () 
           from pg_class c where c.relname = ${table}`)) as unknown as { rls: boolean; policies: number; anon: boolean; authed: boolean }[])[0],
     );
     expect(out).toEqual({ rls: true, policies: 1, anon: false, authed: false });
+  });
+
+  describe('the layout fingerprint (0029): hashes only', () => {
+    const insertLayout = (layout: string) =>
+      rolledBack(async (tx) => {
+        const id = await read(tx);
+        await tx.execute(sql.raw(`insert into ratecon_ai_outcomes (read_id, layout) values ('${id}', ${layout})`));
+      });
+    const stored = (layout: string) =>
+      rolledBack(async (tx) => {
+        const id = await read(tx);
+        await tx.execute(sql.raw(`insert into ratecon_ai_outcomes (read_id, layout) values ('${id}', ${layout})`));
+        return ((await tx.execute(sql`select layout from ratecon_ai_outcomes where read_id = ${id}`)) as unknown as { layout: string[] }[])[0]!.layout;
+      });
+    const many = (n: number) => `ARRAY[${Array.from({ length: n }, (_, i) => `'${i.toString(16).padStart(8, '0')}'`).join(',')}]::text[]`;
+
+    it('is empty when nothing is given: an outcome recorded without one, or before 0029', async () => {
+      const layout = await rolledBack(async (tx) => {
+        const id = await read(tx);
+        await tx.execute(sql`insert into ratecon_ai_outcomes (read_id) values (${id})`);
+        return ((await tx.execute(sql`select layout from ratecon_ai_outcomes where read_id = ${id}`)) as unknown as { layout: string[] }[])[0]!.layout;
+      });
+      expect(layout).toEqual([]);
+    });
+
+    it('stores hashes, 64 at most, an empty set too', async () => {
+      expect(await stored(`ARRAY['0a1b2c3d','ffffffff']::text[]`)).toEqual(['0a1b2c3d', 'ffffffff']);
+      expect(await stored(`'{}'::text[]`)).toEqual([]);
+      expect(await stored(many(64))).toHaveLength(64);
+    });
+
+    it.each([
+      ['65 hashes', many(65)],
+      ['a label', `ARRAY['pick up date']::text[]`],
+      ['a value', `ARRAY['4001 Main St']::text[]`],
+      ['an upper-case hash', `ARRAY['0A1B2C3D']::text[]`],
+      ['a hash of 7 characters', `ARRAY['0a1b2c3']::text[]`],
+      ['a hash of 9 characters', `ARRAY['0a1b2c3d4']::text[]`],
+      ['a hash that is not hex', `ARRAY['0a1b2c3g']::text[]`],
+      ['a hash with a comma in it', `ARRAY['0a1b2c3,0a1b2c3d']::text[]`],
+      ['a hash with a newline', `ARRAY[E'0a1b2c3d\\n']::text[]`],
+      ['a null among them', `ARRAY['0a1b2c3d', NULL]::text[]`],
+      ['a two-dimensional array', `ARRAY[['0a1b2c3d'],['0a1b2c3e']]::text[]`],
+      ['null', 'NULL'],
+    ])('refuses %s', async (_, layout) => {
+      await expect(insertLayout(layout)).rejects.toThrow();
+    });
   });
 
   it('one outcome a read: a second parent row for the same read is refused', async () => {

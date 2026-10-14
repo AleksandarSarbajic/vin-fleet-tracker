@@ -204,6 +204,13 @@
       "when": 1791950000000,
       "tag": "0028_ratecon_ai_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0029_ratecon_ai_outcome_layout",
+      "breakpoints": true
     }
   ]
 }
