@@ -1100,3 +1100,48 @@ export const rateconAiReads = pgTable(
     ),
   ],
 );
+
+/** The fields an AI read can fill, by name (migration 0028). The wire contract's list is `src/lib/ratecon/outcome-codes.ts`. */
+export const rateconAiField = pgEnum('ratecon_ai_field', ['load_number', 'stop_type', 'street', 'city', 'state', 'zip', 'appointment']);
+
+/**
+ * What the dispatcher did with an AI read, once, at the first save after the
+ * fill (migration 0028, docs/llm-reader-design.md §4). The once-per-read
+ * marker, linked to the read's counts row. COUNTS ONLY — no text column,
+ * ever. Deleted with the read, after 90 days.
+ */
+export const rateconAiOutcomes = pgTable('ratecon_ai_outcomes', {
+  readId: uuid('read_id')
+    .primaryKey()
+    .references(() => rateconAiReads.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One row a field NAME for an outcome: filled by the read and kept, changed
+ * or cleared; or left blank and marked, then filled or left. Summed over
+ * stops. A count is bounded by what a read can fill: one load number, at
+ * most ten stops.
+ */
+export const rateconAiOutcomeFields = pgTable(
+  'ratecon_ai_outcome_fields',
+  {
+    readId: uuid('read_id')
+      .notNull()
+      .references(() => rateconAiOutcomes.readId, { onDelete: 'cascade' }),
+    field: rateconAiField('field').notNull(),
+    kept: smallint('kept').notNull().default(0),
+    changed: smallint('changed').notNull().default(0),
+    cleared: smallint('cleared').notNull().default(0),
+    blankFilled: smallint('blank_filled').notNull().default(0),
+    blankLeft: smallint('blank_left').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ name: 'ratecon_ai_outcome_fields_pk', columns: [t.readId, t.field] }),
+    check(
+      'ratecon_ai_outcome_fields_counts',
+      sql`kept >= 0 AND changed >= 0 AND cleared >= 0 AND blank_filled >= 0 AND blank_left >= 0
+        AND kept + changed + cleared + blank_filled + blank_left <= CASE WHEN field = 'load_number' THEN 1 ELSE 10 END`,
+    ),
+  ],
+);

@@ -197,6 +197,13 @@
       "when": 1791928080869,
       "tag": "0027_ratecon_ai_anthropic",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791950000000,
+      "tag": "0028_ratecon_ai_outcomes",
+      "breakpoints": true
     }
   ]
 }
