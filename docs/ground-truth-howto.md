@@ -96,7 +96,15 @@ Leave `"priority"` in; it changes nothing in the score.
 - **Dates `YYYY-MM-DD`:** "10/14/2026" is `"2026-10-14"`. For a date printed
   with no year, write the year the document means.
 - **A bare "8:00" with no AM/PM is not a time anyone can enter.** It is a
-  couldn't-read (below), as the app treats it.
+  couldn't-read (below), as the app treats it — **unless the document shows a
+  24-hour clock elsewhere and has no AM/PM at all** (changed 2026-10-15). Then
+  it is a time: "11:00" is `"11:00"`, "8:00" is `"08:00"`. The test is the
+  app's, over the text that is sent: the document has at least one time that
+  can only be 24-hour (`HH:MM` with an hour from 13 to 23, or a two-digit hour
+  with a leading zero such as `08:00`; four digits like `0800` do not count),
+  AND no time with AM/PM anywhere in it (a single "8:00 PM", "7-10 AM" or
+  "5 p.m." on any line rules it out). Otherwise "10:00" could be either half of
+  the day and stays a couldn't-read.
 
 ### One time: APPT, no window
 
@@ -155,7 +163,8 @@ choose one, so the right result is "Couldn't read", left for the dispatcher:
 ```
 
 - **Give `date` only when the line prints exactly one date.** Printed
-  `11/05/2026 8:00` with no AM/PM:
+  `11/05/2026 8:00` with no AM/PM, in a document that does not show a
+  24-hour clock elsewhere (see above):
 
   ```json
   { "couldntRead": true, "date": "2026-11-05" }

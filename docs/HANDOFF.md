@@ -3255,6 +3255,89 @@ fix would be its own phase: the label rule would have to leave a city line.
 First at ACME`, a company in mixed case after `at`, and any other way of
 introducing a name. "Show what is sent" is still the check.
 
+### Phase 3x: the verifier no longer lets a date eat a time, and reads a 24-hour document as 24-hour (2026-10-15)
+
+No API call, no network, no `ratecon:eval-ai`; nothing read from `.samples/`
+or `expected.json`. **The reader stays off by default.** Invented data only.
+The model, the prompt, the schema and the route are unchanged; the change is
+in `src/lib/ratecon/verify-read.ts`.
+
+**Why:** on a real C.H. Robinson load the AI read both stops correctly and the
+verifier discarded both. The pickup said `08:00-15:00`, the delivery
+`Delivery Time: 11:00 Appt.`.
+
+**Fix 1, a bug: a date ate a time.** `NUMERIC_DATE` matched `00-15` inside
+`08:00-15:00`; `datesIn` blanks every date it finds before the times are
+read, so both times vanished and the appointment was `unreadable`. The
+pattern now has a lookbehind (not right after a colon) and a lookahead (not
+right before a colon and a digit). Both are needed, and each catches what the
+other does not: `08:00-15:00` is caught by either, but `10-11:30 AM` (a
+range, not October 11) needs the lookahead, and `13:00-17` or `8:30-12` need
+the lookbehind. Kept: `7-10 AM`, `1400`, and the dates `10/14`, `10-14-26`,
+`10/14/2026`, `2026-10-14`, `Oct 14`, also right next to a time.
+
+**The same bug in `NAMED_DATE`, found and fixed:** its optional year took any
+four digits, so `Oct 14 0800` was October 14 of the year 800 and the time was
+blanked with it. A year after a named date is now 2020 to 2039. **A cost,**
+pinned: `Oct 14 2000` is October 14 at 20:00, not the year 2000, and a year
+before 2020 after a named date is no longer read. `ISO_DATE` cannot eat a
+time (it needs `dddd-dd-dd`) and is unchanged.
+
+**Fix 2, a rule: a bare `HH:MM` in a 24-hour document.** `documentIs24Hour`
+(exported), computed once in `verifyRead` from the lines that were sent: the
+document is 24-hour when it holds at least one unambiguous 24-hour time
+(`HH:MM` with an hour from 13 to 23, or a two-digit hour with a leading zero,
+`08:00`) AND no time with AM/PM anywhere (`8 AM`, `8:00 pm`, `5 p.m.`,
+`8:00PM`, `8:00P`, the end of `7-10 AM`). Then a bare `HH:MM` in a quote is
+accepted as 24-hour (hour up to 23, minute up to 59). Otherwise nothing
+changes: the quote's own evidence still works as before, and `11:00` alone is
+not guessed. `0800` and `8:00` are not evidence; `10:00`, `11:00` and `12:00`
+are not unambiguous.
+
+**Decisions, for Alex to overrule:**
+
+1. **One AM/PM time anywhere in the sent text rules the document out,** even
+   on an unrelated line (a "Close 8:00 PM" notice, say). This is the brief's
+   rule and the safe side, but a 24-hour load confirmation with one stray
+   "PM" loses its bare times again.
+2. **A `13:22:05` timestamp in a footer counts as 24-hour evidence,** because
+   the pattern finds `13:22` in it. A document with that and bare times and no
+   AM/PM reads the bare times as 24-hour. Not guarded.
+3. **The ground truth follows the rule** (`ground-truth-howto.md`): a bare
+   `11:00` is `"11:00"` in a document that shows a 24-hour clock elsewhere and
+   has no AM/PM, and a couldn't-read otherwise. **Any ground-truth entry that
+   was written as a couldn't-read for a bare time in such a document is now
+   stale** and would score the AI's correct time as WRONG. I did not read
+   `expected.json`; that check is Alex's, or a later phase's.
+4. **Evaluation numbers are not comparable across this change** for
+   appointments on 24-hour documents: before it the verifier threw some of
+   them away (and they showed as `unreadable`, marked); now they are read.
+
+**`templates.ts`, checked and NOT changed:** it has no date-eats-time problem.
+Every date and time there is taken by an anchored, whole-shape pattern
+(`^(\d{1,2})\/(\d{1,2})\/(\d{4})\b` with the time parsed from the text after
+`TIME:`; `\d{2}\/\d{2}\/\d{4}\s+\d{4}`; `Mon D, YYYY` with a separate
+`HH:MM` cell; the stops-section stamp), and none blanks a date out of a string
+before reading times from what is left.
+
+**Tests (invented text):** 61 new in `verify-read.test.ts` (66 became 127): the
+range forms with a date before them (`08:00-15:00`, `8:00-15:00`,
+`08:00 - 15:00`, `0800-1500`, dashed, no-year, ISO and named dates, the date
+after the times, a flag between), `10-11:30 AM`, `13:00-17`, `8:30-12`, real
+dates beside times, `documentIs24Hour` on its own (evidence, none, every
+AM/PM form, look-alikes), and the document fact through `verifyRead` (the
+brief's four cases, evidence and AM/PM together, 25:00 and 11:75, a range of
+bare times, a whole two-stop reply). `npm run check`: 189 files, 3316 tests,
+exit 0. E2E, on their own: `ratecon-ai.spec.ts` 4, `ratecon-fill.spec.ts` 2.
+**Mutation-checked,** 23 mutations (each lookaround, weakened lookarounds, the
+AM/PM guard on dates, the year rule, both guards of the document fact, each
+kind of evidence, each AM/PM form, the first-line-only mistake, the fact
+never, always, false and true, and 25:00). Six survived the first run (the
+lookarounds, which each hid the other on `08:00-15:00`; a weakened lookbehind;
+`25:00`) and are pinned now. One survivor remains and is an equivalent
+mutant: dropping the minutes from the AM/PM pattern, because `\b` already
+matches before the minutes.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18

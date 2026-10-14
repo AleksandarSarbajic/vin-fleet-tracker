@@ -403,8 +403,26 @@ browser against exactly the lines it sent). For every cited value:
 | Street | it appears in the quote and starts with a house number or PO Box (§12.121's rule) | blank, marked |
 | City, state, ZIP | the quote parses with `cityLine` to the same three; or each appears in it, the state is a US state, and the ZIP is 5 digits | each failing one blank, marked |
 | Date | `dateQuote` holds a date our parser reads as that day (M/D/YYYY, MM/DD/YY, Month D YYYY, Mon D YYYY, YYYY-MM-DD); a date with no year verifies only if exactly one of this year and next falls inside §12.122's −1 to +30 day window | time read `unreadable`, quoted |
-| Time | `timeQuote` holds a time our parser reads as that time: AM/PM (a start with none takes its end's, "7-10 AM", never past its end), four digits (`1400`), or `HH:MM` when the quote shows a 24-hour clock — a leading zero or an hour of 13 or more anywhere in it, so "08:00 - 10:00" reads both. A bare `8:00` or `10:00` alone is never guessed (§12.122) | `unreadable`, quoted |
+| Time | `timeQuote` holds a time our parser reads as that time: AM/PM (a start with none takes its end's, "7-10 AM", never past its end), four digits (`1400`), or `HH:MM` when the quote shows a 24-hour clock — a leading zero or an hour of 13 or more anywhere in it, so "08:00 - 10:00" reads both. A bare `8:00` or `10:00` alone is never guessed (§12.122) — unless the DOCUMENT is 24-hour (below) | `unreadable`, quoted |
 | Flag | APPT, appointment, FCFS or first come appears in that stop's quotes | flag set to null |
+
+**A 24-hour document** (phase 3x, 2026-10-15). A real C.H. Robinson load had
+`08:00-15:00` on the pickup and `Delivery Time: 11:00 Appt.` on the delivery;
+the AI read both correctly and the verifier discarded both. Two causes, two
+fixes in `verify-read.ts`:
+1. **A date ate a time.** The numeric date pattern matched `00-15` inside
+   `08:00-15:00` and the date blanking removed it, so every time in the quote
+   vanished. A numeric date now never starts right after a colon or ends right
+   before a colon and a digit (`10-11:30 AM` and `13:00-17` too). A year after a
+   named date is 2020 to 2039, so `Oct 14 0800` is a date and a time.
+2. **The document's clock.** Computed once from the lines that were sent: the
+   document is 24-hour when it holds at least one unambiguous 24-hour time
+   (`HH:MM` with an hour from 13 to 23, or a two-digit hour with a leading zero:
+   `08:00`) AND no time with AM/PM anywhere. Then a bare `HH:MM` in a quote is
+   read as 24-hour. With any AM/PM time, or no 24-hour evidence, nothing
+   changes: `11:00` alone is not guessed. The model, the prompt and the schema
+   are unchanged. The ground truth follows the same rule
+   (`ground-truth-howto.md`).
 
 3. **Convert, then apply the existing rules unchanged.**
    - The verified stop becomes a `StopRead` and its time a `TimeRead`
@@ -1242,3 +1260,10 @@ Phase 3w (2026-10-15):
     void. **Sample numbers shifted:** a new file became 22, so the old 22 to
     28 are 23 to 29; every earlier HANDOFF and design entry uses the old
     numbers, and the next `--files` must use 29 where it meant 28.
+
+Phase 3x (2026-10-15):
+
+45. **The verifier reads a bare `HH:MM` as 24-hour when the document is 24-hour,
+    and a date no longer eats a time** (§3, "A 24-hour document"). The model,
+    prompt and schema are unchanged. Ground truth: a bare time is a time in a
+    24-hour document.
