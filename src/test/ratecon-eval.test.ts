@@ -286,6 +286,25 @@ describe("the app's path, and the score", () => {
   });
 });
 
+describe('single reads are diagnosed per read too', () => {
+  it('read A: its bar WRONGs and its appointment parts, by name', async () => {
+    const r = structuredClone(MODEL_REPLY);
+    r.stops[0]!.appointment = {
+      kind: 'exact',
+      date: '2026-10-14',
+      time: '08:00',
+      flag: 'APPT',
+      dateQuote: { line: 14, text: 'Pick up 10/14/2026 0800-1000 APPT' },
+      timeQuote: { line: 14, text: '0800-1000' },
+    };
+    const { out, deps } = harness([OK, { reply: r, usage: USAGE }]);
+    await runEvaluation(plan([file()], 2), deps);
+    expect(out).toContain('  read A: 0 WRONG on the bar · appointments: stop 1 same, stop 2 same');
+    expect(out).toContain('  read A: 0 WRONG on the bar · appointments: stop 1 (window), stop 2 same');
+    expect(out.some((l) => l.startsWith('  read B'))).toBe(false);
+  });
+});
+
 describe('the dropped-stop cue, measured per run', () => {
   it('a full read: silent', async () => {
     const { out, deps } = harness([OK]);
@@ -346,7 +365,7 @@ describe('the output: counts and codes, never a value or a line of text', () => 
     // Every line is one of the known shapes, so nothing free-form can carry text.
     for (const line of out) {
       expect(line).toMatch(
-        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: would fire on \d+ of \d+ scored runs\.|WRONG on the bar's fields: .+|The bar: .+)$/,
+        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|  read A: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: would fire on \d+ of \d+ scored runs\.|WRONG on the bar's fields: .+|The bar: .+)$/,
       );
     }
     for (const line of out.filter((l) => /^ {2}(load number|stop)/.test(l))) {
@@ -365,7 +384,7 @@ describe('the verdict, and the exit code that follows it', () => {
     wrong: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'],
     scored: 18,
     cueFired: 0,
-    pairs: { agreed: 0, differed: 0, wrongReadA: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'] },
+    pairs: { agreed: 0, differed: 0, wrongReadA: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'], wrongReadB: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'] },
     ...over,
   });
 
@@ -418,6 +437,30 @@ describe('--pairs: two reads a run, merged by agreement', () => {
   const dropped = reply((r) => {
     r.stops = [r.stops[0]!];
   });
+  /** A reply none of whose quotes is in the text: `nothing_confirmed`. */
+  const NOTHING: FakeStep = {
+    reply: { schemaVersion: 1, loadNumber: null, stops: [{ type: { value: 'PU', quote: { line: 1, text: 'not in the text' } }, street: null, city: null, state: null, zip: null, appointment: { kind: 'none' } }] },
+    usage: USAGE,
+  };
+
+  it('each read on its own: the appointment parts it got wrong, by name, and its bar WRONGs', async () => {
+    const { out, deps } = harness([otherAppt, OK]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(out).toContain('  read A: 0 WRONG on the bar · appointments: stop 1 (window), stop 2 same');
+    expect(out).toContain('  read B: 0 WRONG on the bar · appointments: stop 1 same, stop 2 same');
+    // The merge blanked it: its own diagnosis names every part, which is why the reads are diagnosed apart.
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('appointment marked, filled differently (date, time, window)');
+    expect(totals.pairs.wrongReadB).toMatchObject({ ZIP: 0 });
+  });
+
+  it("read B's own bar WRONGs are counted too", async () => {
+    const { out, deps } = harness([OK, wrongZip]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(out).toContain('  read B: 1 WRONG on the bar · appointments: stop 1 same, stop 2 same');
+    expect(totals.pairs.wrongReadB.ZIP).toBe(1);
+    expect(totals.pairs.wrongReadA.ZIP).toBe(0);
+    expect(out).toContain("Read B alone, WRONG on the bar's fields: load number 0, stop count 0, order + type 0, street 0, ZIP 1, city 0, state 0 (1 in all).");
+  });
 
   it('the flag: --pairs, and off by default', () => {
     expect(parseEvalArgs(['--approved=2026-10-14', '--files=1', '--pairs'], '2026-10-14')).toMatchObject({ ok: true, args: { pairs: true } });
@@ -432,7 +475,8 @@ describe('--pairs: two reads a run, merged by agreement', () => {
     expect(adapter.received[0]).toEqual(adapter.received[1]);
     expect(totals).toMatchObject({ calls: 2, scored: 1, pairs: { agreed: 1, differed: 0 } });
     expect(out).toContain('  pair: agree');
-    expect(out).toContain('  read A alone: 0 WRONG on the bar');
+    expect(out).toContain('  read A: 0 WRONG on the bar · appointments: stop 1 same, stop 2 same');
+    expect(out).toContain('  read B: 0 WRONG on the bar · appointments: stop 1 same, stop 2 same');
     expect(out.at(-1)).toMatch(/^The bar: met/);
     expect(out[0]).toMatch(/^sample 7 run 1: ok · A 10 values stood, 0 did not; B 10 stood, 0 did not · tokens 2 calls, 6000 in \/ 3000 out · \$/);
   });
@@ -457,7 +501,8 @@ describe('--pairs: two reads a run, merged by agreement', () => {
     const totals = await runEvaluation(pairs([file()]), deps);
     expect(out).toContain('  pair: differ (stop count 1/2)');
     expect(out).toContain('  stop count    2 read, 2 expected · exact');
-    expect(out).toContain('  read A alone: 1 WRONG on the bar');
+    expect(out).toContain('  read A: 1 WRONG on the bar · appointments: stop 1 same, stop 2 missing');
+    expect(out).toContain('  read B: 0 WRONG on the bar · appointments: stop 1 same, stop 2 same');
     expect(totals.wrong['stop count']).toBe(0);
     expect(totals.pairs.wrongReadA['stop count']).toBe(1);
     expect(out).toContain("Read A alone, WRONG on the bar's fields: load number 0, stop count 1, order + type 0, street 0, ZIP 0, city 0, state 0 (1 in all).");
@@ -479,11 +524,18 @@ describe('--pairs: two reads a run, merged by agreement', () => {
     expect(totals.pairs.agreed).toBe(1);
   });
 
-  it('one read that does not verify: the run is not scored, and not a pass', async () => {
-    const { out, deps } = harness([OK, { fail: 'timeout' }]);
+  it.each([
+    ['read B fails at the adapter', [OK, { fail: 'timeout' }], 'timeout (pair: A ok, B timeout)'],
+    ['read A fails the schema', [{ reply: { junk: true }, usage: USAGE }, OK], 'invalid_output (pair: A invalid_output, B ok)'],
+    ['read B has nothing confirmed', [OK, NOTHING], 'nothing_confirmed (pair: A ok, B nothing_confirmed)'],
+    ["both fail: read A's code", [{ fail: 'unavailable', usage: USAGE }, { fail: 'refused', usage: USAGE }], 'unavailable (pair: A unavailable, B refused)'],
+  ] as [string, FakeStep[], string][])('a pair where %s FAILS AS A WHOLE with that code, fills nothing, and is not scored', async (_, steps, said) => {
+    const { out, deps } = harness(steps);
     const totals = await runEvaluation(pairs([file()]), deps);
     expect(totals.scored).toBe(0);
-    expect(out[0]).toMatch(/^sample 7 run 1: pair_incomplete \(A ok, B timeout\) · tokens 2 calls, some not reported/);
+    expect(out[0]!.startsWith(`sample 7 run 1: ${said} · tokens 2 calls`)).toBe(true);
+    // Nothing of either read is printed or scored: no per-read line, no field line.
+    expect(out.some((l) => /^ {2}(read [AB]|load number|stop)/.test(l))).toBe(false);
     expect(barVerdict(totals, { runs: 1, calls: 2 }).exitCode).toBe(1);
   });
 
@@ -520,7 +572,7 @@ describe('--pairs: two reads a run, merged by agreement', () => {
     }
     for (const line of out) {
       expect(line).toMatch(
-        /^(|sample \d+ run \d+: (ok · A \d+ values stood, \d+ did not; B \d+ stood, \d+ did not|pair_incomplete \(A [a-z_]+, B [a-z_]+\)) · tokens .+ · \$\d+\.\d{4}|  pair: (agree|differ \((stop count \d+\/\d+)?(; )?(fields that differed: [a-z ]+ x\d+(, [a-z ]+ x\d+)*)?\))|  read A alone: \d+ WRONG on the bar|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: .+|Pairs: \d+ agreed, \d+ differed\.|Read A alone, WRONG on the bar's fields: .+|WRONG on the bar's fields, merged: .+|The bar: .+)$/,
+        /^(|sample \d+ run \d+: (ok · A \d+ values stood, \d+ did not; B \d+ stood, \d+ did not|[a-z_]+ \(pair: A [a-z_]+, B [a-z_]+\)) · tokens .+ · \$\d+\.\d{4}|  pair: (agree|differ \((stop count \d+\/\d+)?(; )?(fields that differed: [a-z ]+ x\d+(, [a-z ]+ x\d+)*)?\))|  read [AB]: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: .+|Pairs: \d+ agreed, \d+ differed\.|Read [AB] alone, WRONG on the bar's fields: .+|WRONG on the bar's fields, merged: .+|The bar: .+)$/,
       );
     }
   });

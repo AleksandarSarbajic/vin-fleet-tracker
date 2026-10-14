@@ -23,14 +23,14 @@
 import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type LoadForm, type StopForm } from '../src/components/edit/load-form';
 import { uncitedAddressLines } from '../src/lib/ratecon/address-cue';
-import { agreeReads, type Agreement } from '../src/lib/ratecon/agree-reads';
+import { agreePair, type Agreement } from '../src/lib/ratecon/agree-reads';
 import { ModelRead } from '../src/lib/ratecon/model-read';
 import { prepareForReading, type PreparedLine } from '../src/lib/ratecon/redact';
 import type { Line } from '../src/lib/ratecon/lines';
 import type { RateconRead } from '../src/lib/ratecon/templates';
 import { verifyRead, type Verified } from '../src/lib/ratecon/verify-read';
 import type { AdapterFailure, AdapterUsage, ReaderAdapter, ReaderRequest } from '../src/server/ratecon-reader/adapter';
-import { appointmentVerdict, inspect, type ExpectedStop } from './ratecon-expected.mjs';
+import { appointmentDiff, appointmentVerdict, inspect, type ExpectedStop } from './ratecon-expected.mjs';
 
 /**
  * Per million tokens, in US dollars. Source: Anthropic's model table as the
@@ -166,8 +166,8 @@ export interface EvalTotals {
   scored: number;
   /** Scored runs on which the dropped-stop cue would have fired (`address-cue.ts`). */
   cueFired: number;
-  /** With `--pairs`: how the pairs went, and read A's own WRONGs, so a run shows whether agreement removed one. */
-  pairs: { agreed: number; differed: number; wrongReadA: Record<BarField, number> };
+  /** With `--pairs`: how the pairs went, and each read's own WRONGs, so a run shows whether agreement removed one. */
+  pairs: { agreed: number; differed: number; wrongReadA: Record<BarField, number>; wrongReadB: Record<BarField, number> };
 }
 
 export const dayIn = (tz: string, at: Date) =>
@@ -238,7 +238,7 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
     wrong: zeroWrong(),
     scored: 0,
     cueFired: 0,
-    pairs: { agreed: 0, differed: 0, wrongReadA: zeroWrong() },
+    pairs: { agreed: 0, differed: 0, wrongReadA: zeroWrong(), wrongReadB: zeroWrong() },
   };
   const today = dayIn(deps.tz, deps.now);
   const nowIso = deps.now.toISOString();
@@ -279,6 +279,24 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
       const billed = `${perRun === 2 ? '2 calls, ' : ''}${counted}${usage.inputTokens} in / ${usage.outputTokens} out`;
       const head = (outcome: string, extra = '') => say(`sample ${file.n} run ${run}: ${outcome}${extra} · tokens ${billed} · ${usd(cost)}`);
       const codes = () => reads.map((r, k) => `${k === 0 ? 'A' : 'B'} ${r.code}`).join(', ');
+      /**
+       * One read on its own: its bar WRONGs, and per stop which appointment
+       * parts differ from the ground truth — names only. Scored apart from
+       * any merge: a merged, blanked appointment differs in every part.
+       */
+      const diagnose = (label: 'A' | 'B', form: LoadForm, into: Record<BarField, number>) => {
+        const wrong = zeroWrong();
+        scoreRun(file, scored(form), wrong, () => undefined);
+        for (const f of BAR_FIELDS) into[f] += wrong[f];
+        const n = BAR_FIELDS.reduce((sum, f) => sum + wrong[f], 0);
+        const appts = file.want.stops.map((w, i) => {
+          const got = form.stops[i];
+          if (!got) return `stop ${i + 1} missing`;
+          const parts = appointmentDiff(got, w.appointment);
+          return `stop ${i + 1} ${parts.length === 0 ? 'same' : `(${parts.join(', ')})`}`;
+        });
+        say(`  read ${label}: ${n} WRONG on the bar · appointments: ${appts.join(', ')}`);
+      };
 
       if (reads.some((r) => r.overBound)) {
         head(perRun === 1 ? reads[0]!.code : `pair (${codes()})`);
@@ -305,35 +323,39 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
         head('ok', ` · ${only.verified.confirmed} values stood, ${only.verified.unconfirmed} did not`);
         totals.scored += 1;
         scoreRun(file, scored(filled.form), totals.wrong, say);
+        diagnose('A', filled.form, zeroWrong());
         // The strip's cue, as the app computes it: line numbers only.
         sayCue(uncitedAddressLines(only.reply, file.lines));
         continue;
       }
 
-      // A pair: both reads must verify, or the run is not scored.
+      // A pair FAILS AS A WHOLE when either read fails (`agreePair`, Alex 2026-10-14): that code, nothing filled, not scored.
       const [a, b] = reads as [ReadOnce, ReadOnce];
-      if (a.verified === null || b.verified === null || a.reply === null || b.reply === null) {
-        head(`pair_incomplete (${codes()})`);
+      const side = (r: ReadOnce) => (r.verified ? { ok: true as const, read: r.verified.read } : { ok: false as const, code: r.code });
+      const pair = agreePair(side(a), side(b));
+      if (!pair.ok) {
+        head(pair.code, ` (pair: ${codes()})`);
         continue;
       }
-      const agreement = agreeReads(a.verified.read, b.verified.read);
+      // A pair that agreed has two verified reads, each with its reply.
+      const [va, vb] = [a.verified, b.verified];
+      if (va === null || vb === null || a.reply === null || b.reply === null) throw new Error('A pair that agreed lacks a verified read.');
+      const { agreement } = pair;
       const filled = fill(agreement.read);
-      const aloneA = fill(a.verified.read);
-      if (!filled.ok || !aloneA.ok) {
+      const aloneA = fill(va.read);
+      const aloneB = fill(vb.read);
+      if (!filled.ok || !aloneA.ok || !aloneB.ok) {
         head('fill_refused');
         continue;
       }
-      head('ok', ` · A ${a.verified.confirmed} values stood, ${a.verified.unconfirmed} did not; B ${b.verified.confirmed} stood, ${b.verified.unconfirmed} did not`);
+      head('ok', ` · A ${va.confirmed} values stood, ${va.unconfirmed} did not; B ${vb.confirmed} stood, ${vb.unconfirmed} did not`);
       totals.scored += 1;
       say(`  ${pairSaid(agreement)}`);
       if (agreement.stopCounts === null && agreement.differed.length === 0) totals.pairs.agreed += 1;
       else totals.pairs.differed += 1;
       scoreRun(file, scored(filled.form), totals.wrong, say);
-      const wrongA = zeroWrong();
-      scoreRun(file, scored(aloneA.form), wrongA, () => undefined);
-      for (const f of BAR_FIELDS) totals.pairs.wrongReadA[f] += wrongA[f];
-      const nA = BAR_FIELDS.reduce((n, f) => n + wrongA[f], 0);
-      say(`  read A alone: ${nA} WRONG on the bar`);
+      diagnose('A', aloneA.form, totals.pairs.wrongReadA);
+      diagnose('B', aloneB.form, totals.pairs.wrongReadB);
       // A line either read cited is used.
       const citedByB = new Set(uncitedAddressLines(b.reply, file.lines));
       sayCue(uncitedAddressLines(a.reply, file.lines).filter((n) => citedByB.has(n)));
@@ -349,8 +371,10 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
   say(`Address cue: would fire on ${totals.cueFired} of ${totals.scored} scored runs.`);
   if (plan.pairs) {
     say(`Pairs: ${totals.pairs.agreed} agreed, ${totals.pairs.differed} differed.`);
-    const a = BAR_FIELDS.reduce((n, f) => n + totals.pairs.wrongReadA[f], 0);
-    say(`Read A alone, WRONG on the bar's fields: ${BAR_FIELDS.map((f) => `${f} ${totals.pairs.wrongReadA[f]}`).join(', ')} (${a} in all).`);
+    for (const [label, wrong] of [['A', totals.pairs.wrongReadA], ['B', totals.pairs.wrongReadB]] as const) {
+      const n = BAR_FIELDS.reduce((sum, f) => sum + wrong[f], 0);
+      say(`Read ${label} alone, WRONG on the bar's fields: ${BAR_FIELDS.map((f) => `${f} ${wrong[f]}`).join(', ')} (${n} in all).`);
+    }
   }
   say(`WRONG on the bar's fields${plan.pairs ? ', merged' : ''}: ${BAR_FIELDS.map((f) => `${f} ${totals.wrong[f]}`).join(', ')}.`);
   const wrong = BAR_FIELDS.reduce((n, f) => n + totals.wrong[f], 0);
