@@ -32,7 +32,7 @@ describe('which sent lines look like a US city, state and ZIP', () => {
   });
 });
 
-describe('uncitedAddressLines: address-like lines no quote in the text covers', () => {
+describe('uncitedAddressLines: address-like lines no quote in the text covers, after the first stop', () => {
   it('a full read cites every address line: nothing', () => {
     expect(uncitedAddressLines(MODEL_REPLY, sent())).toEqual([]);
   });
@@ -42,11 +42,39 @@ describe('uncitedAddressLines: address-like lines no quote in the text covers', 
     expect(uncitedAddressLines(dropped, sent())).toEqual([18]);
   });
 
-  it("the broker's own address, the only uncited line, fires too: the cue cannot tell it from a stop", () => {
+  /** MODEL_REPLY with every cited line moved down by `by`, for a document with lines put before it. */
+  const shifted = (by: number): ModelRead => JSON.parse(JSON.stringify(MODEL_REPLY).replace(/"line":(\d+)/g, (_, n: string) => `"line":${Number(n) + by}`));
+
+  it("the broker's address in a header, BEFORE the first stop: silent (the narrowing, phase 3d)", () => {
     const withBroker = [pdfLine(1, 'EXAMPLE LOGISTICS GROUP', '100 Example Ave', 'Minneapolis, MN 55401'), ...UNKNOWN_LAYOUT];
-    // The broker's line is L1; every stop line moves down by one.
-    const reply: ModelRead = JSON.parse(JSON.stringify(MODEL_REPLY).replace(/"line":(\d+)/g, (_, n: string) => `"line":${Number(n) + 1}`));
-    expect(uncitedAddressLines(reply, sent(withBroker))).toEqual([1]);
+    expect(uncitedAddressLines(shifted(1), sent(withBroker))).toEqual([]);
+  });
+
+  it("a broker's or remit-to address AFTER the first stop still fires: the cue cannot tell it from a stop", () => {
+    const withRemit = [...UNKNOWN_LAYOUT, pdfLine(2, 'Remit to: Example Logistics Group, Minneapolis, MN 55401')];
+    // Pasted-free PDF lines: page 3 is not sent, the remit line on page 2 is, as L21.
+    expect(uncitedAddressLines(MODEL_REPLY, sent(withRemit))).toEqual([21]);
+  });
+
+  it('a dropped FIRST stop is NOT caught: its lines come before the first line any stop was read from (known miss)', () => {
+    const firstDropped: ModelRead = { ...MODEL_REPLY, stops: [MODEL_REPLY.stops[1]!] };
+    expect(uncitedAddressLines(firstDropped, sent())).toEqual([]);
+  });
+
+  it('no stop quote in the text at all: no first stop to start from, so every uncited address line counts', () => {
+    const lost: ModelRead = {
+      ...MODEL_REPLY,
+      stops: MODEL_REPLY.stops.map((s) => ({
+        ...s,
+        type: { value: s.type.value, quote: { line: 1, text: 'not in the text' } },
+        street: null,
+        city: null,
+        state: null,
+        zip: null,
+        appointment: { kind: 'none' as const },
+      })),
+    };
+    expect(uncitedAddressLines(lost, sent())).toEqual([13, 18]);
   });
 
   it('a quote that is not in the text covers nothing: a made-up citation does not hide a line', () => {

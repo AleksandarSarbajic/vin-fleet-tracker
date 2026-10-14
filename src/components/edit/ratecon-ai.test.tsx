@@ -246,6 +246,26 @@ describe('the dropped-stop cue: address-like lines the read did not use', () => 
     expect(input(form(), 'Street address').value).toBe('4001 Main St');
   });
 
+  it("a broker's address above the stops is not named; a dropped stop below it still is (the narrowing, phase 3d)", async () => {
+    const clip = `Example Logistics Group, Minneapolis, MN 55401\n${CLIP}`;
+    const shifted = (read: ModelRead): ModelRead =>
+      JSON.parse(JSON.stringify(read).replace(/"line":(\d+)/g, (_, n: string) => `"line":${Number(n) + 1}`)) as ModelRead;
+    readAnswer = respond(200, { ok: true, read: shifted(MODEL_REPLY) });
+    await render();
+    await pasteText(clip);
+    await click(readWithAi()!);
+    expect(said()).toContain('Filled 2 stops');
+    expect(cue()).toBeNull();
+
+    act(() => root?.unmount());
+    root = createRoot(container!);
+    readAnswer = respond(200, { ok: true, read: shifted(DROPPED) });
+    await render();
+    await pasteText(clip);
+    await click(readWithAi()!);
+    expect(cue()?.textContent).toBe('1 line that looks like an address was not used: L19');
+  });
+
   it('after "Replace", the cue still comes', async () => {
     readAnswer = respond(200, { ok: true, read: DROPPED });
     await render();

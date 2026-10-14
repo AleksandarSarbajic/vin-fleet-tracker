@@ -32,7 +32,8 @@ import { verifyRead } from '@/lib/ratecon/verify-read';
  * fixed sentence and fills nothing; the button stays.
  *
  * After an AI fill, the dropped-stop cue (`address-cue.ts`): sent lines that
- * look like addresses and that no quote used are named, with what was sent.
+ * look like addresses, that no quote used, after the first stop, are named,
+ * with what was sent. It cannot catch a dropped first stop.
  * It blocks nothing and changes no mark. Like everything in the detail, it
  * folds away when the load is typed into.
  */

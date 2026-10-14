@@ -8,16 +8,16 @@
  *     (`looksLikeAddressLine`, the cue's own test);
  *   - the known stop count: the template's read, and the ground truth's
  *     where it is complete;
- *   - for a file a template reads, how many of those lines the TEMPLATE
- *     did not read from. That is the cue on a read that dropped nothing and
- *     cited what the template used: it would fire if any is left. A model
- *     cites quotes, not whole lines, so this is an estimate;
- *   - of those, how many come after the first line a stop was read from: a
- *     possible narrowing (a header's address comes before the stops), only
- *     measured here, not built into the cue.
+ *   - for a file a template reads, the cue on a read that dropped nothing
+ *     and cited what the template used — the app's own rule (`cueLines`):
+ *     address-like lines the template did not read from, AFTER the first
+ *     line a stop was read from. A model cites quotes, not whole lines, so
+ *     this is an estimate;
+ *   - beside it, for comparison, the cue as first built in 3c: any uncited
+ *     address-like line, wherever it is.
  */
 import { readFileSync, existsSync } from 'node:fs';
-import { looksLikeAddressLine } from '../src/lib/ratecon/address-cue';
+import { cueLines, looksLikeAddressLine } from '../src/lib/ratecon/address-cue';
 import type { Line } from '../src/lib/ratecon/lines';
 import { prepareForReading, selectPages } from '../src/lib/ratecon/redact';
 import { readRatecon, type RateconRead, type Source } from '../src/lib/ratecon/templates';
@@ -68,9 +68,9 @@ async function main() {
     return r.state === 'complete' && 'stops' in r.entry ? r.entry.stops.length : null;
   };
 
-  console.info('Counts only. "uncited by the template": address-like sent lines the template read nothing from.\n');
+  console.info('Counts only. The cue as built names address-like sent lines nothing cited, after the first stop.\n');
   console.info(
-    ['sample', 'template', 'stops (template)', 'stops (ground truth)', 'lines sent', 'address-like sent', 'uncited by the template', 'cue with nothing dropped', 'uncited after the first stop (a narrowing, not built)'].join(' | '),
+    ['sample', 'template', 'stops (template)', 'stops (ground truth)', 'lines sent', 'address-like sent', 'uncited anywhere (3c)', 'uncited after the first stop (as built)', 'cue with nothing dropped'].join(' | '),
   );
   let controlFired = 0;
   let controlSeen = 0;
@@ -95,12 +95,12 @@ async function main() {
     let narrow: number | '—' = '—';
     if (template.ok) {
       const chosen = selectPages(pdf.lines);
-      const cited = citedIndexes(chosen, sourcesOf(template.read));
-      const firstStop = Math.min(...citedIndexes(chosen, sourcesOf(template.read, true)));
-      const left = prepared.lines.map((l, k) => k).filter((k) => !cited.has(k) && looksLikeAddressLine(prepared.lines[k]!.text));
-      uncited = left.length;
-      narrow = left.filter((k) => k > firstStop).length;
-      fires = uncited > 0 ? 'FIRES' : 'silent';
+      // Sent line n is chosen line n − 1.
+      const cited = new Set([...citedIndexes(chosen, sourcesOf(template.read))].map((k) => k + 1));
+      const stopLines = [...citedIndexes(chosen, sourcesOf(template.read, true))].map((k) => k + 1);
+      uncited = cueLines(prepared.lines, cited, 0).length;
+      narrow = cueLines(prepared.lines, cited, stopLines.length > 0 ? Math.min(...stopLines) : null).length;
+      fires = narrow > 0 ? 'FIRES' : 'silent';
       templateSeen += 1;
       if (uncited > 0) templateFired += 1;
       if (narrow > 0) templateNarrowFired += 1;
@@ -111,11 +111,12 @@ async function main() {
       }
     }
     console.info(
-      [n, template.ok ? template.read.layout : 'not recognised', template.ok ? template.read.stops.length : '—', known ?? '—', prepared.lines.length, addressLike, uncited, fires, narrow].join(' | '),
+      [n, template.ok ? template.read.layout : 'not recognised', template.ok ? template.read.stops.length : '—', known ?? '—', prepared.lines.length, addressLike, uncited, narrow, fires].join(' | '),
     );
   }
-  console.info(`\nWith no stop dropped (the template's citations), the cue would fire on ${controlFired} of the ${controlSeen} control files (1, 18, 19, 22, 23, 27), and on ${templateFired} of the ${templateSeen} template-read files.`);
-  console.info(`Narrowed to lines after the first stop (not built): ${controlNarrowFired} of ${controlSeen} control files, ${templateNarrowFired} of ${templateSeen} template-read files.`);
+  console.info(`\nWith no stop dropped (the template's citations), the cue AS BUILT would fire on ${controlNarrowFired} of the ${controlSeen} control files (1, 18, 19, 22, 23, 27), and on ${templateNarrowFired} of the ${templateSeen} template-read files.`);
+  console.info(`As first built in 3c (any uncited line): ${controlFired} of ${controlSeen} control files, ${templateFired} of ${templateSeen} template-read files.`);
+  console.info('It cannot catch a dropped FIRST stop.');
 }
 
 await main();
