@@ -293,16 +293,46 @@ browser against exactly the lines it sent). For every cited value:
    that is in the document: when the model's quote is not there, the mark
    says so and does not repeat it.
 
-**The dropped-stop cue** (`src/lib/ratecon/address-cue.ts`, phase 3c,
-2026-10-14). The verifier checks each value against its quote and never
+**The dropped-stop cue** (`src/lib/ratecon/address-cue.ts`, phases 3c and
+3d, 2026-10-14). The verifier checks each value against its quote and never
 counts stops, so a read that leaves a stop out verifies cleanly (evaluation
-run 1, sample 22). After verification, the strip names the sent lines that
-look like a US city, state and ZIP (`cityLine`, on the line or any cell) and
-that no quote in the text covers: "N lines that look like addresses were not
-used: L12, L45", with "Show what is sent". A made-up citation covers
-nothing. It blocks nothing and changes no mark. **It cannot tell a stop from
-any other address,** a broker's or carrier's own included. Offline, with
-nothing dropped, it would fire on 5 of the 6 control files (HANDOFF, 3c).
+run 1, sample 22). After verification, the strip names the sent lines that:
+- look like a US city, state and ZIP (`cityLine`, on the line or any cell);
+- no quote in the text covers (a made-up citation covers nothing);
+- come AFTER the first line any stop was read from (3d).
+
+It says "N lines that look like addresses were not used: L12, L45", with
+"Show what is sent". It blocks nothing and changes no mark.
+- **It cannot catch a dropped FIRST stop:** its lines come before any stop
+  the read kept.
+- **It cannot tell a stop from another address after the stops,** such as a
+  remit-to or a footer.
+- **Measured offline, with nothing dropped:** 1 of 6 control files and 5 of
+  13 template-read files. Without the "after the first stop" rule (3c) it
+  was 5 of 6, because a header's addresses come before the stops.
+
+**Two-read agreement** (`src/lib/ratecon/agree-reads.ts`, phase 3d; built
+and tested, NOT wired into the app). Two reads of the same lines, each
+verified, merged so that only what both said stands:
+- **When the stop counts differ,** the read with more stops gives them, and
+  a notice names both counts.
+- **Stop by stop, by index,** a field they differ on is left blank and
+  marked "The two AI reads differed." An appointment that differs in any
+  part is blanked and marked whole.
+- **A field both left blank or unconfirmed stays as it was.**
+
+It catches a read that drops a stop or wanders on a value. It CANNOT catch
+the same mistake made twice: run 1's sample 27 appointment was WRONG the
+same way in 3 runs of 3. Comparing by index blanks the stops after a
+dropped middle stop: the safe side.
+
+**What it would cost in the app:**
+- one read is two calls, made in parallel, so the latency is about one
+  call's;
+- each read would use **two calls against the daily cap**, so the caps
+  (§10 item 8) would halve in reads or need doubling;
+- about **$0.003 a pair** on Haiku 5.5, from run 1's measured $0.0280 for
+  18 calls.
 
 **Prompt injection.** The text is untrusted. The model has no tools, its
 output must pass the schema, every value must be quoted from the text, and
@@ -559,6 +589,10 @@ SOC 2/ISO reports, as `llm-reader-vendors.md` lists.
 | Small | $0.002 | $0.004 | $0.04 – $0.08 | $0.18 – $0.41 |
 | Mid | $0.007 | $0.017 | $0.14 – $0.33 | $0.70 – $1.65 |
 | Large | $0.021 | $0.050 | $0.42 – $0.99 | $2.10 – $4.95 |
+
+**Measured** (evaluation run 1, Haiku 5.5): $0.0280 for 18 calls, about
+$0.0016 a read; two-read agreement (§3) makes a read two calls, about
+$0.003.
 
 At these volumes cost is not the constraint. The caps guard against a loop.
 The ceiling they allow is 100 reads a day for 30 days at the large band's
@@ -905,4 +939,15 @@ Phase 3c (2026-10-14):
 35. **The form has no end date,** so appointment diagnostics name `window`
     (an appointment's end) or `end time` (receiving hours' end); an end-date
     error shows as one of those.
+
+Phase 3d (2026-10-14):
+
+36. **Two-read agreement** (§3) is a library and an evaluation mode
+    (`ratecon:eval-ai --pairs`), not yet a feature. The stop type cannot be
+    left blank in a read, so a differing type keeps the base read's value
+    and is marked. StopRead gains `timeCheck`, which the fill says in place
+    of its own appointment check; only agreement sets it.
+37. **The cue is narrowed** to lines after the first stop (§3). It now
+    misses a dropped first stop, which it caught before; it no longer fires
+    on a header's addresses.
 

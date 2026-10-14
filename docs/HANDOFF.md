@@ -1198,7 +1198,7 @@ sent: 2 → 3, 4 → 3, 7 → 2, 8 → 3, 9 → 8, 10 → 4, 11 → 2, 12 → 10
 | The cue as built | **5 of 6** (all but 1) | 12 of 13 |
 | Narrowed to lines after the first stop (measured only, NOT built) | 1 of 6 (27) | 5 of 13 |
 
-**As built, the cue is noise.** Every file but sample 1 has more
+**As built in 3c, the cue was noise** (narrowed in 3d, below). Every file but sample 1 has more
 address-like lines than stops: the broker's, the carrier's, bill-to and
 remit-to. A dispatcher shown it on nearly every AI read would learn to
 ignore it, the same risk §10 item 1 named for marks.
@@ -1245,6 +1245,137 @@ test:
 cell matches nearly always matches whole. It now has a case where only the
 cell finds the city (`Order PO 44120` | `Fargo, ND 58102`).
 
+### Phase 3d: two-read agreement, built and tested, not wired (2026-10-14)
+
+No API call, no use of the key, no document text or ground-truth value read
+or printed.
+
+**1. `agreeReads(a, b)`** (`src/lib/ratecon/agree-reads.ts`; pure; NOT used
+by the app yet). Two reads of the same lines, each already verified:
+
+- **The stop count:** when it differs, the read with MORE stops gives them,
+  each verified against its own quotes.
+  - A notice names both counts: "The two AI reads found 1 and 2 stops. The
+    2 shown are the read with more; check each against the document."
+- **Stop by stop, by index:** a field the reads differ on is left blank and
+  marked "The two AI reads differed. Enter it by hand."
+  - That includes one read filled and the other blank.
+  - A field both left blank or unconfirmed stays as it was, with its own
+    mark.
+- **An appointment:** any difference blanks and marks the whole of it. That
+  is the kind (exact, range), date, time, end date, end time or flag.
+  - Two unconfirmed appointments (`none` or `unreadable`) are not a
+    difference.
+  - One confirmed and one not is.
+- **The stop type** cannot be blank in a read. A differing type keeps the
+  base read's value, marked "… Check it."
+- **The load number** follows the same rules.
+- **The result:**
+  - the `RateconRead` that `fillLoad` takes (layout `model`);
+  - `notices` for a later UI;
+  - `differed` (stop and field name), for the evaluation;
+  - neither input is changed.
+- **Two things changed outside it:**
+  - `StopRead` gains `timeCheck`;
+  - `fillLoad` says it in place of its own appointment check.
+  Only agreement sets it; a test fills a merged read through `fillLoad`.
+- **Costs:**
+  - **Comparing by index.** A stop dropped from the MIDDLE shifts the rest,
+    which then compare as different and are blanked. It is the safe side (a
+    blank is seen), and it is pinned in a test.
+  - **The same mistake twice is invisible.** Sample 27's appointment was
+    WRONG the same way in 3 runs of 3, so a pair would most likely agree on
+    it. A test pins that a shared WRONG stays WRONG.
+
+**2. `ratecon:eval-ai --pairs`:**
+
+- **Each run is two calls** with the same request, made in parallel. Both
+  are verified, merged by `agreeReads` and scored as before.
+- **Per run** (counts and names only):
+  - `pair: agree`, or `pair: differ (stop count 1/2; fields that differed:
+    street x1, appointment x1)`;
+  - the merged fill's score;
+  - `read A alone: N WRONG on the bar`.
+- **At the end:** pairs agreed and differed, and read A's WRONG per bar
+  field beside the merged ones. So a run shows whether agreement removed a
+  WRONG.
+- **A pair with a read that does not verify** is `pair_incomplete (A ok, B
+  timeout)` and is not scored (so the verdict is `incomplete`).
+- **The ceilings count calls:**
+  - a pair is made only if two more calls and two bounds fit;
+  - the plan refuses more than 75 calls (so at most 12 files × 3 runs);
+  - $1.00 and the approval flags are unchanged.
+- **The default stays single-read,** and prints as before (the 52 earlier
+  tests pass unchanged).
+- **A pair costs about $0.003 on Haiku 5.5.** Run 1 measured $0.0280 for 18
+  calls. A paired run 2 on the six control files would be 36 calls, about
+  $0.06.
+
+**3. The address cue, narrowed** to the version 3c measured: uncited
+address-like lines AFTER the first line any stop was read from.
+
+- **The rule** is `cueLines`, shared by the strip and `ratecon:cue-report`,
+  which now measures exactly what ships.
+- **With nothing dropped,** it would fire on 1 of 6 control files (27) and
+  5 of 13 template-read files. As first built in 3c it was 5 of 6 and 12 of
+  13.
+- **It cannot catch a dropped FIRST stop:** its lines come before any stop
+  the read kept. A test pins this miss.
+- **It still fires on an address after the stops** (a remit-to, a footer).
+  A broker header before the stops is now silent.
+- **With no stop quote in the text,** there is no first stop, and every
+  uncited address line counts.
+- **It still folds away** at the first keystroke in the load (3c).
+  Unchanged.
+
+**Tests:** 2680 in all (2639 before).
+
+| File | Tests |
+|---|---|
+| `agree-reads.test.ts` (new) | 24 |
+| `ratecon-fill.test.ts` | 1 more |
+| `ratecon-eval.test.ts` | 64 (52 before) |
+| `address-cue.test.ts` | 23 (20 before) |
+| `ratecon-ai.test.tsx` | 1 more |
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- **`agreeReads` (11):**
+  - the smaller read gives the stops;
+  - no count notice;
+  - a blank against a value agrees;
+  - the flag not compared;
+  - the end date not compared;
+  - an unconfirmed against a confirmed time agrees;
+  - a differing appointment kept;
+  - a differing field kept;
+  - the type not compared;
+  - the load number not compared;
+  - extra stops dropped.
+- **Pairs (7):**
+  - one call made;
+  - the call ceiling counts a pair as one;
+  - the dollar ceiling prices one call;
+  - read A filled instead of the merge;
+  - read A scored on the merge;
+  - a half-failed pair scored;
+  - the plan counts a pair as one call.
+- **The narrowing (3):**
+  - no narrowing;
+  - the load number's quote as the first stop;
+  - silent with no stop quote.
+
+**For Alex, before agreement goes into the app:**
+
+- **Does it pay?** A paired run 2 on the six control files (36 calls,
+  about $0.06) would show whether agreement removes sample 22's kind of
+  WRONG, and what it costs in blanks. It needs its own written approval.
+- **The caps:** each read would be two calls against the daily cap. Either
+  the cap counts calls and halves the reads, or it is doubled.
+- **Latency:** the two calls run in parallel, so a read takes about as long
+  as one call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -1282,11 +1413,12 @@ proposals below).
    files and run once (phase 3b). The next run, on the unrecognised files,
    needs its own written approval naming them.
 5. **Decide what to do about run 1's findings:**
-   - **A dropped stop:** the cue is built (3c). As built it would fire on 5
-     of 6 control files with nothing dropped. Decide: narrow it to lines
-     after the first stop (1 of 6; misses a dropped first stop), try
-     another signal, or keep it. Also decide whether it should outlast the
-     first keystroke.
+   - **A dropped stop:** the cue is narrowed (3d): 1 of 6 control files
+     with nothing dropped, and it misses a dropped first stop. Still to
+     decide: whether it should outlast the first keystroke.
+   - **Two-read agreement** (3d, not wired): approve a paired run 2 on the
+     six control files (`--pairs`, 36 calls, about $0.06) to see whether it
+     pays. If it goes in, decide the caps: two calls a read.
    - **Sample 27, stop 1:** Alex reads its appointment lines in the viewer
      and says whether the ground truth or the read is right. The template
      agrees with the ground truth there.
