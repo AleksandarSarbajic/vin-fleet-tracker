@@ -23,6 +23,15 @@ import type { RateconRead, Sourced, StopRead, TimeRead } from './templates';
  * The result is what `fillLoad` takes (layout 'model'), with `notices` for
  * the strip to say, and `differed` for the evaluation to count. Neither
  * input is changed.
+ *
+ * THE CALLER'S CONTRACT (Alex, 2026-10-14): `agreeReads` takes two VERIFIED
+ * reads only. A pair where either read fails — the adapter, the schema, or
+ * nothing confirmed — FAILS AS A WHOLE with that code and fills nothing. It
+ * never falls back to the read that succeeded: one read alone is exactly
+ * what agreement exists to distrust. `agreePair` is that contract in code;
+ * call it, not `agreeReads`, with the two outcomes. (Design §4, §5: a failed
+ * pair is one read against the cap, and the strip says the AI read did not
+ * complete.)
  */
 
 export const AGREE_DIFFERED = 'The two AI reads differed.';
@@ -104,4 +113,18 @@ export function agreeReads(a: RateconRead, b: RateconRead): Agreement {
     notices.push(`The two AI reads differed on ${differed.length} ${differed.length === 1 ? 'field' : 'fields'}; each is left blank and marked.`);
   }
   return { read: { layout: 'model', loadNumber, loadNumberCheck, stops }, notices, stopCounts, differed };
+}
+
+/** One side of a pair: a verified read, or the code its read failed with. */
+export type PairRead<C extends string> = { ok: true; read: RateconRead } | { ok: false; code: C };
+
+/**
+ * The pair, by the contract above: the agreement of two verified reads, or
+ * the pair's failure — read A's code when A failed, else read B's. Nothing
+ * from a failed pair is ever filled.
+ */
+export function agreePair<C extends string>(a: PairRead<C>, b: PairRead<C>): { ok: true; agreement: Agreement } | { ok: false; code: C } {
+  if (!a.ok) return { ok: false, code: a.code };
+  if (!b.ok) return { ok: false, code: b.code };
+  return { ok: true, agreement: agreeReads(a.read, b.read) };
 }

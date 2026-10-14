@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_REPLY, UNKNOWN_LAYOUT } from '@/test/model-read-fixtures';
-import { AGREE_DIFFERED, agreeReads } from './agree-reads';
+import { AGREE_DIFFERED, agreePair, agreeReads } from './agree-reads';
 import { prepareForReading } from './redact';
 import type { RateconRead, StopRead, TimeRead } from './templates';
 import { verifyRead } from './verify-read';
@@ -176,5 +176,27 @@ describe('the result is what fillLoad takes', () => {
     const before = [structuredClone(a), structuredClone(b)];
     agreeReads(a, b);
     expect([a, b]).toEqual(before);
+  });
+});
+
+describe('agreePair: the caller contract — a pair where either read fails fails as a whole (Alex, 2026-10-14)', () => {
+  const ok = (read = base()) => ({ ok: true as const, read });
+  const failed = (code: string) => ({ ok: false as const, code });
+
+  it('both reads verified: their agreement', () => {
+    const out = agreePair(ok(), ok(withStop(base(), 0, { zip: null })));
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.agreement.differed).toEqual([{ stop: 1, field: 'zip' }]);
+  });
+
+  it.each([
+    ['read A failed at the adapter', failed('timeout'), ok(), 'timeout'],
+    ['read B failed the schema', ok(), failed('invalid_output'), 'invalid_output'],
+    ['read B had nothing confirmed', ok(), failed('nothing_confirmed'), 'nothing_confirmed'],
+    ["both failed: read A's code", failed('unavailable'), failed('refused'), 'unavailable'],
+  ] as const)('%s: the pair fails with that code, and there is no read to fill', (_, a, b, code) => {
+    const out = agreePair(a, b);
+    expect(out).toEqual({ ok: false, code });
+    expect('agreement' in out).toBe(false);
   });
 });
