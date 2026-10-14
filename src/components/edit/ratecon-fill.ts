@@ -1,6 +1,7 @@
 import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
 import { zipStateCheck } from '@/lib/geo/zip-state';
 import { normalCase } from '@/lib/ratecon/normal-case';
+import { isRealUsZip } from '@/lib/ratecon/us-zip';
 import type { RateconRead, Source, StopRead, TimeRead } from '@/lib/ratecon/templates';
 import type { AppointmentDraft } from './AppointmentFields';
 import {
@@ -29,6 +30,9 @@ import {
 
 export const TOO_MANY_STOPS = (n: number) =>
   `This rate confirmation has ${n} stops; a load holds at most ${MAX_STOPS_PER_LOAD}. Nothing was filled.`;
+
+/** Said under a ZIP the read found but that cannot exist (below 00501); it is left blank, like a ZIP not found. The value is not repeated. */
+export const ZIP_NOT_REAL = "Check: the PDF's ZIP is not a real US ZIP. Enter it by hand.";
 
 /** A window this long or shorter is an appointment window; longer is receiving hours. */
 export const APPT_WINDOW_MAX_MINUTES = 120;
@@ -144,7 +148,10 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
     ['state', 'state', read.state, (v: string) => v],
     ['zip', 'zip', read.zip, (v: string) => v],
   ] as const) {
-    if (value) {
+    if (value && field === 'zip' && !isRealUsZip(value.value)) {
+      // A placeholder the broker's system printed: the same as no ZIP found.
+      checks.zip = ZIP_NOT_REAL;
+    } else if (value) {
       address[field] = shown(value.value);
       sources[field] = value.source;
     } else {

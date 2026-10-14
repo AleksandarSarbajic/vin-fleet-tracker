@@ -12,6 +12,8 @@ import { AGREE_DIFFERED, agreeReads } from '@/lib/ratecon/agree-reads';
 import { loadFormFrom, patchStop, type LoadForm } from './load-form';
 import {
   TOO_MANY_STOPS,
+  ZIP_NOT_REAL,
+  aiMarkedFields,
   aiMarks,
   appointmentFrom,
   confirmAiLoadNumber,
@@ -341,6 +343,88 @@ describe('street and city in normal case (2026-10-14)', () => {
     const form = fill(verified.read);
     expect([form.stops[0]!.addressLine, form.stops[0]!.city, form.stops[0]!.state]).toEqual(['4001 Main St', 'Fargo', 'ND']);
     expect(aiMarks(form)).toEqual({ stops: 2, fields: 12 });
+  });
+});
+
+describe('a ZIP that cannot exist is not put in the form (2026-10-14)', () => {
+  const withZip = (read: RateconRead, at: number, zip: string): RateconRead => ({
+    ...read,
+    stops: read.stops.map((s, i) => (i === at && s.zip ? { ...s, zip: { ...s.zip, value: zip } } : s)),
+  });
+
+  it('00001 leaves the ZIP blank and marks it; the other fields are unaffected', () => {
+    const base = readOf(STOPS_SECTION);
+    const plain = fill(base).stops[0]!;
+    const stop = fill(withZip(base, 0, '00001')).stops[0]!;
+    expect(stop.zip).toBe('');
+    expect(stop.fill?.checks.zip).toBe(ZIP_NOT_REAL);
+    expect(stop.fill?.checks.zip).toBe("Check: the PDF's ZIP is not a real US ZIP. Enter it by hand.");
+    expect(stop.fill?.checks.zip).not.toContain('00001');
+    expect(stop.fill?.sources.zip).toBeUndefined();
+    expect([stop.addressLine, stop.city, stop.state]).toEqual([plain.addressLine, plain.city, plain.state]);
+    expect(stop.fill?.sources.addressLine).toEqual(plain.fill?.sources.addressLine);
+    expect(stop.fill?.sources.city).toEqual(plain.fill?.sources.city);
+    // Only the ZIP's own mark is new.
+    expect(stop.fill?.checks).toEqual({ ...plain.fill?.checks, zip: ZIP_NOT_REAL });
+  });
+
+  it('it comes out exactly as a ZIP the reader did not find: the same form, the same count to check', () => {
+    const base = readOf(STOPS_SECTION);
+    const missing = fill({ ...base, stops: base.stops.map((s, i) => (i === 0 ? { ...s, zip: null } : s)) });
+    const placeholder = fill(withZip(base, 0, '00001'));
+    const stop = (f: LoadForm) => f.stops[0]!;
+    expect(stop(placeholder).zip).toBe(stop(missing).zip);
+    expect(stop(placeholder).appointment.tz).toBe(stop(missing).appointment.tz);
+    expect(fieldsToCheck(placeholder)).toBe(fieldsToCheck(missing));
+    expect(fieldsToCheck(placeholder)).toBeGreaterThan(fieldsToCheck(fill(base)));
+    // Only the wording differs: a missing ZIP says it was not found.
+    expect(Object.keys(stop(placeholder).fill?.checks ?? {}).sort()).toEqual(Object.keys(stop(missing).fill?.checks ?? {}).sort());
+    expect(stop(missing).fill?.checks.zip).toBe('Not found in the PDF.');
+  });
+
+  it('00000, 00500 and a ZIP+4 of the same kind are all refused; 00501 and a real ZIP fill as before', () => {
+    const base = readOf(STOPS_SECTION);
+    for (const zip of ['00000', '00500', '00001-1234']) expect(fill(withZip(base, 0, zip)).stops[0]!.zip, zip).toBe('');
+    expect(fill(withZip(base, 0, '00501')).stops[0]!.zip).toBe('00501');
+    expect(fill(withZip(base, 0, '60450')).stops[0]!.zip).toBe('60450');
+  });
+
+  it('a real ZIP fills as before, source and all, and the other stop is untouched', () => {
+    const form = fill(withZip(readOf(STOPS_SECTION), 0, '00001'));
+    const stop2 = form.stops[1]!;
+    expect(stop2.zip).toBe('58601');
+    expect(stop2.fill?.checks.zip).toBeUndefined();
+    expect(stop2.fill?.sources.zip).toBeDefined();
+  });
+
+  describe('a model read', () => {
+    const lines = UNKNOWN_LAYOUT.map((l) => (l.text.startsWith('Fargo, ND') ? pdfLine(2, 'Fargo, ND 00001') : l));
+    const reply = structuredClone(MODEL_REPLY);
+    for (const f of ['city', 'state', 'zip'] as const) reply.stops[0]![f]!.quote = { line: 13, text: 'Fargo, ND 00001' };
+    reply.stops[0]!.zip = { value: '00001', quote: { line: 13, text: 'Fargo, ND 00001' } };
+    const read = (() => {
+      const prepared = prepareForReading(lines);
+      if (!prepared.ok) throw new Error(prepared.reason);
+      const out = verifyRead(reply, prepared.lines, NOW);
+      if (!out.ok) throw new Error(out.reason);
+      return out.read;
+    })();
+
+    it('the verifier keeps what was printed; the form does not', () => {
+      expect(read.stops[0]!.zip?.value).toBe('00001');
+      const stop = fill(read).stops[0]!;
+      expect(stop.zip).toBe('');
+      expect(stop.fill?.checks.zip).toBe(ZIP_NOT_REAL);
+      expect([stop.addressLine, stop.city, stop.state]).toEqual(['4001 Main St', 'Fargo', 'ND']);
+    });
+
+    it('the blank is a check, not an AI mark', () => {
+      const form = fill(read);
+      expect(aiMarkedFields(form.stops[0]!)).not.toContain('zip');
+      expect(aiMarkedFields(form.stops[0]!).sort()).toEqual(['addressLine', 'appointment', 'city', 'state', 'stopType']);
+      // The 12 fields of a good read, less the ZIP.
+      expect(aiMarks(form)).toEqual({ stops: 2, fields: 11 });
+    });
   });
 });
 
