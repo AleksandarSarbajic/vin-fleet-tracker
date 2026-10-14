@@ -14,7 +14,9 @@
  *     page numbers them) and each one's categories — never the text — so
  *     Alex reviews only those;
  *   - for a file that would be sent, a short sha256 of exactly what would be
- *     sent, so two runs can be compared without printing it.
+ *     sent, so two runs can be compared without printing it;
+ *   - the LINE NUMBERS where the person-name pass (a name running on past
+ *     its label's cell) masked something, and how many masks — never the text.
  * Scans and refused PDFs are listed by reason, from the reader's own codes.
  */
 import { createHash } from 'node:crypto';
@@ -50,6 +52,7 @@ async function main() {
   const notText: string[] = [];
   const hitLines: string[] = [];
   const sentHashes: string[] = [];
+  const nameLines: string[] = [];
   for (const [i, file] of files.entries()) {
     const n = i + 1;
     const pdf = await readSample(file);
@@ -61,6 +64,8 @@ async function main() {
     const template = readRatecon(pdf.lines);
     const read = template.ok ? `read (${template.read.layout})` : 'not recognised';
     const prepared = prepareForReading(pdf.lines);
+    const named = redactedForReview(pdf.lines).lines.filter((l) => l.names > 0);
+    if (named.length > 0) nameLines.push(`sample ${n}: ${named.map((l) => `L${l.n} (${l.names})`).join('; ')}`);
     const row: (string | number)[] = [n, read, pdf.lines.length, pages(pdf.lines)];
     if (prepared.ok) {
       row.push(prepared.lines.length, pages(prepared.lines), ...KINDS.map((k) => prepared.masks[k]), 0, 'no');
@@ -86,6 +91,8 @@ async function main() {
   console.info(`Too large to send: ${tooLarge}.`);
   console.info(`\nLines with hits, by line number as the review page shows them (never their text):`);
   for (const line of hitLines.length ? hitLines : ['none']) console.info(`  ${line}`);
+  console.info(`\nLines where the person-name pass masked, by line number (masks in brackets; never the text):`);
+  for (const line of nameLines.length ? nameLines : ['none']) console.info(`  ${line}`);
   console.info(`\nWhat would be sent, sha256 (first 12), for comparing runs:`);
   for (const line of sentHashes) console.info(`  ${line}`);
   if (residual > 0) process.exitCode = 1;
