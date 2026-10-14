@@ -2956,6 +2956,152 @@ values. Rule A is unchanged (5 masks, 4 samples).
   `Primary` | `Name` is not one, and its row is not touched. Widening the
   vocabulary widens what is masked.
 
+### Phase 3u: evaluation run 10, paired, all twelve files, first under redaction `.4` (2026-10-15)
+
+**Approval (Alex, written, dated 2026-10-14):** `ratecon:eval-ai --pairs` on
+samples 2, 4, 7, 8, 9, 10, 11, 12, 16, 17, 21 and 28, 3 runs each (72 calls),
+Claude Haiku 5.5, ceilings $1.00 and 75 calls: the first run under
+`redact-2026-10-14.4`, which closed the bare-phone gap and the names under a
+person header. Earlier approvals that named a sent-text hash are void. Alex
+read the redacted text of all twelve in the viewer under `.4` and accepted
+that the text of earlier runs contained names and phone numbers. Retention (30
+days default, flagged up to 2 years) accepted for this run. I did not read the
+ground truth or any value.
+
+**Checked before the run:** the tree was clean, `REDACTION_VERSION` was
+`redact-2026-10-14.4`, and the migration state was as expected (29 SQL files,
+29 journal entries ending at 0028, 29 applied in the local test DB; the eval
+script touches no database and stores nothing). **Sent-text hashes (first 12
+of sha256), with 3r's in brackets:** 2 `fe5f7539e194` (`a72717aa76c5`), 4
+`f05494d30f77` (`f38cb9922cfe`), 7 `baa6c413ef11` (`e83b8114d30b`), 8
+`826196de5a3f` (`2097af1b29cd`), 9 `220af5986443` (`dc2a776ec7f4`), 10
+`0d14bdd88041` (`5a57dd07b1ad`), 11 `49288d225e5d` (`432dc67b6e7f`), 12
+`282113934c2a` (`afd147515071`), 16 `8538f55afaf5` (`10c8f0f51354`), 17
+`5b56633ef15b` (`1afe327813da`), 21 `77b64d5b9b8e` (`77b64d5b9b8e`, the only
+one unchanged), 28 `435a59f2c590` (`0b03d4a2f36d`). Residual hits 0.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,7,8,9,10,11,12,16,17,21,28 --runs=3 --pairs
+
+**Result: the bar is MET, exit 0: 36 of 36 runs scored, zero WRONG on all seven
+bar fields, merged and in read A and read B alone.** One appointment is WRONG
+(below); appointments are not on the bar.
+
+| | 3r | 3u |
+|---|---|---|
+| Calls | 72 of 72 | **72 of 72** (ceiling 75) |
+| Tokens | 358,410 in, 163,540 out | **358,704 in, 166,408 out** |
+| Cost | $0.1176 | **$0.1191** (ceiling $1.00) |
+| Runs scored / planned | 35 / 36 | **36 / 36** |
+| Pairs agreed / differed / failed | 22 / 13 / 1 | **26 / 10 / 0** |
+| Address cue fires | 12 of 35 | **12 of 36** (9, 12, 21, 28, every run) |
+| Merged WRONG on the bar | 0 | **0** |
+
+**The failed pair is gone:** sample 16's run 3 (`invalid_output` in 3r, and
+in 3n) agreed this time. One run, so this is not evidence the failure is
+fixed.
+
+**WRONG:** none on the bar. No street or city cell is WRONG, so **there is no
+relation code to report.** **One appointment is WRONG and silent: sample 10,
+run 2, stop 1 (type, time, end time).** Both reads gave the same wrong parts
+and agreed, so nothing marked it; stop 2 is exact. In 3r the same cell in run
+2 differed in four parts (type, date, time, end time) in both reads and was
+marked; it is the one cell that moved from marked to silent. Sample 10's stop
+1 differs from the truth in all three runs (marked in runs 1 and 3).
+
+**Pairs per sample** (3 runs each; 3r in brackets):
+
+| Sample | Pairs | Differed on | 3r |
+|---|---|---|---|
+| 2, 4, 8, 21, 28 | 3 agreed | | same |
+| 17 | **3 agreed** | | 3 differed (street x2, every run) |
+| 11 | 2 agreed, 1 differed | city x1 and state x1 (run 1) | 0 agreed, 3 differed |
+| 16 | 2 agreed, 1 differed | appointment x2 (run 1) | 1 agreed, 1 differed, 1 failed |
+| 7 | 1 agreed, 2 differed | appointment x1 (runs 2, 3) | 1 / 2: appointment x1; city x1 and state x1 |
+| 9 | 1 agreed, 2 differed | appointment x1 (runs 1, 2) | 2 / 1 |
+| 10 | 1 agreed, 2 differed | appointment x1 (runs 1, 3) | 2 / 1 (appointment x2) |
+| 12 | 1 agreed, 2 differed | street x4 (runs 1, 2) | 1 / 2: street x4 (runs 2, 3) |
+
+**Marked fields, cell-runs (3r in brackets):**
+
+- **ZIP blank and marked: 24 (24)**, the same cells: samples 4, 7, 9, 10, 11
+  (one stop, every run) and 12 (stops 2 to 4, every run).
+- **Street blank and marked: 8 (14).** Sample 12, all four stops in runs 1
+  and 2 (3r: runs 2 and 3). **Sample 17: 0 (6)**; its streets are exact in
+  every run.
+- **City and state blank and marked: 2 (3)**: sample 7 stop 2 and sample 11
+  stop 2, run 1 each (3r: sample 7 in runs 1 and 2, sample 11 in run 1).
+- **Order and type filled and marked:** sample 4 stop 1 in every run (3
+  cell-runs; **none in 3r**), sample 9 both stops in run 1 (3r: run 2),
+  sample 11 none (3r: 3 stops across runs 1 and 3).
+
+**Appointment parts that differ from the truth** (marked, except where said):
+
+- **7:** both stops (date, time) in run 1, both reads; run 2 read A both
+  stops (date, time), read B stop 2 (time); run 3 read A stop 2 (time), read B
+  both stops (date, time).
+- **8:** stop 3 (time), both reads, every run (as 3r).
+- **9:** stop 2 (time), both reads, every run (as 3r); the merged stop 1
+  (date, time) is also marked as filled differently in runs 1 and 2.
+- **10:** run 1 read A stop 1 (type, time, end time), merged marked; run 2
+  both reads stop 1 (type, time, end time), merged **WRONG and silent**; run 3
+  read B stop 1 (type, date, time, end time), merged marked.
+- **11:** none in either read in any run (3r: both stops, one read, in runs 2
+  and 3). All its appointments are marked "as the PDF says".
+- **12:** stop 1 (type, end time), both reads, every run (as 3r).
+- **16:** run 1 read B both stops (type, date, time, end time); runs 2 and 3
+  none (3r: run 1 both reads, run 2 read B).
+- **21:** both stops (type, date, time, end time), both reads, every run (as 3r).
+- **2, 4, 17, 28:** none (as 3r).
+
+**What the extra masking changed, per cell, by the counts (no value looked
+at).** Eleven of the twelve sent texts changed; sample 21's did not and its
+cells did not move. The cells that moved: sample 17's two streets went from
+blank-and-marked in every run to exact (6 cell-runs), and its pairs from
+3 differed to 3 agreed; sample 11 stopped differing on appointments; sample 16's
+pair that failed in 3r agreed; sample 4 gained a filled-and-marked order and
+type on stop 1. Sample 10's stop 1 appointment, in run 2, went from marked
+to silent. Everything else is the same cell, or moves between runs in a way 3n,
+3p and 3r already showed (sample 12's four blanked streets sit in runs 1 and 2
+instead of 2 and 3; samples 7, 9 and 10 trade which runs differ). **The
+counts do not say why:** a run-to-run difference of this size is within what
+3p and 3r already showed on unchanged text, and one run per file under `.4` is
+too few to tell a masking effect from that. That sample 17's streets became
+exact is consistent with its carrier row (two masks under `.4`) no longer
+being there for the model to misread, but nothing here shows that is the
+cause; 17's text also changed on two bare phones.
+
+**Counts that matter:**
+
+- **Zero WRONG on the bar in 36 of 36 scored runs, in both reads alone and
+  merged.** This is the first run with every planned run scored.
+- **The zero is still partly blanks:** 24 ZIPs, 8 streets and 2 city-and-state
+  cells are left for the dispatcher, marked.
+- **A silent WRONG appointment exists** (sample 10, run 2, stop 1). It is not
+  on the bar, and the bar does not see it. It is the sort of failure the
+  address cue is not built for: both reads agree.
+- **The 3q question stands** (agreement compares quoted values, before the fill
+  strips trailing punctuation): sample 12's four streets differ between the
+  reads in two of three runs again. Not changed.
+- **Cost** per pair about $0.0033 ($0.1191 for 36). By sample, in dollars and
+  tokens in/out over 3 runs: 2 $0.0073 (23,442 / 9,924); 4 $0.0099 (25,062 /
+  14,765); 7 $0.0092 (20,352 / 14,404); 8 $0.0083 (22,770 / 12,203); 9 $0.0114
+  (52,920 / 12,069); 10 $0.0099 (24,192 / 15,060); 11 $0.0086 (19,524 /
+  13,369); 12 $0.0146 (53,256 / 18,581); 16 $0.0092 (23,850 / 13,544); 17
+  $0.0084 (25,812 / 11,559); 21 $0.0094 (20,670 / 14,696); 28 $0.0127 (46,854
+  / 16,234).
+- **Scope:** 12 of the 25 files, 3 runs each, one model. The six control
+  files have not been re-run since 3e. Nothing was fixed. Whether to turn the
+  reader on is Alex's call.
+
+**Housekeeping, my error:** commit `231d612` (3t) cut about 2,100 lines of
+earlier phases from this file, through a text replace that matched an older
+section. Found while reading 3r for this comparison. Restored in `7b3b8ed`
+from `0582697`: the diff against it is additions only (3t, its `.4`
+follow-up, a file-table row). No other file was affected.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
