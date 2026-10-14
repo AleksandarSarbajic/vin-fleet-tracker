@@ -232,7 +232,9 @@ describe("the app's path, and the score", () => {
     expect(BAR_FIELDS.every((f) => totals.wrong[f] === 0)).toBe(true);
     expect(out).toContain('  load number   verified · exact');
     expect(out.find((l) => l.startsWith('  stop 1'))).toContain('ZIP verified exact');
-    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('appointment exact');
+    // Since phase 3v every appointment the AI fills carries a check, so a filled one is "marked", never "exact"
+    // (nor a silent WRONG): the verdict is of the form as the dispatcher sees it, and the parts still say what differs.
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('appointment marked, filled as the PDF says');
     expect(out.at(-1)).toMatch(/^The bar: met/);
   });
 

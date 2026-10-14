@@ -19,9 +19,11 @@ import {
   confirmAiLoadNumber,
   confirmAiStop,
   fieldsToCheck,
+  AI_APPOINTMENT_CHECK,
   fillLoad,
   sourceLine,
 } from './ratecon-fill';
+import { fillSnapshot, outcomeFields } from './fill-outcome';
 
 /** §12.122. A read, put into the form — by rules that are the same for every layout. Invented documents. */
 
@@ -531,5 +533,152 @@ describe('two-read agreement, through the fill (phase 3d)', () => {
     // What both said stands.
     expect(stop.addressLine).toBe('4001 Main St');
     expect(filled.form.stops[1]!.zip).toBe('55802');
+  });
+});
+
+describe('an appointment the AI filled is never silent (phase 3v)', () => {
+  const SAID = 'Check: the AI filled this appointment. Confirm the date and time against the PDF.';
+  const prepared = prepareForReading(UNKNOWN_LAYOUT);
+  if (!prepared.ok) throw new Error(prepared.reason);
+  const verified = verifyRead(MODEL_REPLY, prepared.lines, NOW);
+  if (!verified.ok) throw new Error(verified.reason);
+  const MODEL: RateconRead = verified.read;
+
+  /** The invented model read with its first stop's time replaced: same stops, same address, a time of the test's choosing. */
+  const withTime = (time: TimeRead, layout: RateconRead['layout'] = 'model'): RateconRead => {
+    const read = structuredClone(MODEL);
+    read.stops[0]!.time = time;
+    return { ...read, layout };
+  };
+  /** A window on the 14th (the `range` helper above starts on the 12th). */
+  const win = (time: string, endTime: string, flag: 'APPT' | 'FCFS' | null = null): TimeRead => ({
+    kind: 'range', date: '2026-10-14', time, endDate: '2026-10-14', endTime, flag, source: SOURCE,
+  });
+  const exact = (flag: 'APPT' | 'FCFS' | null = null, date = '2026-10-14'): TimeRead => ({ kind: 'exact', date, time: '08:00', flag, source: SOURCE });
+  const appointmentCheck = (read: RateconRead, now = NOW) => fill(read, now).stops[0]!.fill?.checks.appointment;
+  const times = (text: string | undefined) => (text ?? '').split(SAID).length - 1;
+
+  it('says it in the words the neighbouring checks use', () => {
+    expect(AI_APPOINTMENT_CHECK).toBe(SAID);
+  });
+
+  it('a confirmed exact time with nothing to flag: the appointment carries the check', () => {
+    const form = fill(withTime(exact()));
+    expect(form.stops[0]!.appointment).toMatchObject({ enabled: true, type: 'APPT', time: '08:00' });
+    expect(form.stops[0]!.fill?.checks.appointment).toBe(SAID);
+  });
+
+  it('a window of two hours or less, nothing to flag: the same', () => {
+    expect(appointmentCheck(withTime(win('08:00', '10:00')))).toBe(SAID);
+    expect(appointmentCheck(withTime(win('08:00', '08:00')))).toBe(SAID);
+  });
+
+  it('an FCFS exact time: the old sentence first, then the new one', () => {
+    expect(appointmentCheck(withTime(exact('FCFS')))).toBe(
+      `Check: the PDF says FCFS but gives one time, so it is filled as an appointment at that time. ${SAID}`,
+    );
+  });
+
+  it('an FCFS window of two hours or less: the old sentence first, then the new one', () => {
+    const text = appointmentCheck(withTime(win('08:00', '10:00', 'FCFS')));
+    expect(text).toBe(`Check: the PDF says FCFS; a window of 2 h is filled as an appointment window. ${SAID}`);
+  });
+
+  it('FCFS receiving hours (a longer window): the old sentence first, then the new one, once', () => {
+    const read = withTime(win('08:00', '14:00', 'FCFS'));
+    const form = fill(read);
+    expect(form.stops[0]!.appointment).toMatchObject({ type: 'FCFS', time: '08:00', endTime: '14:00' });
+    const text = form.stops[0]!.fill?.checks.appointment;
+    expect(text).toMatch(/^Check: a window of 6 h \(08:00–14:00\) is longer than 2 hours, so it is filled as FCFS receiving hours\. /);
+    expect(text?.endsWith(` ${SAID}`)).toBe(true);
+    expect(times(text)).toBe(1);
+  });
+
+  it('a date check already there: the date sentence first, then the new one, once', () => {
+    const later = new Date('2026-10-20T15:00:00Z');
+    const text = appointmentCheck(withTime(exact()), later);
+    expect(text).toBe(`Check: this date has passed. ${SAID}`);
+    const far = appointmentCheck(withTime(exact(null, '2026-12-25')));
+    expect(far).toBe(`Check: this date is more than 30 days out. ${SAID}`);
+    expect(times(far)).toBe(1);
+  });
+
+  it('both an old sentence and a date check: old, date, new', () => {
+    const later = new Date('2026-10-20T15:00:00Z');
+    expect(appointmentCheck(withTime(exact('FCFS')), later)).toBe(
+      `Check: the PDF says FCFS but gives one time, so it is filled as an appointment at that time. Check: this date has passed. ${SAID}`,
+    );
+  });
+
+  it('every filled appointment of a read has it, whatever its kind', () => {
+    const form = fill(MODEL);
+    // The invented read: a 2-hour window on the pickup, and "Couldn\'t read" on the delivery.
+    expect(form.stops[0]!.fill?.checks.appointment).toBe(SAID);
+  });
+
+  it('a blank appointment keeps only its own check: nothing is added', () => {
+    const delivery = fill(MODEL).stops[1]!;
+    expect(delivery.appointment).toMatchObject({ enabled: true, time: '' });
+    expect(delivery.fill?.checks.appointment).toBe("Couldn't read: “Delivery same day by 8 PM, or next day 7-10 AM”.");
+    const none = fill(withTime({ kind: 'none', source: null })).stops[0]!;
+    expect(none.appointment.enabled).toBe(false);
+    expect(none.fill?.checks.appointment).toBe('No date or time for this stop in the PDF.');
+    const unreadable = fill(withTime({ kind: 'unreadable', date: '2026-10-14', quoted: 'Thursday morning', source: SOURCE })).stops[0]!;
+    expect(unreadable.fill?.checks.appointment).toBe('Couldn\'t read: “Thursday morning”.');
+  });
+
+  it('an appointment the pair blanked and marked keeps only its own check', () => {
+    const now = new Date('2026-10-13T15:00:00Z');
+    const b = structuredClone(MODEL);
+    const t = b.stops[0]!.time;
+    if (t.kind !== 'range') throw new Error('stop 1 is a range');
+    b.stops[0]!.time = { ...t, time: '09:00' };
+    const merged = agreeReads(MODEL, b).read;
+    const stop = fill(merged, now).stops[0]!;
+    expect(stop.appointment.time).toBe('');
+    expect(stop.fill?.checks.appointment).toBe(`${AGREE_DIFFERED} Enter it by hand.`);
+    expect(stop.fill?.checks.appointment).not.toContain(SAID);
+  });
+
+  it('a read both reads agree on, filled: the check is there too (the case that was silent)', () => {
+    const a = structuredClone(MODEL);
+    const merged = agreeReads(MODEL, a).read;
+    expect(fill(merged).stops[0]!.fill?.checks.appointment).toBe(SAID);
+  });
+
+  it('a template read with the same data: no AI check, and its fill is as before', () => {
+    for (const layout of ['label-rows', 'pickup-delivery-columns', 'stops-section', 'pu-so-blocks'] as const) {
+      const form = fill(withTime(exact(), layout));
+      expect(form.stops[0]!.fill?.checks.appointment, layout).toBeUndefined();
+      expect(form.stops[0]!.fill?.ai).toBeUndefined();
+    }
+    expect(appointmentCheck(withTime(exact('FCFS'), 'pu-so-blocks'))).toBe(
+      'Check: the PDF says FCFS but gives one time, so it is filled as an appointment at that time.',
+    );
+  });
+
+  it('the AI marks and the outcome counts behave as before: the appointment is still a filled field, counted as filled', () => {
+    const form = fill(MODEL);
+    expect(aiMarkedFields(form.stops[0]!)).toContain('appointment');
+    expect(aiMarks(form)).toEqual({ stops: 2, fields: 12 });
+    const cells = fillSnapshot(form).stops[0]!.cells;
+    expect(cells.appointment).toMatchObject({ filled: true });
+    const appointment = outcomeFields(fillSnapshot(form), form).find((f) => f.field === 'appointment');
+    // The pickup's appointment kept; the delivery's, left blank and marked, left.
+    expect(appointment).toMatchObject({ kept: 1, changed: 0, cleared: 0, blankFilled: 0, blankLeft: 1 });
+  });
+
+  it('"fields to check" counts it, once per filled appointment, and it falls when the appointment is edited', () => {
+    const form = fill(MODEL);
+    const edited = {
+      ...form,
+      stops: form.stops.map((s, i) => (i === 0 ? patchStop(s, { appointment: { ...s.appointment, time: '09:00' } }) : s)),
+    };
+    expect(edited.stops[0]!.fill?.checks.appointment).toBeUndefined();
+    expect(fieldsToCheck(form) - fieldsToCheck(edited)).toBe(1);
+    // "Looks right" clears the AI mark, not a check: as for any other check.
+    const confirmed = confirmAiStop(form, form.stops[0]!.key);
+    expect(confirmed.stops[0]!.fill?.checks.appointment).toBe(SAID);
+    expect(fieldsToCheck(confirmed)).toBe(fieldsToCheck(form));
   });
 });

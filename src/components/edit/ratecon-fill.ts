@@ -35,6 +35,13 @@ export const TOO_MANY_STOPS = (n: number) =>
 /** Said under a ZIP the read found but that cannot exist (below 00501); it is left blank, like a ZIP not found. The value is not repeated. */
 export const ZIP_NOT_REAL = "Check: the PDF's ZIP is not a real US ZIP. Enter it by hand.";
 
+/**
+ * Said under every appointment the language-model reader FILLED (2026-10-15). Two reads can agree on a
+ * wrong time (sample 10, stop 1, run 2 of the last evaluation), and then nothing else marks it. After
+ * whatever the appointment already says.
+ */
+export const AI_APPOINTMENT_CHECK = 'Check: the AI filled this appointment. Confirm the date and time against the PDF.';
+
 /** A window this long or shorter is an appointment window; longer is receiving hours. */
 export const APPT_WINDOW_MAX_MINUTES = 120;
 /** A date this many days out is far enough to be a typo. */
@@ -171,7 +178,10 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
   stop = patchStop(stop, { appointment: { ...stop.appointment, ...appointment.patch, tz: stop.appointment.tz } });
   if (read.time.kind !== 'none' && read.time.source) sources.appointment = read.time.source;
   const when = dateCheck(stop.appointment.enabled ? stop.appointment.date : '', stop.appointment.tz, now);
-  const said = [read.timeCheck ?? appointment.check, when].filter(Boolean).join(' ');
+  // A model read's filled appointment (enabled, with a time) always says so; a blank one, or one the pair
+  // blanked, has its own check and is not the AI's to confirm. Template reads are not the AI's.
+  const aiFilled = byModel && stop.appointment.enabled && stop.appointment.time !== '';
+  const said = [read.timeCheck ?? appointment.check, when, aiFilled ? AI_APPOINTMENT_CHECK : null].filter(Boolean).join(' ');
   if (said) checks.appointment = said;
   return { ...stop, fill: byModel ? { sources, checks, ai: true } : { sources, checks } };
 }
