@@ -1911,6 +1911,77 @@ order + type, ZIP, city and state 0, as in 3j. **Each read alone:** A 1 -> 3
 - The cue fires on the same 6 runs, all on samples 9 and 28, at 0 WRONG.
 - Nothing was fixed. Whether to turn the reader on is Alex's call.
 
+### Phase 3l: evaluation run 6, paired, samples 2, 4, 9, 17 and 28 (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** a re-run of phase 3k's run: the
+same five samples, 3 runs each (30 calls), Claude Haiku 5.5, ceilings $1.00
+and 75 calls. Since 3k, Alex corrected the ground truth for the two streets
+on sample 17: the entries had a street suffix the PDF never prints, and
+abbreviated directions. The one WRONG in 3j and 3k, on sample 17, was
+against that wrong truth, so the 3k result does not stand for that cell.
+Retention (30 days default, flagged up to 2 years) accepted for this run. I
+did not read the ground truth.
+
+**Checked before the run:**
+
+- The tree was clean. The only file changed since the code of 3k
+  (`862c393`) was `docs/HANDOFF.md`; no commit touches the sent-text path;
+  `redact.ts` is identical.
+- **Sent-text hashes** equal the 3k section's, all five: 2 `a72717aa76c5`, 4
+  `f38cb9922cfe`, 9 `dc2a776ec7f4`, 17 `1afe327813da`, 28 `0b03d4a2f36d`.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,9,17,28 --runs=3 --pairs
+
+**Result: the bar is MET, with zero WRONG (3k: 1). Exit 0.**
+
+| | 3k | 3l |
+|---|---|---|
+| Calls | 30 of 30 | 30 of 30 (ceiling 75) |
+| Tokens | 173,910 in, 65,817 out | 173,910 in, 65,652 out |
+| Cost | $0.0503 | $0.0502 (ceiling $1.00) |
+| Runs scored | 15 | 15 |
+| Pairs | 11 agreed, 4 differed | 12 agreed, 3 differed |
+| Address cue fires | 6 of 15 | 6 of 15 |
+
+Every call returned `ok`.
+
+**WRONG on the bar's fields:** merged 0 in all seven (3k: street 1). Read A
+alone 0 (3k: 3). Read B alone 0 (3k: 2).
+
+**Per sample** (merged WRONG on the bar; "marked" is not WRONG):
+
+| Sample | 3k | 3l | What changed |
+|---|---|---|---|
+| 2 | 0 | 0 | nothing: all exact, 3 pairs agreed, cue silent |
+| 4 | 0 | 0 | nothing: stop 1's ZIP blank and marked, both appointments marked "filled as the PDF says", cue silent |
+| 9 | 0 | 0 | all 3 pairs agreed (3k: 2 agreed, 1 differed). Order + type marked on both stops in run 1 only, as in 3k. Stop 2's ZIP blank and marked and its appointment time differing (marked) in all 3 runs, cue 5 lines: as in 3k |
+| 17 | 1 | **0** | the 3k WRONG is gone. Pairs: street x2 differed in all 3 runs (3k: 2 differed, 1 agreed). Both merged streets are blank and marked in all 3 runs. Read A alone: 11 values stood, 0 did not, 0 WRONG, every run; read B alone: 9 stood, **2 did not**, 0 WRONG, every run |
+| 28 | 0 | 0 | all 3 pairs agreed (3k: run 3 differed). 3 stops read, 3 expected; stops 2 and 3's appointments marked "filled as the PDF says"; cue 4 lines: as in 3k |
+
+**What the counts say (no values looked at):**
+
+- The WRONG that stood through 3j and 3k is gone with the corrected truth,
+  as Alex said. Read A's values for sample 17 are all exact against it.
+- **What "met" does and does not say.** The bar counts filled values that are
+  wrong and unmarked. It is zero here, but sample 17's two streets are
+  **blank and marked in all 3 runs**: read B's two streets fail the
+  verifier every run, so the pair differs and the merge leaves them for the
+  dispatcher. Samples 4 and 9 also leave a ZIP blank and marked in every run
+  (the output does not say whether the reader found none or 3i refused a
+  placeholder), and 9 and 28 carry marked appointments. The bar is met
+  without those fields being filled.
+- The cue fires on the same 6 runs, all on samples 9 and 28, at 0 WRONG.
+- The scope is 5 of the 25 ground-truth files, 3 runs each, 15 scored runs,
+  one model. The six control files (1, 18, 19, 22, 23, 27) were run in 3b
+  and 3e, before the fixes since (the cue, agreement, normal case, the ZIP
+  rule), and not re-run on this code. Samples 7, 8, 10, 11, 12, 16 and 21
+  are not reviewed by Alex and not approved to send; the rest have not been
+  sent.
+- Nothing was fixed. Whether to turn the reader on is Alex's call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
