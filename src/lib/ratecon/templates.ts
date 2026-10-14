@@ -59,6 +59,8 @@ export interface StopRead {
   time: TimeRead;
   /** Why an address field is blank, when it is not simply absent. Only a model read says (`verify-read.ts`). */
   fieldChecks?: Partial<Record<'street' | 'city' | 'state' | 'zip', string>>;
+  /** Said under the appointment in place of the fill's own check. Only two-read agreement sets it (`agree-reads.ts`). */
+  timeCheck?: string;
 }
 
 export interface RateconRead {

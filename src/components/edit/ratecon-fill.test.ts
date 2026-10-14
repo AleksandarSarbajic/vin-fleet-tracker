@@ -8,6 +8,7 @@ import type { Line } from '@/lib/ratecon/lines';
 import type { ModelAppointment, ModelRead } from '@/lib/ratecon/model-read';
 import { prepareForReading } from '@/lib/ratecon/redact';
 import { NOT_IN_TEXT, verifyRead } from '@/lib/ratecon/verify-read';
+import { AGREE_DIFFERED, agreeReads } from '@/lib/ratecon/agree-reads';
 import { loadFormFrom, patchStop, type LoadForm } from './load-form';
 import {
   TOO_MANY_STOPS,
@@ -253,5 +254,36 @@ describe('a model read, filled', () => {
       ['checks', 'sources'],
       ['checks', 'sources'],
     ]);
+  });
+});
+
+describe('two-read agreement, through the fill (phase 3d)', () => {
+  it('a field and an appointment the reads differed on are filled blank, each marked as differing', () => {
+    const now = new Date('2026-10-13T15:00:00Z');
+    const sent = prepareForReading(UNKNOWN_LAYOUT);
+    if (!sent.ok) throw new Error(sent.reason);
+    const verified = (reply: ModelRead) => {
+      const v = verifyRead(reply, sent.lines, now);
+      if (!v.ok) throw new Error(v.reason);
+      return v.read;
+    };
+    const a = verified(MODEL_REPLY);
+    const b = structuredClone(a);
+    b.stops[0]!.zip = { value: '58103', source: { text: 'x', page: 2 } };
+    const t = b.stops[0]!.time;
+    if (t.kind !== 'range') throw new Error('stop 1 is a range');
+    b.stops[0]!.time = { ...t, time: '09:00' };
+    const merged = agreeReads(a, b).read;
+    const filled = fillLoad(loadFormFrom(null, now.toISOString(), null), merged, now.toISOString(), now);
+    if (!filled.ok) throw new Error(filled.message);
+    const stop = filled.form.stops[0]!;
+    expect(stop.zip).toBe('');
+    expect(stop.fill?.checks.zip).toBe(`${AGREE_DIFFERED} Enter it by hand.`);
+    expect(stop.appointment.date).toBe('');
+    expect(stop.appointment.time).toBe('');
+    expect(stop.fill?.checks.appointment).toMatch(new RegExp(`^${AGREE_DIFFERED}`));
+    // What both said stands.
+    expect(stop.addressLine).toBe('4001 Main St');
+    expect(filled.form.stops[1]!.zip).toBe('55802');
   });
 });

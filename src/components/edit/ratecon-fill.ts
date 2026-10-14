@@ -153,7 +153,7 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
   stop = patchStop(stop, { appointment: { ...stop.appointment, ...appointment.patch, tz: stop.appointment.tz } });
   if (read.time.kind !== 'none' && read.time.source) sources.appointment = read.time.source;
   const when = dateCheck(stop.appointment.enabled ? stop.appointment.date : '', stop.appointment.tz, now);
-  const said = [appointment.check, when].filter(Boolean).join(' ');
+  const said = [read.timeCheck ?? appointment.check, when].filter(Boolean).join(' ');
   if (said) checks.appointment = said;
   return { ...stop, fill: byModel ? { sources, checks, ai: true } : { sources, checks } };
 }
