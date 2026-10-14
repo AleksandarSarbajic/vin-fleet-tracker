@@ -221,6 +221,41 @@ its cells masked by the label rule, but the values are on the NEXT line.
   own next line. Never across a page. Nothing outside those rows is touched.
 - **The re-scan has no memory of other lines,** so it does not check rule B.
 
+**Rule C: a name before " at <COMPANY>"** (version `redact-2026-10-14.5`,
+2026-10-15). Found on the first page of a C.H. Robinson carrier load
+confirmation, where it names the carrier's rep: `Dana Example at ACME FREIGHT
+INC - T1234567`. No label, so no other rule saw it.
+- **The shape:** two to four Capitalised words (letters, apostrophe, period,
+  hyphen), then ` at `, then a company or an ID: an ALL-CAPS word of two or
+  more characters (`ACME`, `T1234567`), a number of six or more digits, or an
+  `[ID]` the id rule had already made. The NAME part becomes `[REMOVED]`;
+  ` at <rest>` stays. Anywhere in a cell, across the cell gap in the joined
+  pass (`Dana Example at` | `ACME FREIGHT INC`; `Dana` | `Example at ACME`).
+  Run in both passes; the joined pass alone gives the same text (the cell pass
+  is defence in depth). After the label rule, which masks a labelled value
+  whole, company and all.
+- **Also:** `<Name> with <COMPANY>` (the company must be ALL-CAPS letters: an
+  ID or a number is not enough, so `Loaded Trailer with ABC123` passes), and
+  `<Name>, <Role> at <COMPANY>`: the name goes, the role stays. A role is a
+  role only with a role word in it (manager, director, agent, sales, …);
+  otherwise what follows the comma may be the name, and the name before `at`
+  is masked instead.
+- **Untouched:** a facility or function word ends the run (pick up, check in,
+  arrive, dock, gate, door, warehouse, delivery, appointment, stop, …): `Pick
+  Up at DOCK 4` and `Check In at GATE B` pass; `Call Dana Example at ACME`
+  loses only the name; a single word, lower case, `at Dock 4`, `at 08:00`,
+  `at Gate B`, `at 8 PM`, `at PM`, a mixed-case company, `atACME`.
+- **In doubt, mask:** the run may begin inside a word (`d'Arcy Example`
+  becomes `d'[REMOVED]`); an ALL-CAPS name is a name; five Capitalised words
+  mask the last four.
+- **The re-scan checks it,** with the same detector, so a miss fails closed
+  (`labelled`). It is a miss only if the text changed after the mask.
+- **Known limit:** a name with no company or ID after it (`of the carrier
+  desk`), `Last, First at ACME`, a company in mixed case, a name next to a
+  facility word it takes for a place, and every way of introducing a name this
+  does not know. On the 28 samples that existed, rule C fires on none; on the
+  C.H. Robinson file added on 2026-10-15 it fires on one line, once.
+
 **The claim.** The strip said "rates, contacts, phones, emails and driver
 names removed". `redact.ts` says it is not a guarantee, and rules A and B
 exist because the claim was wrong. It now says what is true: phones, emails,
@@ -255,6 +290,8 @@ text has no pages, so all of it is sent, within the size limit (§4).
     label (`Carrier`, `Name`), still goes through;
   - a name of more than four words, or in a cell with a digit or comma, under
     a person header;
+  - a name with no company or ID after it, or in a form rule C does not
+    know (`Last, First at ACME`); a company in mixed case after `at`;
   - a bare phone with an area code assigned after the list was written, in a
     cell right after a `Pickup`, `Ref` or similar cell, or with letters
     stuck to it;
@@ -1196,3 +1233,12 @@ Phase 3v (2026-10-15):
     cannot see"). Every filled appointment of a model read carries a check,
     after any it had. It adds to "fields to check"; it does not change an
     outcome count.
+
+Phase 3w (2026-10-15):
+
+44. **Rule C** (§2; `redact-2026-10-14.5`): a name before ` at <COMPANY>`
+    (also ` with `, and `<Name>, <Role> at`) is masked, found on a C.H.
+    Robinson carrier load confirmation. Approvals that named a `.4` hash are
+    void. **Sample numbers shifted:** a new file became 22, so the old 22 to
+    28 are 23 to 29; every earlier HANDOFF and design entry uses the old
+    numbers, and the next `--files` must use 29 where it meant 28.

@@ -3167,6 +3167,94 @@ starts from a blank form, so a disabled appointment has no time).
 `npm run check`: 188 files, 3182 tests, exit 0. E2E, on their own:
 `ratecon-ai.spec.ts` 4 and `ratecon-fill.spec.ts` 2 pass.
 
+### Phase 3w: rule C, a name before " at <COMPANY>" (2026-10-15)
+
+No API call, no network, no `ratecon:eval-ai`. **The reader stays off.**
+Invented text in every test. The real files were read LOCALLY by the report
+scripts only; counts, sample numbers, line numbers and letter shapes were
+printed, never a value.
+
+**A sample was added, and the numbers moved.** There are 29 PDFs now. The new
+file is **sample 22**; the old 22 to 28 are **23 to 29**. Everything above
+this entry (3a to 3v) uses the old numbers, so "sample 28" there is **29**
+now; the file's sent-text hash, `435a59f2c590`, is the same as in 3u. The
+default list of `ratecon:redact-rules-report` is now 2, 4, 7, 8, 9, 10, 11,
+12, 16, 17, 21 and 29. **A future `--files=...,28` would name a different
+(template-read) file.**
+
+**What was found:** on the first page of a C.H. Robinson carrier load
+confirmation, a line `<First Last> at <COMPANY> - <ID>` names the carrier's
+rep. No label, no header: nothing masked it.
+
+**Rule C** (`redact.ts`, `redact-2026-10-14.5`; approvals that named a `.4`
+hash are void):
+
+- **Shape:** two to four Capitalised words, ` at `, then an ALL-CAPS word of
+  two or more characters, a number of six or more digits, or an `[ID]`. The
+  name becomes `[REMOVED]`, ` at <rest>` stays. Anywhere in a cell; across the
+  cell gap in the joined pass. In both passes; the re-scan uses the same
+  detector (`labelled`), so a regression fails closed.
+- **Also:** ` with ` (company must be ALL-CAPS letters), and `<Name>, <Role> at
+  <COMPANY>` (the name goes, the role stays; a role needs a role word).
+- **Guards:** a facility or function word ends the run (`Pick Up at DOCK 4`,
+  `Check In at GATE B` pass; `Call Dana Example at ACME` loses only the name);
+  a single word, lower case, `at Dock 4`, `at 08:00`, `at Gate B`, `at 8 PM`,
+  a mixed-case company and `atACME` pass.
+- **In doubt, mask:** I removed a lookbehind that kept a run from starting
+  inside a word, because it made `d'Arcy Example at ACME` leak `d'Arcy`; now
+  it gives `d'[REMOVED]`. Five Capitalised words mask the last four.
+- The label rule still wins: `Contact: Dana Example at ACME` is `Contact:
+  [REMOVED]`, as before (rule C runs after it).
+
+**Tests (invented text):** `redact-name-at-company.test.ts`, 73; the older
+redaction tests ran unchanged and pass (one assertion moved: the version
+string in `redact-gaps.test.ts`). `npm run check`: 189 files, 3255 tests, exit
+0. E2E, on their own: `ratecon-ai.spec.ts` 4, `ratecon-fill.spec.ts` 2.
+**Mutation-checked,** 25 mutations on the rule and its guards: the mask, the
+re-scan, each pass, the order of replacement, the stop words, the company
+shape (any token; a Capitalised word; PM/TBD; `with` with an ID; long and
+short numbers; `[ID]`), the word counts (1, 3, 5), lower case, the role rule
+both ways, `with`, the connector's spaces and the version. All killed except
+one equivalent mutant: **the first-pass call is redundant** (the joined pass
+gives the same text for every input), kept because the brief named both. Four
+others survived the first run: an `[ID]` after `at`, the connector's space
+after it, and the connector's space before it (each now pinned by a test),
+and the lookbehind that kept a run from starting inside a word (removed, see
+above).
+
+**On the real files (counts only):**
+
+- **The 28 files that existed: rule C fires on none** (0 lines, 0 masks), and
+  the 12 AI-only files' sent text is **byte-identical to run 10** (hashes
+  equal), so 3u's result stands for the text it sent.
+- **On the new file, sample 22: 1 line, 1 mask** (line 5, page 1). Its shape
+  is a two-word name, `at`, an all-caps company of three words, ` - `, and an
+  ID of a letter and seven digits: the rule's example. The mask took the two
+  name words. The brief said to stop for review if it fired; it fired on the
+  file it was written for and on no other. Re-scan clean (31 lines, no
+  residue). Its ground truth is not complete, so the check below does not
+  cover it.
+- **Re-scan clean on all 29 files** (26 text-layer, 3 scans); 0 residual hits.
+- **The ground-truth values that are in a sample's own text, and still in the
+  sent text** (12 files): the load number in all 12, every street, every
+  city, and every ZIP except **one ZIP on sample 7 and one on sample 11**
+  (below).
+
+**Found while checking, not caused by rule C and not changed: the label rule
+loses a city line on samples 7 and 11.** On each, one line is a label of five
+letters and a colon in one cell and a city-and-ZIP in the next
+(`Aaaaa:` | `City, ST ddddd`). The label rule takes the next cell as the
+label's value and masks the whole city line, so that stop's ZIP never reaches
+the model. That is why those stops' ZIPs were blank and marked in every run
+of 3r and 3u (and, on those stops, the city and state in the runs that were
+blank for them): the cause was the redaction, not the model. Probably a two-column layout
+where the label's value is below and the neighbour is the stop's address. A
+fix would be its own phase: the label rule would have to leave a city line.
+
+**Known limit of rule C:** a name with no company or ID after it, `Last,
+First at ACME`, a company in mixed case after `at`, and any other way of
+introducing a name. "Show what is sent" is still the check.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
