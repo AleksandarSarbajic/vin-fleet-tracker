@@ -20,7 +20,7 @@ const doc = (...lines: Line[]) => redactDocument(lines).map((l) => l.text);
 
 describe('the version', () => {
   it('moved on: a server on the old rules refuses, and approvals that named a hash are void', () => {
-    expect(REDACTION_VERSION).toBe('redact-2026-10-14.4');
+    expect(REDACTION_VERSION).toBe('redact-2026-10-14.5');
   });
 });
 

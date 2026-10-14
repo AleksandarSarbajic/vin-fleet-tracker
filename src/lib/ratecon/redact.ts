@@ -26,6 +26,12 @@ import { cityLine, isUsState } from './templates';
  *     phone with a code assigned after the list was written, a phone in a
  *     cell right after a "Pickup" or "Ref" cell, or one with letters stuck to
  *     it, is not.
+ *   - Rule C finds "<First Last> at <COMPANY>" (and "with", and a role after a
+ *     comma). A name with no company or ID after it ("of the carrier desk"),
+ *     "Last, First at ACME", a name in lower case, a company in mixed case
+ *     ("at Acme Freight"), a run of more than four Capitalised words (the
+ *     first stays), and a name beside a facility word it takes for a place
+ *     ("Pick Up at DOCK 4") go through.
  *   - The re-scan has no memory of other lines: it catches a bare phone and
  *     a name after a label in the same line, but not a name under a header.
  * "Show what is sent" is the dispatcher's check on all of it.
@@ -33,7 +39,8 @@ import { cityLine, isUsState } from './templates';
  * Passes: each cell on its own; then the cells JOINED as they are sent, with
  * the same detectors — a value split across cells (an email, a phone, an MC
  * label and its number) is whole again only there; then a person's name that
- * runs on past its label's cell; then bare phone digits (A); and, over the
+ * runs on past its label's cell; then bare phone digits (A); a name before
+ * " at <COMPANY>" (C, in both the cell and the joined pass); and, over the
  * document, the row below a person header (B).
  *
  * Fails closed: after masking, the lines exactly as they would be sent are
@@ -55,7 +62,7 @@ export const PLACEHOLDER: Readonly<Record<MaskKind, string>> = {
 };
 
 /** Sent with every read; the server refuses a version it does not run (phase 2). */
-export const REDACTION_VERSION = 'redact-2026-10-14.4';
+export const REDACTION_VERSION = 'redact-2026-10-14.5';
 
 /** What may be sent at all, after redaction. A line is counted without its `L<n> ` prefix. */
 export const SEND_LIMITS = { lines: 400, lineChars: 500, totalChars: 24_000 } as const;
@@ -197,12 +204,95 @@ function personLabelBare(text: string): boolean {
   return [...t.matchAll(PERSON_LABEL)].some((m) => m.index === 0 && t.slice(m.index + m[0].length).replace(LEADING_PLACEHOLDERS, '') === '');
 }
 
+/* ---------------- rule C: "<First Last> at <COMPANY>" ---------------- */
+
+/**
+ * Rule C (2026-10-15). A carrier load confirmation names the carrier's rep as
+ * "Dana Example at ACME FREIGHT INC - T1234567": no label, so no other rule
+ * sees it. The NAME part (two to four Capitalised words) before " at " (or
+ * " with ") goes; " at <rest>" stays. It must be followed by a company or an
+ * ID — an ALL-CAPS word, a long number — so "Arrive at Dock 4", "Check in at
+ * Gate B" and "Pick up at 08:00" pass. A facility or function word in the run
+ * ends it ("Pick Up at DOCK 4" keeps "Pick Up"; "Call Dana Example at ACME"
+ * loses only the name). Two shapes more: "<Name>, <Role> at <COMPANY>" keeps
+ * the role (a role has a role word in it; without one, what follows the comma
+ * may be the name), and " with " needs a company of letters. In doubt, a
+ * Name-Name-at-ALLCAPS shape is masked. Anywhere in the text, across the
+ * cell gap too.
+ */
+const CAP_WORD = "\\p{Lu}[\\p{L}\\p{M}'’.-]*";
+const NAME_RUN = new RegExp(`(?:${CAP_WORD}\\s+){1,3}${CAP_WORD}$`, 'u');
+/** ", <role words>" at the end of the text before the connector. */
+const ROLE_TAIL = /,\s+((?:[\p{L}\p{M}&'’.-]+\s+){0,4}[\p{L}\p{M}&'’.-]+)$/u;
+/** A role is a role only with one of these in it; otherwise what follows a comma may itself be the name. */
+const ROLE_WORDS = new Set([
+  'manager', 'director', 'representative', 'rep', 'agent', 'specialist', 'coordinator', 'executive', 'supervisor', 'lead',
+  'owner', 'president', 'vp', 'vice', 'ceo', 'coo', 'dispatcher', 'dispatch', 'broker', 'carrier', 'account', 'sales',
+  'logistics', 'operations', 'transportation', 'freight', 'customer', 'service', 'services', 'support', 'associate',
+  'analyst', 'planner', 'buyer', 'administrator', 'assistant', 'engineer', 'officer', 'partner', 'solutions', 'relations',
+  'development', 'recruiter', 'team', 'desk',
+]);
+const isRole = (role: string) => role.toLowerCase().split(/\s+/).some((w) => ROLE_WORDS.has(w.replace(/[.,]+$/, '')));
+const CONNECTOR = /\s+(at|with)\s+/g;
+/** Words that make a Capitalised run a place, a facility or an instruction, not a name; the run starts after the last one. */
+const NOT_A_NAME = new Set([
+  'pick', 'up', 'pickup', 'pickups', 'drop', 'dropoff', 'check', 'in', 'out', 'arrive', 'arrives', 'arrival', 'depart',
+  'departs', 'delivery', 'deliveries', 'deliver', 'dock', 'door', 'gate', 'warehouse', 'receiving', 'shipping', 'shipper',
+  'consignee', 'load', 'unload', 'loading', 'unloading', 'appointment', 'appt', 'stop', 'origin', 'destination', 'facility',
+  'yard', 'terminal', 'plant', 'depot', 'center', 'centre', 'hub', 'bay', 'lot', 'report', 'reports', 'call', 'text', 'ask',
+  'attn', 'attention', 'contact', 'from', 'per', 'via', 'to',
+]);
+/** All-caps words after " at " that are not a company. */
+const NOT_A_COMPANY = new Set(['AM', 'PM', 'TBD', 'TBA', 'ETA', 'ASAP', 'FCFS', 'APPT', 'NA', 'PU', 'DEL', 'CT', 'ET', 'MT', 'PT', 'CST', 'EST', 'MST', 'PST']);
+
+/** Does a company or an ID start the text after the connector? */
+function companyFollows(rest: string, connector: string): boolean {
+  const token = (/^\S+/.exec(rest)?.[0] ?? '').replace(/[,;:]+$/, '');
+  if (connector === 'at' && (token === PLACEHOLDER.id || /^\d{6,}$/.test(token))) return true;
+  if (!/^[A-Z][A-Z0-9&'’.-]*[A-Z0-9]$/.test(token) || NOT_A_COMPANY.has(token)) return false;
+  return connector === 'at' || /^[A-Z][A-Z&'’.-]*[A-Z]$/.test(token);
+}
+
+/** The name words of a run, from the one after its last facility or function word; null with fewer than two. */
+function nameRange(run: string, start: number): { start: number; end: number } | null {
+  const words = [...run.matchAll(/\S+/g)];
+  const from = words.reduce((at, w, i) => (NOT_A_NAME.has(w[0].toLowerCase().replace(/[.,]+$/, '')) ? i + 1 : at), 0);
+  const kept = words.slice(from);
+  return kept.length < 2 ? null : { start: start + kept[0]!.index, end: start + run.length };
+}
+
+/** Where rule C's names are in a text: the mask and the re-scan both read it. */
+function nameAtCompanyHits(text: string): { start: number; end: number }[] {
+  const hits: { start: number; end: number }[] = [];
+  for (const m of text.matchAll(CONNECTOR)) {
+    if (!companyFollows(text.slice(m.index + m[0].length), m[1]!)) continue;
+    let before = text.slice(0, m.index);
+    // "<Name>, <Role> at": the name is what is before the comma. A role that is not a role (no role word in
+    // it) may be the name itself, so it is not skipped.
+    const role = ROLE_TAIL.exec(before);
+    if (role && isRole(role[1]!)) before = before.slice(0, role.index);
+    const name = NAME_RUN.exec(before);
+    const hit = name ? nameRange(name[0], name.index) : null;
+    if (hit) hits.push(hit);
+  }
+  return hits;
+}
+
+/** Rule C over a text: each name becomes `[REMOVED]`, counted in `counts.labelled` and in `n`. */
+function maskNamesAtCompany(text: string, counts: MaskCounts): { text: string; n: number } {
+  const hits = nameAtCompanyHits(text);
+  let out = text;
+  for (const hit of hits.reverse()) out = `${out.slice(0, hit.start)}${PLACEHOLDER.labelled}${out.slice(hit.end)}`;
+  counts.labelled += hits.length;
+  return { text: out, n: hits.length };
+}
+
 /**
  * One cell, without regard to its neighbours. `labelOnly`: a label with
  * nothing after it, whose value is the next cell. `bareLabel`: the first pass
  * left a person label followed by nothing but placeholders (rule B's header).
  */
-function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: boolean; bareLabel: boolean } {
+function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: boolean; bareLabel: boolean; company: number } {
   let t = mask(text, EMAILS, 'email', counts);
   t = mask(t, URLS, 'url', counts);
   t = mask(t, IDS, 'id', counts);
@@ -214,12 +304,14 @@ function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: 
   t = mask(t, AMOUNTS, 'amount', counts);
   const bareLabel = personLabelBare(t);
   const at = labelledValueAt(t);
-  if (at !== -1 && at === t.length) return { text: t, labelOnly: true, bareLabel };
+  if (at !== -1 && at === t.length) return { text: t, labelOnly: true, bareLabel, company: 0 };
   if (at !== -1) {
     counts.labelled += 1;
     t = `${t.slice(0, at)}${PLACEHOLDER.labelled}`;
   }
-  return { text: t, labelOnly: false, bareLabel };
+  // After the label rule, which masks a labelled value whole, company and all.
+  const company = maskNamesAtCompany(t, counts);
+  return { text: company.text, labelOnly: false, bareLabel, company: company.n };
 }
 
 /** Cells are joined with this, as they are sent. */
@@ -277,6 +369,11 @@ function maskAtTokens(cells: readonly string[], counts: MaskCounts): string[] {
  * pass handled; the re-scan still checks them.
  */
 export function maskJoined(text: string, counts: MaskCounts): string {
+  return maskJoinedCounted(text, counts).text;
+}
+
+/** `maskJoined`, and how many names rule C took in it. */
+function maskJoinedCounted(text: string, counts: MaskCounts): { text: string; company: number } {
   let t = mask(text, EMAILS, 'email', counts);
   t = mask(t, URLS, 'url', counts);
   t = mask(t, IDS, 'id', counts);
@@ -285,7 +382,8 @@ export function maskJoined(text: string, counts: MaskCounts): string {
     counts.phone += 1;
     return `${word}${gap}${PLACEHOLDER.phone}`;
   });
-  return mask(t, AMOUNTS, 'amount', counts);
+  const company = maskNamesAtCompany(mask(t, AMOUNTS, 'amount', counts), counts);
+  return { text: company.text, company: company.n };
 }
 
 /** A cell's leading placeholders, with what separates them, and the rest of the cell. */
@@ -390,6 +488,8 @@ export interface RedactedLine {
   below: number;
   /** Rule B's header: the line has a person label, whatever follows it. The row below it is masked. */
   header: boolean;
+  /** What rule C masked in this line (a name before " at <COMPANY>"), counted in `masks.labelled` too. */
+  company: number;
 }
 
 /**
@@ -421,12 +521,14 @@ export function redactLine(line: Line): RedactedLine {
       });
     }
   });
-  const person = maskPersonNames(maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), counts);
+  const joinedPass = maskJoinedCounted(maskAtTokens(texts, counts).join(CELL_GAP), counts);
+  const person = maskPersonNames(joinedPass.text, counts);
   const bare = maskBarePhones(person.text, counts);
   // Read from the cells as they were AND as the first pass left them: a label's neighbours are
   // placeholders by now, which tells nothing about the header they were.
   const header = cells.some((c) => c.bareLabel) || line.cells.some((c) => isPersonHeaderCell(c.text.trim()));
-  return { text: bare.text, masks: counts, names: person.names, bare: bare.n, below: 0, header };
+  const company = cells.reduce((sum, c) => sum + c.company, 0) + joinedPass.company;
+  return { text: bare.text, masks: counts, names: person.names, bare: bare.n, below: 0, header, company };
 }
 
 /* ------------------- rule B: the row below a person header ------------------- */
@@ -587,7 +689,9 @@ export function residue(text: string): MaskKind[] {
       [...text.matchAll(LABEL)].some((m) => {
         const value = text.slice(m.index + m[0].length);
         return value !== '' && !STARTS_WITH_PLACEHOLDER.test(value);
-      }) || nameLeft(text),
+      }) ||
+      nameLeft(text) ||
+      nameAtCompanyHits(text).length > 0,
     id: hit(IDS),
     url: hit(URLS),
   };
@@ -612,7 +716,7 @@ export function selectPages(lines: readonly Line[]): Line[] {
  */
 export function redactedForReview(lines: readonly Line[]): {
   /** What the passes masked in the line, counts only, for the report: `names` the name pass, `bare` rule A, `below` rule B; `header`: a person header (rule B's). */
-  lines: (PreparedLine & { residue: MaskKind[]; names: number; bare: number; below: number; header: boolean })[];
+  lines: (PreparedLine & { residue: MaskKind[]; names: number; bare: number; below: number; header: boolean; company: number })[];
   masks: MaskCounts;
 } {
   const masks = zero();
@@ -628,6 +732,7 @@ export function redactedForReview(lines: readonly Line[]): {
       bare: redacted.bare,
       below: redacted.below,
       header: redacted.header,
+      company: redacted.company,
     };
   });
   return { lines: out, masks };
