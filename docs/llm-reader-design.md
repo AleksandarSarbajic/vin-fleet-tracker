@@ -293,6 +293,17 @@ browser against exactly the lines it sent). For every cited value:
    that is in the document: when the model's quote is not there, the mark
    says so and does not repeat it.
 
+**The dropped-stop cue** (`src/lib/ratecon/address-cue.ts`, phase 3c,
+2026-10-14). The verifier checks each value against its quote and never
+counts stops, so a read that leaves a stop out verifies cleanly (evaluation
+run 1, sample 22). After verification, the strip names the sent lines that
+look like a US city, state and ZIP (`cityLine`, on the line or any cell) and
+that no quote in the text covers: "N lines that look like addresses were not
+used: L12, L45", with "Show what is sent". A made-up citation covers
+nothing. It blocks nothing and changes no mark. **It cannot tell a stop from
+any other address,** a broker's or carrier's own included. Offline, with
+nothing dropped, it would fire on 5 of the 6 control files (HANDOFF, 3c).
+
 **Prompt injection.** The text is untrusted. The model has no tools, its
 output must pass the schema, every value must be quoted from the text, and
 every value is marked. The worst a hostile document can do is put wrong
@@ -881,4 +892,17 @@ Phase 3a-3 (redaction) and 3b-prep (the evaluation script, 2026-10-14):
     usage × the price constants); the next call's most is its body's UTF-8
     bytes plus 2,000 tokens in, and `max_tokens` out. A reply billed past
     its bound stops the run; a failure with no usage is counted at its bound.
+
+Phase 3c (2026-10-14):
+
+34. **The dropped-stop cue** (§3) is built as asked: every uncited
+    address-like line. Measured offline, it is noisy: with nothing dropped
+    it would fire on 5 of 6 control files and 12 of 13 template-read files,
+    because every one of those files has more address-like lines than
+    stops. A narrowing to lines after the first stop's first line would fire
+    on 1 of 6 and 5 of 13. It is measured, not built: it would miss a dropped
+    FIRST stop.
+35. **The form has no end date,** so appointment diagnostics name `window`
+    (an appointment's end) or `end time` (receiving hours' end); an end-date
+    error shows as one of those.
 

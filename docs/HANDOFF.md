@@ -1110,6 +1110,141 @@ Fixed: nothing, as instructed.
 - The 12 unrecognised files, the ones the reader exists for, are not yet
   evaluated: their ground truth is not written.
 
+### Phase 3c: a dropped stop made visible; sharper diagnostics (2026-10-14)
+
+No API call, no use of the key, no document text or ground-truth value read
+or printed.
+
+**1. `ratecon:eval-ai`'s exit code** (`barVerdict`):
+
+- It exits 0 ONLY when every planned call was made and scored and nothing
+  on the bar is WRONG.
+- A WRONG is `not-met`; anything short of every run scored is
+  `incomplete`; both exit 1.
+- Run 1 exited 0 with a WRONG; that cannot happen now.
+
+**2. Appointment diagnostics** (`appointmentDiff`, in
+`scripts/ratecon-expected.mts`, shared by `ratecon:score` and
+`ratecon:eval-ai`):
+
+- When an appointment is WRONG or "marked, filled differently", the output
+  names WHICH parts differ, never their values: `WRONG (date, time)`.
+- The parts are `none-versus-set`, `type`, `date`, `time`, `window` and
+  `end time`.
+- **The form has no end date.** An appointment's end is its `window` in
+  minutes, and receiving hours' end is `end time`, so a wrong end date shows
+  as one of those.
+- `appointmentScore` is now built on the diff. `ratecon:score`'s results are
+  unchanged: the output was diffed with the part names removed.
+- On the six control files the TEMPLATES are right on every appointment, so
+  `ratecon:score` names no part. That sharpens run 1:
+  - on sample 27, stop 1, the template fills what the PDF says, and the AI
+    was WRONG in all 3 runs;
+  - on sample 1, stop 2, the template fills what the PDF says, and the AI
+    was "marked, filled differently" in all 3 runs.
+  - The next run will name the parts.
+
+**3. The dropped-stop cue, in the app** (`src/lib/ratecon/address-cue.ts`;
+the strip):
+
+- **What it finds:** after verification, the sent lines that look like a US
+  city, state and ZIP (`cityLine`, on the whole line or any cell) that no
+  quote covers.
+  - A quote covers a line only when it is in the text: the verifier's own
+    `locate`, now exported. A made-up citation does not hide a line.
+  - Any quote counts: an appointment quoting the city line covers it.
+  - A quote over several lines covers each of them.
+- **What the strip says:** "N lines that look like addresses were not used:
+  L12, L45" (or "1 line that looks like an address was not used: L18"), with
+  "Show what is sent".
+  - It blocks nothing and changes no mark.
+  - It survives the "Replace" path.
+- **It cannot tell a stop from any other address.** A broker's own address,
+  as the only uncited line, fires it. A test pins this.
+- **It folds away** with the rest of the strip's detail the moment the load
+  is typed into. On a real dropped stop, the warning can be gone after one
+  keystroke. Not changed; worth Alex's view.
+
+**4. Offline measurement** (`npm run ratecon:cue-report`; no model; counts
+only). For a template-read file, the template's own reading stands in for a
+read that dropped nothing: its source lines are taken as the citations. A
+model cites quotes, not whole lines, so this is an estimate. The columns
+layout cites a cell, not a line, and is matched by cell.
+
+| Sample | Template | Stops (template / truth) | Lines sent | Address-like | Uncited, nothing dropped | Of those, after the first stop |
+|---|---|---|---|---|---|---|
+| 1 | label-rows | 2 / 2 | 50 | 2 | 0 | 0 |
+| 13 | columns | 2 / — | 144 | 6 | 4 | 2 |
+| 14 | columns | 2 / — | 140 | 6 | 4 | 2 |
+| 15 | columns | 2 / — | 136 | 6 | 4 | 2 |
+| 18 | stops-section | 2 / 2 | 77 | 4 | 2 | 0 |
+| 19 | stops-section | 2 / 2 | 77 | 4 | 2 | 0 |
+| 20 | stops-section | 2 / — | 77 | 4 | 2 | 0 |
+| 22 | pu-so-blocks | 2 / 2 | 48 | 4 | 2 | 0 |
+| 23 | pu-so-blocks | 2 / 2 | 49 | 4 | 2 | 0 |
+| 24 | pu-so-blocks | 2 / — | 47 | 4 | 2 | 0 |
+| 25 | pu-so-blocks | 2 / — | 48 | 4 | 2 | 0 |
+| 26 | pu-so-blocks | 2 / — | 103 | 6 | 4 | 2 |
+| 27 | pu-so-blocks | 2 / 2 | 99 | 6 | 4 | 2 |
+
+The 12 unrecognised files have no known stop count yet. Address-like lines
+sent: 2 → 3, 4 → 3, 7 → 2, 8 → 3, 9 → 8, 10 → 4, 11 → 2, 12 → 10, 16 → 4,
+17 → 4, 21 → 2, 28 → 8.
+
+**How often it fires when no stop was dropped:**
+
+| | Control files (1, 18, 19, 22, 23, 27) | Template-read files |
+|---|---|---|
+| The cue as built | **5 of 6** (all but 1) | 12 of 13 |
+| Narrowed to lines after the first stop (measured only, NOT built) | 1 of 6 (27) | 5 of 13 |
+
+**As built, the cue is noise.** Every file but sample 1 has more
+address-like lines than stops: the broker's, the carrier's, bill-to and
+remit-to. A dispatcher shown it on nearly every AI read would learn to
+ignore it, the same risk §10 item 1 named for marks.
+
+**The narrowing is promising but not proven.**
+
+- It would still have caught run 1's dropped stop (sample 22's stop 2 comes
+  after stop 1), and it is silent on 22.
+- It cannot catch a dropped FIRST stop: nothing a later stop cites comes
+  before it.
+- It is measured on templates' citations, not a model's.
+
+Alex's call, before the reader goes on: build the narrowing, try another
+signal (stop words near the line), or keep the cue as it is.
+
+**5. `ratecon:eval-ai` measures the cue per run.** For each scored run, it
+prints whether the cue would have fired and the line numbers
+(`address cue   would fire: 2 uncited address-like lines: L12, L45`), and
+the total at the end. So the next run measures it on real reads.
+
+**Tests:** 2639 in all (2587 before).
+
+| File | Tests |
+|---|---|
+| `src/lib/ratecon/address-cue.test.ts` (new) | 20 |
+| `src/test/ratecon-expected.test.ts` (new) | 21 |
+| `src/test/ratecon-eval.test.ts` | 52 (44 before) |
+| `src/components/edit/ratecon-ai.test.tsx` | 3 more |
+
+The exit-code, diff and cue tests were written first and seen to fail.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- a quote not in the text still covers its line;
+- a city line in one cell of several not seen;
+- `lineEnd` ignored;
+- appointment quotes not counted;
+- the singular said as a plural;
+- the cue dropped on the Replace path;
+- the cue never computed.
+
+"Not seen in one cell of several" first passed every test: a line whose
+cell matches nearly always matches whole. It now has a case where only the
+cell finds the city (`Order PO 44120` | `Fargo, ND 58102`).
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -1146,15 +1281,16 @@ proposals below).
 4. ~~Approve step 1 in writing~~: approved 2026-10-14 for the six control
    files and run once (phase 3b). The next run, on the unrecognised files,
    needs its own written approval naming them.
-5. **Decide what to do about run 1's two findings.** These are proposals,
-   none built:
-   - **A dropped stop.** A read with fewer stops than the document's own
-     stop markers could be marked, or refused. That needs a count from the
-     text: for example, the city lines on the pages sent. Not designed yet.
-   - **Sample 27, stop 1.** Alex reads its appointment lines in the viewer
-     and says whether the ground truth or the read is right.
-   - **The exit code.** `ratecon:eval-ai` should exit non-zero when the bar
-     is not met.
+5. **Decide what to do about run 1's findings:**
+   - **A dropped stop:** the cue is built (3c). As built it would fire on 5
+     of 6 control files with nothing dropped. Decide: narrow it to lines
+     after the first stop (1 of 6; misses a dropped first stop), try
+     another signal, or keep it. Also decide whether it should outlast the
+     first keystroke.
+   - **Sample 27, stop 1:** Alex reads its appointment lines in the viewer
+     and says whether the ground truth or the read is right. The template
+     agrees with the ground truth there.
+   - ~~The exit code~~: done in 3c.
 
 **What Alex must approve before step 1** (design §8.2). The figures are
 proposals:
