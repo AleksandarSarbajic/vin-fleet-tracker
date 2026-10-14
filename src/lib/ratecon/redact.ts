@@ -315,7 +315,7 @@ function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: 
 }
 
 /** Cells are joined with this, as they are sent. */
-const CELL_GAP = '  ';
+export const CELL_GAP = '  ';
 const PLACEHOLDER_TOKEN = /^(?:\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\])+$/;
 
 /**
