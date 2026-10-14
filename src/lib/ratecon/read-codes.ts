@@ -62,4 +62,9 @@ export const READ_MESSAGES: Readonly<Record<ReadFailCode, string>> = {
   error: 'The AI read failed. Nothing was filled.',
 };
 
-export type ReadResponse = { ok: true; read: unknown } | { ok: false; code: ReadFailCode; reference?: string };
+/**
+ * A read is a PAIR (two-read agreement; Alex, 2026-10-14): on success, both
+ * model reads, A then B, for the browser to verify and merge. On any failure
+ * of either, a code and neither read. The route does not verify.
+ */
+export type ReadResponse = { ok: true; reads: [unknown, unknown] } | { ok: false; code: ReadFailCode; reference?: string };

@@ -24,6 +24,8 @@ export class FakeReaderAdapter implements ReaderAdapter {
   readonly vendor = 'fake';
   readonly model = 'fake';
   readonly received: ReaderRequest[] = [];
+  /** The signal each call was handed, so a test can prove a cancel or a timeout reached it. */
+  readonly signals: AbortSignal[] = [];
   private readonly steps: FakeStep[];
 
   constructor(steps: readonly FakeStep[]) {
@@ -32,6 +34,7 @@ export class FakeReaderAdapter implements ReaderAdapter {
 
   async read(request: ReaderRequest, signal: AbortSignal): Promise<AdapterResult> {
     this.received.push(structuredClone({ ...request, lines: [...request.lines] }));
+    this.signals.push(signal);
     return this.play(this.steps.shift() ?? { fail: 'unavailable' }, signal);
   }
 

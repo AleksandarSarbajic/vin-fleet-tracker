@@ -10,7 +10,7 @@ import {
 import { REDACTION_VERSION, SEND_LIMITS, residue } from '@/lib/ratecon/redact';
 import type { Db } from '@/server/audit';
 import { RateLimitError, clientAddress, enforceRateLimit, rateLimitResponse } from '@/server/rate-limit';
-import type { AdapterFailure, ReaderAdapter } from './adapter';
+import type { AdapterFailure, AdapterResult, AdapterUsage, ReaderAdapter } from './adapter';
 import { logReadFailure } from './log';
 import { finishRead, reserveRead, type ReadOutcome, type ReadVendor } from './reads';
 
@@ -23,6 +23,14 @@ import { finishRead, reserveRead, type ReadOutcome, type ReadVendor } from './re
  * version, a second redaction scan — and only then the daily cap's
  * reservation, so a request refused for its body never spends a read; then
  * the vendor, under the server's own timeout; then the reply's schema.
+ *
+ * A read is a PAIR (two-read agreement, §3–§5; Alex, 2026-10-14): ONE
+ * reservation, then TWO vendor calls with the same lines, made at once, each
+ * under the server's timeout and the request's cancellation. The pair FAILS
+ * AS A WHOLE when either call fails — at the adapter or at the schema — with
+ * read A's code, else read B's, and returns neither reply: there is never a
+ * read to fall back to. The counts row is the pair's: one row, the pair's
+ * outcome, both calls' tokens.
  *
  * Never lets an error escape (an escaping error reaches Sentry with its
  * message), never returns or logs text from a document or a vendor, and
@@ -132,6 +140,36 @@ function judgeBody(raw: string): { code: ReadFailCode } | { body: ReadRequestBod
   return { body: body.data };
 }
 
+/** One call of a pair, as the route sees it: its reply (schema-valid), or the code it failed with. */
+type Side =
+  | { ok: true; read: ModelRead }
+  | { ok: false; code: ReadFailCode & ReadOutcome; vendorStatus: number | null; fromAdapter: boolean };
+
+function judgeSide(result: AdapterResult, cancelled: boolean): Side {
+  if (!result.ok) {
+    return { ok: false, code: cancelled ? 'cancelled' : ADAPTER_CODE[result.code], vendorStatus: result.vendorStatus, fromAdapter: true };
+  }
+  const parsed = ModelRead.safeParse(result.output);
+  // The issues are not kept: a Zod message quotes the value it received.
+  return parsed.success ? { ok: true, read: parsed.data } : { ok: false, code: 'invalid_output', vendorStatus: null, fromAdapter: false };
+}
+
+/** The reply of a side known to have succeeded (the caller has checked both). */
+function sideRead(side: Side | undefined): ModelRead {
+  if (!side || !side.ok) throw new Error('A pair that succeeded lacks a read.');
+  return side.read;
+}
+
+/** What both calls billed, summed: nothing when neither said (the row then holds no count, not a zero). */
+function billed(results: readonly AdapterResult[]): Partial<AdapterUsage> {
+  const reported = results.map((r) => r.usage).filter((u): u is AdapterUsage => u !== undefined);
+  if (reported.length === 0) return {};
+  return {
+    inputTokens: reported.reduce((n, u) => n + u.inputTokens, 0),
+    outputTokens: reported.reduce((n, u) => n + u.outputTokens, 0),
+  };
+}
+
 export async function handleRead(request: Request, deps: ReadDeps): Promise<Response> {
   let reservation: string | null = null;
   let vendorStatus: number | null = null;
@@ -162,29 +200,28 @@ export async function handleRead(request: Request, deps: ReadDeps): Promise<Resp
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), deps.timeoutMs);
     const signal = AbortSignal.any([timeout.signal, request.signal]);
-    const result = await deps
-      .adapter()
-      .read({ lines: lines.map(({ n, text }) => ({ n, text })), today: dayIn(settings.tz, deps.now()) }, signal)
-      .finally(() => clearTimeout(timer));
+    const adapter = deps.adapter();
+    const readRequest = { lines: lines.map(({ n, text }) => ({ n, text })), today: dayIn(settings.tz, deps.now()) };
+    // Two calls at once, so a read takes about as long as one. An adapter never throws.
+    const results = await Promise.all([adapter.read(readRequest, signal), adapter.read(readRequest, signal)]).finally(() => clearTimeout(timer));
+    const sides = results.map((result) => judgeSide(result, request.signal.aborted));
+    const usage = billed(results);
 
-    if (!result.ok) {
-      vendorStatus = result.vendorStatus;
-      const code: ReadFailCode & ReadOutcome = request.signal.aborted ? 'cancelled' : ADAPTER_CODE[result.code];
-      // A refusal or a cut-off reply was billed: its tokens go in the row.
-      await finishRead(deps.db, reservation, { outcome: code, ...result.usage });
+    // The pair's code: read A's when A failed, else read B's. Nothing of either reply is returned.
+    const failed = sides.find((side) => !side.ok);
+    if (failed && !failed.ok) {
+      vendorStatus = failed.vendorStatus;
+      // A refusal or a cut-off reply was billed: its tokens, and the other call's, go in the row.
+      await finishRead(deps.db, reservation, { outcome: failed.code, ...usage });
       // The vendor's status is the only way to tell a revoked key (401) from
       // an outage (5xx) after the fact. Code and status only, never text.
-      if (code !== 'cancelled') logReadFailure({ reference: newReference(STATUS[code]), code, errorName: 'AdapterFailure', vendorStatus });
-      return fail(code);
+      if (failed.fromAdapter && failed.code !== 'cancelled') {
+        logReadFailure({ reference: newReference(STATUS[failed.code]), code: failed.code, errorName: 'AdapterFailure', vendorStatus });
+      }
+      return fail(failed.code);
     }
-    const parsed = ModelRead.safeParse(result.output);
-    if (!parsed.success) {
-      // The issues are not kept: a Zod message quotes the value it received.
-      await finishRead(deps.db, reservation, { outcome: 'invalid_output', ...result.usage });
-      return fail('invalid_output');
-    }
-    await finishRead(deps.db, reservation, { outcome: 'ok', ...result.usage });
-    return reply({ ok: true, read: parsed.data }, 200);
+    await finishRead(deps.db, reservation, { outcome: 'ok', ...usage });
+    return reply({ ok: true, reads: [sideRead(sides[0]), sideRead(sides[1])] }, 200);
   } catch (error: unknown) {
     // The 429 every route gives; the browser reads a 429 with no code as rate_limited.
     if (error instanceof RateLimitError) return rateLimitResponse(error);

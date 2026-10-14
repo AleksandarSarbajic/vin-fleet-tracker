@@ -64,6 +64,33 @@ describe('FakeReaderAdapter', () => {
     expect(await pending).toEqual({ ok: false, code: 'timeout', vendorStatus: null });
   });
 
+  it('a pair: two calls at once take the first two steps in the order they were made, whatever each step\'s delay', async () => {
+    const fake = new FakeReaderAdapter([{ delayMs: 500, then: { reply: 'slow A' } }, { reply: 'quick B' }]);
+    const a = fake.read(request, live());
+    const b = fake.read(request, live());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await a).toMatchObject({ ok: true, output: 'slow A' });
+    expect(await b).toMatchObject({ ok: true, output: 'quick B' });
+    expect(fake.received).toHaveLength(2);
+  });
+
+  it('a script that fails the SECOND call of a pair: read A answers, read B does not', async () => {
+    const fake = new FakeReaderAdapter([{ reply: MODEL_REPLY }, { fail: 'unavailable', vendorStatus: 503 }]);
+    const [a, b] = await Promise.all([fake.read(request, live()), fake.read(request, live())]);
+    expect(a).toMatchObject({ ok: true, output: MODEL_REPLY });
+    expect(b).toEqual({ ok: false, code: 'unavailable', vendorStatus: 503 });
+  });
+
+  it('records the signal of each call, so a test can show a cancel reached both', async () => {
+    const fake = new FakeReaderAdapter([{ delayMs: 30_000, then: { reply: 'a' } }, { delayMs: 30_000, then: { reply: 'b' } }]);
+    const abort = new AbortController();
+    const pending = Promise.all([fake.read(request, abort.signal), fake.read(request, abort.signal)]);
+    expect(fake.signals).toEqual([abort.signal, abort.signal]);
+    abort.abort();
+    await pending;
+    expect(fake.signals.every((s) => s.aborted)).toBe(true);
+  });
+
   it('a signal already aborted is a timeout at once', async () => {
     const abort = new AbortController();
     abort.abort();
