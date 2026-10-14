@@ -1,0 +1,335 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { prepareForReading } from '@/lib/ratecon/redact';
+import { MODEL_REPLY, SENTINEL, UNKNOWN_LAYOUT, pdfLine } from '@/test/model-read-fixtures';
+import type { FakeStep } from '@/server/ratecon-reader/fake';
+import {
+  BAR_FIELDS,
+  CEILINGS,
+  INPUT_MARGIN_TOKENS,
+  boundOfBody,
+  evalFile,
+  parseEvalArgs,
+  planProblem,
+  runEvaluation,
+  scoreField,
+  type EvalDeps,
+  type EvalFile,
+  type EvalPlan,
+} from '../../scripts/ratecon-eval.mjs';
+
+vi.mock('server-only', () => ({}));
+const { FakeReaderAdapter } = await import('@/server/ratecon-reader/fake');
+
+/**
+ * `npm run ratecon:eval-ai` (docs/llm-reader-design.md §8.2, step 1), tested
+ * with the FAKE adapter and INVENTED documents and ground truth only. No test
+ * here reads a sample, a key, or the network.
+ */
+
+const ROOT = join(import.meta.dirname, '..', '..');
+const NOW = new Date('2026-10-13T15:00:00Z');
+
+/** Invented ground truth for UNKNOWN_LAYOUT, as `expected.json` would hold it. */
+const WANT = {
+  loadNumber: 'EX-40417',
+  stops: [
+    { type: 'PU', street: '4001 Main St', city: 'Fargo', state: 'ND', zip: '58102', appointment: { type: 'APPT', date: '2026-10-14', time: '08:00', windowMinutes: 120 } },
+    { type: 'DEL', street: '220 Harbor Rd', city: 'Duluth', state: 'MN', zip: '55802', appointment: { couldntRead: true, date: '' } },
+  ],
+};
+
+function file(want: unknown = WANT, n = 7): EvalFile {
+  const ready = evalFile(n, UNKNOWN_LAYOUT, want);
+  if (!ready.ok) throw new Error(ready.why);
+  return ready.file;
+}
+
+const USAGE = { inputTokens: 3000, outputTokens: 1500 };
+const OK: FakeStep = { reply: MODEL_REPLY, usage: USAGE };
+
+function harness(steps: FakeStep[], over: Partial<EvalDeps> = {}) {
+  const adapter = new FakeReaderAdapter(steps);
+  const out: string[] = [];
+  const deps: EvalDeps = {
+    adapter,
+    price: { inputPerMTok: 0.1, outputPerMTok: 0.5, maxInputTokens: 100_000 },
+    bound: () => ({ inputTokens: 10_000, outputTokens: 8192 }),
+    now: NOW,
+    tz: 'America/Chicago',
+    timeoutMs: 5_000,
+    say: (line) => out.push(line),
+    ...over,
+  };
+  return { adapter, out, deps };
+}
+
+const plan = (files: EvalFile[], runs = 1, ceilings: EvalPlan['ceilings'] = CEILINGS): EvalPlan => ({ files, runs, ceilings });
+
+describe('the flags: nothing runs without a written approval date and the files it names', () => {
+  const TODAY = '2026-10-14';
+
+  it.each([
+    ['no flags at all', [], 'no --approved'],
+    ['files but no approval', ['--files=1,18'], 'no --approved'],
+    ['an approval but no files', ['--approved=2026-10-14'], 'no --files'],
+    ['an approval date that is not a date', ['--approved=2026-02-30', '--files=1'], 'real date'],
+    ['an approval date in another form', ['--approved=14/10/2026', '--files=1'], 'real date'],
+    ['an approval dated after today', ['--approved=2026-10-15', '--files=1'], 'after today'],
+    ['files that are not numbers', ['--approved=2026-10-14', '--files=1,x'], 'sample numbers'],
+    ['sample 0', ['--approved=2026-10-14', '--files=0'], 'sample numbers'],
+    ['a file named twice', ['--approved=2026-10-14', '--files=1,1'], 'twice'],
+    ['runs of zero', ['--approved=2026-10-14', '--files=1', '--runs=0'], 'whole number'],
+    ['an unknown flag', ['--approved=2026-10-14', '--files=1', '--live'], 'unknown argument'],
+    ['a flag given twice', ['--approved=2026-10-13', '--approved=2026-10-14', '--files=1'], 'twice'],
+  ])('refuses %s', (_, argv, why) => {
+    const parsed = parseEvalArgs(argv, TODAY);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.why).toContain(why);
+  });
+
+  it('takes an approval dated today or before, the files, and 3 runs by default', () => {
+    expect(parseEvalArgs(['--approved=2026-10-14', '--files=1,18'], TODAY)).toEqual({
+      ok: true,
+      args: { approved: '2026-10-14', files: [1, 18], runs: 3 },
+    });
+    expect(parseEvalArgs(['--files=22', '--approved=2026-10-01', '--runs=1'], TODAY)).toMatchObject({ ok: true, args: { runs: 1 } });
+  });
+
+  // The command itself, spawned with an environment that has NO key: it must
+  // refuse at the flags, before the key, a sample or the adapter is touched.
+  const command = (argv: string[]) => {
+    try {
+      execFileSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/ratecon-eval-ai.mts', ...argv], {
+        cwd: ROOT,
+        env: { NODE_ENV: 'test', PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' },
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
+      return { code: 0, stderr: '', stdout: '' };
+    } catch (error: unknown) {
+      const e = error as { status: number; stderr: Buffer; stdout: Buffer };
+      return { code: e.status, stderr: e.stderr.toString(), stdout: e.stdout.toString() };
+    }
+  };
+
+  it('the command refuses with no approval, and says nothing else', () => {
+    const run = command(['--files=1']);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain('refused: no --approved');
+    expect(run.stdout).toBe('');
+  });
+
+  it('the command refuses with no files', () => {
+    expect(command(['--approved=2026-10-14'])).toMatchObject({ code: 2, stderr: expect.stringContaining('no --files') });
+  });
+
+  it('with the flags right but no key, the command refuses at the key: no call can be made', () => {
+    const run = command(['--approved=2026-10-14', '--files=1']);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain('LLM_READER_API_KEY');
+    expect(run.stdout).toBe('');
+  }, 30_000);
+});
+
+describe('which files may be evaluated, checked before any call', () => {
+  it('a prepared file with complete ground truth', () => {
+    const ready = evalFile(7, UNKNOWN_LAYOUT, WANT);
+    expect(ready.ok).toBe(true);
+    if (ready.ok) expect(ready.file.lines).toEqual((prepareForReading(UNKNOWN_LAYOUT) as { lines: unknown }).lines);
+  });
+
+  it.each([
+    ['a scan (no text layer)', null, WANT, 'not-text'],
+    ['no ground truth', UNKNOWN_LAYOUT, undefined, 'no-ground-truth'],
+    ['ground truth still blank in places', UNKNOWN_LAYOUT, { ...WANT, loadNumber: null }, 'ground-truth-incomplete'],
+    ['ground truth of the wrong shape', UNKNOWN_LAYOUT, { loadNumber: 'x' }, 'ground-truth-wrong-shape'],
+    ['ground truth with no stops', UNKNOWN_LAYOUT, { notRecognised: true }, 'no-stops-in-ground-truth'],
+    ['a file the redaction refuses', [pdfLine(1, 'Contact:', 'Dana', 'Q.', 'Example', 'Quill', 'Riley')], WANT, 'not-prepared'],
+  ])('refuses %s', (_, lines, want, why) => {
+    expect(evalFile(7, lines, want)).toEqual({ ok: false, why });
+  });
+});
+
+describe('the ceilings, enforced before each call', () => {
+  it('plans more calls than the ceiling: refused before any call', () => {
+    const f = file();
+    expect(planProblem(plan(Array.from({ length: 25 }, () => f), 3))).toBeNull();
+    expect(planProblem(plan(Array.from({ length: 26 }, () => f), 3))).toContain('78 calls planned, over the ceiling of 75');
+  });
+
+  it('the call ceiling stops the run before the call that would pass it', async () => {
+    const { adapter, deps } = harness([OK, OK, OK]);
+    const totals = await runEvaluation(plan([file()], 3, { calls: 2, dollars: 1 }), deps);
+    expect(adapter.received).toHaveLength(2);
+    expect(totals).toMatchObject({ calls: 2, stopped: 'call-ceiling' });
+  });
+
+  it('the dollar ceiling stops the run before a call whose most could pass it, and spending never passes it', async () => {
+    // Each call's bound costs $0.20 and each bills $0.10: after two, $0.20 + $0.20 > $0.35.
+    const billed: FakeStep = { reply: MODEL_REPLY, usage: { inputTokens: 500, outputTokens: 500 } };
+    const { adapter, deps } = harness([billed, billed, billed], {
+      price: { inputPerMTok: 100, outputPerMTok: 100, maxInputTokens: 100_000 },
+      bound: () => ({ inputTokens: 1000, outputTokens: 1000 }),
+    });
+    const totals = await runEvaluation(plan([file()], 3, { calls: 75, dollars: 0.35 }), deps);
+    expect(adapter.received).toHaveLength(2);
+    expect(totals.stopped).toBe('dollar-ceiling');
+    expect(totals.dollars).toBeCloseTo(0.2, 10);
+    expect(totals.dollars).toBeLessThanOrEqual(0.35);
+  });
+
+  it('a call whose input bound passes the price tier is never made', async () => {
+    const { adapter, deps } = harness([OK], { bound: () => ({ inputTokens: 100_001, outputTokens: 10 }) });
+    const totals = await runEvaluation(plan([file()]), deps);
+    expect(adapter.received).toHaveLength(0);
+    expect(totals.stopped).toBe('dollar-ceiling');
+  });
+
+  it('a failure that reports no usage is counted at its bound, not as free', async () => {
+    const { deps } = harness([{ fail: 'timeout' }]);
+    const totals = await runEvaluation(plan([file()]), deps);
+    expect(totals.inputTokens).toBe(10_000);
+    expect(totals.outputTokens).toBe(8192);
+  });
+
+  it('a reply billed more input than its bound stops the run: the bound was wrong', async () => {
+    const { adapter, deps } = harness([{ reply: MODEL_REPLY, usage: { inputTokens: 10_001, outputTokens: 1 } }, OK]);
+    const totals = await runEvaluation(plan([file()], 2), deps);
+    expect(adapter.received).toHaveLength(1);
+    expect(totals.stopped).toBe('input-over-bound');
+  });
+
+  it("the vendor's own spending limit stops the run", async () => {
+    const { adapter, deps } = harness([{ fail: 'vendor_capped', vendorStatus: 400 }, OK]);
+    const totals = await runEvaluation(plan([file()], 2), deps);
+    expect(adapter.received).toHaveLength(1);
+    expect(totals.stopped).toBe('vendor-capped');
+  });
+
+  it("the bound of a body is its UTF-8 bytes plus the margin, and the adapter's max_tokens", () => {
+    expect(boundOfBody('abc', 8192)).toEqual({ inputTokens: 3 + INPUT_MARGIN_TOKENS, outputTokens: 8192 });
+    expect(boundOfBody('é', 1).inputTokens).toBe(2 + INPUT_MARGIN_TOKENS);
+  });
+});
+
+describe("the app's path, and the score", () => {
+  it('sends the prepared lines as n and text only, and today in the dispatch zone', async () => {
+    const { adapter, deps } = harness([OK]);
+    await runEvaluation(plan([file()]), deps);
+    const sent = (prepareForReading(UNKNOWN_LAYOUT) as { lines: { n: number; text: string }[] }).lines;
+    expect(adapter.received).toEqual([{ lines: sent.map(({ n, text }) => ({ n, text })), today: '2026-10-13' }]);
+  });
+
+  it('a reply that matches the ground truth: every bar field exact, the bar met', async () => {
+    const { out, deps } = harness([OK]);
+    const totals = await runEvaluation(plan([file()]), deps);
+    expect(totals.scored).toBe(1);
+    expect(BAR_FIELDS.every((f) => totals.wrong[f] === 0)).toBe(true);
+    expect(out).toContain('  load number   verified · exact');
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('ZIP verified exact');
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('appointment exact');
+    expect(out.at(-1)).toMatch(/^The bar: met/);
+  });
+
+  it('a verified value that is not what the PDF says is WRONG, and the bar is not met', async () => {
+    const want = { ...WANT, stops: [{ ...WANT.stops[0]!, zip: '58103' }, { ...WANT.stops[1]!, city: 'Superior' }] };
+    const { out, deps } = harness([OK]);
+    const totals = await runEvaluation(plan([file(want)]), deps);
+    expect(totals.wrong).toMatchObject({ ZIP: 1, city: 1, street: 0, 'load number': 0 });
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('ZIP verified WRONG');
+    expect(out.at(-1)).toBe('The bar: NOT met (2 WRONG). The reader stays off.');
+  });
+
+  it('a stop count that differs is WRONG', async () => {
+    const want = { ...WANT, stops: [...WANT.stops, WANT.stops[1]!] };
+    const { out, deps } = harness([OK]);
+    const totals = await runEvaluation(plan([file(want)]), deps);
+    expect(totals.wrong['stop count']).toBe(1);
+    expect(out).toContain('  stop 3        missing');
+  });
+
+  it('a value the verifier refuses is blank and marked, never WRONG', async () => {
+    const reply = structuredClone(MODEL_REPLY);
+    reply.stops[0]!.zip = { value: '58109', quote: { line: 13, text: 'Fargo, ND 58102' } };
+    const { out, deps } = harness([{ reply, usage: USAGE }]);
+    const totals = await runEvaluation(plan([file()]), deps);
+    expect(totals.wrong.ZIP).toBe(0);
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('ZIP blank-and-marked marked');
+  });
+
+  it('outcomes that never reach the fill are codes, and the bar is not called a pass', async () => {
+    const { out, deps } = harness([{ reply: { junk: true } }, { fail: 'refused', usage: USAGE }, { fail: 'unavailable', vendorStatus: 503 }]);
+    const totals = await runEvaluation(plan([file()], 3), deps);
+    expect(totals.scored).toBe(0);
+    expect(out.filter((l) => l.startsWith('sample 7 run')).map((l) => l.split(' · ')[0])).toEqual([
+      'sample 7 run 1: invalid_output',
+      'sample 7 run 2: refused',
+      'sample 7 run 3: unavailable (HTTP 503)',
+    ]);
+    expect(out.at(-1)).toMatch(/not every planned run was scored\. Not a pass\./);
+  });
+
+  it.each([
+    ['filled, unmarked, right', 'x', null, 'x', 'verified', 'exact'],
+    ['filled, unmarked, wrong', 'x', null, 'y', 'verified', 'WRONG'],
+    ['filled and marked', 'x', 'Check it.', 'y', 'filled-and-marked', 'marked'],
+    ['blank and marked', '', 'Not found in the PDF.', 'y', 'blank-and-marked', 'marked'],
+    ['blank, unmarked, and the truth is blank', '', null, '', 'blank-unmarked', 'exact'],
+    ['blank, unmarked, and the truth is not', '', undefined, 'y', 'blank-unmarked', 'WRONG'],
+  ] as const)('scoreField: %s', (_, value, check, truth, status, score) => {
+    expect(scoreField(value, check, truth)).toEqual({ status, score });
+  });
+});
+
+describe('the output: counts and codes, never a value or a line of text', () => {
+  it('prints no value, quote, sentinel or ground truth, through every kind of outcome', async () => {
+    const wrongWant = { ...WANT, loadNumber: 'EX-99417', stops: [{ ...WANT.stops[0]!, street: '9 Elm Example Ave', zip: '58103' }, WANT.stops[1]!] };
+    const leaky = structuredClone(MODEL_REPLY);
+    leaky.stops[0]!.street = { value: `4001 Main St ${SENTINEL}`, quote: { line: 12, text: `4001 Main St ${SENTINEL}` } };
+    const { out, deps } = harness([
+      OK,
+      { reply: leaky, usage: USAGE },
+      { reply: { loadNumber: SENTINEL } },
+      { fail: 'refused', usage: USAGE },
+    ]);
+    await runEvaluation(plan([file(WANT, 7), file(wrongWant, 8)], 2), deps);
+    const all = out.join('\n');
+    expect(all.length).toBeGreaterThan(0);
+    for (const text of [
+      SENTINEL,
+      'EX-40417',
+      'EX-99417',
+      'Main',
+      'Elm',
+      'Harbor',
+      'Fargo',
+      'Duluth',
+      '58102',
+      '58103',
+      '55802',
+      'Prairie',
+      'Lakeside',
+      'Dana',
+      'Riley',
+      '10/14',
+      '2026-10-14',
+      '0800',
+      'Pick up',
+      'Deliver',
+      'Load #',
+    ]) {
+      expect(all).not.toContain(text);
+    }
+    // Every line is one of the known shapes, so nothing free-form can carry text.
+    for (const line of out) {
+      expect(line).toMatch(
+        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|WRONG on the bar's fields: .+|The bar: .+)$/,
+      );
+    }
+    for (const line of out.filter((l) => /^ {2}(load number|stop)/.test(l))) {
+      expect(line).toMatch(/^ {2}[a-z0-9 ]+?( {2,}| )([a-zA-Z0-9 +·-]|, )+$/);
+    }
+  });
+});
