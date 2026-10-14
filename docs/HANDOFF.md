@@ -1372,7 +1372,8 @@ test:
   about $0.06) would show whether agreement removes sample 22's kind of
   WRONG, and what it costs in blanks. It needs its own written approval.
 - **The caps:** each read would be two calls against the daily cap. Either
-  the cap counts calls and halves the reads, or it is doubled.
+  the cap counts calls and halves the reads, or it is doubled. *Decided in
+  3f: the cap counts reads, and a pair, failed or not, is one read.*
 - **Latency:** the two calls run in parallel, so a read takes about as long
   as one call.
 
@@ -1477,6 +1478,78 @@ flagged ones possibly kept up to 2 years) is ACCEPTABLE."
 `--pairs` the run is not scored, by design (3d). In the app, what a pair
 with one failed read does is undecided.
 
+### Phase 3f: each read diagnosed on its own; a failed pair fails whole (2026-10-14)
+
+No API call, no use of the key, no document text or ground-truth value read
+or printed.
+
+**1. Each read is diagnosed on its own** (`ratecon:eval-ai`, both modes):
+
+- **One line per read:** A, and B in `--pairs`. It gives that read's own
+  bar WRONG count and, per stop, which appointment parts differ from the
+  ground truth (names only):
+
+      read A: 0 WRONG on the bar · appointments: stop 1 (window), stop 2 same
+
+  The parts are `none-versus-set`, `type`, `date`, `time`, `window` and
+  `end time`. A stop the read did not return is `missing`.
+- **Why:** in run 2 only the MERGED appointment was diagnosed. A merged
+  appointment the reads disagreed on is blank, so it differs in every part,
+  and sample 27's reads could not be told apart. The next run says which
+  part each read gets wrong.
+- **At the end, in `--pairs`:** read B's own WRONG per bar field, beside
+  read A's and the merged ones.
+- **This replaces 3d's `read A alone: N WRONG on the bar`.**
+
+**2. A pair where either read fails FAILS AS A WHOLE** (Alex, 2026-10-14):
+
+- **The rule:** a read fails at the adapter, at the schema
+  (`invalid_output`) or at the verifier (`nothing_confirmed`). The pair then
+  fails with that code (read A's when A failed, else read B's) and fills
+  nothing. It never falls back to the read that succeeded.
+- **In code:** `agreePair(a, b)` in `agree-reads.ts`, and `agreeReads`'s
+  comment states the caller's contract: call `agreePair`, not
+  `agreeReads`, with the two outcomes.
+- **In the eval:**
+  - the run is `<code> (pair: A ok, B timeout)`;
+  - nothing of either read is printed or scored;
+  - the verdict is `incomplete` (so 3e's `pair_incomplete (…)` is now e.g.
+    `invalid_output (pair: A invalid_output, B ok)`).
+- **In the design** (§4, §5, §11 item 38):
+  - a pair, failed or not, is ONE read against the cap: one reservation,
+    two calls;
+  - the strip says the AI read did not complete, with the code's own
+    sentence, and fills nothing.
+  - This replaces 3d's "two calls a read against the cap".
+- **Not wired into the app:** no route, UI or cap code changed.
+
+**Tests:** 2691 in all (2680 before).
+
+| File | Tests |
+|---|---|
+| `agree-reads.test.ts` | 29 (24 before): the pair contract, including both reads failing |
+| `ratecon-eval.test.ts` | 70 (64 before) |
+
+The eval tests cover:
+
+- per-read lines in single and paired runs;
+- read B's own WRONGs;
+- the merged appointment naming every part while the reads name only
+  their own;
+- a pair failing on read A's schema, read B's timeout, read B's nothing
+  confirmed, and both failing.
+
+The line-shape checks that keep text out of the output cover the new lines.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- a half-failed pair scored from the read that verified;
+- read B diagnosed on read A's fill;
+- a read diagnosed on the merge;
+- single reads not diagnosed;
+- `agreePair` ignoring a failed read B.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -1522,10 +1595,11 @@ proposals below).
      blank in 3 of 3 runs. But it blanked 3 appointments the model reads
      right in run 1, and no stop was dropped to test the case it was built
      for. Decide:
-     - wire it in, with two calls a read against the cap;
+     - wire it in (a pair is one read against the cap; decided in 3f);
      - keep single reads with the cue;
      - or first add per-read appointment diagnostics and run again.
-     Also decide what a pair with one failed read does in the app.
+     ~~Also decide what a pair with one failed read does~~: decided in 3f.
+     It fails as a whole.
    - **Sample 27, stop 1:** Alex reads its appointment lines in the viewer
      and says whether the ground truth or the read is right. The template
      agrees with the ground truth there.

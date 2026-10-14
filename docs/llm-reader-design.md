@@ -329,8 +329,9 @@ dropped middle stop: the safe side.
 **What it would cost in the app:**
 - one read is two calls, made in parallel, so the latency is about one
   call's;
-- each read would use **two calls against the daily cap**, so the caps
-  (§10 item 8) would halve in reads or need doubling;
+- **the cap counts reads, and a pair is ONE read** (Alex, 2026-10-14):
+  one reservation, two vendor calls. A failed pair is one read too (§4,
+  §5). The count per read is unchanged; the spend per read doubles;
 - about **$0.003 a pair** on Haiku 5.5, from run 1's measured $0.0280 for
   18 calls.
 
@@ -376,6 +377,11 @@ request refused for its body never spends a read:
      pass at once.
    - **No projection.** It compares a count with a cap and never divides by
      time elapsed (§12.60).
+   - **Two-read agreement** (§3; decided 2026-10-14, not built): a pair is
+     ONE read against the cap. It makes one reservation, then both calls.
+     The row's outcome is the pair's, and its tokens are both calls'. A pair
+     that fails is still one read against the cap, as a failed single read
+     is today.
    - **RLS** is enabled with deny-by-default policies, like every table.
 6. **Size limit.** The request's `content-length` must be at most 64 KB,
    read through a capped reader. The body is parsed with Zod:
@@ -436,6 +442,19 @@ a constant that never includes vendor or document text.
 | `refused` | the vendor declined, or a content filter fired | "The AI reader declined this document. Nothing was filled." |
 | `invalid_output` | the reply failed `ModelRead` | "The AI read came back unusable. Nothing was filled." |
 | `cancelled` | the dispatcher pressed Cancel | "Cancelled. Nothing was filled." |
+
+**A pair fails as a whole** (two-read agreement, §3; Alex, 2026-10-14; not
+built). When either read of a pair fails, the pair fails, and nothing is
+filled. A read fails at the adapter (`timeout`, `unavailable`, `refused`,
+…), at the schema (`invalid_output`), or at the verifier
+(`nothing_confirmed`).
+- **The code** is read A's when A failed, else read B's.
+- **Never the read that succeeded:** one read alone is exactly what
+  agreement exists to distrust. `agreePair` (`agree-reads.ts`) is the rule
+  in code.
+- **The strip says the AI read did not complete.** It shows that code's own
+  sentence above, and every one of them says nothing was filled.
+- **It is one read against the cap** (§4).
 
 **Partial output.**
 - A reply that fails the schema anywhere is `invalid_output`, and nothing
@@ -950,4 +969,10 @@ Phase 3d (2026-10-14):
 37. **The cue is narrowed** to lines after the first stop (§3). It now
     misses a dropped first stop, which it caught before; it no longer fires
     on a header's addresses.
+
+Phase 3f (2026-10-14):
+
+38. **A failed pair fails as a whole, and is one read against the cap**
+    (§4, §5). This replaces 3d's "two calls against the daily cap". The
+    cap counts reads; a pair is one read made of two calls.
 
