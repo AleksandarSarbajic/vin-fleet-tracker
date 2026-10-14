@@ -33,6 +33,7 @@
     "ratecon:cue-report": "tsx scripts/ratecon-cue-report.mts",
     "ratecon:eval-ai": "node --conditions=react-server --env-file=.env.local --import tsx scripts/ratecon-eval-ai.mts",
     "ratecon:expected-skeleton": "tsx scripts/ratecon-expected-skeleton.mts",
+    "ratecon:layouts-report": "tsx scripts/ratecon-layouts-report.mts",
     "ratecon:redact-report": "tsx scripts/ratecon-redact-report.mts",
     "ratecon:redact-rules-report": "tsx scripts/ratecon-redact-rules-report.mts",
     "ratecon:review-redacted": "tsx scripts/ratecon-review-redacted.mts",
