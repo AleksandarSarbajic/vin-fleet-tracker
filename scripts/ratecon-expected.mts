@@ -11,6 +11,7 @@
  * invalid_union"), never zod's message: that can quote the value.
  */
 import { z } from 'zod';
+import type { StopForm } from '../src/components/edit/load-form';
 
 const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const WallTime = z.string().regex(/^\d{2}:\d{2}$/);
@@ -78,4 +79,30 @@ export function inspect(entry: unknown): Inspected {
     return { state: 'incomplete', blanks, priority };
   }
   return { state: 'complete', entry: parsed.data as CompleteEntry };
+}
+
+/**
+ * One stop's appointment against the ground truth, as `ratecon:score` and
+ * `ratecon:eval-ai` both score it: `exact` — filled, unmarked and right;
+ * `marked, …` — the stop says Check or Couldn't read, so a person will look;
+ * `WRONG` — filled, unmarked, and not what the PDF says.
+ */
+export function appointmentScore(
+  stop: StopForm,
+  want: ExpectedStop['appointment'],
+): 'exact' | 'marked, filled as the PDF says' | 'marked, filled differently' | 'WRONG' {
+  const marked = Boolean(stop.fill?.checks.appointment);
+  const a = stop.appointment;
+  const right =
+    'none' in want
+      ? !a.enabled
+      : 'couldntRead' in want
+      ? a.enabled && a.date === want.date && a.time === ''
+      : a.enabled &&
+        a.type === want.type &&
+        a.date === want.date &&
+        a.time === want.time &&
+        (want.type === 'FCFS' ? a.endTime === want.endTime : a.windowMinutes === want.windowMinutes);
+  if (marked) return right ? 'marked, filled as the PDF says' : 'marked, filled differently';
+  return right ? 'exact' : 'WRONG';
 }

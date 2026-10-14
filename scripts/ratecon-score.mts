@@ -24,7 +24,7 @@ import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type StopForm } from '../src/components/edit/load-form';
 import { linesFromPdf } from '../src/lib/ratecon/read-pdf';
 import { readRatecon } from '../src/lib/ratecon/templates';
-import { inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
+import { appointmentScore, inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
 
 const DIR = '.samples/rate-confirmations';
 
@@ -35,26 +35,6 @@ interface Expected {
 }
 
 const mark = (ok: boolean) => (ok ? 'pass' : 'FAIL');
-
-function appointmentScore(
-  stop: StopForm,
-  want: ExpectedStop['appointment'],
-): 'exact' | 'marked, filled as the PDF says' | 'marked, filled differently' | 'WRONG' {
-  const marked = Boolean(stop.fill?.checks.appointment);
-  const a = stop.appointment;
-  const right =
-    'none' in want
-      ? !a.enabled
-      : 'couldntRead' in want
-      ? a.enabled && a.date === want.date && a.time === ''
-      : a.enabled &&
-        a.type === want.type &&
-        a.date === want.date &&
-        a.time === want.time &&
-        (want.type === 'FCFS' ? a.endTime === want.endTime : a.windowMinutes === want.windowMinutes);
-  if (marked) return right ? 'marked, filled as the PDF says' : 'marked, filled differently';
-  return right ? 'exact' : 'WRONG';
-}
 
 async function main() {
   if (!existsSync(DIR)) {
