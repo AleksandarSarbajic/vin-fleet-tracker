@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { prepareForReading } from '@/lib/ratecon/redact';
@@ -8,6 +9,7 @@ import {
   BAR_FIELDS,
   CEILINGS,
   INPUT_MARGIN_TOKENS,
+  barVerdict,
   boundOfBody,
   evalFile,
   parseEvalArgs,
@@ -15,6 +17,7 @@ import {
   runEvaluation,
   scoreField,
   type EvalDeps,
+  type EvalTotals,
   type EvalFile,
   type EvalPlan,
 } from '../../scripts/ratecon-eval.mjs';
@@ -283,6 +286,24 @@ describe("the app's path, and the score", () => {
   });
 });
 
+describe('the dropped-stop cue, measured per run', () => {
+  it('a full read: silent', async () => {
+    const { out, deps } = harness([OK]);
+    const totals = await runEvaluation(plan([file()]), deps);
+    expect(out).toContain('  address cue   silent: 0 uncited address-like lines');
+    expect(totals.cueFired).toBe(0);
+  });
+
+  it('a dropped stop: it would fire, with the line numbers', async () => {
+    const dropped = { ...MODEL_REPLY, stops: [MODEL_REPLY.stops[0]!] };
+    const { out, deps } = harness([{ reply: dropped, usage: USAGE }, OK]);
+    const totals = await runEvaluation(plan([file()], 2), deps);
+    expect(out).toContain('  address cue   would fire: 1 uncited address-like line: L18');
+    expect(totals.cueFired).toBe(1);
+    expect(out).toContain('Address cue: would fire on 1 of 2 scored runs.');
+  });
+});
+
 describe('the output: counts and codes, never a value or a line of text', () => {
   it('prints no value, quote, sentinel or ground truth, through every kind of outcome', async () => {
     const wrongWant = { ...WANT, loadNumber: 'EX-99417', stops: [{ ...WANT.stops[0]!, street: '9 Elm Example Ave', zip: '58103' }, WANT.stops[1]!] };
@@ -325,11 +346,44 @@ describe('the output: counts and codes, never a value or a line of text', () => 
     // Every line is one of the known shapes, so nothing free-form can carry text.
     for (const line of out) {
       expect(line).toMatch(
-        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|WRONG on the bar's fields: .+|The bar: .+)$/,
+        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: would fire on \d+ of \d+ scored runs\.|WRONG on the bar's fields: .+|The bar: .+)$/,
       );
     }
     for (const line of out.filter((l) => /^ {2}(load number|stop)/.test(l))) {
       expect(line).toMatch(/^ {2}[a-z0-9 ]+?( {2,}| )([a-zA-Z0-9 +·-]|, )+$/);
     }
+  });
+});
+
+describe('the verdict, and the exit code that follows it', () => {
+  const totals = (over: Partial<EvalTotals> = {}): EvalTotals => ({
+    calls: 18,
+    inputTokens: 0,
+    outputTokens: 0,
+    dollars: 0,
+    stopped: null,
+    wrong: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'],
+    scored: 18,
+    cueFired: 0,
+    ...over,
+  });
+
+  it('met only when every planned run was made and scored, and nothing on the bar is WRONG', () => {
+    expect(barVerdict(totals(), 18)).toEqual({ verdict: 'met', exitCode: 0 });
+  });
+
+  it.each([
+    ['a WRONG on the bar', { wrong: { ...totals().wrong, 'stop count': 1 } }, 'not-met'],
+    ['a run not scored', { scored: 17 }, 'incomplete'],
+    ['a ceiling stopped it', { stopped: 'dollar-ceiling' as const, calls: 10, scored: 10 }, 'incomplete'],
+    ['fewer calls than planned', { calls: 17, scored: 17 }, 'incomplete'],
+  ])('%s: exit 1', (_, over, verdict) => {
+    expect(barVerdict(totals(over), 18)).toEqual({ verdict, exitCode: 1 });
+  });
+
+  it('the command sets its exit code from the verdict, whatever stopped it or not', () => {
+    const source = readFileSync(join(ROOT, 'scripts', 'ratecon-eval-ai.mts'), 'utf8');
+    expect(source).toMatch(/process\.exitCode = barVerdict\(totals, [^)]+\)\.exitCode;/);
+    expect(source).not.toMatch(/if \(totals\.stopped !== null\) process\.exitCode/);
   });
 });

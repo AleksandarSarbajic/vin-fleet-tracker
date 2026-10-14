@@ -22,12 +22,13 @@
  */
 import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type StopForm } from '../src/components/edit/load-form';
+import { uncitedAddressLines } from '../src/lib/ratecon/address-cue';
 import { ModelRead } from '../src/lib/ratecon/model-read';
 import { prepareForReading, type PreparedLine } from '../src/lib/ratecon/redact';
 import type { Line } from '../src/lib/ratecon/lines';
 import { verifyRead } from '../src/lib/ratecon/verify-read';
 import type { AdapterFailure, AdapterUsage, ReaderAdapter, ReaderRequest } from '../src/server/ratecon-reader/adapter';
-import { appointmentScore, inspect, type ExpectedStop } from './ratecon-expected.mjs';
+import { appointmentVerdict, inspect, type ExpectedStop } from './ratecon-expected.mjs';
 
 /**
  * Per million tokens, in US dollars. Source: Anthropic's model table as the
@@ -153,12 +154,25 @@ export interface EvalTotals {
   wrong: Record<BarField, number>;
   /** Runs that reached the fill and were scored. */
   scored: number;
+  /** Scored runs on which the dropped-stop cue would have fired (`address-cue.ts`). */
+  cueFired: number;
 }
 
 export const dayIn = (tz: string, at: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 const usd = (n: number) => `$${n.toFixed(4)}`;
 const pad = (s: string) => s.padEnd(13);
+
+/**
+ * The run's verdict, and the command's exit code: 0 ONLY when every planned
+ * call was made and scored and nothing on the bar is WRONG. A WRONG is
+ * `not-met`; anything short of every run scored is `incomplete`.
+ */
+export function barVerdict(totals: EvalTotals, planned: number): { verdict: 'met' | 'not-met' | 'incomplete'; exitCode: 0 | 1 } {
+  if (BAR_FIELDS.some((f) => totals.wrong[f] > 0)) return { verdict: 'not-met', exitCode: 1 };
+  if (totals.stopped !== null || totals.calls < planned || totals.scored < planned) return { verdict: 'incomplete', exitCode: 1 };
+  return { verdict: 'met', exitCode: 0 };
+}
 
 /** Refused before any call: more calls than the ceiling allows. */
 export function planProblem(plan: EvalPlan): string | null {
@@ -190,7 +204,7 @@ function scoreRun(file: EvalFile, form: { loadNumber: string; loadNumberCheck: s
       if (r.score === 'WRONG') totals.wrong[name] += 1;
       return `${name} ${r.status} ${r.score}`;
     });
-    parts.push(`appointment ${appointmentScore(got, w.appointment)}`);
+    parts.push(`appointment ${appointmentVerdict(got, w.appointment)}`);
     say(`  ${pad(`stop ${i + 1}`)} ${parts.join(' · ')}`);
   });
 }
@@ -210,6 +224,7 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
     stopped: null,
     wrong: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as Record<BarField, number>,
     scored: 0,
+    cueFired: 0,
   };
   const today = dayIn(deps.tz, deps.now);
   const nowIso = deps.now.toISOString();
@@ -270,11 +285,19 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
       }
       head('ok', ` · ${verified.confirmed} values stood, ${verified.unconfirmed} did not`);
       totals.scored += 1;
+      // The strip's cue, as the app computes it: line numbers only.
+      const uncited = uncitedAddressLines(parsed.data, file.lines);
+      if (uncited.length > 0) totals.cueFired += 1;
       scoreRun(
         file,
         { loadNumber: filled.form.loadNumber, loadNumberCheck: filled.form.fill?.loadNumberCheck ?? null, stops: filled.form.stops },
         totals,
         say,
+      );
+      say(
+        uncited.length === 0
+          ? `  ${pad('address cue')} silent: 0 uncited address-like lines`
+          : `  ${pad('address cue')} would fire: ${uncited.length} uncited address-like ${uncited.length === 1 ? 'line' : 'lines'}: ${uncited.map((n) => `L${n}`).join(', ')}`,
       );
     }
   }
@@ -284,12 +307,14 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
   say(`Calls: ${totals.calls} of ${plan.files.length * plan.runs} planned (ceiling ${plan.ceilings.calls}).`);
   say(`Tokens: ${totals.inputTokens} in, ${totals.outputTokens} out. Cost: ${usd(totals.dollars)} (ceiling ${usd(plan.ceilings.dollars)}).`);
   say(`Runs scored: ${totals.scored}.`);
+  say(`Address cue: would fire on ${totals.cueFired} of ${totals.scored} scored runs.`);
   say(`WRONG on the bar's fields: ${BAR_FIELDS.map((f) => `${f} ${totals.wrong[f]}`).join(', ')}.`);
   const wrong = BAR_FIELDS.reduce((n, f) => n + totals.wrong[f], 0);
+  const { verdict } = barVerdict(totals, plan.files.length * plan.runs);
   say(
-    wrong > 0
+    verdict === 'not-met'
       ? `The bar: NOT met (${wrong} WRONG). The reader stays off.`
-      : totals.stopped !== null || totals.scored < totals.calls
+      : verdict === 'incomplete'
         ? 'The bar: no WRONG in what was scored, but not every planned run was scored. Not a pass.'
         : 'The bar: met — zero WRONG on load number, stop count, order and type, street, ZIP, city and state.',
   );

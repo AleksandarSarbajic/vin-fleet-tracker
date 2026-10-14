@@ -24,7 +24,7 @@ import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type StopForm } from '../src/components/edit/load-form';
 import { linesFromPdf } from '../src/lib/ratecon/read-pdf';
 import { readRatecon } from '../src/lib/ratecon/templates';
-import { appointmentScore, inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
+import { appointmentScore, appointmentVerdict, inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
 
 const DIR = '.samples/rate-confirmations';
 
@@ -118,6 +118,8 @@ async function main() {
       ['state', per('state', (g, w) => g.state === w.state)],
     ];
     const appts = want.stops.map((w, i) => (stops[i] ? appointmentScore(stops[i]!, w.appointment) : 'WRONG'));
+    // Printed with which parts differ, by name: "WRONG (date, time)".
+    const apptsSaid = want.stops.map((w, i) => (stops[i] ? appointmentVerdict(stops[i]!, w.appointment) : 'WRONG (missing)'));
     const allBar = results.every(([, ok]) => ok) && fields.every(([, oks]) => oks.every(Boolean));
     if (allBar) bar += 1;
     const wrong = !allBar || appts.includes('WRONG');
@@ -125,7 +127,7 @@ async function main() {
     console.info(`${label} (${outcome.read.layout}, ${stops.length} stops): ${wrong ? 'FAIL' : 'pass'}`);
     for (const [name, ok] of results) console.info(`  ${name.padEnd(14)} ${mark(ok)}`);
     for (const [name, oks] of fields) console.info(`  ${name.padEnd(14)} ${oks.map((ok, i) => `stop ${i + 1} ${mark(ok)}`).join('   ')}`);
-    console.info(`  ${'appointment'.padEnd(14)} ${appts.map((a, i) => `stop ${i + 1} ${a}`).join('   ')}`);
+    console.info(`  ${'appointment'.padEnd(14)} ${apptsSaid.map((a, i) => `stop ${i + 1} ${a}`).join('   ')}`);
   }
   console.info(`\nThe bar (load number, stop count, order and type, street, ZIP, city, state all exact): ${bar} of ${barOf}`);
   console.info(`Appointments silently wrong: ${failures === 0 ? 'none' : 'see FAIL above'}`);

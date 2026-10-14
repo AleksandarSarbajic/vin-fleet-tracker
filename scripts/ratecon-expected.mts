@@ -82,6 +82,38 @@ export function inspect(entry: unknown): Inspected {
 }
 
 /**
+ * The part of an appointment that can differ, by NAME. The form has no end
+ * date: an appointment's end is its `window` (minutes), receiving hours'
+ * end is their `end time`, so a wrong end date shows as one of those.
+ */
+export type AppointmentPart = 'none-versus-set' | 'type' | 'date' | 'time' | 'window' | 'end time';
+
+/**
+ * Which parts of a stop's filled appointment differ from the ground truth —
+ * never their values. Empty when it is right. Shared by `ratecon:score` and
+ * `ratecon:eval-ai`; `appointmentScore` is built on it.
+ */
+export function appointmentDiff(stop: StopForm, want: ExpectedAppointment): AppointmentPart[] {
+  const a = stop.appointment;
+  if ('none' in want) return a.enabled ? ['none-versus-set'] : [];
+  if (!a.enabled) return ['none-versus-set'];
+  if ('couldntRead' in want) {
+    const parts: AppointmentPart[] = [];
+    if (a.date !== want.date) parts.push('date');
+    if (a.time !== '') parts.push('time');
+    return parts;
+  }
+  const parts: AppointmentPart[] = [];
+  if (a.type !== want.type) parts.push('type');
+  if (a.date !== want.date) parts.push('date');
+  if (a.time !== want.time) parts.push('time');
+  if (want.type === 'FCFS' ? a.endTime !== want.endTime : a.windowMinutes !== want.windowMinutes) {
+    parts.push(want.type === 'FCFS' ? 'end time' : 'window');
+  }
+  return parts;
+}
+
+/**
  * One stop's appointment against the ground truth, as `ratecon:score` and
  * `ratecon:eval-ai` both score it: `exact` — filled, unmarked and right;
  * `marked, …` — the stop says Check or Couldn't read, so a person will look;
@@ -92,17 +124,14 @@ export function appointmentScore(
   want: ExpectedStop['appointment'],
 ): 'exact' | 'marked, filled as the PDF says' | 'marked, filled differently' | 'WRONG' {
   const marked = Boolean(stop.fill?.checks.appointment);
-  const a = stop.appointment;
-  const right =
-    'none' in want
-      ? !a.enabled
-      : 'couldntRead' in want
-      ? a.enabled && a.date === want.date && a.time === ''
-      : a.enabled &&
-        a.type === want.type &&
-        a.date === want.date &&
-        a.time === want.time &&
-        (want.type === 'FCFS' ? a.endTime === want.endTime : a.windowMinutes === want.windowMinutes);
+  const right = appointmentDiff(stop, want).length === 0;
   if (marked) return right ? 'marked, filled as the PDF says' : 'marked, filled differently';
   return right ? 'exact' : 'WRONG';
+}
+
+/** The score, and for a wrong or differently filled one, which parts differ: "WRONG (date, time)". Names only. */
+export function appointmentVerdict(stop: StopForm, want: ExpectedAppointment): string {
+  const score = appointmentScore(stop, want);
+  const parts = appointmentDiff(stop, want);
+  return parts.length > 0 ? `${score} (${parts.join(', ')})` : score;
 }

@@ -22,7 +22,7 @@ import { readSample, sampleByNumber, sampleFiles, EXPECTED_PATH } from './rateco
 import { AnthropicReaderAdapter, MAX_TOKENS, anthropicRequest } from '../src/server/ratecon-reader/anthropic.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { ExpectedFile } from './ratecon-expected.mts';
-import { CEILINGS, PRICES, boundOfBody, costOf, dayIn, evalFile, parseEvalArgs, planProblem, runEvaluation, type EvalFile } from './ratecon-eval.mts';
+import { CEILINGS, PRICES, barVerdict, boundOfBody, costOf, dayIn, evalFile, parseEvalArgs, planProblem, runEvaluation, type EvalFile } from './ratecon-eval.mts';
 
 /** The route's own limit on a vendor call. */
 const TIMEOUT_MS = 25_000;
@@ -82,4 +82,4 @@ const totals = await runEvaluation(plan, {
   timeoutMs: TIMEOUT_MS,
   say: (line) => console.info(line),
 });
-if (totals.stopped !== null) process.exitCode = 1;
+process.exitCode = barVerdict(totals, files.length * args.runs).exitCode;
