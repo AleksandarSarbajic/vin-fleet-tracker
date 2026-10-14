@@ -71,6 +71,8 @@ const stored = async (readId: string) =>
   (await commitDb().execute(sql`
     select field::text as field, kept, changed, cleared, blank_filled as "blankFilled", blank_left as "blankLeft"
     from ratecon_ai_outcome_fields where read_id = ${readId} order by field`)) as unknown as Record<string, unknown>[];
+const layoutOf = async (readId: string) =>
+  ((await commitDb().execute(sql`select layout from ratecon_ai_outcomes where read_id = ${readId}`)) as unknown as { layout: string[] }[])[0]?.layout;
 const parents = async (readId: string) =>
   ((await commitDb().execute(sql`select count(*)::int as n from ratecon_ai_outcomes where read_id = ${readId}`)) as unknown as { n: number }[])[0]!.n;
 const everything = async () =>
@@ -130,6 +132,51 @@ describeDb('POST /api/ratecon/outcome: a read\'s outcome is stored once', () => 
     ]);
     expect((await Promise.all(results.map(json))).map((b) => b.recorded).sort()).toEqual([false, true]);
     expect(await parents(readId)).toBe(1);
+    expect(await stored(readId)).toHaveLength(1);
+  });
+
+  it('the layout fingerprint is stored on the outcome row, as the hashes it was given', async () => {
+    const id = newUser();
+    const readId = await readFor(id);
+    const layout = ['00000001', '0a1b2c3d', 'ffffffff'];
+    const r = await handleOutcome(request({ readId, fields: [field('street', { kept: 1 })], layout }), deps());
+    expect([r.status, await json(r)]).toEqual([200, { ok: true, recorded: true }]);
+    expect(await layoutOf(readId)).toEqual(layout);
+    expect(await stored(readId)).toHaveLength(1);
+  });
+
+  it('64 hashes are stored; an empty fingerprint is stored empty; none given is empty', async () => {
+    const id = newUser();
+    const sixtyFour = Array.from({ length: 64 }, (_, i) => i.toString(16).padStart(8, '0'));
+    const a = await readFor(id);
+    const b = await readFor(id);
+    const c = await readFor(id);
+    await handleOutcome(request({ readId: a, fields: [field('zip', { kept: 1 })], layout: sixtyFour }), deps());
+    await handleOutcome(request({ readId: b, fields: [field('zip', { kept: 1 })], layout: [] }), deps());
+    await handleOutcome(request({ readId: c, fields: [field('zip', { kept: 1 })] }), deps());
+    expect(await layoutOf(a)).toEqual(sixtyFour);
+    expect(await layoutOf(b)).toEqual([]);
+    expect(await layoutOf(c)).toEqual([]);
+  });
+
+  it('a second post is ignored whole: its layout does not replace the first', async () => {
+    const id = newUser();
+    const readId = await readFor(id);
+    await handleOutcome(request({ readId, fields: [field('street', { kept: 2 })], layout: ['00000001'] }), deps());
+    const again = await handleOutcome(request({ readId, fields: [field('street', { changed: 2 })], layout: ['00000002', '00000003'] }), deps());
+    expect([again.status, await json(again)]).toEqual([200, { ok: true, recorded: false }]);
+    expect(await layoutOf(readId)).toEqual(['00000001']);
+  });
+
+  it('two posts at the same moment store one layout, whole', async () => {
+    const id = newUser();
+    const readId = await readFor(id);
+    await Promise.all([
+      handleOutcome(request({ readId, fields: [field('street', { kept: 2 })], layout: ['00000001'] }), deps()),
+      handleOutcome(request({ readId, fields: [field('street', { changed: 2 })], layout: ['00000002'] }), deps()),
+    ]);
+    const layout = await layoutOf(readId);
+    expect([['00000001'], ['00000002']]).toContainEqual(layout);
     expect(await stored(readId)).toHaveLength(1);
   });
 
@@ -201,6 +248,16 @@ describeDb('POST /api/ratecon/outcome: refused, and nothing stored', () => {
     ['a value under an extra key', { fields: [{ ...field('street', { kept: 1 }), value: `4001 Main St ${SENTINEL}` }] }],
     ['an extra key on the body', { fields: [field('street', { kept: 1 })], loadNumber: SENTINEL }],
     ['a count that is text', { fields: [field('street', { kept: SENTINEL })] }],
+    ['a layout that is a label', { fields: [field('street', { kept: 1 })], layout: [`pick up date ${SENTINEL}`] }],
+    ['a layout that is a value', { fields: [field('street', { kept: 1 })], layout: [`4001 Main St ${SENTINEL}`] }],
+    ['a layout of 65 hashes', { fields: [field('street', { kept: 1 })], layout: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(8, '0')) }],
+    ['a layout hash in upper case', { fields: [field('street', { kept: 1 })], layout: ['0A1B2C3D'] }],
+    ['a layout with a hash twice', { fields: [field('street', { kept: 1 })], layout: ['0a1b2c3d', '0a1b2c3d'] }],
+    ['a layout out of order', { fields: [field('street', { kept: 1 })], layout: ['ffffffff', '00000001'] }],
+    ['a layout that is text', { fields: [field('street', { kept: 1 })], layout: SENTINEL }],
+    ['a layout that is an object of text', { fields: [field('street', { kept: 1 })], layout: { label: SENTINEL } }],
+    ['a layout with an object in it', { fields: [field('street', { kept: 1 })], layout: [{ hash: SENTINEL }] }],
+    ['a second key beside the layout', { fields: [field('street', { kept: 1 })], layout: ['00000001'], labels: [SENTINEL] }],
   ])('%s: 400, nothing stored, and the sentinel nowhere', async (_, rest) => {
     const id = newUser();
     const readId = await readFor(id);
@@ -247,12 +304,15 @@ describeDb('POST /api/ratecon/outcome: when recording fails', () => {
   it('a database fault is a 500 with a reference and ONE log line of code and error name — never its message or the body', async () => {
     newUser();
     const failing = { transaction: async () => Promise.reject(new Error(`boom ${SENTINEL}`)) } as unknown as Db;
-    const r = await handleOutcome(request({ readId: '5b1e2c0a-7f3d-4c58-9a60-0e3f6d1b2a44', fields: [field('street', { kept: 1 })] }), deps({ db: failing }));
+    const r = await handleOutcome(request({ readId: '5b1e2c0a-7f3d-4c58-9a60-0e3f6d1b2a44', fields: [field('street', { kept: 1 })], layout: ['0a1b2c3d'] }), deps({ db: failing }));
     const body = await json(r);
     expect(r.status).toBe(500);
     expect(body).toMatchObject({ ok: false, code: 'error' });
     expect(body.reference).toMatch(/^RATECON-500-[0-9A-Z]+$/);
     const errorSpy = consoleSpies[3]!;
     expect(errorSpy.mock.calls).toEqual([['ratecon outcome not recorded', { reference: body.reference, code: 'error', errorName: 'Error' }]]);
+    // Not even the hashes: the log holds a code, a reference and a class name.
+    expect(JSON.stringify(consoleSpies.flatMap((c) => c.mock.calls))).not.toContain('0a1b2c3d');
+    expect(JSON.stringify(body)).not.toContain('0a1b2c3d');
   });
 });

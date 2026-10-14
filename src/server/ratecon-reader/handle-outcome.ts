@@ -11,9 +11,10 @@ import { recordOutcome } from './outcomes';
  * 2026-10-14): what the dispatcher did with an AI read, as counts. The route
  * file only wires the live dependencies to this.
  *
- * The browser is UNTRUSTED. The body is a read id and counts per field name
- * from a fixed list, parsed strictly, bounded by what a read can fill; nothing
- * in it drives behaviour beyond being stored. The read must be the caller's
+ * The browser is UNTRUSTED. The body is a read id, counts per field name
+ * from a fixed list, and the read's layout as at most 64 hashes of 8 hex
+ * characters (2026-10-15), parsed strictly, bounded by what a read can fill;
+ * nothing in it drives behaviour beyond being stored. The read must be the caller's
  * own and have answered. The order: the address limit; a dispatcher or admin;
  * the reader on (when it is off there is nothing to record); the user's
  * write limit — its own, not the reader's three-a-minute; the body.
@@ -58,7 +59,7 @@ export async function handleOutcome(request: Request, deps: Deps): Promise<Respo
     const body = OutcomeBody.safeParse(parsed);
     if (!body.success) return fail('bad_request');
 
-    const result = await recordOutcome(deps.db, { userId: user.id, readId: body.data.readId, fields: body.data.fields });
+    const result = await recordOutcome(deps.db, { userId: user.id, readId: body.data.readId, fields: body.data.fields, layout: body.data.layout ?? [] });
     return result === 'unknown_read' ? fail('unknown_read') : reply({ ok: true, recorded: result === 'recorded' }, 200);
   } catch (error: unknown) {
     if (error instanceof RateLimitError) return rateLimitResponse(error);

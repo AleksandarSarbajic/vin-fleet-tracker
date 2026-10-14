@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
-import { OUTCOME_FIELDS, OutcomeBody, maxCount } from './outcome-codes';
+import { OUTCOME_BODY_LIMIT_BYTES, OUTCOME_FIELDS, OutcomeBody, maxCount } from './outcome-codes';
+import { MAX_LAYOUT_LABELS } from './layout';
 
 /**
  * The wire contract for what the dispatcher did with an AI read (Alex,
@@ -65,5 +66,58 @@ describe('OutcomeBody refuses', () => {
     ['a string', '{"readId":"x"}'],
   ])('%s', (_, body) => {
     expect(OutcomeBody.safeParse(body).success).toBe(false);
+  });
+});
+
+/** `n` distinct 8-hex hashes in ascending order. */
+const hashes = (n: number) => Array.from({ length: n }, (_, i) => i.toString(16).padStart(8, '0'));
+
+describe('the layout fingerprint on the body (2026-10-15)', () => {
+  it.each([
+    ['none: an older page', undefined],
+    ['an empty one: a document with no label', []],
+    ['one hash', ['0a1b2c3d']],
+    ['several, in ascending order', ['00000001', '0a1b2c3d', 'ffffffff']],
+    ['the most: 64', hashes(MAX_LAYOUT_LABELS)],
+  ])('accepts %s', (_, layout) => {
+    const body = layout === undefined ? good : { ...good, layout };
+    expect(OutcomeBody.safeParse(body).success).toBe(true);
+  });
+
+  it('keeps what it was given, and nothing when it was not', () => {
+    const parsed = OutcomeBody.parse({ ...good, layout: ['0a1b2c3d'] });
+    expect(parsed.layout).toEqual(['0a1b2c3d']);
+    expect(OutcomeBody.parse(good).layout).toBeUndefined();
+  });
+
+  it.each([
+    ['65 hashes', hashes(MAX_LAYOUT_LABELS + 1)],
+    ['an upper-case hash', ['0A1B2C3D']],
+    ['a hash of 7 characters', ['0a1b2c3']],
+    ['a hash of 9 characters', ['0a1b2c3d4']],
+    ['a hash that is not hex', ['0a1b2c3g']],
+    ['a label instead of a hash', ['pick up date']],
+    ['a value instead of a hash', ['4001 Main St']],
+    ['a hash with a space', ['0a1b2c3 ']],
+    ['a hash with a newline', ['0a1b2c3d\n']],
+    ['the same hash twice', ['0a1b2c3d', '0a1b2c3d']],
+    ['hashes out of order', ['ffffffff', '00000001']],
+    ['a number', [12345678]],
+    ['null in the array', [null]],
+    ['a nested array', [['0a1b2c3d']]],
+    ['an object', [{ hash: '0a1b2c3d' }]],
+    ['a string, not an array', '0a1b2c3d'],
+    ['an object, not an array', { 0: '0a1b2c3d' }],
+    ['null', null],
+  ])('refuses %s', (_, layout) => {
+    expect(OutcomeBody.safeParse({ ...good, layout }).success).toBe(false);
+  });
+
+  it('the largest body that is valid fits in the limit', () => {
+    const fields = OUTCOME_FIELDS.map((field) => ({ field, kept: 1, changed: 0, cleared: 0, blankFilled: 0, blankLeft: 0 }));
+    const body = { readId: READ, fields, layout: hashes(MAX_LAYOUT_LABELS) };
+    expect(OutcomeBody.safeParse(body).success).toBe(true);
+    expect(JSON.stringify(body).length).toBeLessThan(OUTCOME_BODY_LIMIT_BYTES);
+    expect(OUTCOME_BODY_LIMIT_BYTES).toBe(4 * 1024);
   });
 });

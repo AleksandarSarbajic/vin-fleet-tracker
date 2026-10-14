@@ -1,12 +1,14 @@
 import { z } from 'zod/v4';
 import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
+import { MAX_LAYOUT_LABELS } from './layout';
 
 /**
  * The wire contract between the edit modal and `POST /api/ratecon/outcome`
  * (docs/llm-reader-design.md §4; Alex, 2026-10-14): what the dispatcher did
  * with an AI read, as COUNTS. Shared, pure.
  *
- * It names a read and, per field NAME from a fixed list, five small counts.
+ * It names a read and, per field NAME from a fixed list, five small counts, and
+ * the read's layout as at most 64 hashes of 8 hex characters.
  * There is no place in it for a value, a quote, an address or a load number,
  * and the server parses it strictly: an unknown key, a field name off the
  * list, a count a read cannot produce, or a field twice is refused. The
@@ -15,8 +17,8 @@ import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
 
 export const OUTCOME_ROUTE = '/api/ratecon/outcome';
 
-/** The request body is a read id and at most seven small rows. */
-export const OUTCOME_BODY_LIMIT_BYTES = 2 * 1024;
+/** The request body is a read id, at most seven small rows, and at most 64 short hashes. */
+export const OUTCOME_BODY_LIMIT_BYTES = 4 * 1024;
 
 /** The fields an AI read can fill, by name. The database type (`ratecon_ai_field`, migration 0028) is the same list. */
 export const OUTCOME_FIELDS = ['load_number', 'stop_type', 'street', 'city', 'state', 'zip', 'appointment'] as const;
@@ -46,10 +48,22 @@ export const FieldCounts = z
   });
 export type FieldCounts = z.infer<typeof FieldCounts>;
 
+/**
+ * The read's layout fingerprint (`layoutLabels`): at most 64 hashes of 8 lower-case
+ * hex characters, strictly ascending, so each is once and the stored array is
+ * canonical. Nothing else can be in it — not a label, not a value. Optional so a
+ * page loaded before this shipped still records its counts.
+ */
+export const LayoutHashes = z
+  .array(z.string().regex(/^[0-9a-f]{8}$/))
+  .max(MAX_LAYOUT_LABELS)
+  .refine((hashes) => hashes.every((h, i) => i === 0 || hashes[i - 1]! < h), { message: 'sorted, each once' });
+
 export const OutcomeBody = z
   .strictObject({
     readId: z.string().uuid(),
     fields: z.array(FieldCounts).min(1).max(OUTCOME_FIELDS.length),
+    layout: LayoutHashes.optional(),
   })
   .refine((b) => new Set(b.fields.map((f) => f.field)).size === b.fields.length, { message: 'a field twice' });
 export type OutcomeBody = z.infer<typeof OutcomeBody>;
