@@ -1006,11 +1006,120 @@ fixed; both are follow-ups.
 - **In both,** a request from the page did not answer in time. Not
   investigated.
 
+### Phase 3b: evaluation run 1, the six control files (2026-10-14)
+
+**Alex's written approval, 2026-10-14:** "I have read the redacted text of
+samples 1, 18, 19, 22, 23 and 27 in the viewer and found nothing that
+should not be sent. Approved: ratecon:eval-ai on samples 1,18,19,22,23,27,
+3 runs each (18 calls), Claude Haiku 5.5, ceilings $1.00 and 75 calls. The
+account's default retention (inputs deleted within 30 days, flagged ones
+possibly kept up to 2 years) is ACCEPTABLE."
+
+**The command, run once:**
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=1,18,19,22,23,27 --runs=3
+
+- **One addition to the command as given:** the model is pinned on the
+  command line.
+  - **Why:** the script takes the model from `.env.local`, which was not
+    opened. Had the file named Sonnet, the run would not have been the one
+    approved.
+  - **Checked first, on a scratch file:** under Node 26.8.2, a variable in
+    the shell wins over `--env-file`.
+  - The run's first line confirmed `Model claude-haiku-5-5`.
+- **No `--as-of`:** `now` is `expected.json`'s `scoredAt`, so the run
+  compares with `ratecon:score`.
+- **Nothing was stored.** The output is counts and codes only.
+
+**Result:**
+
+| | |
+|---|---|
+| Calls | 18 of 18 planned, all `ok` (no refusal, timeout or invalid output) |
+| Tokens | 76,947 in, 40,668 out |
+| Cost | **$0.0280** (the ceiling is $1.00; the bound-based most was $0.0921) |
+| Runs scored | 18 |
+| **The bar** | **NOT met: 1 WRONG.** The reader stays off |
+
+**WRONG on the bar's fields** (load number, stop count, order and type,
+street, ZIP, city, state):
+
+| Field | WRONG | Where |
+|---|---|---|
+| stop count | 1 | **sample 22, run 3:** 1 stop read, 2 expected; stop 2 missing |
+| all the others | 0 | — |
+
+**WRONG on appointments** (not a bar field, but `ratecon:score` fails a
+file on it: filled, unmarked, and not what the PDF says):
+
+| Field | WRONG | Where |
+|---|---|---|
+| appointment | 3 | **sample 27, stop 1, in all 3 runs** |
+
+Fixed: nothing, as instructed.
+
+**Per file, over 3 runs** (bar fields: exact unless said):
+
+| Sample | Bar fields | Appointments |
+|---|---|---|
+| 1 | all exact | stop 1 exact ×3; stop 2 marked, filled differently ×3 |
+| 18 | all exact | both stops marked, filled as the PDF says ×3 |
+| 19 | all exact. Run 1: 2 values did not stand | run 1: both stops marked, filled differently; runs 2–3: both marked, filled as the PDF says |
+| 22 | **run 3: stop count WRONG.** Run 1: stop 2's type filled and marked | stop 1 marked, filled as the PDF says ×3; stop 2 exact (runs 1–2) |
+| 23 | all exact | stop 1 marked, filled as the PDF says ×3; stop 2 exact ×3 |
+| 27 | all exact | **stop 1 WRONG ×3**; stop 2 exact ×3 |
+
+**What surprised me:**
+
+1. **A dropped stop is silent.** In sample 22's run 3, the model returned
+   one stop.
+   - The verifier checks each value against its quote. It never checks how
+     many stops there are, so the read came back `ok` with 6 values
+     standing.
+   - A dispatcher would see a one-stop load with nothing marked, and the
+     delivery would be gone.
+   - The templates read the same file with both stops. This is the one
+     WRONG on the bar.
+2. **Sample 27's first appointment is WRONG in all three runs.** That makes
+   it systematic, not chance.
+   - The verifier let a value stand that is not the ground truth's.
+   - Either the quote supports a reading the ground truth does not, or the
+     ground truth is wrong.
+   - It was not investigated: that needs the text, which is Alex's to read.
+3. **Not deterministic.** Sample 19's run 1 differed from runs 2 and 3: 2
+   values did not stand, and its appointments came back "filled
+   differently".
+   - Sample 22 differed in each run: a marked type in run 1, a dropped stop
+     in run 3.
+   - Three runs were worth it. One run of sample 22 could have shown either
+     a pass or a fail.
+4. **The script exits 0 when the bar is not met.** It sets a failing exit
+   code only when a ceiling stops it early. Not fixed (fix nothing); worth
+   changing before the next run.
+5. **Smaller things:**
+   - Input tokens were identical across runs of a file; only output varied.
+   - Real cost was about 30% of the bound.
+   - No reply came near its input bound.
+
+**What this says, so far:**
+
+- On the files the templates already read 6 of 6, the AI met the bar in
+  17 of 18 runs.
+- Its one miss is the kind the design most needs to prevent: a filled load
+  that silently lacks a stop.
+- The 12 unrecognised files, the ones the reader exists for, are not yet
+  evaluated: their ground truth is not written.
+
 ## Next
 
-**Phases 3a, 3a-2, 3a-3 and 3b-prep wait for Alex.** Nothing is sent until
-step 1 is approved in writing. `ratecon:eval-ai` is built and has not been
-run.
+**Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
+calls on the six control files, at $0.0280.
+
+- **Stop count WRONG:** sample 22, run 3.
+- **Appointment WRONG:** sample 27, stop 1, all 3 runs.
+
+The reader stays off. Nothing was fixed; what to change is Alex's call (the
+proposals below).
 
 **What Alex does next, in this order:**
 
@@ -1034,8 +1143,18 @@ run.
    - `npm run ratecon:check-expected` shows what is left.
    - Decide sample 12: give its entry stops (it changes an existing entry),
      or leave it out of the evaluation.
-4. **Approve step 1 in writing** (the list below), with its date. That
-   date is the command's `--approved`; the files it names are `--files`.
+4. ~~Approve step 1 in writing~~: approved 2026-10-14 for the six control
+   files and run once (phase 3b). The next run, on the unrecognised files,
+   needs its own written approval naming them.
+5. **Decide what to do about run 1's two findings.** These are proposals,
+   none built:
+   - **A dropped stop.** A read with fewer stops than the document's own
+     stop markers could be marked, or refused. That needs a count from the
+     text: for example, the city lines on the pages sent. Not designed yet.
+   - **Sample 27, stop 1.** Alex reads its appointment lines in the viewer
+     and says whether the ground truth or the read is right.
+   - **The exit code.** `ratecon:eval-ai` should exit non-zero when the bar
+     is not met.
 
 **What Alex must approve before step 1** (design §8.2). The figures are
 proposals:
@@ -1074,7 +1193,8 @@ proposals:
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
 - **One live call is left** of 2b's five. None was made in 3a, 3a-2, 3a-3
-  or 3b-prep.
+  or 3b-prep. Phase 3b made the 18 approved evaluation calls, and no
+  others.
 - **Before the route can count in production,** migrations 0026 and 0027
   must be applied there.
 - Other open decisions are above.
