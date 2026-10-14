@@ -2216,6 +2216,111 @@ cannot remove a value both reads share.
   (1, 18, 19, 22, 23, 27) have not been re-run on it.
 - Nothing was fixed. Whether to turn the reader on is Alex's call.
 
+### Phase 3o: `ratecon:eval-ai` says HOW a wrong street or city differs (2026-10-14)
+
+No API call, no network, no use of the key, no document text or ground-truth
+value read or printed, nothing under `.samples/` opened, and **no change to
+the reader, the verifier, the fill, the prompt, the route or the settings**.
+`ratecon:eval-ai` was not run (it was only shown to still refuse without
+`--approved`). Diagnostics only.
+
+**Why:** run 7 (3n) had 10 merged street WRONG in four cells, three of them
+identical across runs and across both reads. The counts could not say
+whether a read was too long, too short or differed in punctuation, and the
+reads are not stored. The output said WRONG and nothing more.
+
+**What it prints.** For every **street or city** cell that scores WRONG, one
+added line: the field, the stop, a relation code, and the two word counts.
+Nothing else is added and no existing line changes.
+
+- **Merged** (single mode and `--pairs`), right after the stop's line:
+
+      street, stop 3: read has 2 extra trailing words (read 6, truth 4)
+
+- **Each read on its own** (`--pairs` only), right after that read's
+  `read A:` or `read B:` line:
+
+      read A street, stop 3: read has 2 extra trailing words (read 6, truth 4)
+
+  In single mode the one read IS the merged one, so it is said once.
+- Only a cell the scorer calls WRONG gets a line: an exact cell, or a
+  blank-and-marked one (an agreement blank, or a value the verifier
+  refused), gets none. So a street the reads disagreed on has no merged line
+  but does have one for each read that was wrong.
+- **What is compared:** the form's value (so already in the normal case the
+  app shows) against the truth as it was written, which is what the scorer
+  compares. Words are compared without commas, periods and hyphens, and a
+  hyphen is a word break. The word counts are of those words.
+- **Never printed:** a word, a character, a file name, or the shape of a
+  value. A code and counts only. A test puts the sentinel in a value and
+  checks that it, and the invented words, are absent.
+
+**The codes, in precedence order (each pair gets exactly one):**
+
+| Code | Means |
+|---|---|
+| `equal` | the strings are the same (never on a WRONG cell; the function is total) |
+| `read is empty` | the read has no words (blank, or only punctuation) |
+| `truth is empty` | **not in Alex's list; added.** The truth has none and the read has a value. Without it, this would read "different words (0 of 0)" |
+| `case-only` | the same but for case, punctuation identical |
+| `spacing-only` | **added.** The same words with a different gap between them |
+| `punctuation-only` | the same words once commas, periods and hyphens are taken out. Tested after `case-only` and without regard to case, so "ST," against "St" is this one |
+| `read has N extra trailing words` | the truth's words, then N more |
+| `read has N extra leading words` | N more words, then the truth's |
+| `read is missing N trailing words` | the read is the truth's first words |
+| `read is missing N leading words` | the read is the truth's last words |
+| `same words in a different order` | the same words, another order |
+| `different words (K of M words differ)` | anything else. M is the longer side's word count; K is M less the words that pair up |
+
+Every line ends with `(read R, truth T)` (the word counts), which for the
+last code reads `(K of M words differ; read R, truth T)`.
+
+**Which code wins, and why:**
+
+- **A trailing comma plus a case difference** ("ST," against "St"):
+  `punctuation-only`. `case-only` needs the punctuation identical, and the
+  punctuation test ignores case.
+- **An extra word and a comma** ("St, Dock" against "St"): `extra trailing
+  words`. The words are compared with the commas taken out, so the extra
+  word is the difference that is left and the comma is not mentioned. The
+  comma can hide a word difference; it cannot make one.
+- **Extra words at both ends**, or in the middle: `different words`, not
+  leading or trailing.
+- **A repeated word** that could be leading or trailing: `trailing`, which
+  is tested first.
+- **Leading and trailing "missing"** are tested the same way: the read must
+  be exactly the first (or last) words of the truth.
+
+**Where:** `scripts/ratecon-relation.mts` (pure: `relationOf`,
+`relationSaid`) and `scoreRun` in `ratecon-eval.mts`, the shared evaluation
+code both modes use. Not copied anywhere.
+
+**Tests:** 2803 in all (2775 before).
+
+| File | Tests |
+|---|---|
+| `ratecon-relation.test.ts` (new) | 20: one test per code, the precedence cases above, one code each over a spread of pairs, nothing of a value in a phrase |
+| `ratecon-eval.test.ts` | 78 (70 before): the lines after their stop and read lines, only WRONG cells, single mode not repeated, pairs, and the sentinel |
+
+**One change to existing tests, for Alex to see:** two output-shape
+whitelists in `ratecon-eval.test.ts` (the "no value, every line a known
+shape" checks, single and `--pairs`) each gained one alternation admitting the
+new line, because the new line is a new shape. Nothing else in the 70
+existing eval tests changed, and they pass.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- leading tested before trailing;
+- punctuation tested before case-only;
+- a value appended to the phrase;
+- a line for every street, WRONG or not;
+- single mode repeating the lines per read.
+
+**For the next run:** with `--pairs`, a street that is wrong the same way in
+every run will now say, for each of the four 3n cells, whether the read is
+longer, shorter, differently ordered or differently worded than the truth.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
