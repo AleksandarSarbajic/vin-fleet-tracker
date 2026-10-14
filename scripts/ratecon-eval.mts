@@ -32,6 +32,7 @@ import type { RateconRead } from '../src/lib/ratecon/templates';
 import { verifyRead } from '../src/lib/ratecon/verify-read';
 import type { AdapterFailure, AdapterUsage, ReaderAdapter, ReaderRequest } from '../src/server/ratecon-reader/adapter';
 import { appointmentDiff, appointmentVerdict, inspect, type ExpectedStop } from './ratecon-expected.mjs';
+import { relationOf, relationSaid } from './ratecon-relation.mjs';
 
 /**
  * Per million tokens, in US dollars. Source: Anthropic's model table as the
@@ -196,8 +197,22 @@ export function planProblem(plan: EvalPlan): string | null {
   return null;
 }
 
-/** Score one filled reply against its file's ground truth; print it; add its WRONGs to the totals. */
-function scoreRun(file: EvalFile, form: { loadNumber: string; loadNumberCheck: string | null; stops: StopForm[] }, wrong: Record<BarField, number>, say: (l: string) => void) {
+/**
+ * Score one filled reply against its file's ground truth; print it; add its
+ * WRONGs to the totals.
+ *
+ * For a street or city that is WRONG it also says HOW it differs
+ * (`ratecon-relation.mts`): a code and two word counts, never a word. Those
+ * lines follow their stop's line, or are handed to `relations` instead of
+ * `say` when the caller prints them itself (a read scored apart from the merge).
+ */
+function scoreRun(
+  file: EvalFile,
+  form: { loadNumber: string; loadNumberCheck: string | null; stops: StopForm[] },
+  wrong: Record<BarField, number>,
+  say: (l: string) => void,
+  relations?: string[],
+) {
   const load = scoreField(form.loadNumber, form.loadNumberCheck, file.want.loadNumber);
   if (load.score === 'WRONG') wrong['load number'] += 1;
   say(`  ${pad('load number')} ${load.status} · ${load.score}`);
@@ -212,13 +227,22 @@ function scoreRun(file: EvalFile, form: { loadNumber: string; loadNumberCheck: s
       say(`  ${pad(`stop ${i + 1}`)} missing`);
       return;
     }
+    const how: string[] = [];
     const parts = STOP_FIELDS.map(([name, value, key, truth]) => {
       const r = scoreField(value(got), got.fill?.checks[key], truth(w));
-      if (r.score === 'WRONG') wrong[name] += 1;
+      if (r.score === 'WRONG') {
+        wrong[name] += 1;
+        // The form's value, as the scorer compared it, against the truth: a code and counts.
+        if (name === 'street' || name === 'city') how.push(`${name}, stop ${i + 1}: ${relationSaid(relationOf(value(got), truth(w)))}`);
+      }
       return `${name} ${r.status} ${r.score}`;
     });
     parts.push(`appointment ${appointmentVerdict(got, w.appointment)}`);
     say(`  ${pad(`stop ${i + 1}`)} ${parts.join(' · ')}`);
+    for (const line of how) {
+      if (relations) relations.push(line);
+      else say(`  ${line}`);
+    }
   });
 }
 
@@ -287,7 +311,8 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
        */
       const diagnose = (label: 'A' | 'B', form: LoadForm, into: Record<BarField, number>) => {
         const wrong = zeroWrong();
-        scoreRun(file, scored(form), wrong, () => undefined);
+        const how: string[] = [];
+        scoreRun(file, scored(form), wrong, () => undefined, how);
         for (const f of BAR_FIELDS) into[f] += wrong[f];
         const n = BAR_FIELDS.reduce((sum, f) => sum + wrong[f], 0);
         const appts = file.want.stops.map((w, i) => {
@@ -297,6 +322,8 @@ export async function runEvaluation(plan: EvalPlan, deps: EvalDeps): Promise<Eva
           return `stop ${i + 1} ${parts.length === 0 ? 'same' : `(${parts.join(', ')})`}`;
         });
         say(`  read ${label}: ${n} WRONG on the bar · appointments: ${appts.join(', ')}`);
+        // How each wrong street or city differs, per read. A single read is the merged one: said once, above.
+        if (perRun === 2) for (const line of how) say(`  read ${label} ${line}`);
       };
 
       if (reads.some((r) => r.overBound)) {

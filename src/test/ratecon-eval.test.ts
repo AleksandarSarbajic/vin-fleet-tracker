@@ -365,7 +365,7 @@ describe('the output: counts and codes, never a value or a line of text', () => 
     // Every line is one of the known shapes, so nothing free-form can carry text.
     for (const line of out) {
       expect(line).toMatch(
-        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|  read A: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: would fire on \d+ of \d+ scored runs\.|WRONG on the bar's fields: .+|The bar: .+)$/,
+        /^(|sample \d+ run \d+: [a-z_]+( \(HTTP \d+\))?( · \d+ values stood, \d+ did not)? · tokens .+ · \$\d+\.\d{4}|  (load number|stop count|stop \d+) .+|  read A: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  (read [AB] )?(street|city), stop \d+: [a-z0-9 -]+ \(.+\)|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|STOPPED EARLY: [a-z-]+\.|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: would fire on \d+ of \d+ scored runs\.|WRONG on the bar's fields: .+|The bar: .+)$/,
       );
     }
     for (const line of out.filter((l) => /^ {2}(load number|stop)/.test(l))) {
@@ -572,8 +572,113 @@ describe('--pairs: two reads a run, merged by agreement', () => {
     }
     for (const line of out) {
       expect(line).toMatch(
-        /^(|sample \d+ run \d+: (ok · A \d+ values stood, \d+ did not; B \d+ stood, \d+ did not|[a-z_]+ \(pair: A [a-z_]+, B [a-z_]+\)) · tokens .+ · \$\d+\.\d{4}|  pair: (agree|differ \((stop count \d+\/\d+)?(; )?(fields that differed: [a-z ]+ x\d+(, [a-z ]+ x\d+)*)?\))|  read [AB]: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: .+|Pairs: \d+ agreed, \d+ differed\.|Read [AB] alone, WRONG on the bar's fields: .+|WRONG on the bar's fields, merged: .+|The bar: .+)$/,
+        /^(|sample \d+ run \d+: (ok · A \d+ values stood, \d+ did not; B \d+ stood, \d+ did not|[a-z_]+ \(pair: A [a-z_]+, B [a-z_]+\)) · tokens .+ · \$\d+\.\d{4}|  pair: (agree|differ \((stop count \d+\/\d+)?(; )?(fields that differed: [a-z ]+ x\d+(, [a-z ]+ x\d+)*)?\))|  read [AB]: \d+ WRONG on the bar · appointments: stop \d+ (same|missing|\([a-z ,-]+\))(, stop \d+ (same|missing|\([a-z ,-]+\)))*|  (load number|stop count|stop \d+) .+|  (read [AB] )?(street|city), stop \d+: [a-z0-9 -]+ \(.+\)|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: .+|Pairs: \d+ agreed, \d+ differed\.|Read [AB] alone, WRONG on the bar's fields: .+|WRONG on the bar's fields, merged: .+|The bar: .+)$/,
       );
     }
+  });
+});
+
+describe('how a wrong street or city differs, by code and counts (phase 3o)', () => {
+  const pairs = (files: EvalFile[], runs = 1): EvalPlan => ({ files, runs, ceilings: CEILINGS, pairs: true });
+  const wantWith = (street: string, city = 'Duluth') => ({
+    ...WANT,
+    stops: [{ ...WANT.stops[0]!, street }, { ...WANT.stops[1]!, city }],
+  });
+  const reply = (change: (r: typeof MODEL_REPLY) => void): FakeStep => {
+    const r = structuredClone(MODEL_REPLY);
+    change(r);
+    return { reply: r, usage: USAGE };
+  };
+  /** Stop 1's street read as stop 2's: in the text, so it verifies, and it differs from stop 1's truth. */
+  const otherStreet = reply((r) => {
+    r.stops[0]!.street = { value: '220 Harbor Rd', quote: { line: 17, text: '220 Harbor Rd' } };
+  });
+  const relationLines = (out: string[]) => out.filter((l) => /^ {2}(read [AB] )?(street|city), stop \d+: /.test(l));
+
+  it('a WRONG street and a WRONG city: one line each, right after the stop line, with a code and the two word counts', async () => {
+    const { out, deps } = harness([OK]);
+    const want = { ...WANT, stops: [{ ...WANT.stops[0]!, street: '4001 Main Street' }, { ...WANT.stops[1]!, city: 'Superior' }] };
+    await runEvaluation(plan([file(want)]), deps);
+    const at = (prefix: string) => out.findIndex((l) => l.startsWith(prefix));
+    expect(out[at('  stop 1') + 1]).toBe('  street, stop 1: different words (1 of 3 words differ; read 3, truth 3)');
+    expect(out[at('  stop 2') + 1]).toBe('  city, stop 2: different words (1 of 1 words differ; read 1, truth 1)');
+  });
+
+  it('a read with extra words at the end says so, and how many', async () => {
+    const { out, deps } = harness([OK]);
+    await runEvaluation(plan([file(wantWith('4001 Main'))]), deps);
+    expect(relationLines(out)).toEqual(['  street, stop 1: read has 1 extra trailing word (read 3, truth 2)']);
+  });
+
+  it('only a WRONG cell gets a line: exact, and blank-and-marked, get none', async () => {
+    const { out, deps } = harness([OK]);
+    await runEvaluation(plan([file()]), deps);
+    expect(relationLines(out)).toEqual([]);
+
+    const unconfirmed = reply((r) => {
+      r.stops[0]!.street = { value: '4001 Main St', quote: { line: 1, text: 'not in the text' } };
+    });
+    const marked = harness([unconfirmed]);
+    await runEvaluation(plan([file(wantWith('9 Elm Example Ave'))]), marked.deps);
+    expect(marked.out.find((l) => l.startsWith('  stop 1'))).toContain('street blank-and-marked marked');
+    expect(relationLines(marked.out)).toEqual([]);
+  });
+
+  it('a single read is scored once: its relation is the merged line only, not repeated as a read line', async () => {
+    const { out, deps } = harness([OK]);
+    await runEvaluation(plan([file(wantWith('4001 Main Street'))]), deps);
+    expect(relationLines(out)).toHaveLength(1);
+    expect(out.some((l) => /^ {2}read [AB] (street|city)/.test(l))).toBe(false);
+  });
+
+  it('--pairs: both reads wrong the same way gives the merged line and a line for each read, after its read line', async () => {
+    const { out, deps } = harness([otherStreet, otherStreet]);
+    await runEvaluation(pairs([file()]), deps);
+    const want = '(3 of 3 words differ; read 3, truth 3)';
+    expect(relationLines(out)).toEqual([
+      `  street, stop 1: different words ${want.replace(/^/, '')}`,
+      `  read A street, stop 1: different words ${want}`,
+      `  read B street, stop 1: different words ${want}`,
+    ]);
+    const readA = out.findIndex((l) => l.startsWith('  read A: '));
+    expect(out[readA + 1]).toBe(`  read A street, stop 1: different words ${want}`);
+    const readB = out.findIndex((l) => l.startsWith('  read B: '));
+    expect(out[readB + 1]).toBe(`  read B street, stop 1: different words ${want}`);
+  });
+
+  it('--pairs: one read wrong and the other right is blanked in the merge, so only the wrong read has a line', async () => {
+    const { out, deps } = harness([otherStreet, OK]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(totals.wrong.street).toBe(0);
+    expect(relationLines(out)).toEqual(['  read A street, stop 1: different words (3 of 3 words differ; read 3, truth 3)']);
+  });
+
+  it('prints no value, word or sentinel: a value that carries the sentinel is counted, never shown', async () => {
+    const leaky = reply((r) => {
+      r.stops[0]!.street = { value: `4001 Main St ${SENTINEL}`, quote: { line: 12, text: `4001 Main St ${SENTINEL}` } };
+    });
+    const { out, deps } = harness([leaky, leaky]);
+    await runEvaluation(pairs([file()]), deps);
+    expect(relationLines(out)).toEqual([
+      '  street, stop 1: read has 1 extra trailing word (read 4, truth 3)',
+      '  read A street, stop 1: read has 1 extra trailing word (read 4, truth 3)',
+      '  read B street, stop 1: read has 1 extra trailing word (read 4, truth 3)',
+    ]);
+    const all = out.join('\n');
+    for (const text of [SENTINEL, 'Main', 'Harbor', 'Fargo', 'Duluth', 'Elm']) expect(all).not.toContain(text);
+    // Every one of the new lines is a code and counts.
+    for (const line of relationLines(out)) {
+      expect(line).toMatch(/^ {2}(read [AB] )?(street|city), stop \d+: [a-z0-9 -]+ \((\d+ of \d+ words differ; )?read \d+, truth \d+\)$/);
+    }
+  });
+
+  it('adds lines and changes none: the same run scored against a truth that is right has the same lines but for these', async () => {
+    const wrong = harness([OK]);
+    await runEvaluation(plan([file(wantWith('4001 Main Street'))]), wrong.deps);
+    const right = harness([OK]);
+    await runEvaluation(plan([file()]), right.deps);
+    const strip = (lines: string[]) => lines.filter((l) => !/^ {2}(read [AB] )?(street|city), stop \d+: /.test(l));
+    // Only the lines that say WRONG differ between the two; the number of lines does not.
+    expect(strip(wrong.out)).toHaveLength(right.out.length);
   });
 });
