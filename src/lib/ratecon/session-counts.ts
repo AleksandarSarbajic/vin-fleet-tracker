@@ -11,10 +11,16 @@ export interface FillCounts {
   editedAfterFill: number;
   /** Reads by the language-model reader that filled the form. */
   readWithAi: number;
+  /**
+   * Times what the dispatcher did with an AI read could not be recorded.
+   * Counted for this tab and shown to nobody: recording is after a save and
+   * changes nothing the dispatcher sees.
+   */
+  outcomeNotRecorded: number;
 }
 
 const KEY = 'ft.ratecon.counts';
-let memory: FillCounts = { notRecognised: 0, editedAfterFill: 0, readWithAi: 0 };
+let memory: FillCounts = { notRecognised: 0, editedAfterFill: 0, readWithAi: 0, outcomeNotRecorded: 0 };
 
 export function readCounts(): FillCounts {
   try {
@@ -25,6 +31,7 @@ export function readCounts(): FillCounts {
       notRecognised: Number(parsed.notRecognised) || 0,
       editedAfterFill: Number(parsed.editedAfterFill) || 0,
       readWithAi: Number(parsed.readWithAi) || 0,
+      outcomeNotRecorded: Number(parsed.outcomeNotRecorded) || 0,
     };
     return memory;
   } catch {

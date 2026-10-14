@@ -56,7 +56,7 @@ type Status =
   | { kind: 'idle' }
   | { kind: 'reading' }
   | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue; notices?: string[] }
-  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[] }
+  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[]; readId?: string }
   /** A template miss, with "Read with AI" offered when the document can be prepared. */
   | { kind: 'missed'; prepared: Prepared; note: Said | null }
   | { kind: 'ai-reading'; prepared: PreparedOk };
@@ -84,8 +84,12 @@ export function RateconStrip({
   aiMarks?: { stops: number; fields: number } | null;
   /** The server offers "Read with AI" to this user (the flag, a vendor, a dispatcher). */
   aiReader?: boolean;
-  /** Fill the form; returns why it could not, or null. */
-  onFill: (read: RateconRead) => string | null;
+  /**
+   * Fill the form; returns why it could not, or null. For an AI read, `meta`
+   * names the read (its counts row), so the modal can later tell the server
+   * what the dispatcher did with it.
+   */
+  onFill: (read: RateconRead, meta?: { readId: string }) => string | null;
   /** Bumped by the modal when it counts an edit, so the counts line re-reads. */
   countsVersion: number;
   /** Bumped by the modal whenever the dispatcher types into the load: the strip folds. */
@@ -93,7 +97,7 @@ export function RateconStrip({
 }) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [over, setOver] = useState(false);
-  const [counts, setCounts] = useState<FillCounts>({ notRecognised: 0, editedAfterFill: 0, readWithAi: 0 });
+  const [counts, setCounts] = useState<FillCounts>({ notRecognised: 0, editedAfterFill: 0, readWithAi: 0, outcomeNotRecorded: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
   /** The read in flight, so Cancel can stop it and closing the modal does. */
   const inFlight = useRef<AbortController | null>(null);
@@ -113,8 +117,8 @@ export function RateconStrip({
   }, [editsVersion]);
 
   const fill = useCallback(
-    (read: RateconRead, cue?: Cue, notices?: string[]) => {
-      const refused = onFill(read);
+    (read: RateconRead, cue?: Cue, notices?: string[], readId?: string) => {
+      const refused = onFill(read, readId ? { readId } : undefined);
       const n = read.stops.length;
       setStatus(
         refused
@@ -176,8 +180,10 @@ export function RateconStrip({
       const cueText = addressCueText(pair.cue);
       const cue = cueText ? { text: cueText, sent: prepared.text } : undefined;
       const { read, notices } = pair.agreement;
-      if (entries.current) setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}) });
-      else fill(read, cue, notices);
+      const readId = out.readId ?? undefined;
+      if (entries.current) {
+        setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}), ...(readId ? { readId } : {}) });
+      } else fill(read, cue, notices, readId);
     },
     [fill],
   );
@@ -363,7 +369,7 @@ export function RateconStrip({
               </p>
               <button
                 type="button"
-                onClick={() => fill(status.read, status.cue, status.notices)}
+                onClick={() => fill(status.read, status.cue, status.notices, status.readId)}
                 className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
               >
                 Replace

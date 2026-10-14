@@ -64,6 +64,8 @@ import {
 import { LoadStrip } from './LoadStrip';
 import { STOP_FORM_ID, StopList } from './StopList';
 import { RateconStrip } from './RateconStrip';
+import { fillSnapshot } from './fill-outcome';
+import { recordFillOutcome, type PendingOutcome } from './record-outcome';
 import {
   aiMarks,
   aiSourceLine,
@@ -306,6 +308,12 @@ function LoadEditor({
   const [clearLoadId, setClearLoadId] = useState<string | null>(null);
   /** The stops the last request carried, in its order — a field error's `stops.<i>`. */
   const sentKeys = useRef<string[]>([]);
+  /**
+   * An AI read that filled the form and has not been saved since: which read,
+   * and what it put where (in memory only). Sent as counts after the first
+   * save that lands, then dropped; any other fill drops it.
+   */
+  const pendingOutcome = useRef<PendingOutcome | null>(null);
 
   /** §12.122. Bumped when a filled field is edited, so the strip's counts re-read. */
   const [countsVersion, setCountsVersion] = useState(0);
@@ -675,6 +683,16 @@ function LoadEditor({
         }
 
         const saved = (await response.json()) as { warnings?: FieldError[] };
+
+        /**
+         * The load has saved. Tell the server, once, what was done with an AI
+         * fill: counts per field name (docs/llm-reader-design.md §4). Not
+         * awaited, and nothing in it can reach the save: it cannot throw or
+         * reject, and what it needs is already in hand.
+         */
+        const pending = pendingOutcome.current;
+        pendingOutcome.current = null;
+        void recordFillOutcome(pending, form);
 
         /**
          * §12.14. A second request, deliberately, and only when the flag
@@ -1049,11 +1067,14 @@ function LoadEditor({
                 aiReader={aiReader}
                 countsVersion={countsVersion}
                 editsVersion={editsVersion}
-                onFill={(read) => {
+                onFill={(read, meta) => {
                   const filled = fillLoad(form, read, openedAt, new Date());
                   if (!filled.ok) return filled.message;
                   setForm(filled.form);
                   setSelected(0);
+                  // An AI read that filled the form waits for the first save after it; any other fill replaces it.
+                  pendingOutcome.current =
+                    read.layout === 'model' && meta ? { readId: meta.readId, snapshot: fillSnapshot(filled.form) } : null;
                   return null;
                 }}
               />
