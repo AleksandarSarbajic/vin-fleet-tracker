@@ -20,7 +20,7 @@ const doc = (...lines: Line[]) => redactDocument(lines).map((l) => l.text);
 
 describe('the version', () => {
   it('moved on: a server on the old rules refuses, and approvals that named a hash are void', () => {
-    expect(REDACTION_VERSION).toBe('redact-2026-10-14.3');
+    expect(REDACTION_VERSION).toBe('redact-2026-10-14.4');
   });
 });
 
@@ -254,13 +254,20 @@ describe('B. a name in the row below a header row that names a person', () => {
     expect(doc(row('Contact'), row('612-555-0147 Dana Example'))[1]).toBe('[PHONE] [REMOVED]');
   });
 
-  it('a person label with a value on the same line: that line as before, and the next line untouched', () => {
+  it('a person label cell with a value beside it: that line as before; the row below is masked too (the cost of "whatever follows")', () => {
     const same = row('Contact:', 'Dana Example');
-    const out = doc(same, row('Prairie Cold Storage'));
+    const out = doc(same, row('Prairie Cold Storage'), row('Riley Quill'));
     expect(out[0]).toBe(redactLine(same).text);
     expect(out[0]).toBe('Contact:  [REMOVED]');
-    expect(out[1]).toBe('Prairie Cold Storage');
-    expect(doc(row('Dispatcher:', 'Dana', 'Example'), row('Riley Quill'))[1]).toBe('Riley Quill');
+    expect(out[1]).toBe('[REMOVED]');
+    expect(out[2]).toBe('Riley Quill');
+    expect(doc(row('Dispatcher:', 'Dana', 'Example'), row('Riley Quill'))[1]).toBe('[REMOVED]');
+  });
+
+  it('a label inside a longer cell is not a header: "Contact: Dana Example" in one cell, a sentence ending in "contact"', () => {
+    expect(doc(row('Contact: Dana Example'), row('Prairie Cold Storage'))[1]).toBe('Prairie Cold Storage');
+    expect(doc(row('For questions please contact'), row('Riley Quill'))[1]).toBe('Riley Quill');
+    expect(doc(row('Sales Rep'), row('Riley Quill'))[1]).toBe('Riley Quill');
   });
 
   it('a row that is not under a header is untouched: names, facilities, cities', () => {
@@ -303,6 +310,91 @@ describe('B. a name in the row below a header row that names a person', () => {
     const once = doc(row('Contact', 'Phone'), row('Dana Example', '612-555-0147'), row('Driver Name'), row(), row('Sam'));
     const again = doc(...once.map((t) => row(t)));
     expect(again).toEqual(once);
+  });
+});
+
+describe('B, finished: a header row is any row with a cell that is exactly a person label, whatever follows', () => {
+  // Invented, in the shape of a carrier table seen on a real sample: a title row, a header row whose
+  // cells after the label are not header words (and are consumed by the label rule), a row of values.
+  const title = row('CARRIER INFORMATION', 'CONTACT INFORMATION');
+  const header = row('Carrier', 'Contact', 'Office, Direct', 'Mailbox Addr');
+  const values = row('ACME HAULING INC', 'ZORBLAT QUENBY', 'Fennimore Wexcombe', '612-555-0147');
+
+  it('the exact shape: both person cells go, the company cell stays, the phone is masked', () => {
+    const out = doc(title, header, values);
+    expect(out[1]).toBe('Carrier  Contact  [REMOVED]  [REMOVED]');
+    expect(out[2]).toBe('ACME HAULING INC  [REMOVED]  [REMOVED]  [PHONE]');
+  });
+
+  it('the title row is not a header; the header row is', () => {
+    const out = redactDocument([title, header, values]);
+    expect(out.map((l) => l.header)).toEqual([false, true, false]);
+    expect(out.map((l) => l.below)).toEqual([0, 0, 2]);
+  });
+
+  it('an ALL-CAPS cell with no company word under a person header is a name: masked', () => {
+    expect(doc(header, row('ZORBLAT QUENBY'))[1]).toBe('[REMOVED]');
+    expect(doc(header, row('ZORBLAT'))[1]).toBe('[REMOVED]');
+    expect(doc(header, row('ZORBLAT Q. QUENBY JR'))[1]).toBe('[REMOVED]');
+  });
+
+  it('an ALL-CAPS cell with a company word stays, whatever else it holds', () => {
+    for (const company of ['ACME HAULING INC', 'ZORBLAT QUENBY TRUCKING', 'QUENBY & SONS LLC', 'ACME DC', 'ACME EXPRESS']) {
+      expect(doc(header, row(company))[1]).toBe(company);
+    }
+  });
+
+  it('a company word does not keep a cell in mixed case: only an ALL-CAPS cell is a company', () => {
+    expect(doc(header, row('Zorblat Trucking'))[1]).toBe('[REMOVED]');
+  });
+
+  it('the cells that stay stay: a digit, a comma, a state, a weekday run, a city line', () => {
+    const out = doc(header, row('4001 Main St', 'ACME, INC', 'ND', 'MON-FRI', 'Fargo, ND 58102'));
+    expect(out[1]).toBe('4001 Main St  ACME, INC  ND  MON-FRI  Fargo, ND 58102');
+  });
+
+  it('a label followed by cells the first pass already masked: it fires', () => {
+    expect(doc(row('Contact', '[REMOVED]', '[REMOVED]'), row('Dana Example'))[1]).toBe('[REMOVED]');
+  });
+
+  it('a label followed only by placeholders in its own cell fires: "Contact 612-555-0147"', () => {
+    expect(doc(row('Contact 612-555-0147'), row('Dana Example'))[1]).toBe('[REMOVED]');
+    expect(doc(row('Contact: dana@example.com'), row('Dana Example'))[1]).toBe('[REMOVED]');
+  });
+
+  it('a label with placeholders after it, in the middle of the line, fires without the vocabulary', () => {
+    expect(doc(row('Contact 612-555-0147', 'Office, Direct'), row('Dana Example'))[1]).toBe('[REMOVED]');
+    expect(doc(row('Office, Direct', 'Dispatcher: dana@example.com', 'Mailbox Addr'), row('Dana Example'))[1]).toBe('[REMOVED]');
+  });
+
+  it('a person label inside a longer cell is no header, even with placeholders after it', () => {
+    expect(doc(row('For questions please contact 612-555-0147'), row('Riley Quill'))[1]).toBe('Riley Quill');
+  });
+
+  it('only a whole company WORD keeps an ALL-CAPS cell: a name that merely contains one is a name', () => {
+    for (const name of ['COLE QUENBY', 'INCA QUENBY', 'GROUPER ZORBLAT', 'DCARTER WEXCOMBE', 'ZORBLAT INC']) {
+      expect(doc(header, row(name))[1], name).toBe(name === 'ZORBLAT INC' ? name : '[REMOVED]');
+    }
+  });
+
+  it('a company word alone in an otherwise mixed-case cell keeps nothing: "Zorblat INC" is a name and a word', () => {
+    expect(doc(header, row('Zorblat INC'))[1]).toBe('[REMOVED]');
+  });
+
+  it('the row after a blank line, as before', () => {
+    expect(doc(header, row(), row('ZORBLAT QUENBY'))[2]).toBe('[REMOVED]');
+    expect(doc(header, row('612-555-0147'), row('ZORBLAT QUENBY'))[2]).toBe('[REMOVED]');
+  });
+
+  it('rows under no person header are untouched, and so is a name with no header above it (the known limit)', () => {
+    const rows = [row('Carrier', 'Office, Direct', 'Mailbox Addr'), row('ZORBLAT QUENBY', 'Fennimore Wexcombe')];
+    expect(doc(...rows)).toEqual(rows.map((r) => redactLine(r).text));
+    expect(doc(...rows)[1]).toBe('ZORBLAT QUENBY  Fennimore Wexcombe');
+  });
+
+  it('is idempotent', () => {
+    const once = doc(title, header, values);
+    expect(doc(...once.map((t) => row(t)))).toEqual(once);
   });
 });
 

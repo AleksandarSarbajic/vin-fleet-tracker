@@ -55,7 +55,7 @@ export const PLACEHOLDER: Readonly<Record<MaskKind, string>> = {
 };
 
 /** Sent with every read; the server refuses a version it does not run (phase 2). */
-export const REDACTION_VERSION = 'redact-2026-10-14.3';
+export const REDACTION_VERSION = 'redact-2026-10-14.4';
 
 /** What may be sent at all, after redaction. A line is counted without its `L<n> ` prefix. */
 export const SEND_LIMITS = { lines: 400, lineChars: 500, totalChars: 24_000 } as const;
@@ -185,8 +185,24 @@ function labelledValueAt(text: string): number {
   return -1;
 }
 
-/** One cell, without regard to its neighbours. `labelOnly`: a label with nothing after it, whose value is the next cell. */
-function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: boolean } {
+/**
+ * Does a PERSON label start this text with nothing after it but placeholders?
+ * "Contact", "Dispatcher:", "Contact 612-555-0147": its value, if it is a
+ * name, is somewhere else — the next cell, or the next line. A label inside a
+ * longer cell ("Please contact", "Sales Rep") does not count: it must start
+ * the cell.
+ */
+function personLabelBare(text: string): boolean {
+  const t = text.trim();
+  return [...t.matchAll(PERSON_LABEL)].some((m) => m.index === 0 && t.slice(m.index + m[0].length).replace(LEADING_PLACEHOLDERS, '') === '');
+}
+
+/**
+ * One cell, without regard to its neighbours. `labelOnly`: a label with
+ * nothing after it, whose value is the next cell. `bareLabel`: the first pass
+ * left a person label followed by nothing but placeholders (rule B's header).
+ */
+function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: boolean; bareLabel: boolean } {
   let t = mask(text, EMAILS, 'email', counts);
   t = mask(t, URLS, 'url', counts);
   t = mask(t, IDS, 'id', counts);
@@ -196,13 +212,14 @@ function maskCell(text: string, counts: MaskCounts): { text: string; labelOnly: 
     return `${word}${gap}${PLACEHOLDER.phone}`;
   });
   t = mask(t, AMOUNTS, 'amount', counts);
+  const bareLabel = personLabelBare(t);
   const at = labelledValueAt(t);
-  if (at !== -1 && at === t.length) return { text: t, labelOnly: true };
+  if (at !== -1 && at === t.length) return { text: t, labelOnly: true, bareLabel };
   if (at !== -1) {
     counts.labelled += 1;
     t = `${t.slice(0, at)}${PLACEHOLDER.labelled}`;
   }
-  return { text: t, labelOnly: false };
+  return { text: t, labelOnly: false, bareLabel };
 }
 
 /** Cells are joined with this, as they are sent. */
@@ -371,6 +388,8 @@ export interface RedactedLine {
   bare: number;
   /** What rule B masked in this line, because of the header above it: counted in `masks.labelled` too. */
   below: number;
+  /** Rule B's header: the line has a person label, whatever follows it. The row below it is masked. */
+  header: boolean;
 }
 
 /**
@@ -404,7 +423,10 @@ export function redactLine(line: Line): RedactedLine {
   });
   const person = maskPersonNames(maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), counts);
   const bare = maskBarePhones(person.text, counts);
-  return { text: bare.text, masks: counts, names: person.names, bare: bare.n, below: 0 };
+  // Read from the cells as they were AND as the first pass left them: a label's neighbours are
+  // placeholders by now, which tells nothing about the header they were.
+  const header = cells.some((c) => c.bareLabel) || line.cells.some((c) => isPersonHeaderCell(c.text.trim()));
+  return { text: bare.text, masks: counts, names: person.names, bare: bare.n, below: 0, header };
 }
 
 /* ------------------- rule B: the row below a person header ------------------- */
@@ -417,24 +439,19 @@ const HEADER_WORDS = new Set([
 ]);
 const PERSON_ROLES = new Set(['contact', 'dispatcher', 'dispatch', 'rep', 'representative', 'agent', 'booked', 'driver']);
 const headerWords = (cell: string): string[] => cell.toLowerCase().replace(/[:#.,]+/g, ' ').split(/\s+/).filter((w) => w !== '');
-const isHeaderCell = (cell: string): boolean => {
-  const words = headerWords(cell);
-  return words.length > 0 && words.every((w) => HEADER_WORDS.has(w));
-};
-const isPersonHeaderCell = (cell: string): boolean => isHeaderCell(cell) && headerWords(cell).some((w) => PERSON_ROLES.has(w));
-
 /**
- * A line is a person header when one of its cells is a person label with
- * nothing after it: the last cell of the line, or followed by another header
- * cell ("Contact" | "Phone" | "Email"). A person label followed by a value
- * ("Contact:" | "Dana Example") is the same-line case, handled where it
- * always was. Read from the cells as they were, not as masked: the label
- * pass has already turned the header's cells into placeholders.
+ * A cell that is a person label and nothing else: every word from the header
+ * vocabulary, a person role among them ("Contact", "Booked by:", "Carrier
+ * Contact", "Driver Cell"). Whatever follows it on the line is not asked
+ * (2026-10-14, sample 17): the label rule consumes the cells after a label,
+ * and what they were — header words, or a value — cannot be told apart once
+ * they are placeholders. So "Contact:" | "Dana Example" is a header too, and
+ * the row below it is masked: the cost, and the doubt goes to masking.
  */
-function isPersonHeader(line: Line): boolean {
-  const cells = line.cells.map((c) => c.text.trim()).filter((t) => t !== '');
-  return cells.some((cell, i) => isPersonHeaderCell(cell) && (i === cells.length - 1 || isHeaderCell(cells[i + 1]!)));
-}
+const isPersonHeaderCell = (cell: string): boolean => {
+  const words = headerWords(cell);
+  return words.length > 0 && words.every((w) => HEADER_WORDS.has(w)) && words.some((w) => PERSON_ROLES.has(w));
+};
 
 const COMPANY_WORDS = new Set([
   'INC', 'LLC', 'LTD', 'CORP', 'CO', 'LOGISTICS', 'FREIGHT', 'TRANSPORT', 'TRUCKING', 'EXPRESS', 'GROUP', 'SERVICES',
@@ -471,7 +488,7 @@ function isPersonUnderHeader(text: string): boolean {
 }
 
 /** One cell of a row under a person header: the person part becomes a placeholder, placeholders around it stay. */
-function maskPersonCell(cell: string): string | null {
+export function maskPersonCell(cell: string): string | null {
   const [, lead, core, trail] = AROUND_PLACEHOLDERS.exec(cell)!;
   if (core === '' || !isPersonUnderHeader(core!)) return null;
   return `${lead}${PLACEHOLDER.labelled}${trail}`;
@@ -486,15 +503,16 @@ const isBlankOrMasked = (text: string): boolean => text.replace(PLACEHOLDER_ANY,
  * ROW — there is no column alignment to go by. If that line is blank or only
  * placeholders, the line after it is masked too, and no further. A line that
  * is itself a person header is not a row of values: it masks its own next
- * line. Never across a page.
+ * line. Never across a page. A header is any line with a person label,
+ * whatever follows it (`RedactedLine.header`).
  */
 function maskBelowHeaders(lines: readonly Line[], out: RedactedLine[]): void {
   lines.forEach((header, i) => {
-    if (!isPersonHeader(header)) return;
+    if (!out[i]!.header) return;
     for (let j = i + 1; j <= i + 2 && j < lines.length; j += 1) {
       const line = lines[j]!;
       const result = out[j]!;
-      if (line.page !== header.page || isPersonHeader(line)) return;
+      if (line.page !== header.page || out[j]!.header) return;
       const wasEmpty = isBlankOrMasked(result.text);
       let below = 0;
       const cells = result.text.split(CELL_GAP).map((cell) => {
@@ -593,8 +611,8 @@ export function selectPages(lines: readonly Line[]): Line[] {
  * hit. Not called by the app.
  */
 export function redactedForReview(lines: readonly Line[]): {
-  /** What the passes masked in the line, counts only, for the report: `names` the name pass, `bare` rule A, `below` rule B. */
-  lines: (PreparedLine & { residue: MaskKind[]; names: number; bare: number; below: number })[];
+  /** What the passes masked in the line, counts only, for the report: `names` the name pass, `bare` rule A, `below` rule B; `header`: a person header (rule B's). */
+  lines: (PreparedLine & { residue: MaskKind[]; names: number; bare: number; below: number; header: boolean })[];
   masks: MaskCounts;
 } {
   const masks = zero();
@@ -609,6 +627,7 @@ export function redactedForReview(lines: readonly Line[]): {
       names: redacted.names,
       bare: redacted.bare,
       below: redacted.below,
+      header: redacted.header,
     };
   });
   return { lines: out, masks };
