@@ -2321,6 +2321,111 @@ test:
 every run will now say, for each of the four 3n cells, whether the read is
 longer, shorter, differently ordered or differently worded than the truth.
 
+### Phase 3p: evaluation run 8, paired, samples 8, 10, 12 and 21: how the wrong streets differ (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** `ratecon:eval-ai --pairs` on samples
+8, 10, 12 and 21, 3 runs each (24 calls), Claude Haiku 5.5, ceilings $1.00
+and 75 calls. A diagnostic re-run of 3n's out-of-sample run, now that the
+output says how a wrong street differs from the truth (3o). Alex corrected
+two ground-truth entries since 3n (which, I do not know: I did not read the
+ground truth). Alex reviewed the four files' redacted text that day.
+Retention (30 days default, flagged up to 2 years) accepted for this run.
+
+**Checked before the run:** the tree was clean; since the code of 3n
+(`2af1c78`) only the eval's printing (`ratecon-eval.mts`,
+`ratecon-relation.mts`), its tests and docs changed; `redact.ts` is
+byte-identical and no file on the sent-text path changed. **Sent-text
+hashes equal 3n's, all four:** 8 `2097af1b29cd`, 10 `5a57dd07b1ad`, 12
+`afd147515071`, 21 `77b64d5b9b8e`.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=8,10,12,21 --runs=3 --pairs
+
+**Result: the bar is NOT met, with 14 WRONG, all on street. Exit 1.**
+
+| | 3n, the same four files | 3p |
+|---|---|---|
+| Calls | 24 of the 42 | 24 of 24 (ceiling 75) |
+| Tokens | not separable | 120,792 in, 59,735 out |
+| Cost | not separable | $0.0419 (about $0.0035 a pair) |
+| Runs scored | 12 | 12 |
+| Pairs | 8 agreed, 4 differed | **10 agreed, 2 differed** |
+| Address cue fires | on 12 and 21, every run | 6 of 12 runs: 12 and 21, every run |
+| Merged WRONG on the bar | 10 (street) | **14 (street)** |
+
+Every call returned `ok`; no pair failed. Merged WRONG: street 14, every
+other bar field 0. **Read A alone: street 14. Read B alone: street 14.** The
+two reads were wrong in the same cells, every time, so agreement had nothing
+to remove.
+
+**What the 3o lines say.** Every WRONG street cell, by code (the same code
+for the merge and for read A and read B in every case):
+
+| Cell | Runs WRONG (3n) | Runs WRONG (3p) | Code and word counts |
+|---|---|---|---|
+| 8, stop 2 | 3 of 3 | 3 of 3 | **case-only** (read 6, truth 6) |
+| 8, stop 3 | 3 of 3 | 3 of 3 | **read has 1 extra trailing word** (read 5, truth 4) |
+| 12, stop 1 | none (blanked in runs 1 and 2) | run 1 | **punctuation-only** (read 3, truth 3) |
+| 12, stop 2 | none (blanked in runs 1 and 2) | run 1 | **punctuation-only** (read 4, truth 4) |
+| 12, stop 3 | none (blanked in runs 1 and 2) | run 1 | **punctuation-only** (read 3, truth 3) |
+| 12, stop 4 | run 3 | runs 2 and 3 | **punctuation-only** (read 4, truth 4) |
+| 21, stop 1 | 3 of 3 | 3 of 3 | **punctuation-only** (read 3, truth 3) |
+
+That is 3 cell-runs of `case-only`, 8 of `punctuation-only` and 3 of `read
+has 1 extra trailing word`: **11 of the 14 differ from the truth in case or
+punctuation only, with the same words**; 3 have one more word at the end.
+No cell is a different word, a missing word, or a different order.
+
+**Per sample** (merged WRONG on the bar; "marked" is not WRONG):
+
+| Sample | Pairs | Merged WRONG | 3n | What changed |
+|---|---|---|---|---|
+| 8 | 3 agreed | 6 | 6 | the same two cells in all 3 runs, now with codes; stop 3's appointment time differs (marked), cue silent |
+| 10 | 2 differed (appointment x1), 1 agreed | 0 | 0 | stop 1's ZIP blank and marked every run. **Appointment WRONG (time) on stop 2 in runs 1 and 2**, unmarked (3n: runs 2 and 3); in run 3 the reads differed and it was blanked and marked |
+| 12 | 3 agreed | **5** | 1 | stops 1 to 3 in run 1 and stop 4 in runs 2 and 3, all punctuation-only; cells flip between exact and punctuation-only from run to run; ZIPs on stops 2 to 4 blank and marked; stop 1's appointment differs (type, end time; marked); cue fires every run on the same 3 lines |
+| 21 | 3 agreed | 3 | 3 | stop 1, punctuation-only, every run; both stops' appointments differ (type, date, time, end time; marked); cue fires every run on the same 2 lines |
+
+**The appointment parts that differ from the truth** (by name, as before):
+
+- **8:** stop 3 (time), both reads, every run. Marked.
+- **10:** stop 2 (time), both reads, every run; read B also stop 1 (type,
+  time, end time) in run 2. **Silent WRONG** in runs 1 and 2, where the two
+  reads agreed on the time; marked in run 3, where they differed.
+- **12:** stop 1 (type, end time), both reads, every run. Marked.
+- **21:** both stops (type, date, time, end time), both reads, every run.
+  Marked.
+
+**What the counts say (no values looked at):**
+
+- **The street WRONGs on these files are not wrong addresses by the codes.**
+  Seven cell-types, and for each the read has the truth's words (or one more
+  at the end). Whether `case-only` and `punctuation-only` should be WRONG at
+  all is a question about the scorer, not the reader: the scorer compares
+  strings exactly. That is Alex's call, and nothing was changed.
+- **Where they come from is for Alex to check,** cell by cell, against the
+  PDF's own line, now that the kind is known:
+  - `case-only` (8, stop 2): the form's value is the normal-case rule's
+    output (3g); a name printed in capitals whose inner capitals the rule
+    cannot recover is its documented known limit. The truth may also be
+    written differently from what the rule produces.
+  - `punctuation-only` (12, 21): the value's punctuation follows what the
+    model quoted, so it can vary from run to run, as 12's does; the truth's
+    is fixed.
+  - `extra trailing word` (8, stop 3): the read carries one word more than
+    the truth.
+- **Sample 12's rise from 1 to 5 is not a worse reading.** In 3n the reads
+  differed on four streets in runs 1 and 2 and the merge blanked them; now
+  they agree, with the same punctuation, so the cells show as WRONG instead.
+  Each cell is exact in some runs.
+- **The silent appointment WRONG on sample 10 stop 2 is still there** (two
+  cells, as in 3n), and agreement cannot catch it while the reads agree.
+- **The cue** fired on 12 and 21 every run, as in 3n, and was silent on 8.
+- **Cost** is as before, about $0.0035 a pair.
+- Nothing was fixed. Whether to turn the reader on, and whether the scorer
+  should count case-only and punctuation-only as exact, are Alex's calls.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
