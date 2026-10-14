@@ -2123,6 +2123,99 @@ test:
 4. **Two concurrent calls from one request** meet the vendor's rate limits
    sooner (a 429 is `unavailable`).
 
+### Phase 3n: evaluation run 7, paired, samples 7, 8, 10, 11, 12, 16 and 21: the out-of-sample test (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** `ratecon:eval-ai --pairs` on samples
+7, 8, 10, 11, 12, 16 and 21, 3 runs each (42 calls), Claude Haiku 5.5,
+ceilings $1.00 and 75 calls. These seven are files the reader had not been
+run on or tuned against: the out-of-sample test of the bar. Alex read the
+redacted text of each in the viewer that day and found nothing that should
+not be sent, and checked every street, city and ZIP in the ground truth
+against the PDF text. Retention (30 days default, flagged up to 2 years)
+accepted for this run. I did not read the ground truth.
+
+**Checked before the run:**
+
+- The tree was clean. Since the code of 3l (`862c393`): `redact.ts` is
+  byte-identical, and **no file on the sent-text path changed** (redaction,
+  lines, PDF reading, templates, the model's instruction and schema, the
+  verifier, the cue, agreement, the vendor adapters, the redaction report,
+  the eval command). What did change is the app's route, client and strip
+  (3m), and `ratecon-eval.mts` internally: it now calls `readPair`, with
+  output unchanged (3m).
+- **Sent-text hashes** (first 12 of sha256): 7 `e83b8114d30b`, 8
+  `2097af1b29cd`, 10 `5a57dd07b1ad`, 11 `432dc67b6e7f`, 12 `afd147515071`,
+  16 `10c8f0f51354`, 21 `77b64d5b9b8e`.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=7,8,10,11,12,16,21 --runs=3 --pairs
+
+**Result: the bar is NOT met, with 10 WRONG, all on street. Exit 1.**
+
+| | 3l (samples 2, 4, 9, 17, 28) | 3n (samples 7, 8, 10, 11, 12, 16, 21) |
+|---|---|---|
+| Calls | 30 of 30 | 42 of 42 (ceiling 75) |
+| Tokens | 173,910 in, 65,652 out | 184,500 in, 100,641 out |
+| Cost | $0.0502 | $0.0688 (ceiling $1.00) |
+| Runs planned / scored | 15 / 15 | 21 / **20** |
+| Pairs | 12 agreed, 3 differed | **10 agreed, 10 differed** |
+| Address cue fires | 6 of 15 | 6 of 20 |
+| Merged WRONG on the bar | 0 | **10** |
+
+**One pair failed:** sample 16, run 2, `invalid_output` (read A's reply
+failed the schema, read B was fine). The pair failed as a whole, filled
+nothing and was not scored; its tokens are counted. In 3l none of 15 failed.
+
+**Merged WRONG, by field:** street 10; load number, stop count, order +
+type, ZIP, city and state 0. **Each read alone:** A street 16, B street 12
+(nothing else). Where the two reads differed on a street (sample 12, runs 1
+and 2), the merge blanked and marked it, so agreement removed those; it
+cannot remove a value both reads share.
+
+**Per sample** (merged WRONG on the bar; "marked" is not WRONG):
+
+| Sample | Pairs (3 runs) | Merged WRONG | What the output shows |
+|---|---|---|---|
+| 7 | 2 differed (appointment x1; city x1 and state x1), 1 agreed | 0 | stop 2's ZIP blank and marked every run; in runs 2 and 3 its city and state too; appointments marked, filled differently from the truth; cue silent |
+| 8 | 3 agreed | **6** | street WRONG on stops 2 and 3 in all 3 runs, both reads agreeing on each; stop 3's appointment time differs (marked); cue silent |
+| 10 | 2 differed (appointment x2; x1), 1 agreed | 0 on the bar | stop 1's ZIP blank and marked every run. **Appointment WRONG (time) on stop 2 in runs 2 and 3**, unmarked, both reads agreeing (in run 1 the reads differed and it was blanked); cue silent |
+| 11 | 2 differed (appointment x2, both runs), 1 agreed | 0 | stop 2's ZIP blank and marked every run; marked appointments; cue silent |
+| 12 | 2 differed (street x4, in runs 1 and 2), 1 agreed | **1** | runs 1 and 2: all four streets blank and marked. Run 3: **stop 4's street WRONG**, both reads agreeing. ZIPs on stops 2 to 4 blank and marked; stop 1's appointment differs (type, end time; marked); cue fires every run, on the same 3 lines |
+| 16 | 2 differed (appointment x2, both scored runs), **1 pair failed** | 0 | appointments blanked and marked on both stops; cue silent. Scored in 2 of 3 runs |
+| 21 | 3 agreed | **3** | stop 1's street WRONG in all 3 runs, both reads agreeing; both stops' appointments marked, filled differently (type, date, time, end time); cue fires every run, on the same 2 lines |
+
+**What the counts say (no values looked at):**
+
+- **The 10 WRONG are 4 cells, not 10 independent errors:** sample 8 stops 2
+  and 3, sample 21 stop 1 (each WRONG in all 3 runs, both reads agreeing),
+  and sample 12 stop 4 (run 3 only). Three of the four are identical across
+  runs and across both reads, which looks like something systematic rather
+  than the model varying. Counts cannot say what. Candidates for Alex to
+  check, cell by cell, against the PDF's own line: the form's value vs the
+  truth after `normalCase` (a name printed in capitals whose capitals the
+  rule cannot recover is the documented known limit, 3g); a street value
+  that is a part of the printed line; or the truth. City, ZIP and state have
+  no WRONG at all.
+- **Two appointments are wrong and unmarked** (sample 10, stop 2, runs 2
+  and 3, time). The bar's seven fields do not include the appointment, so
+  they are not in the 10, but they are the silent kind. Both reads agree on
+  the time in run 3 and in run 2, so agreement did not catch them.
+- **Agreement differed on half the pairs** (10 of 20 scored; 3l: 3 of 15).
+  Most of the differences are in appointments (7, 10, 11, 16), each turned
+  into a blank and a mark. This is the out-of-sample behaviour the
+  in-sample files did not show.
+- **The cue** fired on 6 of 20 runs, on samples 12 and 21 only. It was
+  silent on sample 8, whose three WRONG streets are wrong values, not
+  dropped stops.
+- **Cost** per scored pair was about $0.0033 as in 3l; output tokens per
+  call were higher (about 2,400 against 2,200).
+- **Scope:** 7 of the 25 files, 3 runs each, one model. With 3l's five,
+  12 files have now been run on the current code; the six control files
+  (1, 18, 19, 22, 23, 27) have not been re-run on it.
+- Nothing was fixed. Whether to turn the reader on is Alex's call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
