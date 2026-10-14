@@ -3102,6 +3102,71 @@ section. Found while reading 3r for this comparison. Restored in `7b3b8ed`
 from `0582697`: the diff against it is additions only (3t, its `.4`
 follow-up, a file-table row). No other file was affected.
 
+### Phase 3v: an appointment the AI filled is never silent (2026-10-15)
+
+No API call, no network, no `ratecon:eval-ai`; nothing read from `.samples/`.
+**The reader stays off by default.** Invented data only.
+
+**Why:** evaluation run 10 (3u) had one appointment, stop 1 of one file, filled
+wrong by BOTH reads. They agreed, so the pair did not blank it, and it carried
+no check, so nothing told the dispatcher to look. Agreement cannot catch the
+same mistake made twice; the form can.
+
+**The rule** (`fillStop` in `ratecon-fill.ts`; `AI_APPOINTMENT_CHECK`): when
+the read is a model read and the stop's appointment is filled (enabled, with a
+time; APPT or FCFS, exact or a window), the appointment's check always
+includes "Check: the AI filled this appointment. Confirm the date and time
+against the PDF." It follows whatever the appointment already said (the flag or
+window sentence, the date sentence), with a space, once; if it had no check,
+that is the whole check. Not applied to a template read, to a blank
+appointment, to "No date or time", to "Couldn't read", or to an appointment
+the pair blanked and marked. No other field, the verifier, agreement, the
+prompt or the route changed. The dispatcher clears it as any check: by editing
+the appointment (`fillAfterEdit`). No new mechanism.
+
+**What it does to counts:**
+
+- **"Fields to check"** rises by the filled appointments that gained a check
+  (an invented two-stop read: 1 for the pickup, none for the blank delivery).
+- **`aiMarkedFields`, `aiMarks` and the outcome summary are unchanged:** a
+  filled appointment is still an AI-marked, filled field, so the snapshot
+  counts it as filled and the outcome counts per field are as before (pinned).
+- **One existing test changed**, `src/test/ratecon-eval.test.ts`, "a reply that
+  matches the ground truth": its stop line said `appointment exact` and now
+  says `appointment marked, filled as the PDF says`. The evaluation scores the
+  form as the dispatcher sees it, and every filled appointment now has a mark.
+
+**Two consequences for the evaluation script (not changed):**
+
+1. In `ratecon:eval-ai` output a filled appointment is now "marked, filled as
+   the PDF says" or "marked, filled differently (parts)", never "exact" and
+   never a silent WRONG. The silent-WRONG category for appointments cannot
+   occur by construction. The per-read lines (`read A: appointments: stop 1
+   (type, time)`) are unaffected, and are the way to compare with 3r and 3u.
+2. A comparison of marked-field counts with earlier runs must leave the
+   appointments out: they are all marked now.
+
+**A cost, for Alex to weigh:** every AI read now leaves at least one "field to
+check" per filled appointment, and "Looks right" does not clear it (it clears
+the AI mark only, as for every check); the dispatcher has to edit the
+appointment, or leave the count standing. If that is too loud, "Looks right"
+could clear this one check; not done, because the brief said no new mechanism.
+
+**Tests (invented text):** 15 new in `ratecon-fill.test.ts` (an exact time; a
+window of two hours or less; an FCFS exact time, window and receiving hours,
+each old sentence first and the new one once; a date check already there, past
+and far; blank, none, unreadable and pair-blanked left as they were; the case
+both reads agree on; template reads in all four layouts; the marks and outcome
+counts; "fields to check" up by one and down when edited, and unmoved by
+"Looks right"). **Mutation-checked,** 11 mutations: FCFS excluded (by type and
+by flag), applied to template reads, duplicated (twice over), new sentence
+first, applied to a blank appointment, applied to a pair-blanked one, replacing
+instead of following an old check, the sentence reworded: all killed. One
+survived, "applied to a disabled appointment": an equivalent mutant (a stop
+starts from a blank form, so a disabled appointment has no time).
+`npm run check`: 188 files, 3182 tests, exit 0. E2E, on their own:
+`ratecon-ai.spec.ts` 4 and `ratecon-fill.spec.ts` 2 pass.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18

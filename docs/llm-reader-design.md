@@ -376,7 +376,13 @@ browser against exactly the lines it sent). For every cited value:
      two hours or less, FCFS receiving hours when longer, overnight marked.
    - The zone follows the state and ZIP (§12.120).
    - The server converts to UTC on Save, as it does today.
-   - Nothing about appointments is new.
+   - Nothing about appointments is new, except one thing (phase 3v,
+     2026-10-15): **an appointment the AI filled is never silent.** Whenever a
+     `model` read fills an appointment (enabled, with a time: APPT or FCFS,
+     exact or a window), the stop's appointment field carries a check, after
+     any it already had: "Check: the AI filled this appointment. Confirm the
+     date and time against the PDF." See "The case agreement cannot see",
+     below.
 4. **Mark every model-filled field, with an AI mark of its own.**
    `RateconRead.layout` gains `'model'`. Every field a `model` read FILLED
    carries an AI mark (`StopFill.ai`, `LoadFill.ai`), counted apart from
@@ -424,6 +430,21 @@ It catches a read that drops a stop or wanders on a value. It CANNOT catch
 the same mistake made twice: run 1's sample 27 appointment was WRONG the
 same way in 3 runs of 3. Comparing by index blanks the stops after a
 dropped middle stop: the safe side.
+
+**The case agreement cannot see: both reads wrong, the same way** (phase 3v,
+2026-10-15). Evaluation run 10 had one: stop 1 of one file, an appointment
+filled wrong by BOTH reads. They agreed, so nothing blanked it, and it had no
+check, so nothing told the dispatcher to look. Nothing in the reads can catch
+that; the form can: **every appointment a model read fills carries a check**
+(`fillStop`, `AI_APPOINTMENT_CHECK`), appended after the date, window or flag
+check it already had. Not for a template read (it is not the AI's), not for a
+blank appointment or one the pair blanked and marked (each has its own check).
+The dispatcher clears it as any check: by editing the appointment. "Looks
+right" clears the AI mark, as it does for every field, not a check. "Fields to
+check" rises by the appointments that gained one; the outcome counts are
+unchanged (a filled appointment is still counted as filled). The evaluation
+now scores a filled appointment "marked", never "exact" or a silent WRONG: its
+per-part lines still say what differs.
 
 **What it costs in the app** (3m):
 - one read is two calls, made in parallel, so the latency is about one
@@ -1168,3 +1189,10 @@ Phase 3t (2026-10-14):
     a carrier header were sent). The doubt goes to masking: a value beside
     the label also makes the line below a masked row. Approvals that named a
     `.3` hash are void.
+
+Phase 3v (2026-10-15):
+
+43. **An appointment the AI filled is never silent** (§3, "The case agreement
+    cannot see"). Every filled appointment of a model read carries a check,
+    after any it had. It adds to "fields to check"; it does not change an
+    outcome count.
