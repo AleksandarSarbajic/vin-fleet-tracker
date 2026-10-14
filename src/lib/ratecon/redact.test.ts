@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SENTINEL, UNKNOWN_LAYOUT, pastedLine, pdfLine } from '@/test/model-read-fixtures';
-import { REDACTION_VERSION, SEND_LIMITS, maskJoined, prepareForReading, redactLine, redactedForReview, residue } from './redact';
+import { NAME_CELLS, REDACTION_VERSION, SEND_LIMITS, maskJoined, prepareForReading, redactLine, redactedForReview, residue } from './redact';
 
 /** The language-model reader, design §2: what is stripped before anything leaves. Invented text only. */
 
@@ -266,3 +266,143 @@ describe('the re-scan is unchanged: it still fails closed on the joined shapes',
   });
 });
 
+
+/**
+ * A person's name that runs on past its label's cell (2026-10-14). Every
+ * name here is invented: Dana, Example, Sam, Placeholder, Riley, D'Arcy.
+ */
+describe('a person label: the name that outruns its cell', () => {
+  const NAMES = /Dana|Example|Sam\b|Placeholder|Riley|D'Arcy|Smith|José|Ejemplo|Quill/;
+
+  it.each([
+    ['the name split over two cells after the label', ['Dispatcher:', 'Dana', 'Example']],
+    ['the name after a placeholder in the next cell', ['Contact', '612-555-0147 Dana Example']],
+    ['the name after an email in its own cell', ['Contact:', 'dana@example.com', 'Dana Example']],
+    ['the name in three cells', ['Booked by:', 'Dana', 'Q.', 'Example']],
+    ['the label and a first name in one cell, the surname in the next', ['Dispatcher: Dana', 'Example']],
+    ['a label of two words', ['Contact Name:', 'Dana Example']],
+    ["apostrophes, hyphens and periods", ['Agent', "D'Arcy", 'Smith-Example Jr.']],
+    ['letters outside ASCII', ['Broker Rep:', 'José', 'Ejemplo']],
+    ['a driver after a phone', ['Driver Cell', '(612) 555-0147', 'Sam Placeholder']],
+  ])('%s', (_, cells) => {
+    const text = joined(...cells);
+    expect(text).not.toMatch(NAMES);
+    expect(text).toContain('[REMOVED]');
+    expect(residue(text)).toEqual([]);
+  });
+
+  it('a name after a placeholder in the label’s own cell', () => {
+    expect(redacted('Contact: 612-555-0147 Dana Example')).toBe('Contact: [PHONE] [REMOVED]');
+    expect(joined('Rep: dana@example.com Riley', '08:00')).toBe(`Rep: [EMAIL] [REMOVED]  08:00 ${SENTINEL}`);
+  });
+
+  it('only the name-like words after the placeholder: the rest of the cell stays', () => {
+    expect(joined('Contact', '612-555-0147 Dana Mon-Fri 08:00-17:00')).toBe(`Contact  [PHONE] [REMOVED] 08:00-17:00 ${SENTINEL}`);
+  });
+
+  it('stops at the first cell that is not name-like, and keeps it and all after it', () => {
+    expect(joined('Driver:', 'Sam', '08:00', 'Placeholder')).toBe(`Driver:  [REMOVED]  08:00  Placeholder ${SENTINEL}`);
+    expect(joined('Contact:', 'Dana Example', 'Fargo, ND 58102')).toBe(`Contact:  [REMOVED]  Fargo, ND 58102 ${SENTINEL}`);
+  });
+
+  it('stops at a cell with a label of its own', () => {
+    expect(joined('Rep:', 'Dana', 'Phone', '612-555-0147')).toBe(`Rep:  [REMOVED]  Phone  [PHONE] ${SENTINEL}`);
+    expect(joined('Dispatcher:', 'Dana', 'Truck #', '4471')).toBe(`Dispatcher:  [REMOVED]  Truck #  [REMOVED]`);
+  });
+
+  it(`masks at most ${NAME_CELLS} cells past the label's own value; one more name-like cell, and the re-scan refuses the document`, () => {
+    // The label's own value (Dana) is the first pass's; the walk takes three more.
+    const four = ['Contact:', 'Dana', 'Q.', 'Example', 'Quill'];
+    expect(joined(...four)).not.toMatch(NAMES);
+    const five = [...four, 'Riley'];
+    const text = joined(...five);
+    expect(text).toContain('Riley');
+    expect(residue(text)).toContain('labelled');
+    expect(prepareForReading([pdfLine(1, ...five)])).toEqual({ ok: false, reason: 'residue', kinds: ['labelled'] });
+  });
+
+  it('only after a PERSON label: a phone, email or truck label does not walk on', () => {
+    expect(joined('Phone:', '612-555-0147', 'Prairie Cold Storage')).toBe(`Phone:  [PHONE]  Prairie Cold Storage ${SENTINEL}`);
+    expect(joined('Shipper:', 'Prairie Cold Storage', 'Pick Up')).toBe(`Shipper:  Prairie Cold Storage  Pick Up ${SENTINEL}`);
+  });
+
+  it('the cost, pinned: a facility name in the cells right after a person label goes with the name', () => {
+    expect(joined('Contact:', 'Dana', 'Prairie Cold Storage')).toBe(`Contact:  [REMOVED]  [REMOVED]`);
+  });
+
+  it.each([
+    ['a ZIP', '58102'],
+    ['a time', '08:00'],
+    ['a time range', '0800-1000'],
+    ['a date', '10/14/2026'],
+    ['a street number and street', '4001 Main St'],
+    ['a load number', 'Load # EX-40417'],
+    ['a city line', 'Fargo, ND 58102'],
+    // Letters and digits: only "no digit" keeps these.
+    ['a load number alone', 'EX-40417'],
+    ['a dock door', 'Door 12A'],
+    // A city and state with the ZIP in the next cell: only "no comma" keeps it.
+    ['a city and state', 'Fargo, ND|58102'],
+  ])('keeps %s after the name', (_, kept) => {
+    const text = joined('Dispatcher:', 'Dana', 'Example', ...kept.split('|'));
+    for (const k of kept.split('|')) expect(text).toContain(k);
+    expect(text).not.toMatch(NAMES);
+    expect(residue(text)).toEqual([]);
+  });
+
+  it('touches nothing on a line with no person label: facility names, streets, cities, times', () => {
+    for (const cells of [
+      ['Prairie Cold Storage', 'Pick Up 1'],
+      ['Lakeside Distribution', '220 Harbor Rd', 'Duluth, MN 55802'],
+      ['Origin', 'Pick Up', 'Prairie Cold Storage'],
+      ['Load #', 'EX-40417', 'Appt', '10/14/2026', '08:00'],
+    ]) {
+      const out = redactLine(pdfLine(1, ...cells));
+      expect(out.text).toBe(`${cells.join('  ')} ${SENTINEL}`);
+      expect(out.names).toBe(0);
+    }
+  });
+
+  it('counts what it masks, in labelled and in names', () => {
+    const plain = redactLine(pdfLine(1, 'Dispatcher:', 'Dana'));
+    const out = redactLine(pdfLine(1, 'Dispatcher:', 'Dana', 'Example'));
+    expect(out.names).toBe(1);
+    expect(out.masks.labelled).toBe(plain.masks.labelled + 1);
+    expect(redactLine(pdfLine(1, 'Contact', '612-555-0147 Dana Example')).names).toBe(1);
+  });
+
+  it('is idempotent: the masked line, redacted again, is unchanged', () => {
+    for (const cells of [['Dispatcher:', 'Dana', 'Example', '08:00'], ['Contact', '612-555-0147 Dana Example', '58102']]) {
+      const once = joined(...cells);
+      expect(redactLine(pastedLine(once)).text).toBe(`${once} ${SENTINEL}`);
+    }
+  });
+
+  it('the invented document is unchanged by it: no person label there runs into a name', () => {
+    const out = prepareForReading(UNKNOWN_LAYOUT);
+    if (!out.ok) throw new Error(out.reason);
+    expect(redactedForReview(UNKNOWN_LAYOUT).lines.every((l) => l.names === 0)).toBe(true);
+  });
+});
+
+describe('the re-scan fails closed on a person label followed by a name', () => {
+  it.each([
+    ['a name in the next cell', 'Dispatcher:  [REMOVED]  Example'],
+    ['a name after a placeholder in the next cell', 'Contact  [PHONE] Dana Example'],
+    ['a name after a placeholder in the same cell', 'Contact: [PHONE] Dana'],
+    ['a name past a cell of placeholders only', 'Contact:  [EMAIL]  [PHONE]  Dana Example'],
+    ['a fifth name-like cell', 'Contact:  [REMOVED]  [REMOVED]  [REMOVED]  [REMOVED]  Riley'],
+  ])('%s is a hit', (_, text) => {
+    expect(residue(text)).toContain('labelled');
+  });
+
+  it.each([
+    ['a city after the masked name', 'Contact:  [REMOVED]  Fargo, ND 58102'],
+    ['a time after a phone', 'Contact:  [PHONE]  08:00'],
+    ['a label after the masked name', 'Rep:  [REMOVED]  Phone  [PHONE]'],
+    ['hours after the masked name in one cell', 'Contact  [PHONE] [REMOVED] 08:00-17:00'],
+    ['a name-like cell after a phone label, not a person label', 'Phone:  [PHONE]  Prairie Cold Storage'],
+  ])('%s is not', (_, text) => {
+    expect(residue(text)).toEqual([]);
+  });
+});

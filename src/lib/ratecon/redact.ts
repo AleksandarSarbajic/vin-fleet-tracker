@@ -11,9 +11,10 @@ import { cityLine } from './templates';
  * broker's own name in a header, goes through. Facility names, addresses,
  * dates, times and reference numbers stay on purpose; the read needs them.
  *
- * Two passes: each cell on its own, then the cells JOINED as they are sent,
- * with the same detectors — a value split across cells (an email, a phone,
- * an MC label and its number) is whole again only there.
+ * Three passes: each cell on its own; then the cells JOINED as they are
+ * sent, with the same detectors — a value split across cells (an email, a
+ * phone, an MC label and its number) is whole again only there; then a
+ * person's name that runs on past its label's cell.
  *
  * Fails closed: after masking, the lines exactly as they would be sent are
  * scanned again, and any hit means nothing is sent.
@@ -34,7 +35,7 @@ export const PLACEHOLDER: Readonly<Record<MaskKind, string>> = {
 };
 
 /** Sent with every read; the server refuses a version it does not run (phase 2). */
-export const REDACTION_VERSION = 'redact-2026-10-14.1';
+export const REDACTION_VERSION = 'redact-2026-10-14.2';
 
 /** What may be sent at all, after redaction. A line is counted without its `L<n> ` prefix. */
 export const SEND_LIMITS = { lines: 400, lineChars: 500, totalChars: 24_000 } as const;
@@ -87,12 +88,18 @@ const AMOUNTS = [/\$\s*\d[\d,]*(?:\.\d+)?/g, /\b\d[\d,]*(?:\.\d+)?\s?(?:USD|doll
 /** A cell about money: its numbers, and the next cell's, are amounts. "Rate Confirmation" is a title, not a rate. */
 const MONEY_LABEL = /\b(?:rate(?!\s*con)|line\s?haul|total|fuel|fsc|accessorials?|detention|lumper|tonu|pay|amount|charges?)\b/i;
 const NUMBER = /\d[\d,]*(?:\.\d+)?/g;
+/** The labels whose value is a PERSON, not only how to reach one. */
+const PERSON_WORDS = 'contact|dispatcher|broker rep|carrier rep|agent|rep|booked by|driver(?: name| cell| phone)?';
 /**
  * A label whose value is a person or how to reach one; the value runs to the
  * end of the cell. Never the word inside a placeholder: `[PHONE]` is not a label.
  */
-const LABEL =
-  /(?<!\[)\b(?:(?:contact|dispatcher|broker rep|carrier rep|agent|rep|booked by|driver(?: name| cell| phone)?|phone|ph|tel|telephone|fax|cell|mobile|e-?mail)\b|(?:truck|trailer|tractor)\s?#)\s*[:#.-]?\s*/gi;
+const LABEL = new RegExp(
+  `(?<!\\[)\\b(?:(?:${PERSON_WORDS}|phone|ph|tel|telephone|fax|cell|mobile|e-?mail)\\b|(?:truck|trailer|tractor)\\s?#)\\s*[:#.-]?\\s*`,
+  'gi',
+);
+/** A label whose value is a person: a name can run on past its cell (`personNames`). */
+const PERSON_LABEL = new RegExp(`(?<!\\[)\\b(?:${PERSON_WORDS})\\b\\s*[:#.-]?\\s*`, 'gi');
 const STARTS_WITH_PLACEHOLDER = /^\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\]/;
 
 const zero = (): MaskCounts => ({ email: 0, phone: 0, amount: 0, labelled: 0, id: 0, url: 0 });
@@ -203,8 +210,105 @@ export function maskJoined(text: string, counts: MaskCounts): string {
   return mask(t, AMOUNTS, 'amount', counts);
 }
 
-/** One line: each cell masked, a label's value in the next cell masked, money cells' numbers masked; then the joined line. */
-export function redactLine(line: Line): { text: string; masks: MaskCounts } {
+/** A cell's leading placeholders, with what separates them, and the rest of the cell. */
+const LEADING_PLACEHOLDERS = /^(?:\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\][\s,;/|-]*)*/;
+/** A word of a name: letters, apostrophes, hyphens, periods, at least one letter. No digit, no colon, no bracket. */
+const NAME_WORD = /^(?=.*\p{L})[\p{L}\p{M}'’.-]+$/u;
+const isNameLike = (text: string) => text !== '' && text.split(' ').every((w) => NAME_WORD.test(w));
+const hasLabel = (text: string) => new RegExp(LABEL.source, 'i').test(text);
+/** Name-like cells a person label's value may run on into, past its own cell. */
+export const NAME_CELLS = 3;
+
+function splitLead(text: string): { lead: string; rest: string } {
+  const lead = LEADING_PLACEHOLDERS.exec(text)![0];
+  return { lead, rest: text.slice(lead.length) };
+}
+
+/** The rest's leading name words, as one placeholder; and whether nothing else follows them. */
+function maskLeadingNames(rest: string): { text: string; masked: boolean; ended: boolean } {
+  const words = rest.split(' ');
+  const k = words.findIndex((w) => !NAME_WORD.test(w));
+  const names = k === -1 ? words.length : k;
+  const after = words.slice(names).join(' ');
+  if (names === 0) return { text: rest, masked: false, ended: rest === '' };
+  return { text: after === '' ? PLACEHOLDER.labelled : `${PLACEHOLDER.labelled} ${after}`, masked: true, ended: after === '' };
+}
+
+/**
+ * The third pass, over the line as it is sent (2026-10-14, Alex: the
+ * labelled name split across cells). After a PERSON label — contact,
+ * dispatcher, rep, agent, booked by, driver — a name can outrun the label's
+ * cell: "Dispatcher:" | "Dana" | "Example", or "Contact" | "[PHONE] Dana
+ * Example", which the first pass sends because the value starts with a
+ * placeholder. So:
+ *   - in the label's own cell, the name-like words after its placeholders go;
+ *   - if that reaches the cell's end, the walk goes on into the next cells:
+ *     a cell of placeholders only is passed over (already masked; the value
+ *     runs on), a cell that starts with placeholders loses its leading
+ *     name-like words, and any other cell goes whole while it is name-like;
+ *   - it stops at the first cell that is not, at a cell with a label of its
+ *     own, or after NAME_CELLS cells it masked.
+ * Name-like: letters, spaces, apostrophes, hyphens, periods; no digit, no
+ * colon, no comma — so a ZIP, a time, a date, a street number, a load number
+ * and "Fargo, ND" stop it. A facility name in the cells right after a person
+ * label goes with it: that is the cost.
+ *
+ * Runs on the joined text, split back on the cell gap: the cells the re-scan
+ * sees, after the joined pass has merged any value split across cells.
+ */
+function maskPersonNames(text: string, counts: MaskCounts): { text: string; names: number } {
+  const cells = text.split(CELL_GAP);
+  let names = 0;
+  const masked = () => {
+    names += 1;
+    counts.labelled += 1;
+  };
+  for (let i = 0; i < cells.length; i += 1) {
+    const labels = [...cells[i]!.matchAll(PERSON_LABEL)];
+    let runsOn = false;
+    // Last label first, so masking after one leaves the earlier ones' places as they were.
+    for (const m of labels.reverse()) {
+      const at = m.index + m[0].length;
+      const { lead, rest } = splitLead(cells[i]!.slice(at));
+      const out = maskLeadingNames(rest);
+      if (out.masked) {
+        cells[i] = `${cells[i]!.slice(0, at)}${lead}${out.text}`;
+        masked();
+      }
+      runsOn ||= out.ended;
+    }
+    if (!runsOn) continue;
+    for (let c = i + 1, walked = 0; c < cells.length && walked < NAME_CELLS; c += 1) {
+      const cell = cells[c]!;
+      if (hasLabel(cell)) break;
+      const { lead, rest } = splitLead(cell);
+      if (rest === '') continue;
+      if (lead === '') {
+        if (!isNameLike(rest)) break;
+        cells[c] = PLACEHOLDER.labelled;
+        masked();
+        walked += 1;
+        continue;
+      }
+      const out = maskLeadingNames(rest);
+      if (out.masked) {
+        cells[c] = `${lead}${out.text}`;
+        masked();
+        walked += 1;
+      }
+      if (!out.ended) break;
+    }
+  }
+  return { text: cells.join(CELL_GAP), names };
+}
+
+/**
+ * One line: each cell masked, a label's value in the next cell masked, money
+ * cells' numbers masked; then the joined line; then a person's name that runs
+ * on past its label's cell. `names` counts that last pass's masks, which are
+ * in `masks.labelled` too.
+ */
+export function redactLine(line: Line): { text: string; masks: MaskCounts; names: number } {
   const counts = zero();
   const cells = line.cells.map((c) => maskCell(c.text, counts));
   const texts = cells.map((c) => c.text);
@@ -225,7 +329,36 @@ export function redactLine(line: Line): { text: string; masks: MaskCounts } {
       });
     }
   });
-  return { text: maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), masks: counts };
+  const person = maskPersonNames(maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), counts);
+  return { text: person.text, masks: counts, names: person.names };
+}
+
+/**
+ * The re-scan's own reading of a person label, written apart from the mask
+ * (`maskPersonNames`) on purpose: does a name still follow one? In the
+ * label's cell, after its placeholders, the next word must not be name-like;
+ * if the cell ends there, the first following cell that is not placeholders
+ * only must not be name-like (whole, or its first word after placeholders).
+ * A cell with a label of its own ends the look. NO limit on how far: a fifth
+ * name-like cell after "Contact" | four masked ones is a hit, and the
+ * document is refused rather than sent with it.
+ */
+function nameLeft(text: string): boolean {
+  const cells = text.split(CELL_GAP);
+  const firstWordIsName = (rest: string) => NAME_WORD.test(rest.split(' ')[0]!);
+  return cells.some((cell, i) =>
+    [...cell.matchAll(PERSON_LABEL)].some((m) => {
+      const own = cell.slice(m.index + m[0].length).replace(LEADING_PLACEHOLDERS, '');
+      if (own !== '') return firstWordIsName(own);
+      for (const next of cells.slice(i + 1)) {
+        if (hasLabel(next)) return false;
+        const rest = next.replace(LEADING_PLACEHOLDERS, '');
+        if (rest === '') continue;
+        return rest === next ? isNameLike(rest) : firstWordIsName(rest);
+      }
+      return false;
+    }),
+  );
 }
 
 /**
@@ -242,10 +375,11 @@ export function residue(text: string): MaskKind[] {
     email: hit(EMAILS) || text.includes('@'),
     phone: hit(PHONES) || new RegExp(PHONE_WORD_DIGITS.source, 'i').test(text),
     amount: hit(AMOUNTS),
-    labelled: [...text.matchAll(LABEL)].some((m) => {
-      const value = text.slice(m.index + m[0].length);
-      return value !== '' && !STARTS_WITH_PLACEHOLDER.test(value);
-    }),
+    labelled:
+      [...text.matchAll(LABEL)].some((m) => {
+        const value = text.slice(m.index + m[0].length);
+        return value !== '' && !STARTS_WITH_PLACEHOLDER.test(value);
+      }) || nameLeft(text),
     id: hit(IDS),
     url: hit(URLS),
   };
@@ -269,14 +403,15 @@ function selectPages(lines: readonly Line[]): Line[] {
  * hit. Not called by the app.
  */
 export function redactedForReview(lines: readonly Line[]): {
-  lines: (PreparedLine & { residue: MaskKind[] })[];
+  /** `names`: what the person-name pass masked in the line (counts only, for the report). */
+  lines: (PreparedLine & { residue: MaskKind[]; names: number })[];
   masks: MaskCounts;
 } {
   const masks = zero();
   const out = selectPages(lines).map((line, i) => {
     const redacted = redactLine(line);
     for (const k of KINDS) masks[k] += redacted.masks[k];
-    return { n: i + 1, page: line.page, text: redacted.text, residue: residue(redacted.text) };
+    return { n: i + 1, page: line.page, text: redacted.text, residue: residue(redacted.text), names: redacted.names };
   });
   return { lines: out, masks };
 }
