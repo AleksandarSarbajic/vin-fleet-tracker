@@ -1,7 +1,7 @@
 /**
  * Step 1 of the real-sample evaluation (docs/llm-reader-design.md §8.2).
  *
- *   npm run ratecon:eval-ai -- --approved=YYYY-MM-DD --files=1,18 [--runs=3]
+ *   npm run ratecon:eval-ai -- --approved=YYYY-MM-DD --files=1,18 [--runs=3] [--pairs]
  *
  * PAID CALLS TO ANTHROPIC, with the approved samples' REDACTED text. Runs
  * only with Alex's written approval: `--approved` is its date, `--files` the
@@ -22,7 +22,7 @@ import { readSample, sampleByNumber, sampleFiles, EXPECTED_PATH } from './rateco
 import { AnthropicReaderAdapter, MAX_TOKENS, anthropicRequest } from '../src/server/ratecon-reader/anthropic.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { ExpectedFile } from './ratecon-expected.mts';
-import { CEILINGS, PRICES, barVerdict, boundOfBody, costOf, dayIn, evalFile, parseEvalArgs, planProblem, runEvaluation, type EvalFile } from './ratecon-eval.mts';
+import { CEILINGS, PRICES, barVerdict, boundOfBody, plannedOf, costOf, dayIn, evalFile, parseEvalArgs, planProblem, runEvaluation, type EvalFile } from './ratecon-eval.mts';
 
 /** The route's own limit on a vendor call. */
 const TIMEOUT_MS = 25_000;
@@ -59,7 +59,8 @@ for (const n of args.files) {
   if (!ready.ok) refuse(`sample ${n}: ${ready.why}`);
   files.push(ready.file);
 }
-const plan = { files, runs: args.runs, ceilings: CEILINGS };
+const plan = { files, runs: args.runs, ceilings: CEILINGS, pairs: args.pairs };
+const planned = plannedOf(plan);
 const problem = planProblem(plan);
 if (problem) refuse(problem);
 
@@ -67,10 +68,10 @@ const bound = (request: Parameters<typeof anthropicRequest>[0]) => boundOfBody(J
 const now = new Date(expected.data.scoredAt);
 if (Number.isNaN(now.getTime())) refuse('expected.json scoredAt is not an instant');
 
-console.info(`Approved ${args.approved}. Model ${model}. Samples ${args.files.join(', ')}, ${args.runs} run(s) each: ${files.length * args.runs} calls.`);
+console.info(`Approved ${args.approved}. Model ${model}. Samples ${args.files.join(', ')}, ${args.runs} run(s) each${args.pairs ? ', each run a PAIR of reads merged by agreement' : ''}: ${planned.calls} calls.`);
 console.info(`Ceilings: ${CEILINGS.calls} calls, $${CEILINGS.dollars.toFixed(2)}, both checked before each call.`);
 console.info(`Prices: $${price.inputPerMTok} in, $${price.outputPerMTok} out, per million tokens.`);
-const worst = files.reduce((sum, f) => sum + costOf(bound({ lines: f.lines, today: dayIn(tz.data, now) }), price), 0) * args.runs;
+const worst = files.reduce((sum, f) => sum + costOf(bound({ lines: f.lines, today: dayIn(tz.data, now) }), price), 0) * args.runs * (args.pairs ? 2 : 1);
 console.info(`Most it could cost, at every call's bound: $${worst.toFixed(4)}. Counts and codes only below; nothing is stored.\n`);
 
 const totals = await runEvaluation(plan, {
@@ -82,4 +83,4 @@ const totals = await runEvaluation(plan, {
   timeoutMs: TIMEOUT_MS,
   say: (line) => console.info(line),
 });
-process.exitCode = barVerdict(totals, files.length * args.runs).exitCode;
+process.exitCode = barVerdict(totals, planned).exitCode;

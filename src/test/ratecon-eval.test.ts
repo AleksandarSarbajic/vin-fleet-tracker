@@ -95,7 +95,7 @@ describe('the flags: nothing runs without a written approval date and the files 
   it('takes an approval dated today or before, the files, and 3 runs by default', () => {
     expect(parseEvalArgs(['--approved=2026-10-14', '--files=1,18'], TODAY)).toEqual({
       ok: true,
-      args: { approved: '2026-10-14', files: [1, 18], runs: 3 },
+      args: { approved: '2026-10-14', files: [1, 18], runs: 3, pairs: false },
     });
     expect(parseEvalArgs(['--files=22', '--approved=2026-10-01', '--runs=1'], TODAY)).toMatchObject({ ok: true, args: { runs: 1 } });
   });
@@ -365,11 +365,12 @@ describe('the verdict, and the exit code that follows it', () => {
     wrong: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'],
     scored: 18,
     cueFired: 0,
+    pairs: { agreed: 0, differed: 0, wrongReadA: Object.fromEntries(BAR_FIELDS.map((f) => [f, 0])) as EvalTotals['wrong'] },
     ...over,
   });
 
   it('met only when every planned run was made and scored, and nothing on the bar is WRONG', () => {
-    expect(barVerdict(totals(), 18)).toEqual({ verdict: 'met', exitCode: 0 });
+    expect(barVerdict(totals(), { runs: 18, calls: 18 })).toEqual({ verdict: 'met', exitCode: 0 });
   });
 
   it.each([
@@ -378,12 +379,149 @@ describe('the verdict, and the exit code that follows it', () => {
     ['a ceiling stopped it', { stopped: 'dollar-ceiling' as const, calls: 10, scored: 10 }, 'incomplete'],
     ['fewer calls than planned', { calls: 17, scored: 17 }, 'incomplete'],
   ])('%s: exit 1', (_, over, verdict) => {
-    expect(barVerdict(totals(over), 18)).toEqual({ verdict, exitCode: 1 });
+    expect(barVerdict(totals(over), { runs: 18, calls: 18 })).toEqual({ verdict, exitCode: 1 });
   });
 
   it('the command sets its exit code from the verdict, whatever stopped it or not', () => {
     const source = readFileSync(join(ROOT, 'scripts', 'ratecon-eval-ai.mts'), 'utf8');
     expect(source).toMatch(/process\.exitCode = barVerdict\(totals, [^)]+\)\.exitCode;/);
     expect(source).not.toMatch(/if \(totals\.stopped !== null\) process\.exitCode/);
+  });
+});
+
+describe('--pairs: two reads a run, merged by agreement', () => {
+  const pairs = (files: EvalFile[], runs = 1, ceilings: EvalPlan['ceilings'] = CEILINGS): EvalPlan => ({ files, runs, ceilings, pairs: true });
+  const reply = (change: (r: typeof MODEL_REPLY) => void): FakeStep => {
+    const r = structuredClone(MODEL_REPLY);
+    change(r);
+    return { reply: r, usage: USAGE };
+  };
+  /** Stop 1's street read as stop 2's: in the text, so it verifies, and it differs. */
+  const otherStreet = reply((r) => {
+    r.stops[0]!.street = { value: '220 Harbor Rd', quote: { line: 17, text: '220 Harbor Rd' } };
+  });
+  /** Stop 1's appointment as one time, not a range: it verifies, and it differs. */
+  const otherAppt = reply((r) => {
+    r.stops[0]!.appointment = {
+      kind: 'exact',
+      date: '2026-10-14',
+      time: '08:00',
+      flag: 'APPT',
+      dateQuote: { line: 14, text: 'Pick up 10/14/2026 0800-1000 APPT' },
+      timeQuote: { line: 14, text: '0800-1000' },
+    };
+  });
+  /** Stop 1's ZIP read from stop 2's city line: it verifies, and it is WRONG. */
+  const wrongZip = reply((r) => {
+    r.stops[0]!.zip = { value: '55802', quote: { line: 18, text: 'Duluth, MN 55802' } };
+  });
+  const dropped = reply((r) => {
+    r.stops = [r.stops[0]!];
+  });
+
+  it('the flag: --pairs, and off by default', () => {
+    expect(parseEvalArgs(['--approved=2026-10-14', '--files=1', '--pairs'], '2026-10-14')).toMatchObject({ ok: true, args: { pairs: true } });
+    expect(parseEvalArgs(['--approved=2026-10-14', '--files=1'], '2026-10-14')).toMatchObject({ ok: true, args: { pairs: false } });
+    expect(parseEvalArgs(['--approved=2026-10-14', '--files=1', '--pairs', '--pairs'], '2026-10-14')).toMatchObject({ ok: false });
+  });
+
+  it('two agreeing reads: two calls, "pair: agree", scored as one run', async () => {
+    const { adapter, out, deps } = harness([OK, OK]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(adapter.received).toHaveLength(2);
+    expect(adapter.received[0]).toEqual(adapter.received[1]);
+    expect(totals).toMatchObject({ calls: 2, scored: 1, pairs: { agreed: 1, differed: 0 } });
+    expect(out).toContain('  pair: agree');
+    expect(out).toContain('  read A alone: 0 WRONG on the bar');
+    expect(out.at(-1)).toMatch(/^The bar: met/);
+    expect(out[0]).toMatch(/^sample 7 run 1: ok · A 10 values stood, 0 did not; B 10 stood, 0 did not · tokens 2 calls, 6000 in \/ 3000 out · \$/);
+  });
+
+  it('a street that differs: blanked and marked in the merge, named by field', async () => {
+    const { out, deps } = harness([OK, otherStreet]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(out).toContain('  pair: differ (fields that differed: street x1)');
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('street blank-and-marked marked');
+    expect(totals.pairs.differed).toBe(1);
+  });
+
+  it('an appointment that differs: the whole of it blanked and marked', async () => {
+    const { out, deps } = harness([OK, otherAppt]);
+    await runEvaluation(pairs([file()]), deps);
+    expect(out).toContain('  pair: differ (fields that differed: appointment x1)');
+    expect(out.find((l) => l.startsWith('  stop 1'))).toContain('appointment marked, filled differently (date, time, window)');
+  });
+
+  it('read A drops a stop and read B does not: the merge has both stops, and read A alone shows the WRONG agreement removed', async () => {
+    const { out, deps } = harness([dropped, OK]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(out).toContain('  pair: differ (stop count 1/2)');
+    expect(out).toContain('  stop count    2 read, 2 expected · exact');
+    expect(out).toContain('  read A alone: 1 WRONG on the bar');
+    expect(totals.wrong['stop count']).toBe(0);
+    expect(totals.pairs.wrongReadA['stop count']).toBe(1);
+    expect(out).toContain("Read A alone, WRONG on the bar's fields: load number 0, stop count 1, order + type 0, street 0, ZIP 0, city 0, state 0 (1 in all).");
+    expect(out.at(-1)).toMatch(/^The bar: met/);
+  });
+
+  it('a WRONG value in one read, right in the other: blank and marked in the merge, not WRONG', async () => {
+    const { out, deps } = harness([wrongZip, OK]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(totals.wrong.ZIP).toBe(0);
+    expect(totals.pairs.wrongReadA.ZIP).toBe(1);
+    expect(out).toContain('  pair: differ (fields that differed: zip x1)');
+  });
+
+  it('both reads WRONG the same way: agreement cannot see it, and it stays WRONG', async () => {
+    const { deps } = harness([wrongZip, wrongZip]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(totals.wrong.ZIP).toBe(1);
+    expect(totals.pairs.agreed).toBe(1);
+  });
+
+  it('one read that does not verify: the run is not scored, and not a pass', async () => {
+    const { out, deps } = harness([OK, { fail: 'timeout' }]);
+    const totals = await runEvaluation(pairs([file()]), deps);
+    expect(totals.scored).toBe(0);
+    expect(out[0]).toMatch(/^sample 7 run 1: pair_incomplete \(A ok, B timeout\) · tokens 2 calls, some not reported/);
+    expect(barVerdict(totals, { runs: 1, calls: 2 }).exitCode).toBe(1);
+  });
+
+  it('the call ceiling counts calls: a pair that would pass it is not made', async () => {
+    const { adapter, deps } = harness([OK, OK, OK, OK]);
+    const totals = await runEvaluation(pairs([file()], 2, { calls: 3, dollars: 1 }), deps);
+    expect(adapter.received).toHaveLength(2);
+    expect(totals.stopped).toBe('call-ceiling');
+  });
+
+  it('the dollar ceiling: both calls of the pair at their bound, before the pair', async () => {
+    const { adapter, deps } = harness([OK, OK], {
+      price: { inputPerMTok: 100, outputPerMTok: 100, maxInputTokens: 100_000 },
+      bound: () => ({ inputTokens: 1000, outputTokens: 1000 }),
+    });
+    // One call's bound is $0.20, a pair's $0.40: over $0.35, so no call is made.
+    const totals = await runEvaluation(pairs([file()], 1, { calls: 75, dollars: 0.35 }), deps);
+    expect(adapter.received).toHaveLength(0);
+    expect(totals.stopped).toBe('dollar-ceiling');
+  });
+
+  it('plans: a pair is two calls against the 75', () => {
+    const f = file();
+    expect(planProblem(pairs(Array.from({ length: 12 }, () => f), 3))).toBeNull();
+    expect(planProblem(pairs(Array.from({ length: 13 }, () => f), 3))).toContain('78 calls planned');
+  });
+
+  it('prints no value or text, and every line has a known shape', async () => {
+    const { out, deps } = harness([OK, OK, OK, otherStreet, dropped, OK, wrongZip, OK, OK, { fail: 'refused', usage: USAGE }]);
+    await runEvaluation(pairs([file()], 5), deps);
+    const all = out.join('\n');
+    for (const text of [SENTINEL, 'EX-40417', 'Main', 'Harbor', 'Fargo', 'Duluth', '58102', '55802', '10/14', '2026-10-14', '0800']) {
+      expect(all).not.toContain(text);
+    }
+    for (const line of out) {
+      expect(line).toMatch(
+        /^(|sample \d+ run \d+: (ok · A \d+ values stood, \d+ did not; B \d+ stood, \d+ did not|pair_incomplete \(A [a-z_]+, B [a-z_]+\)) · tokens .+ · \$\d+\.\d{4}|  pair: (agree|differ \((stop count \d+\/\d+)?(; )?(fields that differed: [a-z ]+ x\d+(, [a-z ]+ x\d+)*)?\))|  read A alone: \d+ WRONG on the bar|  (load number|stop count|stop \d+) .+|  address cue   (silent: 0 uncited address-like lines|would fire: \d+ uncited address-like lines?: L\d+(, L\d+)*)|Calls: .+|Tokens: .+|Runs scored: \d+\.|Address cue: .+|Pairs: \d+ agreed, \d+ differed\.|Read A alone, WRONG on the bar's fields: .+|WRONG on the bar's fields, merged: .+|The bar: .+)$/,
+      );
+    }
   });
 });
