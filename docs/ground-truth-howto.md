@@ -41,7 +41,11 @@ app's answer would make the score agree with itself.
 - **Stops:** in the order the document lists them. A skeleton has two; add
   or delete stop objects to match the document.
 - **`type`:** `"PU"` for a pickup, `"DEL"` for a delivery.
-- **`street`, `city`:** as printed, e.g. `"4001 Main St"`, `"Fargo"`.
+- **`street`, `city`:** in normal capitalization, e.g. `"4001 Main St"`,
+  `"Fargo"`. Many PDFs print ALL CAPS ("FARGO"); the app converts those to
+  normal case when it fills, so write the normal-case form.
+  - A word with any lowercase letter is left alone by the app, so write it
+    exactly as the PDF prints it ("McAllen" stays "McAllen").
 - **`state`:** the two-letter code, e.g. `"ND"`.
 - **`zip`:** the five digits as printed, e.g. `"58102"`.
 

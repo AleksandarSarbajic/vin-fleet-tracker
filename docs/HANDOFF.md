@@ -1550,6 +1550,90 @@ test:
 - single reads not diagnosed;
 - `agreePair` ignoring a failed read B.
 
+### Phase 3g: street and city in normal case (2026-10-14)
+
+No API call, no use of the key, no document text or ground-truth value read
+or printed. Nothing under `.samples/` was opened.
+
+**Decision (Alex, 2026-10-14):** when a rate confirmation is filled, street
+and city are shown in normal capitalization. Many PDFs print ALL CAPS
+("DALLAS"); dispatchers want "Dallas".
+
+- **Where:** `fillStop` in `ratecon-fill.ts`, the one seam both the template
+  readers and the AI reader go through. Street and city only. State stays
+  upper-case; ZIP, load number, appointment, marks and checks are untouched.
+  Manual entry and the paste-address path are not touched.
+- **When:** AFTER the read is verified, never before. `verify-read.ts`
+  matches the model's quote against the printed line case-insensitively, so
+  it and the AI prompt are unchanged. The `RateconRead`, each field's
+  `source` line ("From p.1: “4001 MAIN ST”") and the agreement of two reads
+  keep what was printed. Only the form's value changes.
+- **Why:** the reader copies the PDF as printed. Capitals are how some
+  brokers print, not what the dispatcher means to save.
+- **Not a geocode matter:** `normalizeAddress` upper-cases first, so the
+  geocode cache key and the "did the address change?" test do not move.
+
+**The rule** (`src/lib/ratecon/normal-case.ts`, `normalCase(text)`, pure):
+
+- Word by word, whitespace kept exactly. A word with any lowercase letter
+  is left as is (it was mixed case on purpose: "McAllen"). An all-caps word
+  becomes Title case.
+- Hyphens and apostrophes split a word; each part is cased:
+  "WINSTON-SALEM" -> "Winston-Salem", "O'FALLON" -> "O'Fallon".
+- "Mc" + letter: "MCALLEN" -> "McAllen".
+- Kept upper-case: N S E W NE NW SE SW, PO ("P.O." too), and a route prefix
+  (I, US, FM, SH, CR, RR) followed by a number: "I-35", "US-90", "FM 1960".
+- Ordinals lower-case the suffix: "1ST" -> "1st". Any other word with a
+  digit, and "#", are untouched.
+- "ST." -> "St."; ST, AVE, BLVD, HWY, RD, DR, LN, PKWY, STE -> "St", "Ave",
+  and so on (plain Title case; no list is needed).
+- Idempotent; a no-op on mixed-case input.
+- **One addition to the rule as given:** after an apostrophe, S, T, D, M,
+  LL, RE and VE go lower-case when the part before is two letters or more
+  ("JOHN'S" -> "John's", "DON'T" -> "Don't"). Without it the directional
+  rule would have produced "John'S". "O'FALLON" and "D'IBERVILLE" are
+  unaffected.
+
+**Known limit (do not fix with a list):** a name whose capitals are inside
+the word cannot be recovered from all-caps. "DEKALB" comes out "Dekalb",
+"MLK BLVD" comes out "Mlk Blvd", "JFK" comes out "Jfk". The dispatcher sees
+the field filled, with its source line (printed in capitals) under it, and
+edits it. A mixed-case word is never touched, so a PDF that prints "DeKalb"
+is right.
+
+**Scripts:** `ratecon:score` and `ratecon:eval-ai` (through
+`ratecon-eval.mts`) both run `fillLoad` and compare the form's street and
+city to `expected.json`, so they pick the change up with no edit. How they
+print is unchanged; neither prints a value or a file name.
+**For Alex:** an existing `expected.json` street or city typed in capitals
+will now score WRONG. Retype it in normal case (a mixed-case word as the PDF
+prints it). `docs/ground-truth-howto.md` now says so.
+
+**Tests:** 2716 in all (2691 before).
+
+| File | Tests |
+|---|---|
+| `normal-case.test.ts` | 18 (new): every rule above, idempotence, the mixed-case no-op |
+| `ratecon-fill.test.ts` | 33 (26 before): all-caps read in normal case, mixed case unchanged, state and ZIP untouched, sources keep the printed line, marks and checks unchanged, an AI read in capitals |
+
+Three tests outside those files expected the fixture's printed capitals in
+the form and now expect normal case (the invented fixture still prints
+"FARGO" and "DICKINSON"): two in `ratecon-strip.test.tsx`, and the e2e
+`ratecon-fill.spec.ts` (form and saved row; it passes). `ratecon-ai.test.tsx`
+and `agree-reads.test.ts` needed no change: reads are compared before
+`fillLoad`, on what was printed.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- state also normalized;
+- a source line normalized;
+- a city's "Not found in the PDF." mark dropped.
+
+Doing the second showed my first "sources keep the printed line" test was
+vacuous (its fixture had no capitals in the source line); it was
+strengthened and re-checked.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
