@@ -2495,6 +2495,145 @@ test:
 matters (an abbreviation such as "Ft." or "St." at the very end) loses it.
 The owner decided this.
 
+### Phase 3r: evaluation run 9, paired, all twelve files no template reads, under the final code (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** `ratecon:eval-ai --pairs` on samples
+2, 4, 7, 8, 9, 10, 11, 12, 16, 17, 21 and 28, 3 runs each (72 calls), Claude
+Haiku 5.5, ceilings $1.00 and 75 calls: the first run on all twelve files no
+template reads, under the final code (normal case 3g, the ZIP rule 3i, the
+pair in the app 3m, the relation diagnostics 3o, no trailing punctuation 3q).
+Alex corrected the ground truth since 3n and 3p and checked every street and
+city in it against the PDF text. Alex read the redacted text of all twelve.
+Retention (30 days default, flagged up to 2 years) accepted for this run. I
+did not read the ground truth.
+
+**Checked before the run:** the tree was clean. Since the code of 3p
+(`92e9fdc`) only the fill (3q), its tests and docs changed; `redact.ts` is
+byte-identical and no file on the sent-text path changed. **Sent-text hashes
+(first 12 of sha256), each equal to the one recorded for its sample (3l for
+2, 4, 9, 17, 28; 3n for 7, 8, 10, 11, 12, 16, 21):** 2 `a72717aa76c5`, 4
+`f38cb9922cfe`, 7 `e83b8114d30b`, 8 `2097af1b29cd`, 9 `dc2a776ec7f4`, 10
+`5a57dd07b1ad`, 11 `432dc67b6e7f`, 12 `afd147515071`, 16 `10c8f0f51354`, 17
+`1afe327813da`, 21 `77b64d5b9b8e`, 28 `0b03d4a2f36d`.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,7,8,9,10,11,12,16,17,21,28 --runs=3 --pairs
+
+**Result: zero WRONG on every bar field, but the verdict is "incomplete", not
+"met" (exit 1): one pair failed, so 35 of 36 runs were scored.** The script
+calls a run short of every planned run scored "Not a pass".
+
+| | 3l (5 files) | 3n (7 files) | 3p (4 files) | 3r (12 files) |
+|---|---|---|---|---|
+| Calls | 30 | 42 | 24 | **72 of 72** (ceiling 75) |
+| Tokens | 173,910 in, 65,652 out | 184,500 in, 100,641 out | 120,792 in, 59,735 out | 358,410 in, 163,540 out |
+| Cost | $0.0502 | $0.0688 | $0.0419 | **$0.1176** (ceiling $1.00) |
+| Runs scored / planned | 15 / 15 | 20 / 21 | 12 / 12 | **35 / 36** |
+| Pairs agreed / differed / failed | 12 / 3 / 0 | 10 / 10 / 1 | 10 / 2 / 0 | **22 / 13 / 1** |
+| Address cue fires | 6 of 15 | 6 of 20 | 6 of 12 | **12 of 35** |
+| Merged WRONG on the bar | 0 | 10 | 14 | **0** |
+
+**The failed pair:** sample 16, run 3, `invalid_output` (read A's reply failed
+the schema; read B was fine). The pair failed as a whole, filled nothing and
+was not scored. Sample 16 failed the same way in 3n (run 2, also read A). Two
+of its six pairs in the runs so far, none anywhere else.
+
+**WRONG:** merged 0 in all seven bar fields; **read A alone 0, read B alone
+0**. No appointment is WRONG (3n had two, on sample 10 stop 2). There is no
+WRONG street or city cell, so there is **no relation code to report**. The
+cells 3p named are all gone from the WRONG column:
+
+| 3p cell | 3p | 3r |
+|---|---|---|
+| 8, stop 2 (case-only) | WRONG, 3 of 3 | exact, 3 of 3 |
+| 8, stop 3 (1 extra trailing word) | WRONG, 3 of 3 | exact, 3 of 3 |
+| 21, stop 1 (punctuation-only) | WRONG, 3 of 3 | exact, 3 of 3 |
+| 12, stops 1 to 4 (punctuation-only) | WRONG in 4 cell-runs | exact in run 1; **blank and marked in runs 2 and 3** |
+| 10, stop 2 appointment time (silent WRONG) | WRONG, runs 1 and 2 | exact in runs 2 and 3; marked in run 1 |
+
+(Part of that is the corrected ground truth, part is 3q; the output does not
+say which did what.)
+
+**Merged WRONG per sample:** 0 for every one of the 12. **Pairs per sample**
+(3 runs each):
+
+| Sample | Pairs | Differed on |
+|---|---|---|
+| 2, 4, 8, 21, 28 | 3 agreed | |
+| 9 | 2 agreed, 1 differed | appointment x1 |
+| 7 | 1 agreed, 2 differed | appointment x1; city x1 and state x1 |
+| 10 | 2 agreed, 1 differed | appointment x2 |
+| 11 | 0 agreed, 3 differed | city x1 and state x1; appointment x2 (twice) |
+| 12 | 1 agreed, 2 differed | street x4 (runs 2 and 3) |
+| 16 | 1 differed (appointment x2), 1 agreed, **1 failed** | |
+| 17 | 3 differed | street x2 (every run) |
+
+**Marked fields (blank-and-marked, or filled and marked), cell-runs:**
+
+- **ZIP blank and marked:** samples 4, 7, 9, 10, 11 (one stop, every run: 3
+  each) and 12 (stops 2 to 4, every run: 9). 24 in all.
+- **Street blank and marked:** sample 12, 8 (all four stops in runs 2 and 3);
+  sample 17, 6 (both stops, every run; read B's two streets fail the verifier
+  or the reads differ, as in 3l).
+- **City and state blank and marked:** sample 7 stop 2 in runs 1 and 2;
+  sample 11 stop 2 in run 1.
+- **Order and type filled and marked:** sample 9, both stops in run 2;
+  sample 11, both stops in run 1 and stop 1 in run 3.
+
+**Appointment parts that differ from the truth** (all marked; none silent):
+
+- **7:** both stops (date, time) in runs 1 and 2, both reads; run 3 read A
+  both stops (date, time), read B stop 2 (time).
+- **8:** stop 3 (time), both reads, every run.
+- **9:** stop 2 (time), both reads, every run.
+- **10:** run 1 read B stop 1 (type, time, end time); run 2 both reads stop 1
+  (type, date, time, end time); run 3 none.
+- **11:** run 2 read A both stops (type, date, time, end time); run 3 read B
+  both stops (type, date, time, end time); run 1 none.
+- **12:** stop 1 (type, end time), both reads, every run.
+- **16:** run 1 both reads both stops (type, date, time, end time); run 2 read
+  B both stops (type, date, time, end time).
+- **21:** both stops (type, date, time, end time), both reads, every run.
+- **2, 4, 17, 28:** none.
+
+**Address cue:** fires on samples 9, 12, 21 and 28, every run (12 of 35),
+silent on the other eight. With 0 WRONG on all of them, it named lines on four
+files where nothing is wrong. As in 3l, 3n and 3p.
+
+**Compared with 3l (samples 2, 4, 9, 17, 28), per cell:** the same. Sample 17's
+streets are still blank and marked in all three runs (6 cell-runs); 9's stop 2
+ZIP is still blank and marked every run and its stop 2 appointment time still
+differs (marked); 28 reads 3 stops with its stops 2 and 3 appointments marked
+"as the PDF says"; 2 and 4 unchanged. One difference: sample 9's pair differs
+in run 1 (appointment x1; 3l: all three agreed).
+
+**Compared with 3p (samples 8, 10, 12, 21):** the 14 WRONG cells are gone, as
+in the table above.
+
+**What the counts say (no values looked at):**
+
+- **Zero WRONG across 35 scored runs of 12 files, in both reads alone and
+  merged.** That is the bar's seven fields. It is a "no WRONG in what was
+  scored", not a pass: 1 of 36 runs was not scored.
+- **The zero is partly blanks.** Streets on 12 (runs 2 and 3) and 17 (every
+  run), and a ZIP on six files, are left for the dispatcher. They are marked.
+- **A possible cost of 3q, for Alex to weigh (not changed, not tested here):**
+  agreement compares what the two reads QUOTED (`agreeReads` compares the
+  verified values, before the fill strips punctuation). 3p showed sample 12's
+  punctuation varying from run to run. In runs 2 and 3 its reads now differ on
+  all four streets and the merge blanks them. If that difference is only a
+  trailing mark, it is exactly what the strip made harmless in the form, and
+  the merge still blanks it. The counts do not say it is; they cannot. Making
+  the comparison after the same trailing-punctuation and case rules is
+  small; it needs its own decision.
+- **Cost** per pair was about $0.0033, as before ($0.1176 for 36 pairs).
+- **Scope:** 12 of the 25 files, 3 runs each, one model. The six control files
+  (1, 18, 19, 22, 23, 27) were run in 3b and 3e, before most of this code, and
+  have not been re-run. Template-read files are read by templates, not this.
+- Nothing was fixed. Whether to turn the reader on is Alex's call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
