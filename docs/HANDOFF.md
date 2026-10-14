@@ -2634,6 +2634,169 @@ in the table above.
   have not been re-run. Template-read files are read by templates, not this.
 - Nothing was fixed. Whether to turn the reader on is Alex's call.
 
+### Phase 3s: what the dispatcher did with an AI read, recorded (2026-10-14)
+
+No API call, no network, no `ratecon:eval-ai`, nothing read from `.samples/`.
+**The reader stays off by default** (`LLM_READER_ENABLED` is set in no env
+file; the e2e server sets it itself, with the fake vendor). Nothing the
+dispatcher sees changed.
+
+**Why:** the system stored one counts row per pair (calls, tokens, outcome)
+and nothing about what happened next, so a real-world trial would produce no
+accuracy evidence. Now each read that filled the form leaves, once, a count of
+what the dispatcher kept, changed and cleared, by field name.
+
+**What is counted.** For a read that filled the form, once, at the FIRST save
+of the load after the fill (the first that lands; a refused save waits):
+
+- **a field the read FILLED:** `kept` (saved as filled), `changed` (saved as
+  something else), `cleared` (saved empty, or its stop removed);
+- **a field the read left BLANK and marked:** `blank_filled` (the dispatcher
+  filled it) or `blank_left`;
+- per **field name**: `load_number`, `stop_type`, `street`, `city`, `state`,
+  `zip`, `appointment`; **summed over stops**.
+
+Values are compared trimmed and by value, in the browser's memory: a field
+edited and put back is kept; a space at an end is not a change; the
+appointment is compared by type, date, time, end time and window (not the
+zone, which follows the address). A field the dispatcher had typed before a
+"Replace" that the read left blank is `blank_left` unless changed. A stop
+added after the fill is not counted; a stop removed counts its filled fields
+as cleared.
+
+**What is never stored:** a value, a quote, a stop address, a load number, a
+file name, any field's text. Both tables hold a read id, a field NAME from a
+closed list, and small integers. A schema test asserts the column types.
+
+**Tables (migration 0028, additive, direct connection):**
+
+| Table | Holds |
+|---|---|
+| `ratecon_ai_outcomes` | `read_id` (primary key; a foreign key to `ratecon_ai_reads`, `ON DELETE CASCADE`), `created_at`. The once-per-read marker |
+| `ratecon_ai_outcome_fields` | `read_id`, `field` (enum `ratecon_ai_field`), `kept`, `changed`, `cleared`, `blank_filled`, `blank_left` (smallints). Primary key (read_id, field). A check bounds the sum: at most 1 for `load_number`, 10 for any other |
+
+RLS on both, a deny-all policy, nothing granted to `anon` or `authenticated`
+(as every table). **They live 90 days:** they follow the read's counts row,
+which each reservation deletes after 90 days, and a foreign key without the
+cascade would make that clean-up fail. Read the numbers inside 90 days, or
+copy the query results out (decision for Alex below).
+
+**The route** `POST /api/ratecon/outcome` (`handle-outcome.ts`, written on the
+pooler connection like every route handler): the address limit; a dispatcher
+or admin; the reader on (off: 404 `disabled`); the user's **`write`** limit
+(its own bucket, so outcomes never spend the reader's three-a-minute); a 2 KB
+body; a strict parse (`OutcomeBody`): a read id, and per field name five
+counts, each 0 to 10, adding up to at most what a read can fill, no field
+twice, no unknown key (a 400 `bad_request` otherwise; the issues are not
+echoed). Then the read must be **the caller's own and `ok`**: a read that is
+someone else's, does not exist, or whose pair failed is the same 404
+`unknown_read`. The once-per-read marker is inserted `on conflict do nothing`,
+and only the post that inserted it stores the counts, in the same transaction:
+a second post, or two at the same moment, store nothing and answer
+`recorded: false`. The browser is untrusted: nothing in the body drives
+behaviour beyond being stored.
+
+**The read response** gains `readId` (the counts row's id), so the modal can
+name the read. A failed pair returns none.
+
+**It never delays, blocks or fails a save.** The modal posts AFTER the load
+has saved, does not await it, and `recordFillOutcome` cannot throw or reject.
+If the post is refused or fails (or the summary throws), the tab counts it
+(`outcomeNotRecorded`, kept with the strip's other session counts and shown to
+nobody). If the server fails while recording it logs ONE line, `ratecon
+outcome not recorded { reference, code, errorName }`, never the request or the
+error's message. **Nothing the dispatcher sees changes**: a test compares the
+strip after a recorded and an unrecorded outcome.
+
+**Not recorded** (each tested): a load saved with no AI fill; a template fill,
+or an AI fill replaced by a template one; a failed pair; a save that did not
+land (the outcome waits for the one that does); a modal closed without saving;
+any later save; the reader off.
+
+**Reading the numbers.** Run these on the production database (they work on
+any Postgres with the tables; checked here on invented rows):
+
+    -- 1. By field: how much of what the AI filled was kept, and how much of
+    --    what it left blank the dispatcher filled.
+    select f.field,
+           sum(f.kept) as kept, sum(f.changed) as changed, sum(f.cleared) as cleared,
+           sum(f.blank_filled) as blank_filled, sum(f.blank_left) as blank_left,
+           round(100.0 * sum(f.kept) / nullif(sum(f.kept + f.changed + f.cleared), 0), 1) as pct_kept
+      from ratecon_ai_outcome_fields f
+     group by f.field
+     order by array_position(enum_range(null::ratecon_ai_field), f.field);
+
+    -- 2. The funnel and the cost: reads that answered, reads whose load was
+    --    saved, and what a saved read cost (tokens, both calls).
+    select count(*) filter (where r.outcome = 'ok') as reads_answered,
+           count(o.read_id) as reads_saved,
+           round(100.0 * count(o.read_id) / nullif(count(*) filter (where r.outcome = 'ok'), 0), 1) as pct_saved,
+           round(avg(r.input_tokens + r.output_tokens) filter (where o.read_id is not null)) as tokens_per_saved_read
+      from ratecon_ai_reads r left join ratecon_ai_outcomes o on o.read_id = r.id
+     where r.created_at >= now() - interval '30 days';
+
+    -- 3. Reads saved with nothing changed or cleared.
+    select count(*) filter (where changed = 0 and cleared = 0) as saved_untouched,
+           count(*) as reads_saved
+      from (select read_id, sum(changed) as changed, sum(cleared) as cleared
+              from ratecon_ai_outcome_fields group by read_id) t;
+
+`pct_kept` is of the fields the AI filled (kept + changed + cleared); a
+blank-filled count is of the fields it left blank and marked. A read answered
+and never saved (query 2's gap) is not an outcome: the dispatcher typed the
+load another way, or abandoned it.
+
+**Tests:** 2940 in all (2815 before). New or changed:
+
+| File | Tests |
+|---|---|
+| `outcomes-schema.test.ts` (new) | 14: no text column, a closed list of names, RLS, once per read, bounds, cascade with the read |
+| `outcome-codes.test.ts` (new) | 25: the strict contract |
+| `fill-outcome.test.ts` (new) | 21: every outcome per field, multiple stops, nothing filled, kept / changed / cleared, blank-then-filled, a typed-before value, no value in the rows |
+| `handle-outcome.test.ts` (new) | 28: stored once, a second ignored, not the caller's or unknown or not `ok` read refused, no role, reader off, every bad body, the sentinel in the row and the log, its own bucket, a failure logs one line |
+| `outcome-client.test.ts` (new) | 11: what is sent (nothing but the id and counts), recorded or not, never thrown |
+| `record-outcome.test.ts` (new) | 7: it never throws or rejects |
+| `fill-outcome-save.test.tsx` (new) | 15: through the strip, the save and the network: once, after the save, not on a failed save, a template fill, or a later save; a save that still succeeds when recording is refused, unreachable or never answers; nothing visible changes |
+| `handle-read.test.ts` (42, as before), `read-client.test.ts` (24; 20 before) | the read response's `readId`, and a read id that is no id is no link |
+
+**e2e** (`e2e/ratecon-ai.spec.ts`, run on its own; `npm run check` does not
+run it): the pair test now Saves, and checks the real rows: seven field
+names, `street` kept 2, `load_number` kept 1, `appointment` kept 1 and
+blank-left 1, joined to the read's tokens, with no value in them. The spec
+seeds the geocode cache for its two invented places so the Save calls no
+outside service. 6 passed with `ratecon-fill` and `reader-key-bundle`.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- summary: empty counted as changed; values not trimmed; a removed stop not
+  counted; a blank that stays counted as filled; a template fill recorded;
+- server: not the caller's read; any read, answered or not; no once-per-read
+  marker; the error message in the log; the reader's own rate-limit bucket;
+  Zod's issues echoed in the 400;
+- modal: the pending outcome not dropped after the first save; the save
+  awaiting the recording; a template fill leaving the AI fill pending;
+  recorded at the click rather than after the save; the strip dropping the
+  read id.
+
+**For Alex to decide / found while building (none changed):**
+
+1. **90 days.** The outcome tables live as long as the read's counts row. A
+   longer trial needs either a longer retention on `ratecon_ai_reads` or
+   copying query results out. Lengthening it is one constant (`KEEP_DAYS`) and
+   its privacy statement.
+2. **A recording that never reaches the server is only counted in the
+   browser tab,** and is lost when the tab closes. There is nothing to log on
+   a server that was never called. The funnel (query 2) shows it as a read
+   answered and never saved.
+3. **Two reads in one modal.** If the dispatcher reads with AI twice, the
+   first read gets no outcome (the second replaced it). Only the read that
+   was in the form at the save is recorded.
+4. **The load number is one field name for the load; the others are summed
+   over stops.** A trial that cares which stop is wrong (the second of four,
+   say) cannot tell: that is deliberate, to keep the numbers free of anything
+   that identifies a load.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18

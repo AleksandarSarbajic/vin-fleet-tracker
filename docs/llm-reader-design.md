@@ -416,11 +416,53 @@ request refused for its body never spends a read:
    2026-10-13); the verifier stays the judge of the year. No retries in the
    first release: a failed read costs one click, never a loop.
 9. **Parse each reply** with `ModelRead.safeParse`. The route returns
-   `{ ok: true, reads: [A, B] }` or `{ ok: false, code }` (§5). Either call
+   `{ ok: true, reads: [A, B], readId }` or `{ ok: false, code }` (§5). Either call
    failing, at the adapter or the schema, fails the request with read A's
    code, else read B's, and returns neither reply. It does not verify or
    merge; the browser does, with `readPair`, against the text it holds. The
    route stores nothing but the counts row.
+
+**What the dispatcher did with a read** (Alex, 2026-10-14; migration 0028,
+`POST /api/ratecon/outcome`). A real-world trial needs accuracy evidence, and
+the counts row says only what a read cost. So, once per read that filled the
+form, at the FIRST save of the load after the fill, the modal tells the server:
+- **per field name** (load number, stop type, street, city, state, ZIP,
+  appointment), summed over stops, one outcome each: a field the read FILLED
+  is **kept** (saved as it was), **changed**, or **cleared** (saved empty, or
+  its stop removed); a field the read left **blank and marked** is
+  **blank-filled** by the dispatcher or **blank-left**. A value is compared
+  trimmed, and by value, so a field edited and put back is kept.
+- **Never** a value, a quote, an address, a load number, a file name or a
+  field's text. The browser compares the values in its own memory and sends
+  counts. The tables hold a read id and numbers (below).
+- **Tables.** `ratecon_ai_outcomes`: one row a read, its primary key the read
+  (a foreign key to `ratecon_ai_reads`, `ON DELETE CASCADE`) — the once-per-read
+  marker. `ratecon_ai_outcome_fields`: one row a (read, field name), with
+  `kept`, `changed`, `cleared`, `blank_filled`, `blank_left` as small ints,
+  checked against what a read can fill (one load number; at most 10 of any
+  other field). The field names are an enum. RLS on, deny-by-default. They go
+  with the read when its row is deleted at 90 days, so **an outcome lives 90
+  days**: read the numbers inside that, or copy them out.
+- **The route.** The read response carries `readId` (the counts row's id). The
+  modal posts `{ readId, fields }`. The server: the address limit; a
+  dispatcher or admin; the reader on (off: 404); the user's `write` limit, not
+  the reader's three-a-minute; a 2 KB body; a strict Zod parse (an unknown key,
+  a field name off the list, a negative or large count, counts that add up to
+  more than a read can fill, or a field twice is a 400); then the read must be
+  **the caller's own and `ok`** — anyone else's, none, or a failed pair is the
+  same `unknown_read`. The marker is inserted `on conflict do nothing`; only
+  the post that inserted it stores the counts, in the same transaction, so a
+  second post (or two at once) stores nothing and answers `recorded: false`.
+- **It is never in the way of a save.** The modal posts AFTER the load has
+  saved and does not await it; `recordFillOutcome` cannot throw or reject. A
+  failure is counted in the tab (`outcomeNotRecorded`) and shown to nobody; the
+  server logs a failure as one line of a reference, a code and a class name
+  (`logOutcomeFailure`), never the request or the error's message. It changes
+  nothing the dispatcher sees.
+- **Not recorded:** a load saved with no AI fill; a template fill (or an AI
+  fill the dispatcher replaced with one); a failed pair; a save that did not
+  land (the outcome waits for the one that does); a modal closed without
+  saving; later saves; the reader off.
 
 **Keys.**
 - The reader's settings are parsed by `parseReaderEnv` in
@@ -1017,3 +1059,11 @@ Phase 3m (2026-10-14):
     available as both of its calls (a failure of either fails it); the other
     call is not cancelled when one fails, so a failed pair still pays for
     both; and per-call detail is not kept (one row per pair).
+
+Phase 3s (2026-10-14):
+
+40. **What the dispatcher did with an AI read is recorded** (§4): counts per
+    field name and outcome, once per read, at the first save after the fill,
+    in two new tables linked to the read's counts row. The read response gains
+    `readId`. Counts only, 90 days. Recording is after the save, not awaited,
+    and cannot fail it. The queries to read it are in HANDOFF, phase 3s.
