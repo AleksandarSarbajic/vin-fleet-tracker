@@ -50,7 +50,7 @@ interface Located {
 }
 
 /** The quote, if it is in the lines it cites (joined with a space, whitespace collapsed); null otherwise. */
-function locate(quote: ModelQuote, sent: ReadonlyMap<number, PreparedLine>): Located | null {
+export function locate(quote: ModelQuote, sent: ReadonlyMap<number, PreparedLine>): Located | null {
   const lines: PreparedLine[] = [];
   for (let n = quote.line; n <= (quote.lineEnd ?? quote.line); n += 1) {
     const line = sent.get(n);

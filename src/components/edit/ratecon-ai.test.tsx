@@ -220,6 +220,43 @@ describe('a read', () => {
   });
 });
 
+describe('the dropped-stop cue: address-like lines the read did not use', () => {
+  const DROPPED: ModelRead = { ...MODEL_REPLY, stops: [MODEL_REPLY.stops[0]!] };
+  const cue = () => strip().querySelector('[data-ratecon-cue]');
+
+  it('a full read: no cue', async () => {
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(cue()).toBeNull();
+  });
+
+  it('a read that dropped a stop: says which line, and offers what was sent; it fills and marks as always', async () => {
+    readAnswer = respond(200, { ok: true, read: DROPPED });
+    await render();
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    expect(cue()?.textContent).toBe('1 line that looks like an address was not used: L18');
+    const sent = strip().querySelector('[data-ratecon-cue-sent]')!;
+    expect(sent.querySelector('summary')?.textContent).toBe('Show what is sent');
+    expect(sent.querySelector('pre')?.textContent).toContain('L18 Duluth, MN 55802');
+    // It blocks nothing and changes no mark: the one stop is filled and marked as any read's.
+    expect(said()).toBe('Filled 1 stop, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.');
+    expect(strip().querySelector('[data-ai-to-confirm]')?.textContent).toBe('1 stop read by AI to confirm');
+    expect(input(form(), 'Street address').value).toBe('4001 Main St');
+  });
+
+  it('after "Replace", the cue still comes', async () => {
+    readAnswer = respond(200, { ok: true, read: DROPPED });
+    await render();
+    await type(input(container!, 'Load number'), 'MINE-1');
+    await pasteText(CLIP);
+    await click(readWithAi()!);
+    await click(buttonIn(strip(), 'Replace')!);
+    expect(cue()?.textContent).toBe('1 line that looks like an address was not used: L18');
+  });
+});
+
 describe('every failure fills nothing, says one fixed sentence, and leaves the button', () => {
   it.each([
     [503, { ok: false, code: 'unavailable' }, 'The AI reader is not available right now. Nothing was filled.'],

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { addressCueText, uncitedAddressLines } from '@/lib/ratecon/address-cue';
 import { linesFromText, type Line } from '@/lib/ratecon/lines';
 import { READ_MESSAGES, type ReadFailCode } from '@/lib/ratecon/read-codes';
 import { requestModelRead } from '@/lib/ratecon/read-client';
@@ -29,18 +30,25 @@ import { verifyRead } from '@/lib/ratecon/verify-read';
  * sends, shows them on request ("Show what is sent"), sends only those, and
  * fills only what `verifyRead` confirms against them. Every failure is one
  * fixed sentence and fills nothing; the button stays.
+ *
+ * After an AI fill, the dropped-stop cue (`address-cue.ts`): sent lines that
+ * look like addresses and that no quote used are named, with what was sent.
+ * It blocks nothing and changes no mark. Like everything in the detail, it
+ * folds away when the load is typed into.
  */
 
 export const NOT_RECOGNISED = 'Layout not recognised, nothing filled.';
 
 type PreparedOk = Extract<Prepared, { ok: true }>;
 type Said = { tone: 'fault' | 'done'; text: string };
+/** The dropped-stop cue: what to say, and the text that was sent, to show on request. */
+type Cue = { text: string; sent: string };
 
 type Status =
   | { kind: 'idle' }
   | { kind: 'reading' }
-  | { kind: 'said'; tone: 'fault' | 'done'; text: string }
-  | { kind: 'confirm'; read: RateconRead }
+  | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue }
+  | { kind: 'confirm'; read: RateconRead; cue?: Cue }
   /** A template miss, with "Read with AI" offered when the document can be prepared. */
   | { kind: 'missed'; prepared: Prepared; note: Said | null }
   | { kind: 'ai-reading'; prepared: PreparedOk };
@@ -97,7 +105,7 @@ export function RateconStrip({
   }, [editsVersion]);
 
   const fill = useCallback(
-    (read: RateconRead) => {
+    (read: RateconRead, cue?: Cue) => {
       const refused = onFill(read);
       const n = read.stops.length;
       setStatus(
@@ -106,6 +114,7 @@ export function RateconStrip({
           : {
               kind: 'said',
               tone: 'done',
+              ...(cue ? { cue } : {}),
               text:
                 read.layout === 'model'
                   ? `Filled ${n} ${n === 1 ? 'stop' : 'stops'}, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.`
@@ -153,8 +162,10 @@ export function RateconStrip({
         return;
       }
       setCounts(bumpCount('readWithAi'));
-      if (entries.current) setStatus({ kind: 'confirm', read: verified.read });
-      else fill(verified.read);
+      const cueText = addressCueText(uncitedAddressLines(out.reply, prepared.lines));
+      const cue = cueText ? { text: cueText, sent: prepared.text } : undefined;
+      if (entries.current) setStatus({ kind: 'confirm', read: verified.read, ...(cue ? { cue } : {}) });
+      else fill(verified.read, cue);
     },
     [fill],
   );
@@ -259,6 +270,19 @@ export function RateconStrip({
               {status.text}
             </p>
           ) : null}
+          {status.kind === 'said' && status.cue ? (
+            <>
+              <p data-ratecon-cue="" className="text-small text-status-risk-fg">
+                {status.cue.text}
+              </p>
+              <details data-ratecon-cue-sent="" className="text-small text-text-mutedOnOverlay">
+                <summary className="cursor-pointer">Show what is sent</summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words border border-line-hair bg-surface-sunken p-2 text-small">
+                  {status.cue.sent}
+                </pre>
+              </details>
+            </>
+          ) : null}
           {status.kind === 'missed' ? (
             <>
               <p className="text-small text-status-risk-fg">{NOT_RECOGNISED}</p>
@@ -320,7 +344,7 @@ export function RateconStrip({
               </p>
               <button
                 type="button"
-                onClick={() => fill(status.read)}
+                onClick={() => fill(status.read, status.cue)}
                 className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
               >
                 Replace
