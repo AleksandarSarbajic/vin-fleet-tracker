@@ -91,6 +91,9 @@ const request = (body: unknown, init: { raw?: string; signal?: AbortSignal; cont
   });
 };
 const json = async (r: Response) => (await r.json()) as Record<string, unknown>;
+/** The id of the counts row a user's read reserved: what the browser is told, to link the outcome to it. */
+const readIdOf = async (userId: string) =>
+  ((await commitDb().execute(sql`select id from ratecon_ai_reads where user_id = ${userId}`)) as unknown as { id: string }[])[0]!.id;
 const rows = async (userId: string) =>
   (await commitDb().execute(
     sql`select outcome, vendor, lines_sent, input_tokens, output_tokens from ratecon_ai_reads where user_id = ${userId} order by created_at`,
@@ -139,7 +142,8 @@ describeDb('POST /api/ratecon/read: a read is a pair', () => {
     const id = newUser();
     const { fake, deps: d } = deps();
     const r = await handleRead(request(BODY), d);
-    expect([r.status, await json(r)]).toEqual([200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY] }]);
+    // The read's id is the counts row's, so the outcome can be linked to it, cost and all.
+    expect([r.status, await json(r)]).toEqual([200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY], readId: await readIdOf(id) }]);
     // 03:00 UTC on the 13th is 22:00 on the 12th in Chicago.
     expect(fake.received).toEqual([
       { lines: SENT, today: '2026-10-12' },
@@ -150,10 +154,10 @@ describeDb('POST /api/ratecon/read: a read is a pair', () => {
   });
 
   it('returns each call\'s own reply, A then B', async () => {
-    newUser();
+    const id = newUser();
     const other = { ...MODEL_REPLY, loadNumber: null };
     const r = await handleRead(request(BODY), deps({ steps: [{ reply: MODEL_REPLY }, { reply: other }] }).deps);
-    expect(await json(r)).toEqual({ ok: true, reads: [MODEL_REPLY, other] });
+    expect(await json(r)).toEqual({ ok: true, reads: [MODEL_REPLY, other], readId: await readIdOf(id) });
   });
 
   it('the two calls run at the same time, so a read stays inside the time limit', async () => {
@@ -187,6 +191,7 @@ describeDb('POST /api/ratecon/read: a pair that fails fails as a whole, and retu
     const body = await json(r);
     expect([r.status, body]).toEqual([status, { ok: false, code }]);
     expect(JSON.stringify(body)).not.toContain('reads');
+    expect(JSON.stringify(body)).not.toContain('readId');
     expect(await rows(id)).toHaveLength(1);
     expect((await rows(id))[0]).toMatchObject({ outcome: code });
   });
@@ -421,7 +426,7 @@ describeDb('POST /api/ratecon/read: through the real Anthropic adapter, on an in
         }),
       ),
     );
-    expect([r.status, await json(r)]).toEqual([200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY] }]);
+    expect([r.status, await json(r)]).toEqual([200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY], readId: await readIdOf(id) }]);
     expect(await rows(id)).toEqual([{ outcome: 'ok', vendor: 'anthropic', lines_sent: 20, input_tokens: 5800, output_tokens: 1400 }]);
   });
 

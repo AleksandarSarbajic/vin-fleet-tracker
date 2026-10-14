@@ -66,8 +66,12 @@ export const READ_MESSAGES: Readonly<Record<ReadFailCode, string>> = {
  * A read is a PAIR (two-read agreement; Alex, 2026-10-14): on success, both
  * model reads, A then B, for the browser to verify and merge. On any failure
  * of either, a code and neither read. The route does not verify.
+ *
+ * `readId` is the read's counts row: what the browser quotes, with counts and
+ * nothing else, when it tells the server what the dispatcher did with the read
+ * (`outcome-codes.ts`).
  */
-export type ReadResponse = { ok: true; reads: [unknown, unknown] } | { ok: false; code: ReadFailCode; reference?: string };
+export type ReadResponse = { ok: true; reads: [unknown, unknown]; readId: string } | { ok: false; code: ReadFailCode; reference?: string };
 
 /**
  * When a PAIR fails (Alex, 2026-10-14) — either read, at the vendor, at the

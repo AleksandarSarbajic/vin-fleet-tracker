@@ -42,7 +42,22 @@ describe('what comes back', () => {
     expect(await requestModelReads(LINES, live(), answer(200, { ok: true, reads: [MODEL_REPLY, other] }))).toEqual({
       ok: true,
       replies: [MODEL_REPLY, other],
+      readId: null,
     });
+  });
+
+  it('the read\'s id, when the server sends one: so an outcome can be linked to it', async () => {
+    const readId = '5b1e2c0a-7f3d-4c58-9a60-0e3f6d1b2a44';
+    expect(await requestModelReads(LINES, live(), answer(200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY], readId }))).toEqual({
+      ok: true,
+      replies: [MODEL_REPLY, MODEL_REPLY],
+      readId,
+    });
+  });
+
+  it.each([['text', '4001 Main St'], ['a number', 7], ['an empty string', '']])('a read id that is %s is no id: the read still fills, nothing is linked', async (_, readId) => {
+    const out = await requestModelReads(LINES, live(), answer(200, { ok: true, reads: [MODEL_REPLY, MODEL_REPLY], readId }));
+    expect(out).toEqual({ ok: true, replies: [MODEL_REPLY, MODEL_REPLY], readId: null });
   });
 
   it.each([

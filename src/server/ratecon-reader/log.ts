@@ -36,3 +36,14 @@ export function logReaderMisconfigured(problems: readonly ReaderProblem[]): void
     problems: problems.map(({ setting, fault }) => ({ setting, fault })),
   });
 }
+
+/**
+ * An outcome that could not be recorded (docs/llm-reader-design.md §4). A
+ * code, a reference and a class name — nothing from the request, which holds
+ * a read id and counts, and nothing from the error, whose message can quote
+ * whatever the database was handed.
+ */
+export function logOutcomeFailure(entry: { reference: string; code: 'error'; errorName: string }): void {
+  // eslint-disable-next-line no-restricted-globals -- the one sanctioned line for a failed outcome; no value, no message.
+  console.error('ratecon outcome not recorded', { reference: entry.reference, code: entry.code, errorName: entry.errorName });
+}

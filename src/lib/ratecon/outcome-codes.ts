@@ -53,3 +53,13 @@ export const OutcomeBody = z
   })
   .refine((b) => new Set(b.fields.map((f) => f.field)).size === b.fields.length, { message: 'a field twice' });
 export type OutcomeBody = z.infer<typeof OutcomeBody>;
+
+export type OutcomeFailCode = 'disabled' | 'forbidden' | 'rate_limited' | 'too_large' | 'bad_request' | 'unknown_read' | 'error';
+
+/**
+ * The answer. `recorded: false` is a second post for a read already recorded:
+ * ignored, and not an error. A read that is not the caller's, does not exist
+ * or never answered is the same `unknown_read`, so the answer tells a caller
+ * nothing about other people's reads.
+ */
+export type OutcomeResponse = { ok: true; recorded: boolean } | { ok: false; code: OutcomeFailCode; reference?: string };

@@ -88,14 +88,14 @@ const reply = (body: ReadResponse, status: number, headers: Record<string, strin
   Response.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
 const fail = (code: ReadFailCode) => reply({ ok: false, code }, STATUS[code]);
 
-const newReference = (status: number) => `RATECON-${status}-${Date.now().toString(36).toUpperCase()}`;
+export const newReference = (status: number) => `RATECON-${status}-${Date.now().toString(36).toUpperCase()}`;
 
 /** The dispatch zone's calendar date, YYYY-MM-DD. */
 const dayIn = (tz: string, at: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 
 /** The body as text, or null past the limit — read in chunks, so a body with no length cannot run past it. */
-async function bodyWithin(request: Request, limit: number): Promise<string | null> {
+export async function bodyWithin(request: Request, limit: number): Promise<string | null> {
   const declared = Number(request.headers.get('content-length') ?? '0');
   if (declared > limit) return null;
   if (!request.body) return '';
@@ -221,7 +221,7 @@ export async function handleRead(request: Request, deps: ReadDeps): Promise<Resp
       return fail(failed.code);
     }
     await finishRead(deps.db, reservation, { outcome: 'ok', ...usage });
-    return reply({ ok: true, reads: [sideRead(sides[0]), sideRead(sides[1])] }, 200);
+    return reply({ ok: true, reads: [sideRead(sides[0]), sideRead(sides[1])], readId: reservation }, 200);
   } catch (error: unknown) {
     // The 429 every route gives; the browser reads a 429 with no code as rate_limited.
     if (error instanceof RateLimitError) return rateLimitResponse(error);

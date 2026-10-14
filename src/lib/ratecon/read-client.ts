@@ -18,7 +18,14 @@ import { REDACTION_VERSION, type PreparedLine } from './redact';
 /** Past the server's own 25 s, so the server's timeout is the one that usually speaks. */
 export const BROWSER_TIMEOUT_MS = 35_000;
 
-export type ClientReadOutcome = { ok: true; replies: [ModelRead, ModelRead] } | { ok: false; code: ReadFailCode; reference?: string };
+export type ClientReadOutcome =
+  | {
+      ok: true;
+      replies: [ModelRead, ModelRead];
+      /** The read's counts row, to link what the dispatcher does with it; null when the server named none. */
+      readId: string | null;
+    }
+  | { ok: false; code: ReadFailCode; reference?: string };
 
 /** Every code the server can send: the keys of its messages, so a new code cannot be missed here. */
 const CODES: ReadonlySet<string> = new Set(Object.keys(READ_MESSAGES));
@@ -60,7 +67,8 @@ export async function requestModelReads(
     const body = await bodyOf(response);
     if (response.ok && body?.ok === true) {
       const replies = z.tuple([ModelRead, ModelRead]).safeParse(body.reads);
-      return replies.success ? { ok: true, replies: replies.data } : { ok: false, code: 'invalid_output' };
+      const readId = z.string().uuid().safeParse(body.readId);
+      return replies.success ? { ok: true, replies: replies.data, readId: readId.success ? readId.data : null } : { ok: false, code: 'invalid_output' };
     }
     const code = typeof body?.code === 'string' && CODES.has(body.code) ? (body.code as ReadFailCode) : byStatus(response.status);
     return typeof body?.reference === 'string' ? { ok: false, code, reference: body.reference } : { ok: false, code };
