@@ -48,6 +48,10 @@ app's answer would make the score agree with itself.
     exactly as the PDF prints it ("McAllen" stays "McAllen").
 - **`state`:** the two-letter code, e.g. `"ND"`.
 - **`zip`:** the five digits as printed, e.g. `"58102"`.
+  - **A ZIP below 00501 (such as `00001`) is not a ZIP** (00501 is the lowest
+    assigned US ZIP; a broker's system prints a default there). The document
+    gives no usable ZIP, so the right ground truth is `""`: the app leaves it
+    blank and marks it.
 
 ```json
 "Example Tender 40417.pdf": {

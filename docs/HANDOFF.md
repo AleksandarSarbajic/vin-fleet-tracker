@@ -1704,6 +1704,64 @@ stop count 3, street 8, ZIP 3 (14).
   thing to look at. Same for sample 28's third stop.
 - Nothing was fixed. What to change is Alex's call.
 
+### Phase 3i: a ZIP that cannot exist is not put in the form (2026-10-14)
+
+No API call, no use of the key, no `ratecon:eval-ai`. Nothing under
+`.samples/` was opened.
+
+**Decision (Alex, 2026-10-14):** a ZIP the reader found but that cannot be a
+US ZIP is treated as not given.
+
+- **Why:** a rate confirmation can print a placeholder ZIP such as `00001`
+  (a broker system's default). Both AI reads copied it and the verifier
+  confirmed it against the text, so a dispatcher would have got a plausible
+  wrong ZIP with no mark. Evaluation run 3 (3h) had a ZIP WRONG on sample 9
+  that the case change could not explain; this is the reason that was
+  decided for it. (It was not checked against the ground truth here: no
+  `.samples/` value was read.)
+- **The rule** (`isRealUsZip`, `src/lib/ratecon/us-zip.ts`, pure): the
+  first five digits, numerically, must be 00501 or more (00501 is the
+  lowest assigned US ZIP). 00000 to 00500 are not ZIPs. Five digits or
+  ZIP+4 (hyphen or not); a +4 never lifts a placeholder over the line;
+  an empty string, or any other shape, is not a ZIP. The readers only ever
+  produce five digits, so nothing that was accepted before is now refused
+  except below 00501.
+- **Where:** `fillStop` in `ratecon-fill.ts`, in the address loop, so the
+  template readers and the AI reader are covered together. The form's ZIP
+  stays blank, no source is kept for it, and the field gets the check
+  `ZIP_NOT_REAL`: "Check: the PDF's ZIP is not a real US ZIP. Enter it by
+  hand." The value is not repeated in the message. The read, its source line
+  and the verifier keep what was printed; `verify-read.ts` and the AI prompt
+  are unchanged.
+- **It comes out as a ZIP not found does:** blank, a check (so "fields to
+  check" counts it), the zone left for the dispatcher to confirm where the
+  state spans two. For an AI read the blank is a check, not an AI mark
+  (`aiMarkedFields` does not list `zip`). Only the wording differs from
+  "Not found in the PDF."
+- **Not done, by decision:** no ZIP-to-state check beyond today's
+  `zipStateCheck`, no lookup table, no external service. State, street, city
+  and the ZIP formats accepted elsewhere are untouched.
+- **Ground truth** (`docs/ground-truth-howto.md`): a ZIP below 00501 printed
+  in the PDF is `""`. **For Alex:** an `expected.json` ZIP written as
+  `00001` will now score WRONG; change it to `""`.
+- **No known issue** about "ZIP 00001 is copied as printed" was written in
+  this file, so none was closed. No existing test used a placeholder ZIP as
+  a fixture; none was changed.
+
+**Tests:** 2728 in all (2716 before).
+
+| File | Tests |
+|---|---|
+| `us-zip.test.ts` | 6 (new): 00000, 00001, 00500 refused; 00501, 10001, 60450, 99950 accepted; ZIP+4 follows the first five digits; empty and malformed refused |
+| `ratecon-fill.test.ts` | 39 (33 before): 00001 blank + marked with the other fields and their sources unchanged; equal to a ZIP not found (form, zone, count); 00000, 00500, ZIP+4 refused and 00501 and a real ZIP filled; the other stop untouched; a model read keeps `00001` in the read and blanks it in the form, with no AI mark (`aiMarks` 11 fields, not 12) |
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- blank without the mark;
+- the refused ZIP keeping its source line;
+- the rule off for AI reads only.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
