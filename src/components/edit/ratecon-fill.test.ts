@@ -346,6 +346,81 @@ describe('street and city in normal case (2026-10-14)', () => {
   });
 });
 
+describe('no trailing punctuation on a street or city (2026-10-14)', () => {
+  const withText = (read: RateconRead, at: number, field: 'street' | 'city' | 'state', value: string): RateconRead => ({
+    ...read,
+    stops: read.stops.map((s, i) => (i === at && s[field] ? { ...s, [field]: { ...s[field]!, value } } : s)),
+  });
+  const printed = (read: RateconRead, at: number, field: 'street' | 'city') => read.stops[at]![field]!.value;
+
+  it('a trailing comma or period shows without it, in the form', () => {
+    const base = readOf(STOPS_SECTION);
+    const stop = fill(withText(withText(base, 0, 'street', `${printed(base, 0, 'street')},`), 0, 'city', `${printed(base, 0, 'city')}.`)).stops[0]!;
+    expect([stop.addressLine, stop.city]).toEqual(['4001 Main St', 'Fargo']);
+  });
+
+  it('the read and its source line keep what was printed; checks, sources and marks are those of a read without the comma', () => {
+    const base = readOf(STOPS_SECTION);
+    const loud = withText(base, 0, 'street', `${printed(base, 0, 'street')},`);
+    const sourced: RateconRead = {
+      ...loud,
+      stops: loud.stops.map((s, i) => (i === 0 && s.street ? { ...s, street: { ...s.street, source: { text: `${s.street.value}`, page: 2 } } } : s)),
+    };
+    expect(sourced.stops[0]!.street!.value.endsWith(',')).toBe(true);
+    const plain = fill(base);
+    const form = fill(sourced);
+    // The source line is what was printed, comma and all.
+    expect(form.stops[0]!.fill?.sources.addressLine?.text.endsWith(',')).toBe(true);
+    expect(sourceLine(form.stops[0]!.fill?.sources.addressLine)).toBe('From p.2: “4001 Main St,”');
+    expect(form.stops[0]!.fill?.checks).toEqual(plain.stops[0]!.fill?.checks);
+    expect(Object.keys(form.stops[0]!.fill?.sources ?? {})).toEqual(Object.keys(plain.stops[0]!.fill?.sources ?? {}));
+    expect(fieldsToCheck(form)).toBe(fieldsToCheck(plain));
+  });
+
+  it('a street or a city that is only punctuation is blank, with the same check as one not found', () => {
+    const base = readOf(STOPS_SECTION);
+    const missing = fill({ ...base, stops: base.stops.map((s, i) => (i === 0 ? { ...s, street: null, city: null } : s)) }).stops[0]!;
+    const noise = fill(withText(withText(base, 0, 'street', '.,;'), 0, 'city', ' , ')).stops[0]!;
+    expect([noise.addressLine, noise.city]).toEqual(['', '']);
+    expect(noise.fill?.checks.addressLine).toBe('Not found in the PDF.');
+    expect(noise.fill?.checks.city).toBe('Not found in the PDF.');
+    expect(noise.fill?.sources.addressLine).toBeUndefined();
+    expect(noise.fill?.sources.city).toBeUndefined();
+    expect(noise.fill?.checks).toEqual(missing.fill?.checks);
+    expect(noise.zip).toBe(missing.zip);
+  });
+
+  it('interior punctuation stays', () => {
+    const base = readOf(STOPS_SECTION);
+    const stop = fill(withText(withText(base, 0, 'street', 'N. Main St. #4,'), 0, 'city', 'St. Louis.')).stops[0]!;
+    expect([stop.addressLine, stop.city]).toEqual(['N. Main St. #4', 'St. Louis']);
+  });
+
+  it('state is as read, and a ZIP that is not five digits still is not one: neither is stripped', () => {
+    const base = readOf(STOPS_SECTION);
+    const stop = fill(withText(base, 0, 'state', 'ND.')).stops[0]!;
+    expect(stop.state).toBe('ND.');
+    const zip = fill({ ...base, stops: base.stops.map((s, i) => (i === 0 && s.zip ? { ...s, zip: { ...s.zip, value: '58102,' } } : s)) }).stops[0]!;
+    expect(zip.zip).toBe('');
+    expect(zip.fill?.checks.zip).toBe(ZIP_NOT_REAL);
+  });
+
+  it('a model read: an all-punctuation street is a check, not an AI mark', () => {
+    const lines = UNKNOWN_LAYOUT.map((l) => (l.text.startsWith('4001 Main St') ? pdfLine(2, '...') : l));
+    const reply = structuredClone(MODEL_REPLY);
+    reply.stops[0]!.street = { value: '...', quote: { line: 12, text: '...' } };
+    const prepared = prepareForReading(lines);
+    if (!prepared.ok) throw new Error(prepared.reason);
+    const verified = verifyRead(reply, prepared.lines, NOW);
+    if (!verified.ok) throw new Error(verified.reason);
+    const form = fill(verified.read);
+    // Whatever the verifier made of it, the form's street is blank, marked, and not read-by-AI.
+    expect(form.stops[0]!.addressLine).toBe('');
+    expect(form.stops[0]!.fill?.checks.addressLine).toBeTruthy();
+    expect(aiMarkedFields(form.stops[0]!)).not.toContain('addressLine');
+  });
+});
+
 describe('a ZIP that cannot exist is not put in the form (2026-10-14)', () => {
   const withZip = (read: RateconRead, at: number, zip: string): RateconRead => ({
     ...read,

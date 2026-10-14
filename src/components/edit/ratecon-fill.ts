@@ -1,6 +1,6 @@
 import { MAX_STOPS_PER_LOAD } from '@/lib/load-edit';
 import { zipStateCheck } from '@/lib/geo/zip-state';
-import { normalCase } from '@/lib/ratecon/normal-case';
+import { normalCase, withoutTrailingPunctuation } from '@/lib/ratecon/normal-case';
 import { isRealUsZip } from '@/lib/ratecon/us-zip';
 import type { RateconRead, Source, StopRead, TimeRead } from '@/lib/ratecon/templates';
 import type { AppointmentDraft } from './AppointmentFields';
@@ -24,7 +24,8 @@ import {
  * street, ZIP, city, state and appointment; the zone follows the address by
  * §12.120's rules. Never the rate, broker, contacts, driver, trailer, notes,
  * status or Active — the read does not carry them. Street and city are put
- * in normal case (`normalCase`) on the way in. Nothing is saved: the
+ * in normal case (`normalCase`) and without trailing punctuation on the way
+ * in. Nothing is saved: the
  * form is the dispatcher's to look at, change and Save.
  */
 
@@ -140,19 +141,24 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
 
   const address: Partial<StopForm> = { stopType: read.type.value };
   // Street and city are shown in normal case (ALL CAPS on the page becomes
-  // "Dallas"); the read, its source line and the verifier's match keep what
-  // was printed. State, ZIP and everything else go in as read.
-  for (const [field, readField, value, shown] of [
-    ['addressLine', 'street', read.street, normalCase],
-    ['city', 'city', read.city, normalCase],
-    ['state', 'state', read.state, (v: string) => v],
-    ['zip', 'zip', read.zip, (v: string) => v],
+  // "Dallas") and without trailing punctuation ("Rd." and "Rd," are "Rd", as
+  // the model quotes the punctuation in some runs and not in others); a value
+  // that is only punctuation is not a value, and is marked like one not found.
+  // The read, its source line and the verifier's match keep what was printed.
+  // State, ZIP and everything else go in as read.
+  const place = (v: string) => normalCase(withoutTrailingPunctuation(v));
+  for (const [field, readField, value, shown, emptyIsMissing] of [
+    ['addressLine', 'street', read.street, place, true],
+    ['city', 'city', read.city, place, true],
+    ['state', 'state', read.state, (v: string) => v, false],
+    ['zip', 'zip', read.zip, (v: string) => v, false],
   ] as const) {
+    const text = value ? shown(value.value) : '';
     if (value && field === 'zip' && !isRealUsZip(value.value)) {
       // A placeholder the broker's system printed: the same as no ZIP found.
       checks.zip = ZIP_NOT_REAL;
-    } else if (value) {
-      address[field] = shown(value.value);
+    } else if (value && !(emptyIsMissing && text === '')) {
+      address[field] = text;
       sources[field] = value.source;
     } else {
       checks[field] = read.fieldChecks?.[readField] ?? 'Not found in the PDF.';
