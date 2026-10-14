@@ -131,11 +131,14 @@ describe('offered only after a template miss, and only when the server offers it
     expect(readWithAi()).toBeNull();
   });
 
-  it('flag on: the button, how many lines it sends, and what it leaves out', async () => {
+  it('flag on: the button, how many lines it sends, and what it does not promise', async () => {
     await render();
     await pasteText(CLIP);
     expect(readWithAi()).not.toBeNull();
-    expect(strip().textContent).toContain('sends 23 lines, with rates, contacts, phones, emails and driver names removed');
+    expect(strip().textContent).toContain(
+      'sends 23 lines with phones, emails, rates and the names it recognises removed; a name it does not recognise can still go through, so read “Show what is sent” before you click.',
+    );
+    expect(strip().textContent).not.toContain('contacts');
     expect(reads).toHaveLength(0);
   });
 

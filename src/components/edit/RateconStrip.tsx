@@ -329,8 +329,9 @@ export function RateconStrip({
                       Read with AI
                     </button>
                     <span className="text-text-mutedOnOverlay">
-                      sends {status.prepared.lines.length} {status.prepared.lines.length === 1 ? 'line' : 'lines'}, with
-                      rates, contacts, phones, emails and driver names removed. Nothing is saved until Save.
+                      sends {status.prepared.lines.length} {status.prepared.lines.length === 1 ? 'line' : 'lines'} with
+                      phones, emails, rates and the names it recognises removed; a name it does not recognise can still
+                      go through, so read “Show what is sent” before you click.
                     </span>
                   </div>
                   <details data-ratecon-sent="" className="text-small text-text-mutedOnOverlay">

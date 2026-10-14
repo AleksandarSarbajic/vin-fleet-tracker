@@ -103,8 +103,10 @@ test('after a template miss, Read with AI makes a PAIR through the route and the
 
   const readWithAi = strip.getByRole('button', { name: 'Read with AI' });
   await expect(readWithAi, 'the e2e server must run with the reader on and the fake vendor (see the header)').toBeVisible();
-  await expect(strip).toContainText('sends 23 lines, with rates, contacts, phones, emails and driver names removed');
-  await strip.getByText('Show what is sent').click();
+  await expect(strip).toContainText(
+    'sends 23 lines with phones, emails, rates and the names it recognises removed; a name it does not recognise can still go through, so read “Show what is sent” before you click.',
+  );
+  await strip.locator('[data-ratecon-sent] summary').click();
   await expect(strip.locator('[data-ratecon-sent] pre')).toContainText('L3 Booked by: [REMOVED]');
   await expect(strip.locator('[data-ratecon-sent] pre')).not.toContainText('dispatch@example.com');
 
