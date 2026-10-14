@@ -124,6 +124,27 @@ still left takes its whole token, and, at a cell edge, the word touching it
 across the boundary, so a local part split from its `@` goes too. Labels are
 not re-run. The pass is idempotent: a placeholder matches no detector.
 
+**A third pass: a person's name that outruns its label's cell** (phase
+3a-3, 2026-10-14; Alex decided to close the gap). On the joined line, split
+back on the cell gap. After a PERSON label (contact, dispatcher, broker or
+carrier rep, agent, rep, booked by, driver):
+- in the label's own cell, the name-like words after its placeholders go:
+  `Contact: [PHONE] Dana Example` sends `Contact: [PHONE] [REMOVED]`;
+- if that reaches the cell's end, the following cells go while each is
+  name-like, at most 3. A cell of placeholders only is passed over, not a
+  stop (`Contact` | `[EMAIL]` | `Dana` is `Contact` | `[PHONE] Dana` cut
+  differently). A cell starting with placeholders loses its leading
+  name-like words. A cell with a label of its own ends the walk.
+- **Name-like:** letters, spaces, apostrophes, hyphens and periods; no
+  digit, colon or comma. So a ZIP, a time, a date, a street number, a load
+  number and `Fargo, ND` each stop it.
+- Only person labels walk on: after `Phone:` or `Shipper:` nothing changes.
+
+**The re-scan has its own check,** written apart from the mask: a person
+label still followed by a name-like word (in its cell) or cell (past
+placeholder-only cells) is a `labelled` hit. It has NO limit, so a fourth
+name-like cell past the mask's three refuses the document.
+
 **Page selection, to send less.** From a PDF, the sender takes page 1 and
 every page that holds at least one US city line (the existing `cityLine`
 pattern). Terms-and-conditions pages are mostly dropped this way. Pasted
@@ -143,17 +164,22 @@ text has no pages, so all of it is sent, within the size limit (§4).
 **Pattern redaction is not a guarantee.** It removes what it can recognise.
 - **Known misses:**
   - names that carry no label, such as a signature or "questions, call Dana";
-  - a LABELLED name whose value runs into another cell, such as
-    `Dispatcher:` | `Dana` | `Example` (the surname goes through) or
-    `Contact` | `[PHONE] Dana Example`. The re-scan misses these too: it asks
-    only whether a label's value starts with a placeholder (found in 3a-2,
-    not fixed; HANDOFF);
+  - a labelled name that shares a later cell with a non-name word:
+    `Dispatcher: Dana` | `Example x22` sends `Example` (the walk takes
+    whole name-like cells only), and the re-scan agrees with the mask;
+  - a name on the line after its label: the walk is within one line;
+  - a name after a contact label that is not a person label (`Phone:`
+    | `[PHONE]` | `Dana`);
   - a broker's company name in a page header;
   - a contact detail written in a way no pattern expected.
-- **Known over-masking:** a load number made of 10 bare digits after a phone
-  label would be masked, and that field would then come back blank and
-  marked. We accept this: masking too much loses a field; masking too little
-  sends a phone number.
+- **Known over-masking:**
+  - a load number made of 10 bare digits after a phone label would be
+    masked, and that field would then come back blank and marked;
+  - a facility name in the cells right after a person label goes with the
+    name (`Contact:` | `Dana` | `Prairie Cold Storage`).
+
+  We accept both: masking too much loses a field; masking too little sends
+  a phone number or a name.
 
 **What remains in the text, on purpose**, because the read needs it:
 facility names, street addresses, cities, states, ZIPs, dates, times,
@@ -838,7 +864,21 @@ Phase 3a-2 (redaction, 2026-10-14):
 30. **The `$` detector took at most one space** after the `$`, so `$` |
     `1,850` in two cells passed the mask AND the re-scan. It now takes any
     run of spaces. Stronger, not looser: the re-scan is stronger with it.
-31. **Labelled names split across cells are a known miss** (§2), found while
-    testing, not fixed: the re-scan does not catch them either. Deciding
-    where a label's value ends in the joined line is Alex's call.
+31. **Labelled names split across cells were a known miss** (§2), found
+    while testing. Closed in 3a-3, below.
+
+Phase 3a-3 (redaction) and 3b-prep (the evaluation script, 2026-10-14):
+
+32. **The person-name pass** (§2, A third pass), Alex's rule with three
+    refinements: placeholder-only cells are passed over rather than ending
+    the walk; a cell with its own label ends it; and the re-scan has no
+    3-cell limit, so a longer run is refused, not sent. `REDACTION_VERSION`
+    is `redact-2026-10-14.2`. On the real samples, 11 files changed (21
+    masks on 20 lines), 14 are byte-identical, and none has a residual hit.
+33. **`ratecon:eval-ai` bounds each call without asking the vendor.** "Measured
+    tokens" before a call would mean `count_tokens`, which sends the
+    document's text a second time. Instead: spent is measured (each reply's
+    usage × the price constants); the next call's most is its body's UTF-8
+    bytes plus 2,000 tokens in, and `max_tokens` out. A reply billed past
+    its bound stops the run; a failure with no usage is counted at its bound.
 

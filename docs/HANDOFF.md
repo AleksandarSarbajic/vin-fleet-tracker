@@ -466,7 +466,8 @@ Every way the build differs from the design, phases 1 and 2a, is listed in
 ### Phase 3a: evaluation prep (2026-10-14)
 
 Local only: no network, no API call, no use of the key. `ratecon:eval-ai`
-(step 1) is NOT built: it needs Alex's separate written approval.
+(step 1) is NOT built: it needs Alex's separate written approval. (Built in
+3b-prep, below; still not run.)
 
 | File | What |
 |---|---|
@@ -685,6 +686,226 @@ the re-scan does not catch it.**
 **E2e after 3a-2:** the AI spec and the key-scan spec, 3 passed (with
 setup).
 
+### Phase 3a-3: the labelled-name gap, closed (2026-10-14)
+
+Local only: no network, no key, no document text read. Alex decided: fix it.
+
+**The rule** (`src/lib/ratecon/redact.ts`, `maskPersonNames`; a third pass,
+on the joined line split back on the cell gap). After a PERSON label —
+contact, dispatcher, broker or carrier rep, agent, rep, booked by, driver
+(with name, cell or phone):
+
+- **In the label's own cell,** the name-like words after its placeholders
+  go: `Contact: [PHONE] Dana Example` → `Contact: [PHONE] [REMOVED]`. The
+  rest of the cell after them stays (`… [REMOVED] 08:00-17:00`).
+- **If that reaches the cell's end,** the following cells go while each is
+  name-like, at most 3, stopping at the first that is not.
+- **Name-like:** letters (any alphabet), spaces, apostrophes, hyphens,
+  periods; no digit, colon, comma or placeholder.
+
+**Three refinements to Alex's rule, and why:**
+
+1. **A cell of placeholders only is passed over,** not a stop, and not
+   counted in the 3. `Contact` | `[EMAIL]` | `Dana Example` is the same
+   layout as `Contact` | `[PHONE] Dana Example`, only cut differently by
+   the PDF. Stopping there would have left the name.
+2. **A cell with a label of its own ends the walk.** A new label starts a
+   new value; without this, `Rep:` | `Dana` | `Phone` | … would mask the
+   word "Phone".
+3. **The re-scan has no 3-cell limit.** Its check (`nameLeft`) is written
+   apart from the mask: a person label still followed by a name-like word
+   in its cell, or a name-like cell past placeholder-only cells, is a
+   `labelled` hit. So a fourth name-like cell past the mask's three
+   REFUSES the document rather than sending it. Fail-closed, as asked. No
+   detector was loosened or removed.
+
+**Kept by tests (invented text):** ZIPs, times, time ranges, dates, street
+numbers and streets, load numbers (`Load # EX-40417`, and `EX-40417`
+alone), a dock door (`Door 12A`), city lines, and `Fargo, ND` with its ZIP
+in the next cell. Lines with no person label are untouched, facility names
+included. A phone or shipper label does not walk on.
+
+**The cost, pinned in a test:** a facility name in the cells right after a
+person label goes with the name (`Contact:` | `Dana` | `Prairie Cold
+Storage`).
+
+**What it still misses** (design §2, verified on invented text):
+
+- a name sharing a later cell with a non-name word: `Dispatcher: Dana` |
+  `Example x22` sends `Example`, and the re-scan agrees with the mask;
+- a name on the line after its label (the walk is within one line);
+- a name after a contact label that is not a person label: `Phone:` |
+  `612-555-0147` | `Dana` sends `Dana`.
+
+**Tests:** 114 in `redact.test.ts` (74 before), every name invented.
+**Mutations,** each applied alone and reverted:
+
+| Mutation | Tests that fail |
+|---|---|
+| The person pass off | 21 |
+| A placeholder-only cell stops the walk | 16 |
+| The re-scan's person check off | 6 |
+| The re-scan stops at a placeholder-only cell | 4 |
+| Names after a placeholder in a walked cell kept | 3 |
+| A digit counts as name-like | 2 |
+| A label cell does not stop the walk | 1 |
+| No 3-cell limit | 1 |
+| Names after a placeholder in the label's cell kept | 1 |
+| A comma counts as name-like | 1 |
+
+The digit and comma mutations first passed every test. Every "kept" case
+also failed the needs-a-letter rule, so neither exclusion was pinned. Three
+keep cases were added that only those exclusions protect.
+
+`REDACTION_VERSION` is `redact-2026-10-14.2`. The browser and the route must
+ship together: a page still on `.1` gets `outdated` (409).
+
+**Before and after** (`npm run ratecon:redact-report`; it now also prints
+the line numbers where the person pass masked, and how many masks, never
+the text):
+
+| | Before | After |
+|---|---|---|
+| Residual hits | 0 | **0** |
+| Files that can be sent | 25 of 25 | **25 of 25** |
+| Hash unchanged | — | **14:** 1, 4, 7, 8, 9, 10, 11, 18, 19, 20, 21, 26, 27, 28 |
+| Hash changed | — | **11:** 2, 12, 13, 14, 15, 16, 17, 22, 23, 24, 25 |
+
+Every changed file is one where the new pass masked, and in each the
+`labelled` count rose by exactly that many. Where it masked, by line number
+as the review page shows them (masks in brackets where more than one):
+
+| Sample | Lines |
+|---|---|
+| 2 | L12, L38 |
+| 12 | L34 (2), L240 |
+| 13 | L55, L79 |
+| 14 | L75 |
+| 15 | L14, L57, L71 |
+| 16 | L7 |
+| 17 | L7 |
+| 22, 23, 24, 25 | L18, L23 each |
+
+**For Alex:** these lines are where to look first in the viewer. Was a
+name taken, or a facility name or something else the read needs (the cost
+above)?
+
+### Phase 3b-prep: `ratecon:eval-ai`, built and NOT run (2026-10-14)
+
+No call was made, the key was not used, and the command was never started
+with the real adapter. It was run only to show its refusals, with an empty
+environment (no key), and in tests that spawn it the same way.
+
+| File | What |
+|---|---|
+| `scripts/ratecon-eval.mts` | The engine: flags, file checks, ceilings, the run, the score. Tested |
+| `scripts/ratecon-eval-ai.mts` | `npm run ratecon:eval-ai`: reads the samples and ground truth, builds the real adapter, calls the engine |
+| `scripts/ratecon-expected.mts` | `appointmentScore` moved here from `ratecon-score.mts`, unchanged (`ratecon:score`'s output diffed identical) |
+| `src/test/ratecon-eval.test.ts` | 44 tests, fake adapter and invented ground truth only |
+
+**How to run it, once Alex approves in writing:**
+
+    npm run ratecon:eval-ai -- --approved=YYYY-MM-DD --files=1,18,19 [--runs=3]
+
+**It refuses, before the key or any sample is read:**
+
+- with no `--approved`;
+- with an `--approved` that is not a real date or is after today;
+- with no `--files`, or a list that is not sample numbers or names one twice;
+- with any unknown flag.
+
+**Then, before any call, it refuses the whole run when:**
+
+- the key or model is wrong;
+- any named file is a scan, does not prepare (residue), or lacks complete
+  ground truth with stops;
+- files × runs is more than 75.
+
+**The path is the app's:**
+
+- `prepareForReading`;
+- the adapter, given `n` and `text` and today in the dispatch zone, as the
+  route sends them;
+- `ModelRead`, then `verifyRead` against exactly the lines sent;
+- `fillLoad` into an empty form.
+
+`now` is `expected.json`'s `scoredAt`, as `ratecon:score` uses it, so
+year-less dates read against the same day the ground truth was written for.
+
+**Ceilings, checked before each call:**
+
+- **75 calls.**
+- **$1.00:** what was spent (measured tokens × the price constants), plus
+  the most the next call can cost.
+  - **Prices:** Haiku 5.5 at $0.10 in and $0.50 out per million tokens, for
+    prompts up to 100K tokens. Source: Anthropic's model table in the
+    claude-api reference (cached 2026-10-06), read 2026-10-14. A call whose
+    input bound passes 100K is never made.
+  - **Sonnet 5.5's prices are there too** ($2 and $10), only in case Alex
+    names it.
+- **A bound, not a measurement, before the call.** Measuring first would
+  mean `count_tokens`, which sends the document's text a second time.
+  - The bound is the request body's UTF-8 bytes plus 2,000 tokens in, and
+    `max_tokens` (8,192) out.
+  - The 2b smoke call: 5,470 bytes, billed 3,117 input tokens.
+  - The largest file's bound is about $0.0073 a call, so 75 calls is at
+    most about $0.55.
+- **Fail-safes:**
+  - a reply billed more input than its bound stops the run;
+  - a failure that reports no usage is counted at its bound;
+  - `vendor_capped` stops the run.
+
+**Output:** counts and codes only, never a value, a quote or any text.
+Calls run in rounds (run 1 of every file, then run 2), so a ceiling still
+leaves every file a run.
+
+- **Per file and run:** the outcome code, tokens and cost.
+- **Per field:** a status (`verified`, `blank-and-marked`,
+  `filled-and-marked`) and a score against the truth.
+  - `exact`, `marked`, or **`WRONG`** (verified, filled, and not what the
+    PDF says).
+  - A blank with no mark is WRONG unless the truth is blank. It should
+    never happen, and the bar must not pass it.
+  - Appointments are scored by `ratecon:score`'s own function.
+- **At the end:** total calls, tokens and cost, WRONG per bar field, and
+  the bar.
+  - A run cut short, or one with unscored runs, is never called a pass.
+
+**Tests** (44, fake adapter and invented data):
+
+- each ceiling stops it before the call that would pass it, and spending
+  never passes $1.00;
+- the input-tier refusal, a failure counted at its bound, the over-bound
+  stop and `vendor_capped`;
+- the request is `n` and `text` only, with the zone's today;
+- exact, WRONG, a wrong stop count, and a verifier-refused value (blank
+  and marked, never WRONG);
+- a missing approval refuses: the parser, and the command spawned with no
+  key;
+- no value, quote, sentinel or ground-truth value reaches the output, and
+  every line matches one of the known shapes.
+
+**Mutations:** each fails at least one test.
+
+- no call ceiling;
+- no dollar ceiling;
+- the ceiling checked without the next call's bound;
+- a usage-less failure counted as free;
+- no over-bound stop;
+- approval not required;
+- a load number printed;
+- a ground-truth value printed;
+- the page sent to the adapter.
+
+**Control (template-read) files with COMPLETE ground truth:** **1, 18, 19,
+22, 23, 27** (6 of 13).
+
+- **Still blank in places:** 13, 14, 15, 20, 24, 25, 26.
+- **Of the 12 unrecognised files, none is complete yet.** Sample 12 has no
+  stops.
+- **So today the command would accept only 1, 18, 19, 22, 23 and 27.** At 3
+  runs that is 18 calls.
+
 **E2e, phase 2a build (2026-10-13), with the reader still off on the e2e server:**
 
 - **Result:** 241 passed, 1 skipped (the AI spec) and 1 did not run.
@@ -787,8 +1008,9 @@ fixed; both are follow-ups.
 
 ## Next
 
-**Phases 3a and 3a-2 wait for Alex.** Nothing is sent until step 1 is
-approved in writing.
+**Phases 3a, 3a-2, 3a-3 and 3b-prep wait for Alex.** Nothing is sent until
+step 1 is approved in writing. `ratecon:eval-ai` is built and has not been
+run.
 
 **What Alex does next, in this order:**
 
@@ -799,20 +1021,21 @@ approved in writing.
      is highlighted.
    - Look first at the lines that hit before 3a-2 (the table in "Phase
      3a-2"): are they masked as they should be?
-   - Watch for labelled names whose value runs into the next cell (found in
-     3a-2): the re-scan does not catch those.
+   - Look at the lines the 3a-3 person pass masked (the table in "Phase
+     3a-3"): a name taken, or something the read needs?
+   - Still not caught: a name sharing a cell with a non-name word after its
+     label's cell, a name on the next line, and a name after a phone label.
    - For every file, say what is NOT masked that should be: a name, a phone,
      anything. Describe the pattern in invented words; it is fixed with an
      invented test case and step 0 re-run. Or sign the file off.
-2. **Decide the labelled-name gap:** where a label's value ends in the
-   joined line.
+2. ~~Decide the labelled-name gap~~: decided (fix it) and closed in 3a-3.
 3. **Write ground truth,** per `docs/ground-truth-howto.md`.
    - Priority 1 first, then priority 2.
    - `npm run ratecon:check-expected` shows what is left.
    - Decide sample 12: give its entry stops (it changes an existing entry),
      or leave it out of the evaluation.
-4. **Approve step 1 in writing** (the list below). Then
-   `ratecon:eval-ai` is built, in its own phase.
+4. **Approve step 1 in writing** (the list below), with its date. That
+   date is the command's `--approved`; the files it names are `--files`.
 
 **What Alex must approve before step 1** (design §8.2). The figures are
 proposals:
@@ -830,7 +1053,8 @@ proposals:
     21 and 28 all pass step 0 since 3a-2. Sample 12 has no stops in its
     ground truth.
   - **The control, template-read,** which the AI is run on too: 1, 13, 14,
-    15, 18, 19, 20 and 22–27 all pass step 0.
+    15, 18, 19, 20 and 22–27 all pass step 0. Complete ground truth today:
+    1, 18, 19, 22, 23, 27 only.
 - **Runs per file:** proposed 3. With no temperature the model is not
   deterministic, so one run could mislead.
 - **The spend ceiling:**
@@ -840,7 +1064,8 @@ proposals:
   - **Worst case:** 25 files × 3 runs is 75 calls, at most about $0.23 on
     Haiku, or about $4.50 on Sonnet.
   - **Proposed:** a hard ceiling of **$1.00** and **75 calls**, both enforced
-    by the script, which stops before a call would pass either.
+    by the script, which stops before a call would pass either. Built so
+    (3b-prep); the most 75 calls could cost at their bounds is about $0.55.
 
 **Also open:**
 
@@ -848,7 +1073,8 @@ proposals:
 - **The two intermittent hangs above** (truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
-- **One live call is left** of 2b's five. None was made in 3a or 3a-2.
+- **One live call is left** of 2b's five. None was made in 3a, 3a-2, 3a-3
+  or 3b-prep.
 - **Before the route can count in production,** migrations 0026 and 0027
   must be applied there.
 - Other open decisions are above.
