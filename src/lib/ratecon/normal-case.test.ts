@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalCase } from './normal-case';
+import { normalCase, withoutTrailingPunctuation } from './normal-case';
 
 /**
  * Street and city in normal capitalization when a rate confirmation is
@@ -192,3 +192,67 @@ describe('normalCase: idempotent', () => {
     }
   });
 });
+
+describe('withoutTrailingPunctuation: a street or city never ends in , ; : or .', () => {
+  it('removes what ends the value', () => {
+    table2([
+      ['2300 20th Ave NE,', '2300 20th Ave NE'],
+      ['840 N Thayer Rd.', '840 N Thayer Rd'],
+      ['Fargo;', 'Fargo'],
+      ['Fargo:', 'Fargo'],
+      ['Fargo...', 'Fargo'],
+    ]);
+  });
+
+  it('a run of them, and whitespace between, until none is left', () => {
+    table2([
+      ['Rd.,', 'Rd'],
+      ['Rd., ', 'Rd'],
+      ['Rd . , ;', 'Rd'],
+      ['Rd.  ', 'Rd'],
+      ['  Rd. ', '  Rd'],
+    ]);
+  });
+
+  it('a value that is only punctuation (or blank) becomes empty', () => {
+    table2([
+      ['.,;', ''],
+      ['.', ''],
+      [' , ', ''],
+      ['', ''],
+      ['   ', ''],
+    ]);
+  });
+
+  it('interior punctuation, and any other trailing character, is left alone', () => {
+    table2([
+      ['St. Louis', 'St. Louis'],
+      ['N. Main St', 'N. Main St'],
+      ['Winston-Salem', 'Winston-Salem'],
+      ['1200 Oak Blvd Ste #4', '1200 Oak Blvd Ste #4'],
+      ['4001 Main St', '4001 Main St'],
+      ["O'Fallon", "O'Fallon"],
+      ['Rd-', 'Rd-'],
+      ['Suite #', 'Suite #'],
+      ['(Dock)', '(Dock)'],
+      ['Fargo?', 'Fargo?'],
+    ]);
+  });
+
+  it('idempotent', () => {
+    for (const input of ['2300 20th Ave NE,', 'Rd.,', '.,;', 'St. Louis', 'Fargo ', '  Rd. ', '4001 Main St']) {
+      const once = withoutTrailingPunctuation(input);
+      expect(withoutTrailingPunctuation(once), input).toBe(once);
+    }
+  });
+
+  it('with normalCase, in either order, the same value', () => {
+    for (const input of ['4001 MAIN ST.,', 'ST. LOUIS,', 'DALLAS.']) {
+      expect(normalCase(withoutTrailingPunctuation(input)), input).toBe(withoutTrailingPunctuation(normalCase(input)));
+    }
+  });
+});
+
+function table2(rows: [string, string][]) {
+  rows.forEach(([input, want]) => expect(withoutTrailingPunctuation(input), JSON.stringify(input)).toBe(want));
+}

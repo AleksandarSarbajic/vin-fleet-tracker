@@ -70,3 +70,21 @@ export function normalCase(text: string): string {
     })
     .join('');
 }
+
+/**
+ * A street or city never ends in , ; : or . in the form (2026-10-14). A PDF
+ * can print "Rd." or "Rd," at the end of the line, and the model sometimes
+ * quotes the punctuation and sometimes not, so the same read was WRONG in
+ * one run and exact in the next (evaluation run 8: 8 of 14 WRONG cells were
+ * punctuation-only). Removing it makes the form the same either way.
+ *
+ * Whatever ends the value goes: any run of , ; : . and whitespace, until
+ * none is left ("Rd.," -> "Rd"). Interior punctuation is untouched ("St.
+ * Louis", "N. Main", "Winston-Salem", "#4"). A value that is only
+ * punctuation becomes empty. Pure, idempotent, and only for street and city;
+ * like `normalCase` it is applied on the way into the form, after the read is
+ * verified, so the read and its source line keep what was printed.
+ */
+export function withoutTrailingPunctuation(text: string): string {
+  return text.replace(/[\s,;:.]+$/u, '');
+}
