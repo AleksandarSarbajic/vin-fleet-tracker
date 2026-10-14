@@ -1762,6 +1762,89 @@ test:
 - the refused ZIP keeping its source line;
 - the rule off for AI reads only.
 
+### Phase 3j: evaluation run 4, paired, samples 2, 4, 9, 17 and 28 (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** a re-run of phase 3h's run: the
+same five samples, 3 runs each (30 calls), Claude Haiku 5.5, ceilings $1.00
+and 75 calls. Since 3h, Alex corrected the ground truth for samples 9 and 28
+(typing errors, and a missing third stop on 28), and 3i changed what the
+fill does with a ZIP below 00501. 3h's WRONG counts for 9 and 28 therefore
+do not stand. Retention (30 days default, flagged up to 2 years) accepted
+for this run. I did not read the ground truth.
+
+**Checked before the run:**
+
+- The tree was clean. `redact.ts` is byte-identical to 3h (`b6370ca`), and
+  no commit since then touches the sent-text path (`redact`, `lines`,
+  `read-pdf`, `pdf.worker`, `templates`, `model-read`, `verify-read`, the
+  reader server, the redaction report, `ratecon-eval-ai`, `ratecon-eval`).
+  The only files changed were the fill, its tests, `us-zip` and docs.
+- **Sent-text hashes** equal 3h's, all five: 2 `a72717aa76c5`, 4
+  `f38cb9922cfe`, 9 `dc2a776ec7f4`, 17 `1afe327813da`, 28 `0b03d4a2f36d`.
+  So the model saw the same text as in 3h; every difference below is the
+  ground truth, the fill, or the model's own variation between runs.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,9,17,28 --runs=3 --pairs
+
+**Result: the bar is NOT met, with 1 WRONG (3h: 12). Exit 1.**
+
+| | 3h | 3j |
+|---|---|---|
+| Calls | 30 of 30 | 30 of 30 (ceiling 75) |
+| Tokens | 173,910 in, 64,628 out | 173,910 in, 65,094 out |
+| Cost | $0.0497 | $0.0499 (ceiling $1.00) |
+| Runs scored | 15 | 15 |
+| Pairs | 12 agreed, 3 differed | 12 agreed, 3 differed |
+| Address cue fires | 6 of 15 | 6 of 15 |
+
+Every call returned `ok`.
+
+**Merged WRONG, by field:**
+
+| Field | 3h | 3j |
+|---|---|---|
+| load number | 0 | 0 |
+| stop count | 3 | 0 |
+| order + type | 0 | 0 |
+| street | 6 | 1 |
+| ZIP | 3 | 0 |
+| city | 0 | 0 |
+| state | 0 | 0 |
+| **all** | **12** | **1** |
+
+**Each read alone:** A 16 -> 1 (street 1); B 14 -> 3 (street 3).
+
+**Per sample** (merged WRONG on the bar; "marked" is not WRONG):
+
+| Sample | 3h | 3j | What changed |
+|---|---|---|---|
+| 2 | 0 | 0 | nothing: all exact, 3 pairs agreed, cue silent |
+| 4 | 0 | 0 | nothing: stop 1's ZIP blank and marked in both reads, every run; both appointments marked "filled as the PDF says"; cue silent |
+| 9 | 9 | **0** | street WRONG gone on both stops; stop 2's ZIP went from verified WRONG to **blank and marked** in all 3 runs; stop 2's appointment still differs in time between the fill and the ground truth (marked); order + type marked on stop 1 in runs 1 and 3 and on stop 2 in run 3 (3h: both stops in runs 2 and 3); run 3's pair **differed** (appointment x1; 3h: all 3 agreed); cue still fires on 5 lines every run |
+| 17 | 0 | **1** | pairs: street x1 differed in runs 1 and 2, run 3 agreed (3h: street x2 differed in all 3). Runs 2 and 3: both streets blank and marked. **Run 1: stop 1's street is verified WRONG**, agreed by both reads (stop 2's blank and marked). Each read alone: A 4 -> 1, B 2 -> 3 |
+| 28 | 3 | **0** | stop count 3 read, 3 expected (3h: 3 read, 2 expected) in all 3 runs; stops 2 and 3's appointments are marked "filled as the PDF says" (3h: stop 2 differed in date); cue still fires on 4 lines every run |
+
+**What the counts say (no values looked at):**
+
+- Samples 9 and 28 went to 0 WRONG on the bar. The ground-truth corrections
+  and the ZIP rule account for it; the output does not say which of the two
+  did what. A blank-and-marked ZIP looks the same whether the reader found
+  none or 3i refused a placeholder.
+- The one WRONG is sample 17, run 1, stop 1's street. It is the only
+  filled-and-wrong value left, it is in 1 of 15 runs, and both reads
+  agreed on it, so two-read agreement cannot catch it. In the other two
+  runs of the same file the merged street is blank and marked. Sample 17's
+  streets are unstable from run to run on identical text.
+- The cue fires on 6 of 15 runs, all on samples 9 and 28, which are now at
+  0 WRONG. On 28 all three stops are read and the cue still names 4 lines;
+  on 9, 5. So it is not finding a dropped stop in these runs; whether those
+  lines are anything else is not decidable from line numbers.
+- Nothing was fixed. Whether to turn the reader on is Alex's call, after
+  reading the result together.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
