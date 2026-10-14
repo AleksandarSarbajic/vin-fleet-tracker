@@ -3,7 +3,7 @@ import { MODEL_REPLY, SENTINEL, UNKNOWN_LAYOUT } from '@/test/model-read-fixture
 import type { ModelAppointment, ModelRead, ModelStop } from './model-read';
 import { prepareForReading, type PreparedLine } from './redact';
 import type { StopRead } from './templates';
-import { verifyRead } from './verify-read';
+import { documentIs24Hour, verifyRead } from './verify-read';
 
 /**
  * The language-model reader, design §3: every value the model returns is
@@ -461,5 +461,250 @@ describe('nothing confirmed', () => {
         NOW,
       ),
     ).toEqual({ ok: false, reason: 'nothing-confirmed' });
+  });
+});
+
+/* ----------- a date must not eat a time (2026-10-15) ----------- */
+
+describe('a range with a hyphen keeps both times, and the date is still read', () => {
+  /** A line holding `text`, quoted for the date and the times; the range is 10/14 08:00 to 15:00. */
+  const ranged = (text: string, t = '08:00', end = '15:00') => {
+    const lines = [...DOC, ...sent(text)].map((l, i) => ({ ...l, n: i + 1 }));
+    return time({ ...RANGE, time: t, endTime: end, flag: null, dateQuote: q(6, text), timeQuote: q(6, text) }, lines);
+  };
+
+  it.each([
+    ['08:00-15:00', 'a 24-hour range with a hyphen', '10/14/2026 08:00-15:00'],
+    ['8:00-15:00', 'a first hour with no leading zero', '10/14/2026 8:00-15:00'],
+    ['08:00 - 15:00', 'spaces around the hyphen', '10/14/2026 08:00 - 15:00'],
+    ['0800-1500', 'four digits', '10/14/2026 0800-1500'],
+    ['10/14/26 08:00-15:00', 'a two-digit year', '10/14/26 08:00-15:00'],
+    ['10-14-26 08:00-15:00', 'a dashed date', '10-14-26 08:00-15:00'],
+    ['10/14 08:00-15:00', 'a date with no year', '10/14 08:00-15:00'],
+    ['2026-10-14 08:00-15:00', 'an ISO date', '2026-10-14 08:00-15:00'],
+    ['Oct 14 08:00-15:00', 'a named date', 'Oct 14 08:00-15:00'],
+    ['Oct 14 2026 08:00-15:00', 'a named date with a year', 'Oct 14 2026 08:00-15:00'],
+    ['08:00-15:00 10/14/2026', 'the date after the times', '08:00-15:00 10/14/2026'],
+    ['10/14/2026 FCFS 08:00-15:00', 'a flag between', '10/14/2026 FCFS 08:00-15:00'],
+  ])('%s: %s', (_, __, text) => {
+    expect(ranged(text)).toMatchObject({ kind: 'range', date: '2026-10-14', time: '08:00', endTime: '15:00' });
+  });
+
+  it('a start with no minutes before an end with minutes: "10-11:30 AM" is a range, not October 11', () => {
+    expect(ranged('10/14/2026 10-11:30 AM', '10:00', '11:30')).toMatchObject({ kind: 'range', date: '2026-10-14', time: '10:00', endTime: '11:30' });
+    expect(ranged('10/14/2026 9-10:15 PM', '21:00', '22:15')).toMatchObject({ kind: 'range', time: '21:00', endTime: '22:15' });
+  });
+
+  it('a start with minutes before an end hour alone: "13:00-17" keeps the 13:00', () => {
+    const lines = [...DOC, ...sent('10/14/2026 13:00-17')].map((l, i) => ({ ...l, n: i + 1 }));
+    const out = time({ kind: 'exact', date: '2026-10-14', time: '13:00', flag: null, dateQuote: q(6, '10/14/2026 13:00-17'), timeQuote: q(6, '10/14/2026 13:00-17') }, lines);
+    expect(out).toMatchObject({ kind: 'exact', date: '2026-10-14', time: '13:00' });
+    const early = [...DOC, ...sent('10/14/2026 08:30-12')].map((l, i) => ({ ...l, n: i + 1 }));
+    expect(time({ kind: 'exact', date: '2026-10-14', time: '08:30', flag: null, dateQuote: q(6, '10/14/2026 08:30-12'), timeQuote: q(6, '10/14/2026 08:30-12') }, early)).toMatchObject({ kind: 'exact', time: '08:30' });
+  });
+
+  it('a range in the quote alone, the date on its own line', () => {
+    const lines = [...DOC, ...sent('08:00-15:00')].map((l, i) => ({ ...l, n: i + 1 }));
+    const out = time({ ...RANGE, endTime: '15:00', flag: null, timeQuote: q(6, '08:00-15:00') }, lines);
+    expect(out).toMatchObject({ kind: 'range', date: '2026-10-14', time: '08:00', endTime: '15:00' });
+  });
+
+  it('a range whose end the quote does not hold is still not read', () => {
+    expect(ranged('10/14/2026 08:00-15:00', '08:00', '16:00')).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('"7-10 AM" is still a shared-meridiem range, and "1400" a time', () => {
+    expect(ranged('10/14/2026 7-10 AM', '07:00', '10:00')).toMatchObject({ kind: 'range', date: '2026-10-14', time: '07:00', endTime: '10:00' });
+    const lines = [...DOC, ...sent('10/14/2026 1400')].map((l, i) => ({ ...l, n: i + 1 }));
+    expect(time({ kind: 'exact', date: '2026-10-14', time: '14:00', flag: null, dateQuote: q(6, '10/14/2026 1400'), timeQuote: q(6, '10/14/2026 1400') }, lines)).toMatchObject({
+      kind: 'exact',
+      time: '14:00',
+    });
+  });
+});
+
+describe('a real date still parses, next to a time', () => {
+  const exact = (text: string, date: string, t: string) => {
+    const lines = [...DOC, ...sent(text)].map((l, i) => ({ ...l, n: i + 1 }));
+    return time({ kind: 'exact', date, time: t, flag: null, dateQuote: q(6, text), timeQuote: q(6, text) }, lines);
+  };
+
+  it.each([
+    ['10/14', '2026-10-14', '10/14 08:00', '08:00'],
+    ['10-14-26', '2026-10-14', '10-14-26 08:00', '08:00'],
+    ['10/14/2026', '2026-10-14', '10/14/2026 08:00', '08:00'],
+    ['10/14/2026', '2026-10-14', '08:00 10/14/2026', '08:00'],
+    ['10/14', '2026-10-14', '10/14 2:30 PM', '14:30'],
+    ['10/14', '2026-10-14', '10/14 1400', '14:00'],
+    ['a named date before four digits', '2026-10-14', 'Oct 14 0800', '08:00'],
+    ['a named date and a year before four digits', '2026-10-14', 'Oct 14 2026 0800', '08:00'],
+    ['a named date before a 20xx time', '2026-10-14', 'Oct 14 2000', '20:00'],
+    ['a named date with a comma and a year', '2026-10-14', 'October 14, 2026 14:00', '14:00'],
+  ])('%s: %s', (label, date, text, t) => {
+    expect(exact(text, date, t), label).toMatchObject({ kind: 'exact', date, time: t });
+  });
+});
+
+/* ---------- a bare HH:MM, when the document shows a 24-hour clock (2026-10-15) ---------- */
+
+describe('the document is 24-hour: a 24-hour time, and no AM/PM anywhere', () => {
+  const doc24 = (...texts: string[]) => documentIs24Hour(sent(...texts));
+
+  it.each([
+    ['a leading zero', 'Pick up 08:00-15:00'],
+    ['an hour past noon', 'Close 13:30'],
+    ['the last hour', 'Gate shuts 23:59'],
+    ['midnight with a leading zero', 'Open 00:30'],
+    ['one clock in a long line', 'Dock 4 Appt 10/14/2026 08:00 FCFS'],
+  ])('%s: yes', (_, text) => {
+    expect(doc24(text)).toBe(true);
+  });
+
+  it.each([
+    ['no clock at all', 'Pick up 10/14/2026 0800-1000 APPT'],
+    ['bare hours with no leading zero', 'Open 8:00 Close 11:00'],
+    ['four digits only', 'Open 0800 Close 1500'],
+    ['nothing', ''],
+  ])('%s: no evidence, so no', (_, text) => {
+    expect(doc24(text)).toBe(false);
+  });
+
+  it.each([
+    ['PM', 'Close 8:00 PM'],
+    ['pm', 'Close 8 pm'],
+    ['a.m.', 'Open 8 a.m.'],
+    ['p.m. with minutes', 'Close 5:30 p.m.'],
+    ['A.M. with a space', 'Open 7:00 A.M.'],
+    ['no space', 'Close 8:00PM'],
+    ['a letter alone after minutes', 'Close 8:00P'],
+    ['a shared AM', 'Receiving 7-10 AM'],
+  ])('any time with AM/PM, even one line away: %s, so no', (_, other) => {
+    expect(doc24('Open 08:00', other)).toBe(false);
+  });
+
+  it('words that only look like AM/PM are not', () => {
+    expect(doc24('Open 08:00', 'APPT 10/14/2026', 'Pallets 4 PU', 'Dock 4 Appointment')).toBe(true);
+  });
+});
+
+describe('a bare HH:MM is read as 24-hour when the document is', () => {
+  /** DOC, then `more`, then a delivery date and the bare `11:00` (or `clock`); the appointment is for that delivery. */
+  const docWith = (more: string[], clock = 'Delivery Time: 11:00 Appt.') => {
+    const lines = [...DOC, ...sent(...more, 'Delivery Date: 10/14/2026', clock)].map((l, i) => ({ ...l, n: i + 1 }));
+    return { lines, dateLine: lines.length - 1, clockLine: lines.length, clock };
+  };
+  const delivery = (...more: string[]) => {
+    const d = docWith(more);
+    return time(
+      { kind: 'exact', date: '2026-10-14', time: '11:00', flag: 'APPT', dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) },
+      d.lines,
+    );
+  };
+
+  it('08:00-15:00 elsewhere and "Delivery Time: 11:00 Appt.": read as 11:00', () => {
+    expect(delivery('Pick Up Date: 10/14/2026 08:00-15:00')).toMatchObject({ kind: 'exact', date: '2026-10-14', time: '11:00', flag: 'APPT' });
+  });
+
+  it.each([
+    ['an hour past noon', 'Close 13:30'],
+    ['a leading zero', 'Open 08:00'],
+  ])('24-hour evidence: %s', (_, line) => {
+    expect(delivery(line)).toMatchObject({ kind: 'exact', time: '11:00' });
+  });
+
+  it('a range of bare times is read too', () => {
+    const d = docWith(['Open 08:00'], 'Delivery Time: 10:00 - 11:00');
+    const out = time({ ...RANGE, time: '10:00', endTime: '11:00', flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'range', time: '10:00', endTime: '11:00' });
+  });
+
+  it('a bare time that is not a time is not read: 25:00, 11:75', () => {
+    for (const [clock, t] of [['Delivery Time: 25:00', '01:00'], ['Delivery Time: 11:75', '11:75']] as const) {
+      const d = docWith(['Open 08:00'], clock);
+      const out = time({ kind: 'exact', date: '2026-10-14', time: t, flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, clock) }, d.lines);
+      expect(out).toMatchObject({ kind: 'unreadable' });
+    }
+  });
+
+  it('a one-digit hour before an end hour alone, in a 24-hour document: "8:30-12" keeps the 8:30', () => {
+    const d = docWith(['Open 08:00'], 'Delivery Time: 8:30-12');
+    const out = time({ kind: 'exact', date: '2026-10-14', time: '08:30', flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'exact', time: '08:30' });
+  });
+
+  it('a time past 23:59 is never read, even when the model says it', () => {
+    const d = docWith(['Open 08:00'], 'Delivery Time: 25:00');
+    const out = time({ kind: 'exact', date: '2026-10-14', time: '25:00', flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('only "11:00 Appt.": no 24-hour evidence, so not read (as before)', () => {
+    expect(delivery()).toMatchObject({ kind: 'unreadable', date: '2026-10-14', quoted: 'Delivery Time: 11:00 Appt.' });
+  });
+
+  it('bare hours elsewhere are no evidence: "Open 8:00" and "11:00"', () => {
+    expect(delivery('Open 8:00')).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('four digits elsewhere are no evidence: "0800-1000" and a bare "11:00"', () => {
+    expect(delivery('Pick up 10/14/2026 0800-1000 APPT')).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('"3:30 PM" and "08:00": the AM/PM time stands, and the bare 11:00 is not read', () => {
+    expect(delivery('Pick up 10/14/2026 3:30 PM', 'Gate opens 08:00')).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('a bare "8:00" next to "8:00 PM" elsewhere: not read', () => {
+    const d = docWith(['Close 8:00 PM'], 'Delivery Time: 8:00 Appt.');
+    const out = time({ kind: 'exact', date: '2026-10-14', time: '08:00', flag: 'APPT', dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('24-hour evidence AND an AM/PM time anywhere: not read', () => {
+    expect(delivery('Open 08:00', 'Close 8:00 PM')).toMatchObject({ kind: 'unreadable' });
+    expect(delivery('Open 08:00', 'Receiving 7-10 AM')).toMatchObject({ kind: 'unreadable' });
+  });
+
+  it('the AM/PM time itself still stands in a document that is not 24-hour', () => {
+    const d = docWith(['Open 08:00', 'Close 8:00 PM'], 'Delivery Time: 2:30 PM');
+    const out = time({ kind: 'exact', date: '2026-10-14', time: '14:30', flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'exact', time: '14:30' });
+  });
+
+  it("the quote's own evidence still works, as before, in a document that is not 24-hour", () => {
+    const d = docWith(['Close 8:00 PM'], 'Delivery 08:00 to 11:00');
+    const out = time({ ...RANGE, time: '08:00', endTime: '11:00', flag: null, dateQuote: q(d.dateLine, 'Delivery Date: 10/14/2026'), timeQuote: q(d.clockLine, d.clock) }, d.lines);
+    expect(out).toMatchObject({ kind: 'range', time: '08:00', endTime: '11:00' });
+  });
+
+  it('a whole reply: the verified read carries the delivery time', () => {
+    const lines = sent(
+      'Load # EX-40417',
+      'Pick Up 1',
+      '4001 Main St',
+      'Fargo, ND 58102',
+      'Pick Up Date: 10/14/2026 08:00-15:00',
+      'Delivery 2',
+      '220 Harbor Rd',
+      'Duluth, MN 55802',
+      'Delivery Date: 10/14/2026',
+      'Delivery Time: 11:00 Appt.',
+    );
+    const second: ModelStop = {
+      type: { value: 'DEL', quote: q(6, 'Delivery 2') },
+      street: { value: '220 Harbor Rd', quote: q(7, '220 Harbor Rd') },
+      city: { value: 'Duluth', quote: q(8, 'Duluth, MN 55802') },
+      state: { value: 'MN', quote: q(8, 'Duluth, MN 55802') },
+      zip: { value: '55802', quote: q(8, 'Duluth, MN 55802') },
+      appointment: { kind: 'exact', date: '2026-10-14', time: '11:00', flag: 'APPT', dateQuote: q(9, 'Delivery Date: 10/14/2026'), timeQuote: q(10, 'Delivery Time: 11:00 Appt.') },
+    };
+    const first: ModelStop = {
+      ...STOP,
+      appointment: { ...RANGE, endTime: '15:00', flag: null, dateQuote: q(5, 'Pick Up Date: 10/14/2026 08:00-15:00'), timeQuote: q(5, 'Pick Up Date: 10/14/2026 08:00-15:00') },
+    };
+    const out = read({ ...reply(), stops: [first, second] }, lines);
+    expect(out.stops.map((s) => s.time.kind)).toEqual(['range', 'exact']);
+    expect(out.stops[0]!.time).toMatchObject({ time: '08:00', endTime: '15:00' });
+    expect(out.stops[1]!.time).toMatchObject({ time: '11:00' });
   });
 });

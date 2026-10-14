@@ -82,10 +82,19 @@ const MONTH_INDEX: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+/**
+ * A year after a named date is 2020 to 2039: "Oct 14 0800" is a date and a time,
+ * and "Oct 14 1400" too — a year of any four digits ate the time.
+ */
 const NAMED_DATE =
-  /\b(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4})\b)?/gi;
-/** M/D, M/D/YY, M/D/YYYY (or with dashes) — but "7-10 AM" is a time, not July 10. */
-const NUMERIC_DATE = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}|\d{2}))?\b(?!\s*[ap]\.?\s?m?\b)/gi;
+  /\b(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(20[23]\d)\b)?/gi;
+/**
+ * M/D, M/D/YY, M/D/YYYY (or with dashes) — but "7-10 AM" is a time, not July 10,
+ * and neither is the "00-15" inside "08:00-15:00": a match never starts right after
+ * a colon or ends right before one and a digit, where it is part of a clock time
+ * (2026-10-15: the date blanking destroyed both times of a 24-hour range).
+ */
+const NUMERIC_DATE = /(?<!:)\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}|\d{2}))?\b(?!:\d)(?!\s*[ap]\.?\s?m?\b)/gi;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoOf = (y: number, m: number, d: number) => `${y}-${pad(m)}-${pad(d)}`;
@@ -146,12 +155,29 @@ const hhmm = (h: number, m: number) => `${pad(h)}:${pad(m)}`;
 const from12 = (h: number, m: number, meridiem: string) =>
   h >= 1 && h <= 12 && m <= 59 ? (h % 12) + (meridiem.toLowerCase() === 'p' ? 12 : 0) : null;
 
+/** A time with AM/PM: "8 AM", "8:00 pm", "7:00 A.M.", "8:00P", the end of "7-10 AM". Any one of these, anywhere, rules out a 24-hour document. */
+const AM_PM_TIME = /\b\d{1,2}(?::\d{2})?\s*[ap]\.?\s?m\b|\b\d{1,2}:\d{2}\s*[ap]\b(?![a-z.])/i;
+/** An unambiguous 24-hour clock: an hour past 12, or a two-digit hour with a leading zero. "10:00" is not one. */
+const TWENTY_FOUR_HOUR_TIME = /\b(?:0\d|1[3-9]|2[0-3]):[0-5]\d\b/;
+
+/**
+ * Is the DOCUMENT on a 24-hour clock? It holds at least one unambiguous 24-hour
+ * time (13:30, 08:00) and no time with AM/PM at all. Computed once, from the
+ * lines that were sent. Then a bare "11:00" is 11:00; otherwise it is not
+ * guessed (§12.122).
+ */
+export function documentIs24Hour(sent: readonly PreparedLine[]): boolean {
+  const text = sent.map((l) => l.text).join('\n');
+  return TWENTY_FOUR_HOUR_TIME.test(text) && !AM_PM_TIME.test(text);
+}
+
 /**
  * Every time the text holds. AM/PM, or four digits ("1400"), or HH:MM when
  * the quote shows a 24-hour clock — a leading zero or an hour past 12
- * somewhere in it. A bare "8:00" or "10:00" alone is never guessed (§12.122).
+ * somewhere in it — or when the document does (`hours24`). A bare "8:00" or
+ * "10:00" alone is never guessed (§12.122).
  */
-function timesIn(text: string): Set<string> {
+function timesIn(text: string, hours24: boolean): Set<string> {
   const times = new Set<string>();
   for (const m of text.matchAll(SHARED_MERIDIEM)) {
     const end = from12(Number(m[3]), Number(m[4] ?? 0), m[5]!);
@@ -168,7 +194,7 @@ function timesIn(text: string): Set<string> {
   for (const m of text.matchAll(FOUR_DIGITS)) times.add(hhmm(Number(m[1]), Number(m[2])));
   const clocks = [...text.matchAll(CLOCK)].map((m) => ({ raw: m[1]!, h: Number(m[1]), m: Number(m[2]) }));
   const twentyFour = clocks.some((c) => (c.raw.length === 2 && c.raw.startsWith('0')) || c.h >= 13);
-  if (twentyFour) {
+  if (twentyFour || hours24) {
     for (const c of clocks) if (c.h <= 23 && c.m <= 59) times.add(hhmm(c.h, c.m));
   }
   return times;
@@ -179,7 +205,12 @@ function timesIn(text: string): Set<string> {
 const APPT_WORDS = /\b(?:appt|appointment)\b/i;
 const FCFS_WORDS = /\b(?:fcfs|first come)\b/i;
 
-function timeFrom(a: ModelAppointment, sent: ReadonlyMap<number, PreparedLine>, now: Date): { time: TimeRead; confirmed: boolean } {
+function timeFrom(
+  a: ModelAppointment,
+  sent: ReadonlyMap<number, PreparedLine>,
+  now: Date,
+  hours24: boolean,
+): { time: TimeRead; confirmed: boolean } {
   if (a.kind === 'none') return { time: { kind: 'none', source: null }, confirmed: false };
   if (a.kind === 'unclear') {
     const at = locate(a.quote, sent);
@@ -201,7 +232,7 @@ function timeFrom(a: ModelAppointment, sent: ReadonlyMap<number, PreparedLine>, 
   };
 
   const onDate = dateAt ? datesIn(dateAt.text, now).dates : new Set<string>();
-  const clockOf = (at: Located | null) => (at ? timesIn(datesIn(at.text, now).rest) : new Set<string>());
+  const clockOf = (at: Located | null) => (at ? timesIn(datesIn(at.text, now).rest, hours24) : new Set<string>());
   const atTime = clockOf(timeAt);
   const dateOk = onDate.has(a.date);
   const timeOk = atTime.has(a.time);
@@ -277,6 +308,7 @@ function stopFrom(
   stop: ModelStop,
   sent: ReadonlyMap<number, PreparedLine>,
   now: Date,
+  hours24: boolean,
 ): { read: StopRead; confirmed: number; unconfirmed: number } {
   const typeAt = locate(stop.type.quote, sent);
   const words = typeAt?.text ?? '';
@@ -297,7 +329,7 @@ function stopFrom(
       fieldChecks[field] = result.check;
     }
   }
-  const time = timeFrom(stop.appointment, sent, now);
+  const time = timeFrom(stop.appointment, sent, now, hours24);
   if (time.confirmed) confirmed += 1;
   else if (stop.appointment.kind === 'exact' || stop.appointment.kind === 'range') unconfirmed += 1;
 
@@ -340,8 +372,9 @@ export function verifyRead(reply: ModelRead, sent: readonly PreparedLine[], now:
     }
   }
 
+  const hours24 = documentIs24Hour(sent);
   const stops = reply.stops.map((s) => {
-    const out = stopFrom(s, byLine, now);
+    const out = stopFrom(s, byLine, now, hours24);
     confirmed += out.confirmed;
     unconfirmed += out.unconfirmed;
     return out.read;
