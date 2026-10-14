@@ -34,6 +34,7 @@
     "ratecon:eval-ai": "node --conditions=react-server --env-file=.env.local --import tsx scripts/ratecon-eval-ai.mts",
     "ratecon:expected-skeleton": "tsx scripts/ratecon-expected-skeleton.mts",
     "ratecon:redact-report": "tsx scripts/ratecon-redact-report.mts",
+    "ratecon:redact-rules-report": "tsx scripts/ratecon-redact-rules-report.mts",
     "ratecon:review-redacted": "tsx scripts/ratecon-review-redacted.mts",
     "ratecon:score": "tsx scripts/ratecon-score.mts",
     "reader:smoke": "node --conditions=react-server --env-file=.env.local --import tsx scripts/reader-smoke.mts",

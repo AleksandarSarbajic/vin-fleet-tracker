@@ -66,8 +66,14 @@ a password, damaged) or for a scan, until phase 4.
 reads:
 
 > Layout not recognised, nothing filled.
-> **Read with AI** — sends 46 lines, with rates, contacts, phones, emails and
-> driver names removed. Nothing is saved until Save.
+> **Read with AI** — sends 46 lines with phones, emails, rates and the names
+> it recognises removed; a name it does not recognise can still go through, so
+> read “Show what is sent” before you click.
+
+(Before `redact-2026-10-14.3` it read "…with rates, contacts, phones, emails
+and driver names removed. Nothing is saved until Save." That claimed more than
+the code does, so it was reworded; see §2, The claim. The save is still
+unsaved until Save: the fill messages say so.)
 
 The number is the count of lines that would be sent after redaction and page
 selection (§2). Nothing else from the document is shown.
@@ -118,7 +124,7 @@ so the model still sees the shape of the line.
 | What | How | Placeholder |
 |---|---|---|
 | Email addresses | pattern, including "name at domain dot com" | `[EMAIL]` |
-| Phone and fax numbers | NANP patterns with separators, `+1`, extensions; bare 10-digit runs only after a phone, fax or cell label | `[PHONE]` |
+| Phone and fax numbers | NANP patterns with separators, `+1`, extensions; bare 10-digit runs after a phone, fax or cell label; and (rule A, below) a bare 10- or 11-digit run with an assigned area code and no identifier label before it | `[PHONE]` |
 | Money | `$` amounts (any spaces after the `$`, since 3a-2), amounts with `USD`, and any number on a line labelled Rate, Line Haul, Total, Fuel, FSC, Accessorial, Detention, Lumper, TONU, Pay or Amount | `[AMOUNT]` |
 | Labelled contacts | the value after Contact, Dispatcher, Broker Rep, Agent, Rep, Booked by, Driver, Driver Name, Driver Cell, Truck #, Trailer # | `[REMOVED]` |
 | Carrier and broker identifiers | MC and DOT numbers | `[ID]` |
@@ -154,6 +160,61 @@ label still followed by a name-like word (in its cell) or cell (past
 placeholder-only cells) is a `labelled` hit. It has NO limit, so a fourth
 name-like cell past the mask's three refuses the document.
 
+**Rule A: a bare phone** (version `redact-2026-10-14.3`, 2026-10-14). Found
+in the text "Show what is sent" displays: a phone in a table cell after an
+address cell, and an 11-digit number starting with 1 in a driver row, both
+sent. The old rule left a bare run of digits "because it could be a load
+number". Now, on the line as it is sent (and again after the later passes, so
+a cell they mask cannot leave a number without its label):
+- a run of **exactly 10 digits, or 11 starting with 1**, alone (not inside a
+  longer number, a word, a hyphenated id or a decimal), is `[PHONE]` when its
+  area code is **assigned**: a static set in `nanp-area-codes.ts` (the NANPA
+  list, US, Canada, Caribbean and the toll-free codes; a snapshot, not
+  exhaustive of future codes, and typed by hand — to be diffed against the
+  NANPA download);
+- **left alone:** a number just after an identifier label, in its cell or the
+  one before (load, order, pro, bol, po, so, si, ref, reference, shipment,
+  pickup, delivery, confirmation, tracking, trip, stop #; `#`, `No.`,
+  `Number`, `ID` may sit between); a number whose area code is not assigned
+  (a 10-digit load number starting 200); a run of more than 11 digits;
+- the phone-word rule stays, so `Tel 6125550147` is masked with any area code;
+- **the re-scan checks it too:** a bare phone that is not guarded is a
+  `phone` hit, and nothing is sent.
+
+**Rule B: a name in the row below a person header** (same version). A header
+row — `Contact` | `Phone` | `Email`, or `Driver Name` | `Driver Cell` — has
+its cells masked by the label rule, but the values are on the NEXT line.
+- **Header:** a line with a cell that is a person label with nothing after it
+  — all its words from a small header vocabulary (contact, dispatcher, rep,
+  agent, booked by, driver, name, phone, cell, email, carrier, broker, truck,
+  …) with a person role among them — and that is the last cell of the line or
+  is followed by another header cell. A person label with a value on the same
+  line is the same-line case, unchanged.
+- **Masked:** every cell of the next line (and of the one after it, if the
+  next is blank or only placeholders — and no further) that is one to four
+  words of letters, spaces, hyphens, apostrophes and periods, as
+  `[REMOVED]`; placeholders beside the name stay (`Dana Example [PHONE]` is
+  `[REMOVED] [PHONE]`). **By row**: there is no column alignment to go by.
+- **Kept:** an ALL-CAPS cell with a company word (INC, LLC, LTD, CORP, CO,
+  LOGISTICS, FREIGHT, TRANSPORT, TRUCKING, EXPRESS, GROUP, SERVICES,
+  SOLUTIONS, DISTRIBUTION, WAREHOUSE, DC); a state; a run of weekdays; and
+  anything with a digit or comma — a ZIP, a city line, a street number, a
+  date, a time, a load number. (`cityLine` is therefore not needed: a city
+  line has a comma and digits. No street-like test existed in the code; a
+  digit-free one would only unmask surnames like Lane, so a number-less
+  "Main St" is masked.)
+- **In doubt, masked.** `Prairie Cold Storage` and `Example Logistics Inc`
+  in mixed case under a person header go; that is the cost.
+- A line that is itself a person header is not a row of values: it masks its
+  own next line. Never across a page. Nothing outside those rows is touched.
+- **The re-scan has no memory of other lines,** so it does not check rule B.
+
+**The claim.** The strip said "rates, contacts, phones, emails and driver
+names removed". `redact.ts` says it is not a guarantee, and rules A and B
+exist because the claim was wrong. It now says what is true: phones, emails,
+rates and the names it can recognise are removed; a name it cannot recognise
+can still go through; read what is sent before you click.
+
 **Page selection, to send less.** From a PDF, the sender takes page 1 and
 every page that holds at least one US city line (the existing `cityLine`
 pattern). Terms-and-conditions pages are mostly dropped this way. Pasted
@@ -176,14 +237,27 @@ text has no pages, so all of it is sent, within the size limit (§4).
   - a labelled name that shares a later cell with a non-name word:
     `Dispatcher: Dana` | `Example x22` sends `Example` (the walk takes
     whole name-like cells only), and the re-scan agrees with the mask;
-  - a name on the line after its label: the walk is within one line;
+  - a name on the line after its label: the walk is within one line. Since
+    rule B, one case is closed: the line below a header row that names a
+    person. A name further down, or under a header that is not a person
+    label (`Carrier`, `Name`), still goes through;
+  - a name of more than four words, or in a cell with a digit or comma, under
+    a person header;
+  - a bare phone with an area code assigned after the list was written, in a
+    cell right after a `Pickup`, `Ref` or similar cell, or with letters
+    stuck to it;
   - a name after a contact label that is not a person label (`Phone:`
     | `[PHONE]` | `Dana`);
   - a broker's company name in a page header;
   - a contact detail written in a way no pattern expected.
 - **Known over-masking:**
   - a load number made of 10 bare digits after a phone label would be
-    masked, and that field would then come back blank and marked;
+    masked, and that field would then come back blank and marked; since
+    rule A, so would one with an assigned area code that has no identifier
+    label in its cell or the one before (a load number under a `Load #`
+    header on the line above);
+  - under a person header, a facility or company name in mixed case, and a
+    street name with no number;
   - a facility name in the cells right after a person label goes with the
     name (`Contact:` | `Dana` | `Prairie Cold Storage`).
 
@@ -1067,3 +1141,12 @@ Phase 3s (2026-10-14):
     in two new tables linked to the read's counts row. The read response gains
     `readId`. Counts only, 90 days. Recording is after the save, not awaited,
     and cannot fail it. The queries to read it are in HANDOFF, phase 3s.
+
+Phase 3t (2026-10-14):
+
+41. **Two redaction gaps closed, and the claim made honest** (§2).
+    `REDACTION_VERSION` is `redact-2026-10-14.3`: rule A (a bare phone), rule
+    B (a name under a person header), the strip's line reworded. Every
+    approval that named a sent-text hash is void and must be re-reviewed.
+    The known limit stays: a name with no label and no header above it can
+    still go through.
