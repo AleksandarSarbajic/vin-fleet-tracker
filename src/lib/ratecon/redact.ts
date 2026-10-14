@@ -387,7 +387,7 @@ export function residue(text: string): MaskKind[] {
 }
 
 /** Page 1, and every page with a US city line. Pasted text has no pages: all of it. */
-function selectPages(lines: readonly Line[]): Line[] {
+export function selectPages(lines: readonly Line[]): Line[] {
   if (lines.every((l) => l.page === null)) return [...lines];
   const withCity = new Set(
     lines.filter((l) => cityLine(l.text) !== null || l.cells.some((c) => cityLine(c.text) !== null)).map((l) => l.page),
