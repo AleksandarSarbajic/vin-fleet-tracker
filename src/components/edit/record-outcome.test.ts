@@ -18,6 +18,7 @@ import { recordFillOutcome } from './record-outcome';
 
 const NOW = new Date('2026-10-10T15:00:00.000Z');
 const READ = '5b1e2c0a-7f3d-4c58-9a60-0e3f6d1b2a44';
+const LAYOUT = ['00000001', '0a1b2c3d', 'ffffffff'];
 
 const aiFilled = (): LoadForm => {
   const prepared = prepareForReading(UNKNOWN_LAYOUT);
@@ -39,10 +40,11 @@ describe('recordFillOutcome', () => {
     const form = aiFilled();
     const post = vi.fn(async (_: OutcomeBody) => true);
     const before = notRecorded();
-    await recordFillOutcome({ readId: READ, snapshot: fillSnapshot(form) }, form, post);
+    await recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(form) }, form, post);
     expect(post).toHaveBeenCalledTimes(1);
     const sent = post.mock.calls[0]![0];
     expect(sent.readId).toBe(READ);
+    expect(sent.layout).toEqual(LAYOUT);
     expect(sent.fields.map((f) => f.field)).toEqual(['load_number', 'stop_type', 'street', 'city', 'state', 'zip', 'appointment']);
     expect(notRecorded()).toBe(before);
   });
@@ -51,7 +53,7 @@ describe('recordFillOutcome', () => {
     const form = aiFilled();
     const saved = { ...form, loadNumber: SENTINEL, stops: form.stops.map((s) => patchStop(s, { addressLine: `${SENTINEL} Main St`, city: SENTINEL })) };
     const post = vi.fn(async (_: OutcomeBody) => true);
-    await recordFillOutcome({ readId: READ, snapshot: fillSnapshot(form) }, saved, post);
+    await recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(form) }, saved, post);
     const text = JSON.stringify(post.mock.calls[0]![0]);
     expect(text).not.toContain(SENTINEL);
     expect(text).not.toContain('Main');
@@ -66,14 +68,14 @@ describe('recordFillOutcome', () => {
   it('a fill that put nothing in the form: nothing is posted', async () => {
     const empty = loadFormFrom(null, NOW.toISOString(), null);
     const post = vi.fn(async () => true);
-    await recordFillOutcome({ readId: READ, snapshot: fillSnapshot(empty) }, empty, post);
+    await recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(empty) }, empty, post);
     expect(post).not.toHaveBeenCalled();
   });
 
   it('a post that is refused is counted in this tab, and nothing is thrown', async () => {
     const form = aiFilled();
     const before = notRecorded();
-    await expect(recordFillOutcome({ readId: READ, snapshot: fillSnapshot(form) }, form, async () => false)).resolves.toBeUndefined();
+    await expect(recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(form) }, form, async () => false)).resolves.toBeUndefined();
     expect(notRecorded()).toBe(before + 1);
   });
 
@@ -81,7 +83,7 @@ describe('recordFillOutcome', () => {
     const form = aiFilled();
     const before = notRecorded();
     await expect(
-      recordFillOutcome({ readId: READ, snapshot: fillSnapshot(form) }, form, async () => {
+      recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(form) }, form, async () => {
         throw new Error('network down');
       }),
     ).resolves.toBeUndefined();
@@ -93,7 +95,7 @@ describe('recordFillOutcome', () => {
     const broken = { ...form, stops: null } as unknown as LoadForm;
     const post = vi.fn(async () => true);
     const before = notRecorded();
-    await expect(recordFillOutcome({ readId: READ, snapshot: fillSnapshot(form) }, broken, post)).resolves.toBeUndefined();
+    await expect(recordFillOutcome({ readId: READ, layout: LAYOUT, snapshot: fillSnapshot(form) }, broken, post)).resolves.toBeUndefined();
     expect(post).not.toHaveBeenCalled();
     expect(notRecorded()).toBe(before + 1);
   });

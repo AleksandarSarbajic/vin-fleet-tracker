@@ -163,6 +163,14 @@ test('after a template miss, Read with AI makes a PAIR through the route and the
   // Counts only: no value, and no second record on a later save.
   expect(JSON.stringify(outcome)).not.toMatch(/Main|Fargo|Duluth|EX-40417|58102/);
   expect((await db((sql) => sql<{ n: number }[]>`select count(*)::int as n from stops where load_id is not null`))[0]!.n).toBeGreaterThanOrEqual(2);
+
+  // The read's layout fingerprint sits on the outcome row: hashes of label words, at most 64, sorted — and no text.
+  const [stored] = await db((sql) => sql<{ layout: string[] }[]>`select layout from ratecon_ai_outcomes`);
+  expect(stored!.layout.length).toBeGreaterThan(0);
+  expect(stored!.layout.length).toBeLessThanOrEqual(64);
+  for (const hash of stored!.layout) expect(hash).toMatch(/^[0-9a-f]{8}$/);
+  expect(stored!.layout).toEqual([...stored!.layout].sort());
+  expect(JSON.stringify(stored)).not.toMatch(/load|booked|pick|Main|Fargo|Duluth|EX-40417|58102/i);
 });
 
 test('a pair whose second read fails fills nothing, says the AI read did not complete, and is still one read against the cap', async ({

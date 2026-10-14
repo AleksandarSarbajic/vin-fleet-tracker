@@ -1074,7 +1074,7 @@ function LoadEditor({
                   setSelected(0);
                   // An AI read that filled the form waits for the first save after it; any other fill replaces it.
                   pendingOutcome.current =
-                    read.layout === 'model' && meta ? { readId: meta.readId, snapshot: fillSnapshot(filled.form) } : null;
+                    read.layout === 'model' && meta ? { readId: meta.readId, layout: meta.layout, snapshot: fillSnapshot(filled.form) } : null;
                   return null;
                 }}
               />

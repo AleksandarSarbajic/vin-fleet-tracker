@@ -10,13 +10,16 @@ import type { LoadForm } from './load-form';
  */
 export interface PendingOutcome {
   readId: string;
+  /** The read's layout fingerprint: hashes of the labels in the text that was sent (`layoutLabels`). */
+  layout: string[];
   snapshot: FillSnapshot;
 }
 
 /**
  * Tells the server what the dispatcher did with an AI fill (docs/
- * llm-reader-design.md §4; Alex, 2026-10-14): counts per field name, once,
- * the first time the load is saved after the fill.
+ * llm-reader-design.md §4; Alex, 2026-10-14): counts per field name, and the
+ * read's layout fingerprint (hashes only, 2026-10-15), once, the first time
+ * the load is saved after the fill.
  *
  * It runs AFTER the save, is not awaited by it, and cannot fail it: nothing
  * escapes this function. A summary that throws, a post that throws or is
@@ -33,7 +36,7 @@ export async function recordFillOutcome(
   try {
     const fields = outcomeFields(pending.snapshot, saved);
     if (fields.length === 0) return;
-    if (!(await post({ readId: pending.readId, fields }))) bumpCount('outcomeNotRecorded');
+    if (!(await post({ readId: pending.readId, fields, layout: pending.layout }))) bumpCount('outcomeNotRecorded');
   } catch {
     // Counted, not shown: the load has already saved.
     bumpCount('outcomeNotRecorded');

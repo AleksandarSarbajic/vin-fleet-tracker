@@ -12,6 +12,9 @@ import { PU_SO_PASTED } from '@/test/ratecon-fixtures';
 import type { FleetResponse } from '@/hooks/useFleet';
 import type { ModelRead } from '@/lib/ratecon/model-read';
 import { readCounts } from '@/lib/ratecon/session-counts';
+import { linesFromText } from '@/lib/ratecon/lines';
+import { layoutLabels } from '@/lib/ratecon/layout';
+import { prepareForReading } from '@/lib/ratecon/redact';
 
 /**
  * What the dispatcher did with an AI read, told to the server (docs/
@@ -128,7 +131,13 @@ const aiFill = async () => {
   await click(buttonIn(strip(), 'Read with AI')!);
 };
 const save = () => click(buttonIn(container!, 'Save')!);
-const sent = () => JSON.parse(posts('/api/ratecon/outcome')[0]!.body) as { readId: string; fields: Record<string, unknown>[] };
+const sent = () => JSON.parse(posts('/api/ratecon/outcome')[0]!.body) as { readId: string; fields: Record<string, unknown>[]; layout: string[] };
+/** The fingerprint of the text the page sent for CLIP: the sent lines, labelled. */
+const CLIP_LAYOUT = (() => {
+  const prepared = prepareForReading(linesFromText(CLIP));
+  if (!prepared.ok) throw new Error(prepared.reason);
+  return layoutLabels(prepared.lines);
+})();
 const notRecorded = () => readCounts().outcomeNotRecorded;
 
 describe('an AI fill, saved', () => {
@@ -161,7 +170,31 @@ describe('an AI fill, saved', () => {
     expect(by.street).toMatchObject({ kept: 1, changed: 1 });
     expect(by.city).toMatchObject({ kept: 1, cleared: 1 });
     for (const forbidden of [SENTINEL, 'Main', 'Fargo', 'Duluth', 'EX-40417', '58102']) expect(text).not.toContain(forbidden);
-    expect(Object.keys(JSON.parse(text)).sort()).toEqual(['fields', 'readId']);
+    expect(Object.keys(JSON.parse(text)).sort()).toEqual(['fields', 'layout', 'readId']);
+  });
+
+  it('sends the read\'s layout with it: hashes of the labels in the text that was sent, and nothing else', async () => {
+    await render();
+    await aiFill();
+    await type(input(form(), 'Street address'), `${SENTINEL} Main St`);
+    await save();
+    const body = sent();
+    expect(CLIP_LAYOUT.length).toBeGreaterThan(0);
+    expect(body.layout).toEqual(CLIP_LAYOUT);
+    for (const h of body.layout) expect(h).toMatch(/^[0-9a-f]{8}$/);
+    const text = posts('/api/ratecon/outcome')[0]!.body;
+    for (const forbidden of [SENTINEL, 'Load', 'Booked', 'Pick', 'Dana', 'Fargo']) expect(text).not.toContain(forbidden);
+  });
+
+  it('a layout the server refuses never touches the save: the load saved, the miss is counted, nothing shown', async () => {
+    outcomeAnswer = async () => json(400, { ok: false, code: 'bad_request' });
+    const before = notRecorded();
+    await render();
+    await aiFill();
+    await save();
+    expect(posts('/api/stops')).toHaveLength(1);
+    expect(onClose).toHaveBeenCalled();
+    expect(notRecorded()).toBe(before + 1);
   });
 
   it('only the FIRST save after the fill: a later edit and save posts nothing more', async () => {

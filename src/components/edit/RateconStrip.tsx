@@ -7,6 +7,7 @@ import { READ_MESSAGES, readFailureMessage, type ReadFailCode } from '@/lib/rate
 import { requestModelReads } from '@/lib/ratecon/read-client';
 import { readPair } from '@/lib/ratecon/read-pair';
 import { linesFromPdfFile } from '@/lib/ratecon/read-pdf';
+import { layoutLabels } from '@/lib/ratecon/layout';
 import { prepareForReading, type Prepared } from '@/lib/ratecon/redact';
 import { bumpCount, readCounts, type FillCounts } from '@/lib/ratecon/session-counts';
 import { LAYOUT_NAME, readRatecon, type RateconRead } from '@/lib/ratecon/templates';
@@ -56,10 +57,25 @@ type Status =
   | { kind: 'idle' }
   | { kind: 'reading' }
   | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue; notices?: string[] }
-  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[]; readId?: string }
+  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[]; meta?: ReadMeta }
   /** A template miss, with "Read with AI" offered when the document can be prepared. */
   | { kind: 'missed'; prepared: Prepared; note: Said | null }
   | { kind: 'ai-reading'; prepared: PreparedOk };
+
+/** What the modal keeps of an AI read for the outcome it records after the save: the read, and its layout fingerprint. */
+export interface ReadMeta {
+  readId: string;
+  layout: string[];
+}
+
+/** The layout fingerprint of the lines that were sent; empty if it cannot be made, because it must never get in the way of a fill. */
+function layoutOf(lines: readonly { text: string }[]): string[] {
+  try {
+    return layoutLabels(lines);
+  } catch {
+    return [];
+  }
+}
 
 const notPrepared = (prepared: Exclude<Prepared, { ok: true }>): string =>
   READ_MESSAGES[prepared.reason === 'too-large' ? 'too_large' : 'not_redacted'];
@@ -89,7 +105,7 @@ export function RateconStrip({
    * names the read (its counts row), so the modal can later tell the server
    * what the dispatcher did with it.
    */
-  onFill: (read: RateconRead, meta?: { readId: string }) => string | null;
+  onFill: (read: RateconRead, meta?: ReadMeta) => string | null;
   /** Bumped by the modal when it counts an edit, so the counts line re-reads. */
   countsVersion: number;
   /** Bumped by the modal whenever the dispatcher types into the load: the strip folds. */
@@ -117,8 +133,8 @@ export function RateconStrip({
   }, [editsVersion]);
 
   const fill = useCallback(
-    (read: RateconRead, cue?: Cue, notices?: string[], readId?: string) => {
-      const refused = onFill(read, readId ? { readId } : undefined);
+    (read: RateconRead, cue?: Cue, notices?: string[], meta?: ReadMeta) => {
+      const refused = onFill(read, meta);
       const n = read.stops.length;
       setStatus(
         refused
@@ -180,10 +196,10 @@ export function RateconStrip({
       const cueText = addressCueText(pair.cue);
       const cue = cueText ? { text: cueText, sent: prepared.text } : undefined;
       const { read, notices } = pair.agreement;
-      const readId = out.readId ?? undefined;
+      const meta = out.readId ? { readId: out.readId, layout: layoutOf(prepared.lines) } : undefined;
       if (entries.current) {
-        setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}), ...(readId ? { readId } : {}) });
-      } else fill(read, cue, notices, readId);
+        setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}), ...(meta ? { meta } : {}) });
+      } else fill(read, cue, notices, meta);
     },
     [fill],
   );
@@ -370,7 +386,7 @@ export function RateconStrip({
               </p>
               <button
                 type="button"
-                onClick={() => fill(status.read, status.cue, status.notices, status.readId)}
+                onClick={() => fill(status.read, status.cue, status.notices, status.meta)}
                 className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
               >
                 Replace
