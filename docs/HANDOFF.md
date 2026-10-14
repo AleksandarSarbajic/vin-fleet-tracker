@@ -1376,6 +1376,107 @@ test:
 - **Latency:** the two calls run in parallel, so a read takes about as long
   as one call.
 
+### Phase 3e: evaluation run 2, paired, the six control files (2026-10-14)
+
+**Alex's written approval, 2026-10-14:** "Approved: ratecon:eval-ai with
+--pairs on samples 1,18,19,22,23,27, 3 runs each (36 calls), Claude Haiku
+5.5, ceilings $1.00 and 75 calls. These are the same six files whose
+redacted text I reviewed in the viewer earlier today and found nothing that
+should not be sent; the redaction has not changed since (only an export was
+added). The account's default retention (inputs deleted within 30 days,
+flagged ones possibly kept up to 2 years) is ACCEPTABLE."
+
+**Checked before the run:**
+
+- **`redact.ts` since run 1 (`428e8ae`):** the only change is the `export`
+  on `selectPages`.
+- **The six files' sent text** hashes the same as at review: 1
+  `fb29410648b3`, 18 `468a682c66ec`, 19 `956b427864f6`, 22 `59d3639c56f8`,
+  23 `90354f4c21b4`, 27 `1225bd3f09cf`.
+
+**The command, run once, as given:**
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=1,18,19,22,23,27 --runs=3 --pairs
+
+**Result:**
+
+| | |
+|---|---|
+| Calls | 36 of 36 |
+| Tokens | 153,894 in, 81,584 out |
+| Cost | **$0.0562**, about $0.0031 a pair (ceiling $1.00; bound-based most $0.1842) |
+| Runs scored | **17 of 18.** Sample 22, run 1: `pair_incomplete (A invalid_output, B ok)`, so not scored |
+| Pairs | **12 agreed, 5 differed** |
+| WRONG on the bar, read A alone | **0** |
+| WRONG on the bar, merged | **0** |
+| WRONG on appointments, merged | **0** |
+| Verdict | `incomplete`, exit 1: not a pass, because one run was not scored |
+
+**Per run:**
+
+| Sample | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| 1 | agree | agree | agree |
+| 18 | agree | agree | agree |
+| 19 | agree | agree | agree |
+| 22 | not scored (A `invalid_output`) | agree | **differ:** appointment ×1 (stop 2) |
+| 23 | agree | **differ:** appointment ×1 (stop 2) | agree |
+| 27 | **differ:** appointment ×2 (stops 1 and 2) | **differ:** appointment ×1 (stop 1) | **differ:** appointment ×1 (stop 1) |
+
+- **Only appointments ever differed.** No pair differed on the stop count,
+  the load number, the type, the street, ZIP, city or state. No read
+  dropped a stop this time.
+- **Read A alone vs merged, on the bar:** 0 and 0. Agreement had no bar
+  WRONG to remove in this run: run 1's dropped stop (1 read in 18) did not
+  recur in 35 verified reads.
+
+**Sample 27, stop 1's appointment:**
+
+- **In all 3 runs, the two reads DISAGREED on it,** so the merge blanked it
+  and marked it: `marked, filled differently (type, date, time, end time)`.
+  In run 1 this appointment was WRONG in all 3 single reads. Here it is
+  marked in all 3, never silently wrong.
+- **This corrects 3d.** There I wrote that agreement would most likely NOT
+  catch sample 27, as the same mistake made twice. The reads did not repeat
+  each other: each pair split.
+- **The parts named are the BLANK merged appointment against the ground
+  truth,** so every part differs. They do NOT say which part either read
+  got wrong. The script prints read A's WRONG only for the bar's fields,
+  not per-read appointment diagnostics. So the question of which sub-field
+  the model gets wrong on 27 stop 1 is still open. A diagnostic gap, not
+  fixed: per-read appointment verdicts (names only) would answer it next
+  time.
+
+**What else agreement did to appointments:**
+
+- **It blanked appointments the single reads usually got right.**
+  - In run 1 these were `exact` whenever read: sample 27 stop 2 (pair 1)
+    and sample 23 stop 2 (pair 2), 3 of 3 each; sample 22 stop 2 (pair 3),
+    2 of 2 (the stop was missing in the third).
+  - Each came out `marked, filled differently (…)`: a blank for the
+    dispatcher to fill.
+  - **That is the cost:** 3 of the 6 appointments blanked here were ones
+    the model reads right whenever it reads them. The other 3 are sample 27
+    stop 1, the one that was WRONG.
+- **Sample 1, stop 2: `marked, filled differently (date)` in all 3 runs,**
+  with both reads agreeing.
+  - This is the same mistake made twice, as 3d predicted for some case. It
+    is marked, so a dispatcher looks; it is not WRONG.
+  - The template fills this appointment as the PDF says.
+
+**The narrowed cue:**
+
+- **It would have fired on 3 of 17 scored runs:** sample 27, every run, on
+  L72 and L99.
+- **No stop was dropped in any of them,** so all 3 are false alarms.
+- This matches the offline count exactly: 27 was the 1 of 6 control files
+  it fires on.
+
+**A read that failed the schema:** sample 22, run 1, read A,
+`invalid_output`. That is 1 of 36 reads; run 1 had none in 18. Under
+`--pairs` the run is not scored, by design (3d). In the app, what a pair
+with one failed read does is undecided.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -1416,9 +1517,15 @@ proposals below).
    - **A dropped stop:** the cue is narrowed (3d): 1 of 6 control files
      with nothing dropped, and it misses a dropped first stop. Still to
      decide: whether it should outlast the first keystroke.
-   - **Two-read agreement** (3d, not wired): approve a paired run 2 on the
-     six control files (`--pairs`, 36 calls, about $0.06) to see whether it
-     pays. If it goes in, decide the caps: two calls a read.
+   - **Two-read agreement** (3d, not wired). Run 2 (3e, paired) made no
+     WRONG and turned sample 27's silent appointment WRONG into a marked
+     blank in 3 of 3 runs. But it blanked 3 appointments the model reads
+     right in run 1, and no stop was dropped to test the case it was built
+     for. Decide:
+     - wire it in, with two calls a read against the cap;
+     - keep single reads with the cue;
+     - or first add per-read appointment diagnostics and run again.
+     Also decide what a pair with one failed read does in the app.
    - **Sample 27, stop 1:** Alex reads its appointment lines in the viewer
      and says whether the ground truth or the read is right. The template
      agrees with the ground truth there.
