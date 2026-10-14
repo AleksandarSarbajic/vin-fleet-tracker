@@ -1982,6 +1982,147 @@ alone 0 (3k: 3). Read B alone 0 (3k: 2).
   sent.
 - Nothing was fixed. Whether to turn the reader on is Alex's call.
 
+### Phase 3m: the app runs the pair (2026-10-14)
+
+No API call, no use of the key, no document text or ground-truth value read
+or printed, nothing under `.samples/` opened, and **the reader stays OFF**:
+`LLM_READER_ENABLED` is set in no env file (the e2e server sets it itself,
+with the fake vendor). `ratecon:eval-ai` was not run; it was only shown to
+still refuse without a valid `--approved`.
+
+**Why:** the evaluation (3h to 3l) measured a PAIR of reads merged by
+agreement, but the route and the browser made a single read, so the app did
+not run what was measured. It does now.
+
+**The decisions already made (Alex) were not reopened:** a pair, failed or
+not, is ONE read against the daily cap (one reservation, two vendor calls);
+a pair where either read fails (adapter, schema, or the verifier's
+`nothing_confirmed`) fails as a whole, with a code, and fills nothing; it
+never falls back to the read that succeeded; the route does not verify, the
+browser verifies each reply against exactly the lines it sent and then
+merges.
+
+**1. The route** (`handle-read.ts`; the order of checks is unchanged):
+
+- After the same checks and the same single reservation, **two vendor calls
+  with the same redacted lines, made at once** (`Promise.all`), so a request
+  stays inside the existing time limit. Both get one signal: the server's
+  25 s timeout joined with the request's cancellation, so a timeout or a
+  Cancel reaches both.
+- **Either call failing** (adapter, or the schema) fails the request with
+  that code (**read A's when A failed, else read B's**) and returns neither
+  reply. On success: `{ ok: true, reads: [A, B] }`.
+- **What the counts row now means for a pair.** Still **one row per pair**,
+  and it counts what it already counted: the **outcome is the pair's** (`ok`,
+  or the failing read's code), **`input_tokens` and `output_tokens` are both
+  calls' summed** (a failed pair keeps the tokens of every call that was
+  billed; both empty when neither reported any), `lines_sent` is the lines
+  once, `vendor` as before. No column, no migration.
+- **The one log line** is per failed pair: the failing read's code and
+  vendor status, as before; a schema failure and a cancel are not logged, as
+  before. Nothing from a document or a vendor is logged or returned.
+
+**2. The shared function** (`src/lib/ratecon/read-pair.ts`, `readPair`; pure):
+
+- It does exactly what `ratecon-eval.mts` did privately: verify each reply
+  against the sent lines, `agreePair`, the fill's input (layout `model`),
+  `notices`, `differed`, and the cue (a line either read cited is used). Its
+  failure carries no read: `{ ok: false, code, codes: [A's, B's] }`.
+- The **eval's private copy was moved, not duplicated**: it now calls
+  `readPair`. Its output is unchanged (its 70 tests pass as they were). The
+  eval's single-read mode (no `--pairs`) still verifies its lone reply with
+  `verifyRead`, as does `reader:smoke`: both are diagnostics that fill no
+  form.
+
+**3. The browser:**
+
+- `requestModelRead` is gone; `requestModelReads` returns both replies or a
+  code, and a reply list that is not exactly two schema-valid reads is
+  `invalid_output` (so the old `{ ok: true, read }` shape is refused).
+- The strip calls `readPair`, shows the **agreement notices** (the two stop
+  counts when they differ; how many fields were blanked and marked) under its
+  line, and the blanked fields carry their own marks. The AI marks and
+  checks behave as before. A pair counts once in "N read with AI".
+- **A failed pair** fills nothing and says "The AI read did not complete."
+  and then the code's own sentence (for `timeout`, `unavailable`,
+  `vendor_capped`, `refused`, `invalid_output`, `nothing_confirmed`). This
+  changes the words of those failures from before 3m (they led with the
+  code's sentence alone); the limits, the body's checks, Cancel and the
+  server's own `error` are worded as before.
+- **No path fills the form from one AI read** (proved, not argued):
+  `src/test/pair-only.test.ts` scans the code, without its comments, and
+  fails if `requestModelRead` returns, if anything but `readPair` calls
+  `verifyRead` in the app, if the strip reads `.reads`, `.verified` or a lone
+  reply, if `agreeReads` is called outside `agreePair`, if the route answers
+  with a single `read`, or if the eval copies the pair logic.
+
+**4. The fake and its script:** the fake plays its steps in call order, so
+two concurrent calls take step 1 (read A) and step 2 (read B), whatever each
+step's delay; it now records each call's signal, so a test can show a cancel
+reached both. The e2e script holds **two steps per read**; a script whose
+second step is `{ "fail": "unavailable" }` fails read B.
+
+**Cost and caps (unchanged, counting reads):**
+
+- **Per read, now a pair:** about **$0.0033** on Haiku 5.5, from 3l's
+  $0.0502 for 15 pairs (30 calls); about $0.0017 a call, and run 1's single
+  read was $0.0016. The doubling is vendor spend only.
+- The **daily caps stay 25 a user and 100 a day** and still count READS
+  (one reservation a pair). The per-user rate limit stays 3 at once, then 1 a
+  minute, per request. At the cap's worst case (100 reads a day) the vendor
+  spend is about $0.33 a day on Haiku.
+
+**Tests:** 2775 in all (2728 before).
+
+| File | Tests |
+|---|---|
+| `read-pair.test.ts` (new) | 13: agree, differ on a field, differ on stop count, a read confirming nothing, A/B/both failing (A's code), the cue's intersection, no input changed |
+| `pair-only.test.ts` (new) | 7: the single-read path is gone; the eval calls the strip's function |
+| `handle-read.test.ts` | 42 (31 before): two calls, one reservation; both replies or a code and neither; each failure; cap counts reads; calls at once; cancel and timeout reach both; tokens summed |
+| `read-client.test.ts` | 20 (15 before) |
+| `ratecon-ai.test.tsx` | 29 (21 before): agree, differ, stop counts, notices, a failed pair, no fallback to the read that stood, one count a pair |
+| `fake.test.ts` | 10 (7 before) |
+
+**Changed to follow the contract:** the route, client, strip and e2e tests
+now send and expect `reads: [A, B]`; the strip's failure sentences for the
+pair codes carry the "did not complete" lead. The Anthropic route tests
+return a fresh `Response` per call (a body reads once) and expect doubled
+tokens.
+
+**e2e** (`e2e/ratecon-ai.spec.ts`, run on its own with `ratecon-fill` and
+`reader-key-bundle`; `npm run check` does not run it): 6 passed. It covers a
+pair, a pair whose second read fails (nothing filled, one row, read A's
+tokens), and a pair whose reads differ. Its probe of the route is replaced
+by a check of the strip: the probe spent one of the user's three reads a
+minute, and the file makes exactly three.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- the calls run one after the other;
+- a half-failed pair falls back to the read that stood (route; `readPair`);
+- only the first call's tokens in the row;
+- B's code when both failed;
+- the request's cancel not given to the calls;
+- a second reservation per call;
+- the cue as a union instead of an intersection;
+- the strip dropping the notices;
+- the strip saying the bare sentence for a failed pair.
+
+**Found while building (for Alex to weigh; none changed):**
+
+1. **A pair is as available as both of its calls.** If a call fails with
+   probability p, a pair fails with about 2p. That follows from "fails as a
+   whole"; it was not measured (all 30 calls in 3l returned `ok`).
+2. **A failed pair still pays for both calls.** The other call is not
+   cancelled when one fails, so the row's tokens are complete. Cancelling it
+   early would save money on a failed pair and lose its token count.
+3. **The eval's default (single) mode now measures something the app no
+   longer does.** It is kept as a diagnostic; every approved run so far has
+   used `--pairs`. Removing it would be a separate change.
+4. **Two concurrent calls from one request** meet the vendor's rate limits
+   sooner (a 429 is `unavailable`).
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18

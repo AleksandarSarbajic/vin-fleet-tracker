@@ -76,10 +76,17 @@ selection (§2). Nothing else from the document is shown.
 the request in the browser; the server's own timeout ends the vendor call.
 Typing into the load folds the strip as today but does not cancel the read.
 
-**After a successful read.**
+**After a successful read.** A read is a PAIR (§3, §4; built in 3m): two
+model reads of the same lines, each verified, merged so that only what both
+said stands.
 - The existing Replace or Keep mine question comes first if a load number
   or address was already typed.
-- Then the form fills through `fillLoad`, as with a template. The strip says:
+- Then the form fills through `fillLoad`, as with a template. Under the
+  strip's line, in the fault tone, the agreement's notices when there are any:
+  "The two AI reads found 1 and 2 stops. The 2 shown are the read with more;
+  check each against the document." and "The two AI reads differed on 3
+  fields; each is left blank and marked." Each blanked field carries its own
+  mark. The strip says:
   "Filled 2 stops, read by AI. Check each stop against its quote, then press
   Looks right. Nothing is saved until Save." Its line says "2 stops read by
   AI to confirm", apart from "fields to check".
@@ -90,7 +97,9 @@ Typing into the load folds the strip as today but does not cancel the read.
 - The session counts gain "N read with AI" (counts only, this tab).
 
 **After a failure.** One line in the strip's fault tone (§5), and nothing
-fills. The button stays, so the dispatcher can try once more or type the
+fills. When the pair failed — either read, at the vendor, the schema or the
+verifier — the line says the AI read did not complete, then that code's own
+sentence. The button stays, so the dispatcher can try once more or type the
 load.
 
 **What is sent.** The redacted, numbered lines and a fixed instruction. Not
@@ -311,9 +320,13 @@ It says "N lines that look like addresses were not used: L12, L45", with
   13 template-read files. Without the "after the first stop" rule (3c) it
   was 5 of 6, because a header's addresses come before the stops.
 
-**Two-read agreement** (`src/lib/ratecon/agree-reads.ts`, phase 3d; built
-and tested, NOT wired into the app). Two reads of the same lines, each
-verified, merged so that only what both said stands:
+**Two-read agreement** (`src/lib/ratecon/agree-reads.ts`, phase 3d; in the
+app since phase 3m). Two reads of the same lines, each verified, merged so
+that only what both said stands. The browser strip and `ratecon:eval-ai
+--pairs` both call ONE function for it, `readPair` (`read-pair.ts`):
+verify each reply against exactly the lines sent, `agreePair`, then the cue
+(a line EITHER read cited is used) — so the evaluation measures what the app
+runs and the two cannot drift:
 - **When the stop counts differ,** the read with more stops gives them, and
   a notice names both counts.
 - **Stop by stop, by index,** a field they differ on is left blank and
@@ -326,14 +339,16 @@ the same mistake made twice: run 1's sample 27 appointment was WRONG the
 same way in 3 runs of 3. Comparing by index blanks the stops after a
 dropped middle stop: the safe side.
 
-**What it would cost in the app:**
+**What it costs in the app** (3m):
 - one read is two calls, made in parallel, so the latency is about one
   call's;
 - **the cap counts reads, and a pair is ONE read** (Alex, 2026-10-14):
   one reservation, two vendor calls. A failed pair is one read too (§4,
   §5). The count per read is unchanged; the spend per read doubles;
-- about **$0.003 a pair** on Haiku 5.5, from run 1's measured $0.0280 for
-  18 calls.
+- about **$0.0033 a pair** on Haiku 5.5, from run 6's measured $0.0502 for
+  15 pairs (30 calls); run 1 measured $0.0016 a single read. The caps
+  (25 a user, 100 a day) and the per-user rate limit (3 at once, then 1 a
+  minute) are unchanged and count reads, not calls.
 
 **Prompt injection.** The text is untrusted. The model has no tools, its
 output must pass the schema, every value must be quoted from the text, and
@@ -377,11 +392,13 @@ request refused for its body never spends a read:
      pass at once.
    - **No projection.** It compares a count with a cap and never divides by
      time elapsed (§12.60).
-   - **Two-read agreement** (§3; decided 2026-10-14, not built): a pair is
-     ONE read against the cap. It makes one reservation, then both calls.
-     The row's outcome is the pair's, and its tokens are both calls'. A pair
-     that fails is still one read against the cap, as a failed single read
-     is today.
+   - **Two-read agreement** (§3; decided 2026-10-14, built in 3m): a pair
+     is ONE read against the cap. It makes one reservation, then both calls.
+     The row's outcome is the pair's, and its tokens are both calls'
+     summed (empty, not zero, when neither call reported any). `lines_sent`
+     is the lines once. A pair that fails is still one read against the cap,
+     as a failed single read was. The table has no new column and no
+     migration: one row now means one pair.
    - **RLS** is enabled with deny-by-default policies, like every table.
 6. **Size limit.** The request's `content-length` must be at most 64 KB,
    read through a capped reader. The body is parsed with Zod:
@@ -391,16 +408,19 @@ request refused for its body never spends a read:
 
    Over the limit gets 413 with a fixed message.
 7. **Redaction re-check** (§2). Any hit gets 422, with no vendor call.
-8. **The vendor call** through the adapter (§6), with an `AbortSignal` of
-   25 s, joined with the request's own (a dispatcher's Cancel is recorded
-   as `cancelled`, not `timeout`). The request carries **today's date in
+8. **The vendor calls** (a pair: TWO, with the same redacted lines, made
+   at once through the adapter, §6) under one `AbortSignal` of 25 s joined
+   with the request's own, so a timeout or a Cancel reaches both (a
+   dispatcher's Cancel is recorded as `cancelled`, not `timeout`). The request carries **today's date in
    the dispatch zone**, so a date with no year can be read (Alex,
    2026-10-13); the verifier stays the judge of the year. No retries in the
    first release: a failed read costs one click, never a loop.
-9. **Parse the reply** with `ModelRead.safeParse`. The route returns
-   `{ ok: true, read, lines }` or `{ ok: false, code }` (§5). It does not
-   verify; the browser does, against the text it holds. The route stores
-   nothing but the counts row.
+9. **Parse each reply** with `ModelRead.safeParse`. The route returns
+   `{ ok: true, reads: [A, B] }` or `{ ok: false, code }` (§5). Either call
+   failing, at the adapter or the schema, fails the request with read A's
+   code, else read B's, and returns neither reply. It does not verify or
+   merge; the browser does, with `readPair`, against the text it holds. The
+   route stores nothing but the counts row.
 
 **Keys.**
 - The reader's settings are parsed by `parseReaderEnv` in
@@ -443,8 +463,8 @@ a constant that never includes vendor or document text.
 | `invalid_output` | the reply failed `ModelRead` | "The AI read came back unusable. Nothing was filled." |
 | `cancelled` | the dispatcher pressed Cancel | "Cancelled. Nothing was filled." |
 
-**A pair fails as a whole** (two-read agreement, §3; Alex, 2026-10-14; not
-built). When either read of a pair fails, the pair fails, and nothing is
+**A pair fails as a whole** (two-read agreement, §3; Alex, 2026-10-14; built
+in 3m). When either read of a pair fails, the pair fails, and nothing is
 filled. A read fails at the adapter (`timeout`, `unavailable`, `refused`,
 …), at the schema (`invalid_output`), or at the verifier
 (`nothing_confirmed`).
@@ -452,8 +472,14 @@ filled. A read fails at the adapter (`timeout`, `unavailable`, `refused`,
 - **Never the read that succeeded:** one read alone is exactly what
   agreement exists to distrust. `agreePair` (`agree-reads.ts`) is the rule
   in code.
-- **The strip says the AI read did not complete.** It shows that code's own
-  sentence above, and every one of them says nothing was filled.
+- **The strip says the AI read did not complete,** then that code's own
+  sentence, which says nothing was filled: "The AI read did not complete. The
+  AI reader is not available right now. Nothing was filled." Said for
+  `timeout`, `unavailable`, `vendor_capped`, `refused`, `invalid_output` and
+  `nothing_confirmed`; not for a code that stops a read before any call, nor
+  for Cancel, nor for the server's own `error`.
+- **The browser checks the pair's shape too:** a reply list that is not
+  exactly two schema-valid reads is `invalid_output`.
 - **It is one read against the cap** (§4).
 
 **Partial output.**
@@ -609,9 +635,10 @@ SOC 2/ISO reports, as `llm-reader-vendors.md` lists.
 | Mid | $0.007 | $0.017 | $0.14 – $0.33 | $0.70 – $1.65 |
 | Large | $0.021 | $0.050 | $0.42 – $0.99 | $2.10 – $4.95 |
 
-**Measured** (evaluation run 1, Haiku 5.5): $0.0280 for 18 calls, about
-$0.0016 a read; two-read agreement (§3) makes a read two calls, about
-$0.003.
+**Measured** (Haiku 5.5): evaluation run 1, $0.0280 for 18 single calls,
+about $0.0016 a read; run 6 (phase 3l), $0.0502 for 30 calls in 15 pairs,
+about **$0.0033 a read now that a read is a pair**. The doubling is the
+vendor spend only: the caps count reads.
 
 At these volumes cost is not the constraint. The caps guard against a loop.
 The ceiling they allow is 100 reads a day for 30 days at the large band's
@@ -962,7 +989,8 @@ Phase 3c (2026-10-14):
 Phase 3d (2026-10-14):
 
 36. **Two-read agreement** (§3) is a library and an evaluation mode
-    (`ratecon:eval-ai --pairs`), not yet a feature. The stop type cannot be
+    (`ratecon:eval-ai --pairs`), not yet a feature (it is, since 3m: item
+    39). The stop type cannot be
     left blank in a read, so a differing type keeps the base read's value
     and is marked. StopRead gains `timeCheck`, which the fill says in place
     of its own appointment check; only agreement sets it.
@@ -976,3 +1004,16 @@ Phase 3f (2026-10-14):
     (§4, §5). This replaces 3d's "two calls against the daily cap". The
     cap counts reads; a pair is one read made of two calls.
 
+Phase 3m (2026-10-14):
+
+39. **A read in the app is a pair** (§3–§5). The route makes two concurrent
+    calls under one reservation and returns `reads: [A, B]`; the browser
+    verifies and merges with `readPair`, the one function `ratecon:eval-ai`
+    calls too. There is no path that fills the form from one AI read
+    (`src/test/pair-only.test.ts` fails if one appears). The evaluation's
+    default single mode (no `--pairs`) and `reader:smoke` remain as
+    diagnostics that fill no form. Three consequences of the decisions above,
+    for Alex to weigh: a pair is as
+    available as both of its calls (a failure of either fails it); the other
+    call is not cancelled when one fails, so a failed pair still pays for
+    both; and per-call detail is not kept (one row per pair).
