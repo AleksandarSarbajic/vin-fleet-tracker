@@ -3338,6 +3338,194 @@ lookarounds, which each hid the other on `08:00-15:00`; a weakened lookbehind;
 mutant: dropping the minutes from the AM/PM pattern, because `\b` already
 matches before the minutes.
 
+### Phase 3y: a layout fingerprint with each AI read's outcome (2026-10-15)
+
+No API call, no network, no `ratecon:eval-ai`. **The reader stays off by
+default.** Invented text in every test. The real PDFs were read LOCALLY by
+`ratecon:layouts-report --samples` only; sample numbers and counts were
+printed, never a value, a label, a hash or a file name. **Migration 0029 is
+applied to the LOCAL test databases only.**
+
+**Why:** to see which layouts of rate confirmation recur among the AI reads,
+and which of them deserve a template. Each saved AI read now carries a
+fingerprint of the document's layout, next to the counts the dispatcher's save
+already records.
+
+**The fingerprint** (`src/lib/ratecon/layout.ts`, pure, computed in the browser
+from the prepared, already redacted lines):
+
+- **A label** is the text just before a colon or a `#` in a cell (cells are what
+  the sent line joins with two spaces): `Pick Up Date`, `Appointment#`,
+  `Delivery Time`. Lower-cased, trimmed, digits removed (`Stop 2 Date` is `stop
+  date`), words squeezed, 2 to 40 characters, **at most five words** (a longer
+  run is a sentence). The last piece of a cell has no delimiter after it, so a
+  value is never a label; a clock (`08:00`) gives nothing. **A cell holding a
+  placeholder is ignored whole**, its labels too (`Phone: [PHONE]`, `Booked
+  by: [REMOVED]`).
+- **Each label is its hash:** the first 8 hex characters of SHA-256 of the
+  lower-cased label (a small synchronous SHA-256, checked against Node's, so
+  the browser, a test and a script compute it the same way). Sorted, each
+  once, **at most 64: the 64 smallest hashes** if there are more, so the same
+  document gives the same 64 whatever the order of its lines. No label text,
+  value, name, address or load number is kept.
+- **Known limit:** any text directly before a colon is a label. A name written
+  `Dana Example:` would be hashed (8 hex characters; a dictionary of names could
+  test a guess against it). The redaction has already run, and more than five
+  words is not a label; nothing more is done.
+- **Jaccard similarity** of two label sets; 0 if either is empty. **Groups:** a
+  read joins the EARLIEST read it is 0.7 similar to (itself if none before),
+  and only that one: not transitive, so drifting layouts do not chain. Reads
+  with no labels are in no group.
+
+**On the wire and in the database:**
+
+- `POST /api/ratecon/outcome` takes an optional `layout`: an array of at most
+  64 strings of exactly 8 lower-case hex characters, **strictly ascending**
+  (each once). Anything else is a 400, nothing stored, no echo. It is optional
+  so a page loaded before this still records its counts. The body limit is
+  4 KB (was 2).
+- **Migration 0029** (additive, hand-written like 0028): `ratecon_ai_outcomes`
+  gains `layout text[] NOT NULL DEFAULT '{}'` and a check
+  (`ratecon_ai_outcomes_layout_hashes`): at most 64 entries, none NULL, one
+  dimension, every entry exactly 8 lower-case hex characters. Existing rows get
+  an empty layout. RLS and the deny-all policy are the table's, from 0028. The
+  layout lives and dies with its outcome row: **90 days**, deleted with the read.
+  **Rollback** (in the file): drop the constraint, then the column.
+- **Stored once:** the layout goes on the same row as the once-per-read marker,
+  by whichever post inserts it; a second post stores nothing (the first
+  layout stands), and two at once store one.
+- **Deploy order:** apply 0029 BEFORE the code. The insert names the column, so
+  a database without it answers every outcome post with a 500 (one log line of
+  a code, a reference and a class name). A save is never affected: the modal
+  posts after it and counts a failure in the tab.
+- **The browser:** the strip computes the fingerprint when the pair is read
+  (from the lines it sent), keeps it with the read id, and the modal posts it
+  with the counts after the first save. A fingerprint that cannot be made is
+  `[]`. It never delays, fails or shows anything on a save.
+
+**Reading it.** `npm run ratecon:layouts-report` (reads `DIRECT_URL`, or
+`LAYOUTS_REPORT_URL` when set; **do not point it at production before 0029 is
+applied there**: it says so and stops) prints the two queries below. By hand,
+on a database that has migration 0029:
+
+    -- 1. Groups of similar layouts: reads, how many kept every field the AI
+    --    filled, how many had at least one change or clear.
+    with o as (
+      select read_id, created_at, layout from ratecon_ai_outcomes where cardinality(layout) > 0
+    ), sim as (
+      select a.read_id, b.read_id as anchor, b.created_at as anchor_at,
+        (select count(*) from (select unnest(a.layout) intersect select unnest(b.layout)) i)::float8
+          / (select count(*) from (select unnest(a.layout) union select unnest(b.layout)) u) as j
+      from o a join o b on (b.created_at, b.read_id) <= (a.created_at, a.read_id)
+    ), anchored as (
+      select distinct on (read_id) read_id, anchor from sim where j >= 0.7 order by read_id, anchor_at, anchor
+    )
+    , per_read as (
+      select an.anchor, an.read_id,
+        coalesce(bool_and(f.changed = 0 and f.cleared = 0), true) as kept_all,
+        coalesce(bool_or(f.changed + f.cleared > 0), false) as any_change
+      from anchored an left join ratecon_ai_outcome_fields f on f.read_id = an.read_id
+      group by an.anchor, an.read_id
+    )
+    select anchor::text as anchor, count(*)::int as reads,
+      (count(*) filter (where kept_all))::int as kept_all, (count(*) filter (where any_change))::int as any_change
+    from per_read group by anchor order by reads desc, anchor
+
+    -- 2. Per group and field name: how many of the group's reads filled the
+    --    field, and how many of those changed or cleared it.
+    with o as (
+      select read_id, created_at, layout from ratecon_ai_outcomes where cardinality(layout) > 0
+    ), sim as (
+      select a.read_id, b.read_id as anchor, b.created_at as anchor_at,
+        (select count(*) from (select unnest(a.layout) intersect select unnest(b.layout)) i)::float8
+          / (select count(*) from (select unnest(a.layout) union select unnest(b.layout)) u) as j
+      from o a join o b on (b.created_at, b.read_id) <= (a.created_at, a.read_id)
+    ), anchored as (
+      select distinct on (read_id) read_id, anchor from sim where j >= 0.7 order by read_id, anchor_at, anchor
+    )
+    select an.anchor::text as anchor, f.field::text as field,
+      (count(*) filter (where f.kept + f.changed + f.cleared > 0))::int as filled,
+      (count(*) filter (where f.changed + f.cleared > 0))::int as changed
+    from anchored an join ratecon_ai_outcome_fields f on f.read_id = an.read_id
+    group by an.anchor, f.field order by an.anchor, f.field::text
+
+**How to read them.** A *group* is a layout that recurs (an `anchor` is the
+first read of it; ids are read ids, never printed by the script). *kept_all*
+is the reads where nothing the AI filled was changed or cleared; *any_change*
+the reads where something was (a blank the dispatcher filled is neither). In
+a big group with a high kept share the AI is already doing well and a template
+buys little; in a big group with a low kept share a template pays, and query 2
+says which fields: `street 4 of 9 changed or cleared` is a street the AI gets
+wrong in nearly half of that layout's reads. A group of one is a layout seen
+once. Reads older than 90 days are gone; reads from before 0029 have no
+layout and are not grouped. Small groups say little: read counts, not only
+shares.
+
+**On the real samples** (`npm run ratecon:layouts-report -- --samples`; counts
+and sample numbers only; the numbers are by name order, 29 PDFs, 26 with a text
+layer that can be sent). Labels per sample: least 4, median 17, most 36; none
+without. **The 0.7 rule makes 17 groups:**
+
+| Group | Samples | By |
+|---|---|---|
+| 1 | 23, 24, 25, 26 | a template |
+| 2 | 13, 14, 15 | a template |
+| 3 | 18, 19, 20 | a template |
+| 4 | 7, 11 | **only the AI** |
+| 5 | 27, 28 | a template |
+| 6 to 17 | 1, 2, 4, 8, 9, 10, 12, 16, 17, 21, 22, 29 (one each) | 1 by a template, 11 only the AI |
+
+So the files of one template family group together (lowest similarity to the
+first in a group 0.84 to 1.00), which says the fingerprint sees a layout. Of the
+eleven AI-only files that are alone, none is 0.7 similar to another. **The
+nearest misses** (first samples of two groups between 0.30 and 0.7): 23 and 29
+at 0.40, 4 and 10 at 0.36. The two AI-only files that DO group, 7 and 11
+(0.89), are the one layout among these twelve that recurs: the first candidate
+for a template, if more of its kind come. This is a handful of files; nothing
+here is a rate.
+
+**Tests (invented text):** `layout.test.ts` 49 (the hash against Node's, what
+a label is, the cap, the order, the sentinel, Jaccard, the grouping rule),
+`layout-report.test.ts` 7 (the SQL against the database and against
+`groupLayouts`), `outcome-codes.test.ts` +25 (the contract), `handle-outcome
+.test.ts` +14 (stored, 64, none, empty, once, two at once, every bad shape with
+a sentinel in it, the 500 line), `outcomes-schema.test.ts` +14 (the column, the
+check against every bad input), `record-outcome.test.ts` and
+`fill-outcome-save.test.tsx` (the browser sends it, a refusal never touches the
+save), and the e2e spec (the stored layout is hashes). `npm run check`: 191
+files, 3427 tests, exit 0. E2E, on their own: `ratecon-ai.spec.ts` 4,
+`ratecon-fill.spec.ts` 2.
+
+**Mutation-checked,** 28 mutations (the sentinel: values, placeholder cells,
+digits, five words, 40 characters, one letter, label text instead of its hash;
+the cap of 64 in the fingerprint, the order, the wire and the body; the
+once-per-read rule: a second post overwriting or storing counts twice; the
+layout dropped or not stored; the threshold; Jaccard). All killed except one
+equivalent mutant: lower-casing a label that is already lower-case. The
+database check was shown directly: with it dropped inside a rolled-back
+transaction a label is stored. **A process slip, said plainly:** the wire
+contract (`outcome-codes.ts`) was changed in the same step as its tests, so I
+did not watch those tests fail first; the mutation checks on it (nine, all
+killed) are what show they bite.
+
+**Decisions, for Alex to overrule:**
+
+1. **The 64 kept are the 64 smallest hashes,** not the first 64 or the most
+   common: stable across line order and a fair sample for Jaccard. A document
+   with more than 64 labels is represented by a random-looking subset.
+2. **`layout` is optional on the wire** (a stale tab still records its counts),
+   but **strictly ascending when present**, so a client bug is a 400 and a
+   missed layout, not a stored mess.
+3. **Groups are not transitive.** A read counts with the earliest read it is
+   0.7 similar to. A layout that drifts slowly will split into groups; chained
+   clustering would merge it. Chosen for a rule that the SQL and the script
+   state the same way and a group that means "like its first read".
+4. **A placeholder anywhere in a cell hides the whole cell's labels,** as the
+   brief said. The labels of a cell like `Phone: [PHONE]` are therefore not in
+   the fingerprint, nor are `Rate: [AMOUNT]` or `Contact: [REMOVED]`.
+5. **Samples mode fingerprints the text that WOULD be sent** (the redacted lines
+   of `prepareForReading`, page-selected), which is what the browser hashes.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -3433,5 +3621,6 @@ proposals:
   or 3b-prep. Phase 3b made the 18 approved evaluation calls, and no
   others.
 - **Before the route can count in production,** migrations 0026 and 0027
-  must be applied there.
+  must be applied there (and 0028 and 0029, which add the outcome tables and
+  the layout column: apply 0029 before the code that names it).
 - Other open decisions are above.

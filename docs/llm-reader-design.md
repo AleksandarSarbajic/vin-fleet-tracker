@@ -608,13 +608,34 @@ form, at the FIRST save of the load after the fill, the modal tells the server:
 - **The route.** The read response carries `readId` (the counts row's id). The
   modal posts `{ readId, fields }`. The server: the address limit; a
   dispatcher or admin; the reader on (off: 404); the user's `write` limit, not
-  the reader's three-a-minute; a 2 KB body; a strict Zod parse (an unknown key,
+  the reader's three-a-minute; a 4 KB body (2 KB before the layout); a strict Zod parse (an unknown key,
   a field name off the list, a negative or large count, counts that add up to
   more than a read can fill, or a field twice is a 400); then the read must be
   **the caller's own and `ok`** — anyone else's, none, or a failed pair is the
   same `unknown_read`. The marker is inserted `on conflict do nothing`; only
   the post that inserted it stores the counts, in the same transaction, so a
   second post (or two at once) stores nothing and answers `recorded: false`.
+- **Which layout it was** (Alex, 2026-10-15; migration 0029). The body also
+  carries `layout`: a fingerprint of the document, so the layouts that recur
+  can be counted and the ones worth a template seen. The browser takes the
+  LABELS in the text it sent — the text just before a colon or a `#` in a cell
+  (`Pick Up Date`, `Appointment#`) — lower-cased, digits removed, 2 to 40
+  characters and at most five words, ignoring any cell that holds a
+  placeholder; and sends the first 8 hex characters of each label's SHA-256,
+  sorted, each once, at most 64 (the 64 smallest hashes). **Hashes only:** no
+  label text, value, name, address or load number is stored, logged or
+  returned. The server accepts an optional array of at most 64 strings of 8
+  lower-case hex characters, strictly ascending, and the column
+  (`ratecon_ai_outcomes.layout`, additive, with a check that refuses anything
+  else) lives and dies with the outcome row: 90 days. It is stored with the
+  once-per-read marker, so a second post stores nothing. **Known limit:** any
+  text directly before a colon is a label, so a name written `Dana Example:`
+  would be hashed; it is 8 hex characters, and the redaction has already run.
+  Reads are grouped by Jaccard similarity of their label sets: a read joins the
+  earliest read it is 0.7 similar to. `npm run ratecon:layouts-report` prints,
+  per group, the reads, the share where the dispatcher kept every filled field,
+  the share with at least one change, and the changes by field name
+  (HANDOFF phase 3y gives the SQL and how to read it).
 - **It is never in the way of a save.** The modal posts AFTER the load has
   saved and does not await it; `recordFillOutcome` cannot throw or reject. A
   failure is counted in the tab (`outcomeNotRecorded`) and shown to nobody; the
@@ -1267,3 +1288,9 @@ Phase 3x (2026-10-15):
     and a date no longer eats a time** (§3, "A 24-hour document"). The model,
     prompt and schema are unchanged. Ground truth: a bare time is a time in a
     24-hour document.
+
+Phase 3y (2026-10-15):
+
+46. **A layout fingerprint is recorded with each AI read's outcome** (§4, "Which
+    layout it was"): hashes of the label words, at most 64, on the outcome row,
+    90 days. Counts and hashes only. A report groups reads at 0.7 Jaccard.
