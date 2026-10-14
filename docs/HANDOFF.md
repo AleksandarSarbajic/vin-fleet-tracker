@@ -1845,6 +1845,72 @@ Every call returned `ok`.
 - Nothing was fixed. Whether to turn the reader on is Alex's call, after
   reading the result together.
 
+### Phase 3k: evaluation run 5, paired, samples 2, 4, 9, 17 and 28 (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** a re-run of phase 3j's run: the
+same five samples, 3 runs each (30 calls), Claude Haiku 5.5, ceilings $1.00
+and 75 calls. Since 3j, Alex corrected the ground truth for the two streets
+on sample 17 (they had abbreviations the PDF does not print); 3j's one WRONG,
+on sample 17, was against the old truth. Retention (30 days default, flagged
+up to 2 years) accepted for this run. I did not read the ground truth.
+
+**Checked before the run:**
+
+- The tree was clean. The only file changed since 3j's code (`862c393`) was
+  `docs/HANDOFF.md`; no commit touches the sent-text path; `redact.ts` is
+  identical.
+- **Sent-text hashes** equal the 3j section's, all five: 2 `a72717aa76c5`, 4
+  `f38cb9922cfe`, 9 `dc2a776ec7f4`, 17 `1afe327813da`, 28 `0b03d4a2f36d`.
+
+**The command, run once, as given** (not re-run; nothing about the reader's
+settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,9,17,28 --runs=3 --pairs
+
+**Result: the bar is NOT met, with 1 WRONG (3j: 1). Exit 1.**
+
+| | 3j | 3k |
+|---|---|---|
+| Calls | 30 of 30 | 30 of 30 (ceiling 75) |
+| Tokens | 173,910 in, 65,094 out | 173,910 in, 65,817 out |
+| Cost | $0.0499 | $0.0503 (ceiling $1.00) |
+| Runs scored | 15 | 15 |
+| Pairs | 12 agreed, 3 differed | 11 agreed, 4 differed |
+| Address cue fires | 6 of 15 | 6 of 15 |
+
+Every call returned `ok`.
+
+**Merged WRONG, by field:** street 1 (3j: 1); load number, stop count,
+order + type, ZIP, city and state 0, as in 3j. **Each read alone:** A 1 -> 3
+(street), B 3 -> 2 (street).
+
+**Per sample** (merged WRONG on the bar; "marked" is not WRONG):
+
+| Sample | 3j | 3k | What changed |
+|---|---|---|---|
+| 2 | 0 | 0 | nothing: all exact, 3 pairs agreed, cue silent |
+| 4 | 0 | 0 | nothing: stop 1's ZIP blank and marked, both appointments marked "filled as the PDF says", cue silent |
+| 9 | 0 | 0 | stop 2's ZIP blank and marked and its appointment time differing (marked) in all 3 runs, cue 5 lines: all as in 3j. Run 2's pair **differed** (appointment x1; 3j: run 3), runs 1 and 3 agreed. Order + type marked on both stops in run 1 only (3j: stop 1 in runs 1 and 3, stop 2 in run 3) |
+| 17 | 1 | **1** | **the same one:** run 1, stop 1's street, verified WRONG, agreed by both reads; stop 2's street blank and marked. The ground-truth correction did not change it. Run 2: pair agreed, both streets blank and marked (3j: differed x1). Run 3: pair differed on street x2, both blank and marked (3j: agreed). Each read alone: A 1 -> 3, B 3 -> 2 |
+| 28 | 0 | 0 | stop count 3 read, 3 expected, stops 2 and 3's appointments marked "filled as the PDF says", cue 4 lines: as in 3j. Run 3's pair **differed** (street x1) and the merge blanked and marked stop 1's street (3j: all 3 agreed) |
+
+**What the counts say (no values looked at):**
+
+- The one WRONG is the same cell as in 3j: sample 17, run 1, stop 1's
+  street. Run 1's per-read counts for 17 are the same as in 3j (A 1, B 2).
+  The truth was corrected and the cell did not move. Counts cannot say
+  whether the read is wrong or the truth still differs from the printed
+  line; that needs the two values side by side.
+- Sample 17's streets remain unstable on identical text: filled and wrong in
+  one run, blank and marked (by the reads differing, or by both failing to
+  find a value) in the other two. Every other filled value across the
+  five files is exact.
+- The pairs that differed moved around (17 in 2 runs, 9 in 1, 28 in 1; 3j:
+  17 in 2, 9 in 1). Each time the merge turned a difference into a mark,
+  never a WRONG.
+- The cue fires on the same 6 runs, all on samples 9 and 28, at 0 WRONG.
+- Nothing was fixed. Whether to turn the reader on is Alex's call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
