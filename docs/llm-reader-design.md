@@ -184,20 +184,32 @@ a cell they mask cannot leave a number without its label):
 **Rule B: a name in the row below a person header** (same version). A header
 row — `Contact` | `Phone` | `Email`, or `Driver Name` | `Driver Cell` — has
 its cells masked by the label rule, but the values are on the NEXT line.
-- **Header:** a line with a cell that is a person label with nothing after it
-  — all its words from a small header vocabulary (contact, dispatcher, rep,
-  agent, booked by, driver, name, phone, cell, email, carrier, broker, truck,
-  …) with a person role among them — and that is the last cell of the line or
-  is followed by another header cell. A person label with a value on the same
-  line is the same-line case, unchanged.
+- **Header** (widened in `redact-2026-10-14.4`, sample 17): a line with a
+  cell that is a person label, **whatever follows it**. Either the cell is
+  nothing but header-vocabulary words with a person role among them (contact,
+  dispatcher, rep, agent, booked by, driver, name, phone, cell, email,
+  carrier, broker, truck, …: `Contact`, `Booked by:`, `Carrier Contact`,
+  `Driver Cell`), or the first pass left a person label at the START of a
+  cell followed by nothing but placeholders (`Contact 612-555-0147`). Not a
+  label inside a longer cell (`Please contact`, `Sales Rep`). In `.3` the
+  label also had to be the last cell or be followed by another vocabulary
+  cell; on sample 17 the cells after `Contact` were not vocabulary and the
+  label rule had already turned them into placeholders, so the row below was
+  sent with two names. **The cost:** `Contact:` | `Dana Example` (the value
+  beside the label) is now a header too, because a value and a header cell
+  are the same thing once masked; the line below it is masked by row, so a
+  facility name right under a contact line goes.
 - **Masked:** every cell of the next line (and of the one after it, if the
   next is blank or only placeholders — and no further) that is one to four
   words of letters, spaces, hyphens, apostrophes and periods, as
   `[REMOVED]`; placeholders beside the name stay (`Dana Example [PHONE]` is
   `[REMOVED] [PHONE]`). **By row**: there is no column alignment to go by.
-- **Kept:** an ALL-CAPS cell with a company word (INC, LLC, LTD, CORP, CO,
+- **Kept:** an ALL-CAPS cell with a company WORD (INC, LLC, LTD, CORP, CO,
   LOGISTICS, FREIGHT, TRANSPORT, TRUCKING, EXPRESS, GROUP, SERVICES,
-  SOLUTIONS, DISTRIBUTION, WAREHOUSE, DC); a state; a run of weekdays; and
+  SOLUTIONS, DISTRIBUTION, WAREHOUSE, DC) — a whole word, in an all-caps
+  cell. An all-caps cell of one to four words with none of them is a name and
+  is masked (`ZORBLAT QUENBY`); `COLE QUENBY` is not kept for containing `CO`,
+  and `Zorblat INC` in mixed case is not kept; a state; a run of weekdays; and
   anything with a digit or comma — a ZIP, a city line, a street number, a
   date, a time, a load number. (`cityLine` is therefore not needed: a city
   line has a comma and digits. No street-like test existed in the code; a
@@ -1150,3 +1162,9 @@ Phase 3t (2026-10-14):
     approval that named a sent-text hash is void and must be re-reviewed.
     The known limit stays: a name with no label and no header above it can
     still go through.
+
+42. **Rule B's header widened** (§2; `redact-2026-10-14.4`). A header is any
+    line with a person label, whatever follows it (sample 17: two names under
+    a carrier header were sent). The doubt goes to masking: a value beside
+    the label also makes the line below a masked row. Approvals that named a
+    `.3` hash are void.

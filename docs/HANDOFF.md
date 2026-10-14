@@ -667,6 +667,44 @@ line (not beside the number: a label of 8 letters and a colon, a 10-digit
 cell, then the label cell), and none has one on the line above, which is
 where a load number under a `Load #` header would show.
 
+**Follow-up, `redact-2026-10-14.4` (same phase, from sample 17):** rule B
+still sent two names in a carrier table. Diagnosis, by cell shapes only: on
+the header line the cells after `Contact` were not header vocabulary (one two
+words with a comma, one two capitalised words), so "the label is the last
+cell or is followed by a header cell" failed; and the label rule had already
+turned those cells into placeholders. The ALL-CAPS rule was NOT the cause
+(an all-caps cell with no company word was already masked; now pinned).
+
+- **A header is any line with a person label, whatever follows:** a cell that
+  is only header-vocabulary words with a person role, OR a person label at the
+  start of a cell with only placeholders after it (the first pass's result).
+  A label inside a longer cell does not count.
+- **The cost, decided by the brief ("whatever follows"):** `Contact:` |
+  `Dana Example` is a header too, so the line below it is masked by row. The
+  earlier test that pinned "the next line untouched" now pins the opposite.
+- **Company words:** unchanged in effect; pinned whole-word and all-caps only
+  (`COLE QUENBY` is a name, `Zorblat INC` is a name). A latent slip fixed on
+  the way: `personLabelBare` sliced from the match's length, not its end.
+- `redactedForReview` lines carry `header`; `maskPersonCell` is exported for
+  the report. The report has a new column, an all-caps non-company cell left
+  under a person header (it is `no` on all 12; it is a consistency check, not
+  an independent one).
+
+Tests: `redact-gaps.test.ts` 194; `npm run check` 188 files, 3167 tests, exit
+0; `ratecon-ai.spec.ts` 4 and `ratecon-fill.spec.ts` 2 pass. Mutation-checked:
+13 mutations on (1) the header and (2) the company rule; 4 survived the first
+time (label-last, label-anywhere, mixed-case company word, substring company
+word), each is now pinned by a test and killed.
+
+Rule B on the 12 AI-only samples, lines (masks), `.3` then `.4`:
+2 0→1 (1), 4 1→2 (4), 7 1→1 (1), 8 0→0, 9 0→1 (1), 10 1→2 (4), 11 0→1 (1),
+12 0→2 (3), 16 1→2 (3), 17 1→2 (3; the new line is the carrier row, 2 masks),
+21 0→0, 28 0→5 (5). None near 20. Re-scan clean on all 12. 27 cells are
+masked by B across them: 3 all-caps single words, 2 all-caps pairs, 9
+mixed-case single words, 10 pairs, 3 triples. Names, mostly, by shape; a
+facility name among the mixed-case ones cannot be ruled out without reading
+values. Rule A is unchanged (5 masks, 4 samples).
+
 **Found wrong or worth knowing:**
 
 - The brief's "use the street-like test the code already has" has no target
