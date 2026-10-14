@@ -46,6 +46,11 @@ app's answer would make the score agree with itself.
   normal case when it fills, so write the normal-case form.
   - A word with any lowercase letter is left alone by the app, so write it
     exactly as the PDF prints it ("McAllen" stays "McAllen").
+  - **Write them WITHOUT trailing punctuation.** The app removes any
+    comma, semicolon, colon or period at the end of a street or city
+    (`"840 N Thayer Rd."` is filled as `"840 N Thayer Rd"`), so a truth that
+    ends in one will score WRONG. Punctuation inside stays: `"St. Louis"`,
+    `"N. Main St"`, `"Winston-Salem"`, `"#4"`.
 - **`state`:** the two-letter code, e.g. `"ND"`.
 - **`zip`:** the five digits as printed, e.g. `"58102"`.
   - **A ZIP below 00501 (such as `00001`) is not a ZIP** (00501 is the lowest

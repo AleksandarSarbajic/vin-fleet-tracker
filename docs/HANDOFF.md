@@ -2426,6 +2426,75 @@ No cell is a different word, a missing word, or a different order.
 - Nothing was fixed. Whether to turn the reader on, and whether the scorer
   should count case-only and punctuation-only as exact, are Alex's calls.
 
+### Phase 3q: no trailing punctuation on a street or city (2026-10-14)
+
+No API call, no network, no `ratecon:eval-ai`, nothing read from `.samples/`
+by me except what `ratecon:score` prints (sample numbers and pass or fail,
+never a value). No change to state, ZIP, appointments, `verify-read.ts`, the
+prompt or the route.
+
+**Decision (Alex, 2026-10-14):** strip trailing punctuation from a street
+and a city in the form.
+
+**Why:** the PDF can print "...Rd." or "...Rd," at the end of the line, and
+the model quotes the punctuation in some runs and not in others, so the same
+read was WRONG in one run and exact in the next. Evaluation run 8 (3p): 8 of
+the 14 WRONG street cells were `punctuation-only` (sample 12's flipped
+between exact and punctuation-only from run to run; sample 21's was
+punctuation-only every run).
+
+**The rule** (`withoutTrailingPunctuation`, `src/lib/ratecon/normal-case.ts`,
+beside `normalCase`; pure and idempotent):
+
+- Any run of `,` `;` `:` `.` and whitespace at the END of the value goes,
+  until none is left: `"2300 20th Ave NE,"` -> `"2300 20th Ave NE"`,
+  `"840 N Thayer Rd."` -> `"840 N Thayer Rd"`, `"Rd.,"` -> `"Rd"`.
+- **Interior punctuation is untouched:** `"St. Louis"`, `"N. Main"`,
+  `"Winston-Salem"`, `"#4"`. Any other trailing character stays (a hyphen,
+  `#`, `?`, a bracket).
+- **A value that is only punctuation becomes empty** and is treated as not
+  found: the form's field is blank, no source is kept, and it gets the same
+  check as a missing street or city (the read's own reason when it has one,
+  else "Not found in the PDF."). For an AI read the blank is a check, not an
+  AI mark.
+- **Street and city only,** in `fillStop`, where `normalCase` is applied, and
+  after verification as it is: the read, its source line ("From p.2:
+  “4001 Main St,”") and the verifier keep what was printed. State and ZIP are
+  as before.
+
+**Ground truth** (`docs/ground-truth-howto.md`): write street and city
+WITHOUT trailing punctuation, since the app removes it; interior punctuation
+stays.
+
+**`ratecon:score` after the change:** 13 of 13, none failing, "Appointments
+silently wrong: none". So no template-read ground-truth entry carries a
+trailing mark. The entries `ratecon:score` does not score (the files only
+the AI reader reads, for `ratecon:eval-ai`) are not covered by that run: an
+entry there written with a trailing mark will score WRONG there, as
+`punctuation-only`.
+
+**Tests:** 2815 in all (2803 before).
+
+| File | Tests |
+|---|---|
+| `normal-case.test.ts` | 6 more: what ends a value, a run with whitespace, punctuation alone, interior and other characters left alone, idempotent, the same either side of `normalCase` |
+| `ratecon-fill.test.ts` | 6 more: shown without it; the source line and the marks as without the comma; punctuation alone is blank with the "Not found" check; interior kept; state and ZIP not stripped; an AI read's blank is a check, not an AI mark |
+
+No existing test expected a trailing period or comma, so none was changed.
+
+**Mutations,** each applied alone and reverted; every one fails at least one
+test:
+
+- state also stripped;
+- punctuation alone kept without the "Not found" check;
+- the source line stripped too;
+- one mark removed instead of a run;
+- interior punctuation removed too.
+
+**Known limit:** a street or city that really ends in a period or comma that
+matters (an abbreviation such as "Ft." or "St." at the very end) loses it.
+The owner decided this.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
