@@ -1634,6 +1634,76 @@ Doing the second showed my first "sources keep the printed line" test was
 vacuous (its fixture had no capitals in the source line); it was
 strengthened and re-checked.
 
+### Phase 3h: evaluation run 3, paired, samples 2, 4, 9, 17 and 28 (2026-10-14)
+
+**Approval (Alex, 2026-10-14, written):** `ratecon:eval-ai --pairs` on
+samples 2, 4, 9, 17 and 28, 3 runs each (30 calls), Claude Haiku 5.5,
+ceilings $1.00 and 75 calls.
+
+- Alex read the redacted text of each of the five in the viewer that day
+  and found nothing that should not be sent. Samples 7, 8, 10, 11, 12, 16
+  and 21 were NOT approved.
+- The ground truth for the five is written, in normal case (as the app now
+  fills), and passes `ratecon:check-expected`.
+- The account's default retention (inputs deleted within 30 days, flagged
+  ones possibly kept up to 2 years) was accepted for this run only.
+
+**Checked before the run:**
+
+- **`redact.ts`:** byte-identical to its state at run 2 (`9daac76`); `git
+  diff` empty. No commit since then touches `redact.ts`, `lines.ts`,
+  `read-pdf.ts`, `pdf.worker.ts`, `templates.ts`, `model-read.ts`,
+  `verify-read.ts`, the reader server or the redaction report. Since run 1
+  (`428e8ae`) the only change is the `export` on `selectPages`, which run 2
+  already carried.
+- **Sent text,** sha256 (first 12): 2 `a72717aa76c5`, 4 `f38cb9922cfe`,
+  9 `dc2a776ec7f4`, 17 `1afe327813da`, 28 `0b03d4a2f36d`.
+
+**The command, run once, as given** (not re-run; nothing about the
+reader's settings was changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-14 --files=2,4,9,17,28 --runs=3 --pairs
+
+**Result: the bar is NOT met (12 WRONG, merged). Exit 1.**
+
+| | |
+|---|---|
+| Calls | 30 of 30 planned (ceiling 75) |
+| Tokens | 173,910 in, 64,628 out |
+| Cost | $0.0497 (ceiling $1.00) |
+| Runs scored | 15 |
+| Pairs | 12 agreed, 3 differed |
+| Address cue | would fire on 6 of 15 runs |
+
+Every call returned `ok`; there was no adapter, schema or verifier failure.
+
+**Merged WRONG, by field:** load number 0, stop count 3, order + type 0,
+street 6, ZIP 3, city 0, state 0.
+**Read A alone:** stop count 3, street 10, ZIP 3 (16). **Read B alone:**
+stop count 3, street 8, ZIP 3 (14).
+
+**Per file** (3 runs each; counts only):
+
+| Sample | Pairs | Merged WRONG on the bar | Notes |
+|---|---|---|---|
+| 2 | 3 agreed | 0 | everything exact, every run; cue silent |
+| 4 | 3 agreed | 0 | stop 1's ZIP blank and marked in both reads, every run; both appointments marked, "filled as the PDF says"; cue silent |
+| 9 | 3 agreed | 9 (3 a run: street on both stops, stop 2's ZIP) | both reads agree on every wrong value, and each is "verified"; stop 2's appointment differs in time (marked); in runs 2 and 3 both stops' order + type marked; cue fires every run on 5 lines |
+| 17 | 3 differed | 0 | the reads differed on street x2 every run; the merge blanked and marked both streets. One read alone had 2 WRONG streets in each run (A in runs 1 and 3, B in run 2); cue silent |
+| 28 | 3 agreed | 3 (stop count, every run) | both reads return 3 stops, ground truth has 2; stop 2's appointment differs in date (marked); cue fires every run on 4 lines |
+
+**What the counts say (no values looked at):**
+
+- The cue fired on exactly the two files with merged WRONG (9 and 28), and
+  was silent on the other three.
+- Two-read agreement did its job on 17: a disagreement became a mark, not a
+  WRONG. It cannot help on 9 and 28, where both reads agree.
+- Sample 9's WRONGs are in verified fields on which both reads agree, and
+  one is a ZIP, which the case change cannot explain. Whether the read or
+  the ground truth is wrong is not decidable from counts; it is the first
+  thing to look at. Same for sample 28's third stop.
+- Nothing was fixed. What to change is Alex's call.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
