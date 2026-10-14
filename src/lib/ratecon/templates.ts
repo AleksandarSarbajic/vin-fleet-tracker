@@ -76,6 +76,8 @@ export type ReadOutcome =
   | { ok: false; reason: 'not-recognised' };
 
 const US = new Set(Object.keys(ZONE_BY_STATE));
+/** A two-letter US state code the zone table knows. */
+export const isUsState = (code: string): boolean => US.has(code);
 const src = (line: Line): Source => ({ text: line.text, page: line.page });
 const iso = (y: number, m: number, d: number) =>
   `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;

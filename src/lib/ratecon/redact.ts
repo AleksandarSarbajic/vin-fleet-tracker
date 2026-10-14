@@ -1,5 +1,6 @@
 import type { Line } from './lines';
-import { cityLine } from './templates';
+import { isAssignedAreaCode } from './nanp-area-codes';
+import { cityLine, isUsState } from './templates';
 
 /**
  * The language-model reader's redaction (docs/llm-reader-design.md §2). Pure,
@@ -7,14 +8,33 @@ import { cityLine } from './templates';
  *
  * Masks what it can recognise — emails, phones, money, labelled contacts,
  * MC/DOT numbers, web addresses — with a typed placeholder, so the shape of
- * the line survives. It is NOT a guarantee: a name with no label, or a
- * broker's own name in a header, goes through. Facility names, addresses,
- * dates, times and reference numbers stay on purpose; the read needs them.
+ * the line survives. Facility names, addresses, dates, times and reference
+ * numbers stay on purpose; the read needs them.
  *
- * Three passes: each cell on its own; then the cells JOINED as they are
- * sent, with the same detectors — a value split across cells (an email, a
- * phone, an MC label and its number) is whole again only there; then a
- * person's name that runs on past its label's cell.
+ * It is NOT a guarantee. KNOWN GAPS — what can still go through:
+ *   - A person's name with no label and no header above it: a name in a
+ *     paragraph, a signature, "Questions? Call Riley", a name in a cell
+ *     nothing names. The broker's own name in a header goes through too.
+ *   - A name under a header that names a person is masked by ROW (rule B),
+ *     so it is found only in the next line (and the one after a blank): a
+ *     name further down a table, or under a header that is not a person
+ *     label ("Carrier", "Name"), is not.
+ *   - A name of more than four words, or one with a digit or a comma in its
+ *     cell, is not taken for a name under a header.
+ *   - A bare phone (rule A) is found only when its area code is in the static
+ *     list (nanp-area-codes.ts) and no identifier label is just before it: a
+ *     phone with a code assigned after the list was written, a phone in a
+ *     cell right after a "Pickup" or "Ref" cell, or one with letters stuck to
+ *     it, is not.
+ *   - The re-scan has no memory of other lines: it catches a bare phone and
+ *     a name after a label in the same line, but not a name under a header.
+ * "Show what is sent" is the dispatcher's check on all of it.
+ *
+ * Passes: each cell on its own; then the cells JOINED as they are sent, with
+ * the same detectors — a value split across cells (an email, a phone, an MC
+ * label and its number) is whole again only there; then a person's name that
+ * runs on past its label's cell; then bare phone digits (A); and, over the
+ * document, the row below a person header (B).
  *
  * Fails closed: after masking, the lines exactly as they would be sent are
  * scanned again, and any hit means nothing is sent.
@@ -35,7 +55,7 @@ export const PLACEHOLDER: Readonly<Record<MaskKind, string>> = {
 };
 
 /** Sent with every read; the server refuses a version it does not run (phase 2). */
-export const REDACTION_VERSION = 'redact-2026-10-14.2';
+export const REDACTION_VERSION = 'redact-2026-10-14.3';
 
 /** What may be sent at all, after redaction. A line is counted without its `L<n> ` prefix. */
 export const SEND_LIMITS = { lines: 400, lineChars: 500, totalChars: 24_000 } as const;
@@ -79,6 +99,47 @@ const PHONES = [
 ];
 /** Ten bare digits are a phone only after a phone word: alone, they could be a load number. */
 const PHONE_WORD_DIGITS = /\b(phone|ph|tel|telephone|fax|cell|mobile|call|text)\b(\W{0,6})1?\d{10}\b/gi;
+/**
+ * Rule A (2026-10-14). A run of exactly ten digits, or eleven starting with 1,
+ * standing alone: not part of a longer number, a word, or a hyphenated or
+ * decimal one. A phone when its area code is assigned (nanp-area-codes.ts)
+ * and no identifier label is just before it — "could be a load number" is
+ * answered by the label, not by leaving every bare number alone.
+ */
+const BARE_DIGITS = /(?<![\w-]|\d[.,])\d{10,11}(?![\w-]|[.,]\d)/g;
+/**
+ * A label that says what follows is a reference number, at the end of the
+ * text before it: the same cell ("Load #: ") or the previous one (the cell
+ * gap is spaces). Nothing else between, so a label two cells back guards
+ * nothing.
+ */
+const IDENTIFIER_LABEL =
+  /\b(?:load|order|pro|bol|po|so|si|ref|reference|shipment|pickup|pick-up|delivery|confirmation|tracking|trip|stop)\b(?:\s*(?:#|no\b\.?|num(?:ber)?\b|nbr\b|id\b))*[\s:#.=-]*$/i;
+export const identifierLabelBefore = (before: string): boolean => IDENTIFIER_LABEL.test(before);
+
+const isBarePhoneDigits = (digits: string): boolean =>
+  digits.length === 10 ? isAssignedAreaCode(digits.slice(0, 3)) : digits.startsWith('1') && isAssignedAreaCode(digits.slice(1, 4));
+
+/** The bare phones in a text, as the mask and the re-scan both read them. */
+function bareDigitPhones(text: string): RegExpExecArray[] {
+  return [...text.matchAll(BARE_DIGITS)].filter(
+    (m) => isBarePhoneDigits(m[0]) && !identifierLabelBefore(text.slice(0, m.index)),
+  );
+}
+
+/** Rule A over a text: each bare phone becomes a phone placeholder, counted in `counts.phone` and in `n`. */
+function maskBarePhones(text: string, counts: MaskCounts): { text: string; n: number } {
+  const hits = bareDigitPhones(text);
+  if (hits.length === 0) return { text, n: 0 };
+  let out = '';
+  let from = 0;
+  for (const m of hits) {
+    out += `${text.slice(from, m.index)}${PLACEHOLDER.phone}`;
+    from = m.index + m[0].length;
+  }
+  counts.phone += hits.length;
+  return { text: out + text.slice(from), n: hits.length };
+}
 /**
  * `$` then any spaces then a number (2026-10-14: was at most one space, so
  * "$" | "1,850" in two cells — "$  1,850" joined — passed both the mask and
@@ -302,13 +363,25 @@ function maskPersonNames(text: string, counts: MaskCounts): { text: string; name
   return { text: cells.join(CELL_GAP), names };
 }
 
+/** One line, redacted: `names` and `bare` are what the person-name pass and rule A masked, counted in `masks` too. */
+export interface RedactedLine {
+  text: string;
+  masks: MaskCounts;
+  names: number;
+  bare: number;
+  /** What rule B masked in this line, because of the header above it: counted in `masks.labelled` too. */
+  below: number;
+}
+
 /**
  * One line: each cell masked, a label's value in the next cell masked, money
  * cells' numbers masked; then the joined line; then a person's name that runs
- * on past its label's cell. `names` counts that last pass's masks, which are
- * in `masks.labelled` too.
+ * on past its label's cell; then bare phone digits, last, so a cell the
+ * earlier passes masked cannot leave a number without its label. `names`
+ * counts the name pass's masks, which are in `masks.labelled` too; `bare`
+ * rule A's, which are in `masks.phone`. `below` is the document pass's.
  */
-export function redactLine(line: Line): { text: string; masks: MaskCounts; names: number } {
+export function redactLine(line: Line): RedactedLine {
   const counts = zero();
   const cells = line.cells.map((c) => maskCell(c.text, counts));
   const texts = cells.map((c) => c.text);
@@ -330,7 +403,124 @@ export function redactLine(line: Line): { text: string; masks: MaskCounts; names
     }
   });
   const person = maskPersonNames(maskJoined(maskAtTokens(texts, counts).join(CELL_GAP), counts), counts);
-  return { text: person.text, masks: counts, names: person.names };
+  const bare = maskBarePhones(person.text, counts);
+  return { text: bare.text, masks: counts, names: person.names, bare: bare.n, below: 0 };
+}
+
+/* ------------------- rule B: the row below a person header ------------------- */
+
+/** Words a header cell is made of; a header cell is all of these, and a person header has a role among them. */
+const HEADER_WORDS = new Set([
+  'contact', 'dispatcher', 'dispatch', 'rep', 'representative', 'agent', 'booked', 'by', 'driver', 'name', 'phone', 'ph',
+  'tel', 'telephone', 'cell', 'mobile', 'fax', 'email', 'e-mail', 'number', 'no', 'ext', 'info', 'carrier', 'broker',
+  'company', 'mc', 'dot', 'truck', 'trailer', 'tractor', 'id',
+]);
+const PERSON_ROLES = new Set(['contact', 'dispatcher', 'dispatch', 'rep', 'representative', 'agent', 'booked', 'driver']);
+const headerWords = (cell: string): string[] => cell.toLowerCase().replace(/[:#.,]+/g, ' ').split(/\s+/).filter((w) => w !== '');
+const isHeaderCell = (cell: string): boolean => {
+  const words = headerWords(cell);
+  return words.length > 0 && words.every((w) => HEADER_WORDS.has(w));
+};
+const isPersonHeaderCell = (cell: string): boolean => isHeaderCell(cell) && headerWords(cell).some((w) => PERSON_ROLES.has(w));
+
+/**
+ * A line is a person header when one of its cells is a person label with
+ * nothing after it: the last cell of the line, or followed by another header
+ * cell ("Contact" | "Phone" | "Email"). A person label followed by a value
+ * ("Contact:" | "Dana Example") is the same-line case, handled where it
+ * always was. Read from the cells as they were, not as masked: the label
+ * pass has already turned the header's cells into placeholders.
+ */
+function isPersonHeader(line: Line): boolean {
+  const cells = line.cells.map((c) => c.text.trim()).filter((t) => t !== '');
+  return cells.some((cell, i) => isPersonHeaderCell(cell) && (i === cells.length - 1 || isHeaderCell(cells[i + 1]!)));
+}
+
+const COMPANY_WORDS = new Set([
+  'INC', 'LLC', 'LTD', 'CORP', 'CO', 'LOGISTICS', 'FREIGHT', 'TRANSPORT', 'TRUCKING', 'EXPRESS', 'GROUP', 'SERVICES',
+  'SOLUTIONS', 'DISTRIBUTION', 'WAREHOUSE', 'DC',
+]);
+const DAY_WORDS = new Set([
+  'mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'sat', 'sun', 'monday', 'tuesday', 'wednesday', 'thursday',
+  'friday', 'saturday', 'sunday', 'am', 'pm', 'to', 'thru', 'through',
+]);
+/** Letters, spaces, hyphens, apostrophes and periods only: no digit (so no ZIP, date, time, street number), no comma, no colon, no bracket. */
+const PERSON_CELL = /^[\p{L}\p{M}'’. -]+$/u;
+const PLACEHOLDER_ANY = /\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\]/g;
+/** A cell as leading placeholders, the rest, and trailing placeholders. */
+const AROUND_PLACEHOLDERS = /^((?:\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\][\s,;/|-]*)*)(.*?)((?:[\s,;/|-]*\[(?:EMAIL|PHONE|AMOUNT|REMOVED|ID|URL)\])*)$/;
+
+/**
+ * Under a person header, is this text a person? One to four words of letters
+ * (a cell with a digit or a comma is a ZIP, a date, a time, an address, a
+ * city line or a number, so `cityLine` is never needed here), and not
+ * obviously not: an ALL-CAPS cell with a company word, a state, a run of
+ * weekdays. In doubt it is a person: a lost name costs a blank, a leaked one
+ * a person's privacy. A street name with no number ("Pat Lane") is masked:
+ * every real street line has a number, and a street test without one would
+ * only unmask surnames.
+ */
+function isPersonUnderHeader(text: string): boolean {
+  if (!PERSON_CELL.test(text) || !/\p{L}/u.test(text)) return false;
+  const words = text.split(/\s+/).filter((w) => w !== '');
+  if (words.length < 1 || words.length > 4) return false;
+  if (text === text.toUpperCase() && words.some((w) => COMPANY_WORDS.has(w.replace(/\./g, '')))) return false;
+  if (/^[A-Z]{2}$/.test(text) && isUsState(text)) return false;
+  if (text.toLowerCase().split(/[\s-]+/).every((w) => DAY_WORDS.has(w.replace(/\./g, '')))) return false;
+  return true;
+}
+
+/** One cell of a row under a person header: the person part becomes a placeholder, placeholders around it stay. */
+function maskPersonCell(cell: string): string | null {
+  const [, lead, core, trail] = AROUND_PLACEHOLDERS.exec(cell)!;
+  if (core === '' || !isPersonUnderHeader(core!)) return null;
+  return `${lead}${PLACEHOLDER.labelled}${trail}`;
+}
+
+const isBlankOrMasked = (text: string): boolean => text.replace(PLACEHOLDER_ANY, '').replace(/[\s,;/|-]+/g, '') === '';
+
+/**
+ * Rule B (2026-10-14). The values under a person header sit on the NEXT line,
+ * where the label rule does not look: "Contact" | "Phone" on one line, "Dana
+ * Example" | "612-555-0147" on the next. The next line's cells are masked by
+ * ROW — there is no column alignment to go by. If that line is blank or only
+ * placeholders, the line after it is masked too, and no further. A line that
+ * is itself a person header is not a row of values: it masks its own next
+ * line. Never across a page.
+ */
+function maskBelowHeaders(lines: readonly Line[], out: RedactedLine[]): void {
+  lines.forEach((header, i) => {
+    if (!isPersonHeader(header)) return;
+    for (let j = i + 1; j <= i + 2 && j < lines.length; j += 1) {
+      const line = lines[j]!;
+      const result = out[j]!;
+      if (line.page !== header.page || isPersonHeader(line)) return;
+      const wasEmpty = isBlankOrMasked(result.text);
+      let below = 0;
+      const cells = result.text.split(CELL_GAP).map((cell) => {
+        const masked = maskPersonCell(cell);
+        if (masked === null) return cell;
+        below += 1;
+        return masked;
+      });
+      if (below > 0) {
+        result.masks.labelled += below;
+        result.below += below;
+        // A cell masked here may have been the label that kept a number: look again.
+        const bare = maskBarePhones(cells.join(CELL_GAP), result.masks);
+        result.text = bare.text;
+        result.bare += bare.n;
+      }
+      if (!wasEmpty) return;
+    }
+  });
+}
+
+/** The lines of a document, redacted: each line on its own, then the rows under person headers (rule B). */
+export function redactDocument(lines: readonly Line[]): RedactedLine[] {
+  const out = lines.map(redactLine);
+  maskBelowHeaders(lines, out);
+  return out;
 }
 
 /**
@@ -373,7 +563,7 @@ export function residue(text: string): MaskKind[] {
   const found: Record<MaskKind, boolean> = {
     // Any `@` at all: half an email split across cells ("ops@" | a masked domain) is still a leak.
     email: hit(EMAILS) || text.includes('@'),
-    phone: hit(PHONES) || new RegExp(PHONE_WORD_DIGITS.source, 'i').test(text),
+    phone: hit(PHONES) || new RegExp(PHONE_WORD_DIGITS.source, 'i').test(text) || bareDigitPhones(text).length > 0,
     amount: hit(AMOUNTS),
     labelled:
       [...text.matchAll(LABEL)].some((m) => {
@@ -403,15 +593,23 @@ export function selectPages(lines: readonly Line[]): Line[] {
  * hit. Not called by the app.
  */
 export function redactedForReview(lines: readonly Line[]): {
-  /** `names`: what the person-name pass masked in the line (counts only, for the report). */
-  lines: (PreparedLine & { residue: MaskKind[]; names: number })[];
+  /** What the passes masked in the line, counts only, for the report: `names` the name pass, `bare` rule A, `below` rule B. */
+  lines: (PreparedLine & { residue: MaskKind[]; names: number; bare: number; below: number })[];
   masks: MaskCounts;
 } {
   const masks = zero();
-  const out = selectPages(lines).map((line, i) => {
-    const redacted = redactLine(line);
+  const chosen = selectPages(lines);
+  const out = redactDocument(chosen).map((redacted, i) => {
     for (const k of KINDS) masks[k] += redacted.masks[k];
-    return { n: i + 1, page: line.page, text: redacted.text, residue: residue(redacted.text), names: redacted.names };
+    return {
+      n: i + 1,
+      page: chosen[i]!.page,
+      text: redacted.text,
+      residue: residue(redacted.text),
+      names: redacted.names,
+      bare: redacted.bare,
+      below: redacted.below,
+    };
   });
   return { lines: out, masks };
 }
@@ -424,11 +622,10 @@ export function prepareForReading(lines: readonly Line[]): Prepared {
 
   const masks = zero();
   const out: PreparedLine[] = [];
-  for (const [i, line] of chosen.entries()) {
-    const redacted = redactLine(line);
+  for (const [i, redacted] of redactDocument(chosen).entries()) {
     for (const k of KINDS) masks[k] += redacted.masks[k];
     if (redacted.text.length > SEND_LIMITS.lineChars) return { ok: false, reason: 'too-large' };
-    out.push({ n: i + 1, page: line.page, text: redacted.text });
+    out.push({ n: i + 1, page: chosen[i]!.page, text: redacted.text });
   }
 
   const left = new Set(out.flatMap((l) => residue(l.text)));
