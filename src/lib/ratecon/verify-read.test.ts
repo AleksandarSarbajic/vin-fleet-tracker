@@ -296,6 +296,58 @@ describe('city, state and ZIP', () => {
   });
 });
 
+describe('ZIP+4 (3ab): the five digits fill when the quote says the whole of it', () => {
+  /** A pickup whose street stands and whose city line is `line`; the model's ZIP is `value`, quoting that line. */
+  const zipOf = (line: string, value: string) => {
+    const lines = sent('Pick Up 1', '4001 Main St', line);
+    const s = stop(
+      reply(
+        { type: { value: 'PU', quote: q(1, 'Pick Up 1') }, street: { value: '4001 Main St', quote: q(2, '4001 Main St') }, city: null, state: null, zip: { value, quote: q(3, line) }, appointment: { kind: 'none' } },
+        { loadNumber: null },
+      ),
+      lines,
+    );
+    return { zip: s.zip, check: s.fieldChecks?.zip };
+  };
+  const refused = (line: string) => ({ zip: null, check: `Read by AI, but it does not follow from “${line}”. Enter it by hand.` });
+
+  it('a five-digit ZIP out of a ZIP+4 city line still fills', () => {
+    expect(zipOf('Fargo, ND 58102-1234', '58102')).toEqual({ zip: { value: '58102', source: { text: 'Fargo, ND 58102-1234', page: 2 } }, check: undefined });
+  });
+
+  it('a ZIP+4 the city line prints fills its five digits', () => {
+    expect(zipOf('Fargo, ND 58102-1234', '58102-1234')).toEqual({ zip: { value: '58102', source: { text: 'Fargo, ND 58102-1234', page: 2 } }, check: undefined });
+  });
+
+  it('a ZIP+4 whose +4 the text does not hold is refused, as before', () => {
+    expect(zipOf('Fargo, ND 58102-1234', '58102-9999')).toEqual(refused('Fargo, ND 58102-1234'));
+    expect(zipOf('Fargo, ND 58102', '58102-1234')).toEqual(refused('Fargo, ND 58102'));
+  });
+
+  it('a ZIP+4 whose first five differ from the city line is refused, as before', () => {
+    expect(zipOf('Fargo, ND 58102-1234', '58103-1234')).toEqual(refused('Fargo, ND 58102-1234'));
+    // Even when the quote holds that ZIP+4 too: the city line's is the one that counts.
+    expect(zipOf('Fargo, ND 58102-1234 Yard 58103-1234', '58103-1234')).toEqual(refused('Fargo, ND 58102-1234 Yard 58103-1234'));
+  });
+
+  it('a +4 never lifts a placeholder: below 00501 is refused, as before', () => {
+    for (const z of ['00000', '00001', '00500']) {
+      expect(zipOf(`Fargo, ND ${z}-1234`, `${z}-1234`), z).toEqual(refused(`Fargo, ND ${z}-1234`));
+    }
+  });
+
+  it('nine digits with no hyphen: they fill only as the text prints them', () => {
+    expect(zipOf('Fargo, ND 58102-1234', '581021234')).toEqual(refused('Fargo, ND 58102-1234'));
+    expect(zipOf('Fargo ND 581021234', '581021234')).toEqual({ zip: { value: '58102', source: { text: 'Fargo ND 581021234', page: 2 } }, check: undefined });
+  });
+
+  it('out of a quote that is not a city line, the same two conditions', () => {
+    expect(zipOf('Zip 58102-1234', '58102-1234')?.zip?.value).toBe('58102');
+    expect(zipOf('Zip 58102-1234', '58102-9999')).toEqual(refused('Zip 58102-1234'));
+    expect(zipOf('Zip 00001-1234', '00001-1234')).toEqual(refused('Zip 00001-1234'));
+  });
+});
+
 describe('the date: a date the quote holds, read by our own parser', () => {
   const dated = (text: string, date: string) => {
     const lines = [...DOC, ...sent(text)].map((l, i) => ({ ...l, n: i + 1 }));

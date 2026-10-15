@@ -3,6 +3,7 @@ import { startsLikeStreet } from '../paste-address';
 import { documentIs24Hour } from './clock-24';
 import type { ModelAppointment, ModelQuote, ModelRead, ModelStop } from './model-read';
 import type { PreparedLine } from './redact';
+import { isRealUsZip } from './us-zip';
 import { cityLine, type Flag, type RateconRead, type Source, type Sourced, type StopRead, type TimeRead } from './templates';
 
 export { documentIs24Hour };
@@ -255,6 +256,9 @@ const DELIVERY_WORDS = /\b(?:deliver(?:y|ies|ed)?|consignee|receiver|destination
 
 type FieldResult = { value: Sourced<string> | null; check: string | null };
 
+/** A ZIP+4 as the model gives it: "58102-1234", or "581021234" (`us-zip.ts` reads both). */
+const ZIP_PLUS_FOUR = /^(\d{5})-?\d{4}$/;
+
 function addressField(
   field: AddressField,
   cited: ModelStop[AddressField],
@@ -282,11 +286,16 @@ function addressField(
       if (lower !== w && !lower.endsWith(` ${w}`)) return no;
       return { value: { value: said.slice(said.length - wanted.length), source }, check: null };
     }
+    // A ZIP+4 stands when its first five are the city line's and the quote holds it as given; the five fill (3ab).
+    const plus = field === 'zip' ? ZIP_PLUS_FOUR.exec(wanted) : null;
+    if (plus && plus[1] === said && isRealUsZip(wanted) && tokenIn(at.text, wanted)) return { value: { value: said, source }, check: null };
     return said.toLowerCase() === wanted.toLowerCase() ? { value: { value: said, source }, check: null } : no;
   }
   const found = tokenIn(at.text, wanted);
   if (!found) return no;
   if (field === 'state' && !(/^[A-Za-z]{2}$/.test(found) && found.toUpperCase() in ZONE_BY_STATE)) return no;
+  const plus = field === 'zip' ? ZIP_PLUS_FOUR.exec(found) : null;
+  if (plus) return isRealUsZip(found) ? { value: { value: plus[1]!, source }, check: null } : no;
   if (field === 'zip' && !/^\d{5}$/.test(found)) return no;
   return { value: { value: field === 'state' ? found.toUpperCase() : found, source }, check: null };
 }
