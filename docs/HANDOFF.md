@@ -4053,6 +4053,164 @@ check refused the same cases; the "Palm Beach Gardens" case was added for it.
 - **The street-type list** was transcribed from USPS Publication 28 for this
   phase and not checked against the publication in this session (no network).
 
+### Phase 3ad: the worker logs status changes (2026-10-15)
+
+From the advisor's brief and its addendum: logging only, no engine change.
+Commits:
+
+- `5341943`: the migration and the schema;
+- `2db9c3c`: the worker step and its tests.
+
+NOT pushed, NOT deployed. Migration 0030 is applied to the local test
+databases only. The design is §12.126.
+
+**Why:** the ETA log (§12.112) writes only at distance marks, and the board
+recomputes its status on every read. So a truck can turn AT_RISK and then
+LATE between two marks with nothing recorded, and how early the board warned
+cannot be measured. Truck 145 may be an example: unverified, its positions
+are pruned.
+
+**What was built:**
+
+- **Migration 0030** (`drizzle/0030_eta_status_changes.sql`, plus its
+  journal entry; hand-written and additive, like 0023): the table
+  `eta_status_changes`, with the stop's foreign key on delete cascade. RLS
+  on, a deny-all policy, nothing granted to anon or authenticated on the
+  table or its sequence.
+- **The schema** (`src/db/schema.ts`): `etaStatusChanges`.
+- **`src/worker/status-changes.ts`**: `logStatusChanges` and the
+  never-throwing `runStatusLog`, shaped like `logEtaMarks` and `runEtaLog`.
+  - The rows come from the board's own code: `LATEST_POSITION_SQL`,
+    `parseFleetRows` and `applyStatus`, with `DISPATCH_TZ` from `WorkerEnv`.
+  - A row on first sight, then one per change of (status, computed).
+  - The key is stop + truck + destination.
+  - Cap: 100 rows a sequence, the first row in each status excepted.
+- **`src/worker/index.ts`**: the step runs right after `runEtaLog`, as its
+  own step. Its counts are on `poll: ingested`: `statusStopsConsidered`,
+  `statusFirstSeen`, `statusChanges`, `statusCapped` (truck number and stop
+  id) and `statusPastCapWritten`.
+- **`src/worker/eta-marks.ts`**: `describe` and `LOG_TIMEOUT_MS` are now
+  exported, so neither is copied. `logEtaMarks`, the settle step and the
+  `eta_marks` table are unchanged.
+
+None of the addendum's stop conditions applied:
+
+- `fleet-query.ts` imports unchanged (no `server-only`, no env);
+- `WorkerEnv` already has `DISPATCH_TZ`;
+- 0030 is hand-written like 0023 and 0029;
+- every field needed is on `applyStatus`'s rows.
+
+**Choices made here.** Each is in §12.126; any can be changed.
+
+- **The id is a bigint identity, not a uuid.** Rows written in one
+  transaction share `logged_at` (now()), so a uuid leaves them with no order.
+  That is audit_log's trap, and the tests poll many times in one
+  transaction.
+- **The sequence's history is read in one GROUP BY** over the stops on the
+  board, and matched by a key in which null is a value. The brief said "is
+  not distinct from": GROUP BY treats nulls the same way, and a test polls an
+  unlocated stop twice and gets one row.
+- **`distance_basis` is null when the board shows no ETA.** The engine always
+  returns a basis, `straight-line` by default, even for an unlocated stop.
+- **The cap's exception is a first row in a status OR in a computed
+  status.** So a LATE that first appears under an override is kept too: at
+  most 100 + 16 rows a sequence.
+- **Past the cap, the comparison is with the newest row WRITTEN.** So a
+  dropped change is named on every poll while the board differs from that
+  row. A return to that row's status is no change, and is not named.
+- **Status columns are text with CHECKs**, as the brief said, although the
+  `truck_status` enum holds the same eight values. A test holds each CHECK
+  to `STATUSES`, in order.
+- **The identity's sequence is revoked explicitly.** It is the first
+  sequence in `public`; 0001's default privileges already withhold it.
+
+**Tests:** 20 in `src/worker/status-changes.test.ts`, against the local test
+database, rolled back:
+
+- agreement with `applyStatus` over the fleet query, all eight statuses and
+  a live override;
+- two polls with no change write one row;
+- ON_TIME → AT_RISK → LATE → ON_TIME, the last by a new fix;
+- an override going live and expiring;
+- a destination edit, and a load moved to another truck;
+- a stop with no coordinates;
+- the cap, and the first LATE after 101 flips;
+- no driver, load number or address in a row;
+- the table's CHECKs, grants and column list;
+- failure isolation both ways, and the 3 s timeout.
+
+**`npm run check`:** 193 files, 3503 tests (3483 before).
+
+**Mutations,** each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| write every poll, not only on a change | 5: two polls one row; the four-change sequence; the override; the unlocated stop; the cap |
+| destination left out of the key | 1: the destination edit |
+| a hand-written status instead of `applyStatus` | 4: the agreement test; the four-change sequence; the override; the cap |
+| the first-in-status exception left out | 1: the cap |
+| no cap | 1: the cap |
+| no `statement_timeout` | 1: the timeout |
+
+**Volume, for Alex:**
+
+- **Polls:** up to 120 an hour. `POLL_INTERVAL_MS = 30_000`
+  (`src/worker/index.ts:121`), less when a poll runs long. A poll whose feed
+  brought no readings returns before both logs.
+- **Rows per trip:** NOT measured. One row on first sight, then one per
+  change. The only figure is §12.50's replay: 10 crossings into LATE and 4
+  into AT_RISK in 20 hours, across 28 trucks. It did not count stale-GPS,
+  upcoming-day or arrival changes. At most 116 rows a sequence by
+  construction.
+- **Size:** about 200 bytes of data a row (one row measured locally).
+- **Time:** measured on the local test cluster only (loopback, fsync off),
+  20 runs each:
+
+| data | board query, median | whole step, median (max) |
+|---|---|---|
+| 34 trucks (23 active), 112,200 fixes, 30 open loads | 3.7 ms | 6.0 ms (32.9) |
+| 60 trucks, 1,200,000 fixes, 60 open loads | 5.3 ms | 11.8 ms (44.0) |
+
+**Deploy order (Alex's):**
+
+1. Apply migration 0030 to the hosted database.
+2. `scripts/deploy.sh`.
+
+The running worker and the app ignore the new table, so the migration first
+is safe.
+
+**Rollback:** deploy the previous worker commit. The table can stay, or be
+dropped: `DROP TABLE "eta_status_changes"`.
+
+**NOT deployed.** The migration is not applied to the hosted database, and
+nothing is pushed.
+
+**Questions for Alex (not decided here):**
+
+1. **Run the step on a poll that brought no readings?** `poll: no changes`
+   returns before both logs. If the whole fleet is quiet (overnight), a
+   change by the clock is logged at the next poll with readings, with that
+   poll's time. A deadline passing, a fix going stale and an override
+   expiring are such changes. Running it there costs one board query on
+   such a poll.
+2. **Inactive trucks:** logged, because the board shows their status under
+   the Inactive chip. Keep that, or log active trucks only, as the ETA log
+   does?
+3. **Retention:** nothing prunes the table, and `eta_marks` is not pruned
+   either. Rows go only when their stop is deleted.
+4. **A reader:** nothing reads the table. A report like `eta:score` would be
+   its own phase.
+
+**Unverified:**
+
+- The step's time on production data over the network; the figures above
+  are local only.
+- Rows per trip in practice.
+- Truck 145 as an example.
+- That a worker deployed before the migration only warns. The wrapper
+  catches the failed read as it catches the failed insert in the tests; it
+  was not tried against a database without the table.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -4229,6 +4387,9 @@ fingerprint (3y) stay built and unused.
 - **Route blocks reads a middle stop, split and marked (3ac, `ce654db`):** a
   template change, not yet deployed. 3aa and 3ab are pushed (`origin/master` at
   `82f5f54`); whether they are deployed is unverified (no network call here).
+- **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, not
+  deployed. Migration 0030 goes to the hosted database first, then
+  `scripts/deploy.sh`. Four questions for Alex are in 3ad.
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### 5. Watch for a week

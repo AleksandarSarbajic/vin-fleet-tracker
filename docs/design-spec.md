@@ -9367,6 +9367,148 @@ address and appointment cells, never the whole printed line.
 **On the local samples:** files 9, 10 and 11 are now read; every other
 sample gives the same result as before.
 
+## 12.126 The board's status, logged when it changes — `eta_status_changes`
+
+§12.112's log writes at distance marks only: the first sighting, then 400,
+200, 100, 50, 25 and 10 straight-line miles. The board recomputes its status
+on every read, anchored to the newest fix (§12.24). So a truck that sits
+between two marks can turn AT_RISK and then LATE, and nothing records either
+change. How early the board warned before a late arrival cannot be measured
+(§12.111 is about the ETA, not the status). Truck 145 may be an example. It
+cannot be checked: its positions are pruned.
+
+**What is written.** Every poll, right after the ETA log, for each board row
+with a next stop:
+
+- one row when its sequence is first seen (`prev_status` null);
+- then one row on each poll where the status shown (override applied) or the
+  engine's own (`computed`, §9.5) differs from the sequence's newest row.
+
+Nothing on a poll where neither changed. Each row holds:
+
+- the truck number and the stop id;
+- the status, `computed`, and whether an override is live;
+- the previous row's two statuses;
+- the fix the board anchored to;
+- the ETA and miles the board shows, null when it shows none;
+- the deadline, the precision, the ETA's basis and the appointment type.
+
+Truck number and stop id only: no driver, phone, load number, address or
+secret, in a row or in a log line.
+
+Rows are written for every board row with a next stop, inactive trucks
+included: the board computes their status and shows it under the Inactive
+chip (§12.14).
+
+**The board's own code.** The rows come from `LATEST_POSITION_SQL`,
+`parseFleetRows` and `applyStatus`, run at the poll's instant with
+`DISPATCH_TZ` from the worker's env. That is what `server/fleet.ts` does for
+the console. The worker repeats no status, ETA, freshness or next-stop rule,
+and does not import the engine. A test holds every logged field to
+`applyStatus` over the same data at the same instant.
+
+**The key is stop + truck + destination.** The destination is §12.112's
+`destinationKey`. A new sequence starts, with `prev_status` null, when:
+
+- a stop is edited to a new point;
+- its load moves to another truck.
+
+A stop with no coordinates has a null destination, compared as a value, and
+the status the board gives it by the clock (§12.24).
+
+**The cap: 100 rows a sequence.** Past it, a change is written only if it is
+the sequence's first row in that status, or in that computed status:
+
+- A stop flapping between ON_TIME and AT_RISK all day stops growing, and its
+  first LATE is still written.
+- A sequence holds at most 100 + 16 rows.
+- A change that is not written is named in the poll line
+  (`statusCapped`: truck number and stop id).
+- The comparison is with the newest row WRITTEN, so a sequence at the cap is
+  named on every poll while the board differs from that row, and not when the
+  board comes back to it.
+- `statusPastCapWritten` counts the firsts written past the cap.
+
+**It cannot cost the poll** (§12.112's rules, unchanged). It is its own
+step:
+
+- its own transaction, under the ETA log's 3 s `statement_timeout`;
+- one board query, one grouped read of these stops' sequences, at most one
+  insert;
+- a wrapper that never throws and warns `status change log failed` with the
+  database's own message, cut to 200 characters.
+
+Either log failing loses only its own rows. Tested three ways:
+
+- a failed insert: the ETA marks of the same poll are still written;
+- a failed ETA-mark insert: the status rows are still written;
+- an insert that sleeps 30 s: given up at 3 s.
+
+**Cost.** Zero routing calls, zero Samsara calls: one board query a poll
+(the console's own), one read, at most one insert. Up to 120 polls an hour
+(30 s interval). Timed on the local test cluster (loopback, fsync off),
+production over the network NOT measured:
+
+| data | board query, median | whole step, median (max) |
+|---|---|---|
+| 34 trucks, 112,200 fixes, 30 open loads | 3.7 ms | 6.0 ms (32.9) |
+| 60 trucks, 1,200,000 fixes, 60 open loads | 5.3 ms | 11.8 ms (44.0) |
+
+A row is about 200 bytes of data. Rows per trip are not measured. §12.50's
+replay counted only crossings into LATE and AT_RISK (10 and 4 in 20 hours,
+across 28 trucks); stale-GPS, upcoming-day and arrival changes were not
+counted.
+
+**What it does not cover.**
+
+- **The feed-stale colour withdrawal** (§5.9). It is a display rule the
+  client applies, not a status.
+- **Time the worker is not polling** (stopped or stalled). Nothing is logged.
+- **A poll whose feed brought no readings.** `poll: no changes` returns
+  before both logs. A change by the clock in that time (a deadline passing,
+  a fix going stale, an override expiring) is logged at the next poll that
+  reaches the step, with that poll's time.
+- **A change and its reversal within one 30 s interval.** Neither is seen.
+- **An ETA that moves inside one status.** Nothing is written for it; the ETA
+  log's marks cover distance.
+
+**Migration 0030**, hand-written and additive:
+
+- the table, with a bigint identity id. Rows of one transaction share
+  `logged_at`, so the newest row is read by `logged_at`, then `id`.
+- CHECKs on the four status columns, against `STATUSES` (a test compares
+  them).
+- the stop's foreign key, on delete cascade.
+- one index on (stop, truck, destination, `logged_at`).
+- RLS on and a deny-all policy. Nothing is granted to anon or authenticated,
+  on the table or on its sequence.
+
+Nothing in the app reads it.
+
+**Deploy order.**
+
+1. Apply 0030 to the hosted database. The running worker and the app name
+   nothing in it, so applying it first is safe.
+2. `scripts/deploy.sh`.
+
+A worker deployed without the table warns on every poll and loses nothing
+else (by the wrapper's design; not tried against production).
+
+**Rollback.** Deploy the previous worker commit. The table can stay, or:
+`DROP TABLE "eta_status_changes"`.
+
+**Tests** (`status-changes.test.ts`, 20). Mutations, each alone and
+reverted:
+
+| broken | tests that fail |
+|---|---|
+| write every poll, not only on a change | 5 |
+| destination left out of the key | 1 |
+| a hand-written status instead of `applyStatus` | 4, the agreement test among them |
+| the first-in-status exception left out | 1 |
+| no cap | 1 |
+| no `statement_timeout` | 1 |
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
