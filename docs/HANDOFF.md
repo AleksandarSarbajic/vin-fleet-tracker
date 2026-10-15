@@ -3539,100 +3539,146 @@ killed) are what show they bite.
 
 ## Next
 
-**Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
-calls on the six control files, at $0.0280.
+Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
+means no phase section says it. **Sample numbers:** 3w added a sample, so
+phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
 
-- **Stop count WRONG:** sample 22, run 3.
-- **Appointment WRONG:** sample 27, stop 1, all 3 runs.
+### 1. Where things stand
 
-The reader stays off. Nothing was fixed; what to change is Alex's call (the
-proposals below).
+- **The reader is off.** `LLM_READER_ENABLED` is set in no env file (3m, 3s);
+  3y repeats that it stays off by default. The e2e server sets it itself, with the fake vendor (3m).
+- **Run 10 met the bar** (3u): 36 of 36 runs scored, zero WRONG on all seven
+  bar fields, merged and in each read alone; 72 calls, $0.1191, on the 12
+  unrecognised files.
+- **It covers 12 of 25 files** (3u; 26 have a text layer since 3w and 3y), 3
+  runs each, one model (Haiku 5.5, 3u), and the six control files have not
+  been re-run since 3e (3u).
+- **Code changed after run 10:** rule C, redaction `.5` (3w; the 12 files'
+  sent text is byte-identical, so 3u's result stands for it), the verifier
+  (3x) and the appointment check (3v). No run has measured 3x or 3v.
+- **Nothing is applied beyond the local test databases** for 0029 (3y), and
+  nothing is pushed.
 
-**What Alex does next, in this order:**
+### 2. Open risks
 
-1. **Review the redaction** of each text-layer file:
-   `npm run ratecon:review-redacted <n>`, then open the URL it prints.
-   - Start with the 12 unrecognised files: 2, 4, 7, 8, 9, 10, 11, 12, 16,
-     17, 21, 28. All 25 text-layer files now pass the re-scan, so nothing
-     is highlighted.
-   - Look first at the lines that hit before 3a-2 (the table in "Phase
-     3a-2"): are they masked as they should be?
-   - Look at the lines the 3a-3 person pass masked (the table in "Phase
-     3a-3"): a name taken, or something the read needs?
-   - Still not caught: a name sharing a cell with a non-name word after its
-     label's cell, a name on the next line, and a name after a phone label.
-   - For every file, say what is NOT masked that should be: a name, a phone,
-     anything. Describe the pattern in invented words; it is fixed with an
-     invented test case and step 0 re-run. Or sign the file off.
-2. ~~Decide the labelled-name gap~~: decided (fix it) and closed in 3a-3.
-3. **Write ground truth,** per `docs/ground-truth-howto.md`.
-   - Priority 1 first, then priority 2.
-   - `npm run ratecon:check-expected` shows what is left.
-   - Decide sample 12: give its entry stops (it changes an existing entry),
-     or leave it out of the evaluation.
-4. ~~Approve step 1 in writing~~: approved 2026-10-14 for the six control
-   files and run once (phase 3b). The next run, on the unrecognised files,
-   needs its own written approval naming them.
-5. **Decide what to do about run 1's findings:**
-   - **A dropped stop:** the cue is narrowed (3d): 1 of 6 control files
-     with nothing dropped, and it misses a dropped first stop. Still to
-     decide: whether it should outlast the first keystroke.
-   - **Two-read agreement** (3d, not wired). Run 2 (3e, paired) made no
-     WRONG and turned sample 27's silent appointment WRONG into a marked
-     blank in 3 of 3 runs. But it blanked 3 appointments the model reads
-     right in run 1, and no stop was dropped to test the case it was built
-     for. Decide:
-     - wire it in (a pair is one read against the cap; decided in 3f);
-     - keep single reads with the cue;
-     - or first add per-read appointment diagnostics and run again.
-     ~~Also decide what a pair with one failed read does~~: decided in 3f.
-     It fails as a whole.
-   - **Sample 27, stop 1:** Alex reads its appointment lines in the viewer
-     and says whether the ground truth or the read is right. The template
-     agrees with the ground truth there.
-   - ~~The exit code~~: done in 3c.
+1. **The silent WRONG appointment (3u): sample 10, run 2, stop 1** (type, time,
+   end time). Both reads gave the same wrong parts and agreed, so nothing
+   marked it; appointments are not on the bar, which does not see it (3u).
+   **What 3v changed:** a filled appointment on a model read now always
+   carries "Check: the AI filled this appointment. Confirm the date and time
+   against the PDF." (not for a template read, a blank, "No date or time",
+   "Couldn't read", or one the pair blanked), so the silent-WRONG category
+   cannot occur by construction (3v). It does not make the appointment right,
+   and no run has measured it. **Its cost** (3v): every AI read leaves at least
+   one "field to check" per filled appointment, and "Looks right" does not
+   clear it; "Looks right" could clear this one check, not done.
+2. **The 3q question (3r, 3u): agreement compares the quoted values before the
+   fill strips trailing punctuation** (3q strips it in the form only). Sample
+   12's four streets differ between the reads in two of three runs again (3u)
+   and the merge blanks them. The counts cannot say the difference is only a
+   trailing mark (3r). Comparing after the same punctuation and case rules is
+   small and needs its own decision (3r). Not changed.
+3. **The blanks the zero still contains (3u):** 24 ZIP cell-runs (samples 4, 7,
+   9, 10, 11, one stop, every run; sample 12, stops 2 to 4, every run), 8
+   street (sample 12, all four stops, runs 1 and 2) and 2 city-and-state
+   (sample 7 stop 2 and sample 11 stop 2, run 1). All marked, left for the
+   dispatcher. **3w found the cause for the ZIPs on samples 7 and 11:** the
+   label rule masks a city line that follows a five-letter label, so the model
+   never sees that ZIP. It was the redaction, not the model; a fix is its own
+   phase, not done (3w).
+4. **Ground truth and comparability after 3x (3x):** an entry written as a
+   couldn't-read for a bare time in a 24-hour document is now stale and would
+   score the AI's correct time as WRONG; `expected.json` was not read, so that
+   check is Alex's or a later phase's. Appointment numbers on 24-hour
+   documents are not comparable across 3x.
 
-**What Alex must approve before step 1** (design §8.2). The figures are
-proposals:
+### 3. The decision for Alex: turn the reader on or not
 
-- **Vendor, account and settings:**
-  - Anthropic, `claude-haiku-5-5`, effort `low`, no thinking parameter,
-    `inference_geo: global`, one attempt per call. Sonnet 5.5 only if named.
-  - **Retention:** the account's default is deletion within 30 days, and
-    flagged content kept up to 2 years. Zero retention is by agreement only.
-    Is the default acceptable for redacted text?
-  - The key in `.env.local`, in its own workspace, with a spend limit.
-- **Files, by number:** only those that pass all three of these: residue 0
-  after step 0, Alex's redaction sign-off, complete ground truth.
-  - **The test group, unrecognised:** 2, 4, 7, 8, 9, 10, 11, 12, 16, 17,
-    21 and 28 all pass step 0 since 3a-2. Sample 12 has no stops in its
-    ground truth.
-  - **The control, template-read,** which the AI is run on too: 1, 13, 14,
-    15, 18, 19, 20 and 22–27 all pass step 0. Complete ground truth today:
-    1, 18, 19, 22, 23, 27 only.
-- **Runs per file:** proposed 3. With no temperature the model is not
-  deterministic, so one run could mislead.
-- **The spend ceiling:**
-  - **Estimate:** the smoke read was 3117 in and 1565 out on 20 lines
-    ($0.0011). The largest file sends 285 lines; call it 15k in and 3k out,
-    about $0.003 a run on Haiku.
-  - **Worst case:** 25 files × 3 runs is 75 calls, at most about $0.23 on
-    Haiku, or about $4.50 on Sonnet.
-  - **Proposed:** a hard ceiling of **$1.00** and **75 calls**, both enforced
-    by the script, which stops before a call would pass either. Built so
-    (3b-prep); the most 75 calls could cost at their bounds is about $0.55.
+Not decided here. What each answer needs:
 
-**Also open:**
+**Keep it off.** Nothing further is needed. The pair (3m), the outcome
+recording (3s, only for a read that filled the form) and the layout
+fingerprint (3y) stay built and unused.
 
-- **Full e2e, 2026-10-14:** 246 passed. The 2b follow-up's reader specs ran in it too.
-- **The two intermittent hangs above** (truck-lists "Adding…", timeline
+**Turn it on.** It needs all three of these:
+
+1. **Open decision #1, answered** (see "Open decisions", above):
+   - EU processing: is it required? If so, Anthropic's own API is out today.
+   - Flagged content: is retention of flagged inputs, up to 2 years at
+     Anthropic, acceptable? 3h and 3u accepted the account's default for that
+     run only.
+   - The basis for "sending is allowed": the brokers' confidentiality clauses,
+     or a business judgment. Write down which.
+   - Still unread from open decision #3: data-processing agreements,
+     sub-processors, what "flagged" means in practice, SOC 2/ISO reports.
+2. **The migrations, in production, before the code that names them: 0026,
+   0027, 0028 and 0029.** 0026 is the counts table (2a) and 0027 adds the `anthropic`
+   vendor and `vendor_capped` outcome (2b), which the route's rows use; 0028 adds the outcome tables (3s); 0029 adds the layout
+   column to 0028's table (3y), so it comes after 0028. **0029 goes to
+   production first, then the code** (3y, approved 2026-10-15): the insert
+   names the column, and a database without it answers every outcome post
+   with a 500 (3y). Where 0026 to 0028 are applied today: 0026 and 0027 on
+   the local test databases only (2a, 2b); 0028: unverified. 0029: local test
+   databases only (3y).
+3. **The settings** (server only; "Language-model reader", 2b): the flag on,
+   `LLM_READER_VENDOR=anthropic`, `LLM_READER_MODEL` (`claude-haiku-5-5`, or
+   `claude-sonnet-5-5` by env only), `LLM_READER_API_KEY`. The daily caps stay
+   25 a user and 100 a day, counting reads; at the cap about $0.33 a day on
+   Haiku (3m). A key for production, its workspace and spend limit:
+   unverified (2b records the evaluation key's).
+
+**Whether the six controls get a re-run first** is a separate question under
+"turn it on":
+
+- **Why it might matter:** they were run in 3b and 3e, before most of the code
+  (3r), and 3u says they have not been re-run since 3e. The six are samples 1,
+  18, 19, 23, 24 and 28 now (3w's renumbering of 1, 18, 19, 22, 23, 27).
+  Template-read files are read by templates, not by the reader (3r).
+- **What a re-run needs:** a new written approval naming the files (3b; a
+  sent-text hash named in an earlier approval is void, 3u, 3w); ground
+  truth for them (the six were scored in 3b and 3e, so it was complete then;
+  whether 3x's stale entries are among them: unverified; 3w says the new
+  sample 22's is not complete); Alex's redaction
+  review of their sent text (3h and 3u record reviews of the twelve only; the
+  controls: unverified); and the script's ceilings of $1.00 and 75 calls
+  (3b-prep, 3u). At about $0.0033 a pair (3m, 3u), 18 pairs is about $0.06
+  (arithmetic, not a measurement).
+- **Without one,** the reader goes on with the six unmeasured since 3e.
+
+### 4. Also open
+
+- **Full e2e, 2026-10-14:** 246 passed (3a). The 2b follow-up's reader specs
+  ran in it too.
+- **The two intermittent hangs** (3b-prep: truck-lists "Adding…", timeline
   "Loading…"). Either can fail `npm run gate`; each may want its own small
   phase.
-- **One live call is left** of 2b's five. None was made in 3a, 3a-2, 3a-3
-  or 3b-prep. Phase 3b made the 18 approved evaluation calls, and no
-  others.
-- **Before the route can count in production,** migrations 0026 and 0027
-  must be applied there (and 0028 and 0029, which add the outcome tables and
-  the layout column: **0029 goes to production first, then the code that names
-  it**, and only when the reader is turned on; decided 2026-10-15).
-- Other open decisions are above.
+- **One live smoke call is left** of 2b's five (2b); no later phase records
+  another. The evaluation calls since then are each under their own written
+  approval, in their own phase (3b, 3e, 3h, 3j, 3k, 3l, 3n, 3p, 3r, 3u).
+- **The dropped-stop cue folds away at the first keystroke** in the load (3c,
+  3d): on a real dropped stop the warning can be gone after one keystroke.
+  Not changed; worth Alex's view (3c).
+- **Sample 27, stop 1** (old numbering; 28 now): the template agrees with the
+  ground truth, and the AI's appointment is marked in all three runs of 3e. No
+  phase records Alex reading its lines in the viewer: unverified.
+- Other open decisions are above ("Open decisions, waiting on Alex").
+
+### The old "Next" list, item by item
+
+| Old item | Now | Phase |
+|---|---|---|
+| "Run 1 is done: the bar is NOT met" | Superseded: the bar is met | 3u (3r: 0 WRONG in 35 of 36) |
+| Stop count WRONG, sample 22 run 3 | Superseded | 3e, 3r, 3u |
+| Appointment WRONG, sample 27 stop 1 | Superseded: marked in 3e; by construction in 3v | 3e, 3v |
+| 1. Review the redaction | Done for the twelve (five in 3h, all twelve under `.4` in 3u; text unchanged under `.5`). Controls: unverified. Unmasked patterns: known limits | 3h, 3u, 3w, 3t |
+| 2. The labelled-name gap | Done | 3a-3 |
+| 3. Write ground truth | Done for the twelve, sample 12 included (scored with its four stops), and for the six controls (scored in 3b, 3e). Stale entries after 3x: open | 3h, 3u, 3b, 3e, 3x |
+| 4. Approve step 1 in writing | Done per run; each run needs its own | 3b, 3h, 3u |
+| 5. Dropped-stop cue | Narrowed; "outlast the first keystroke" still open | 3c, 3d |
+| 5. Wire in the pair, or keep single reads | Done: wired, and a failed pair fails whole | 3m, 3f |
+| 5. Per-read appointment diagnostics | Done | 3f |
+| 5. The exit code | Done | 3c |
+| "Must approve before step 1": vendor, model, settings | Used in every run; for production, item 3 above | 3b-prep, 3u |
+| Retention | Accepted per run only; for production, open decision #1 | 3h, 3u |
+| Files by number; runs per file | Superseded: each run's approval names its files | 3b, 3h, 3u |
+| Spend ceiling $1.00 and 75 calls | Enforced by the script; used in 3u | 3b-prep, 3u |
