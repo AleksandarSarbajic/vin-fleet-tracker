@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   check,
   doublePrecision,
@@ -801,6 +802,79 @@ export const etaMarks = pgTable(
     ),
     check('eta_marks_stopped_nonnegative', sql`stopped_minutes is null or stopped_minutes >= 0`),
     check('eta_marks_dest_key_shape', sql`dest_key ~ '^-?[0-9]+:-?[0-9]+$'`),
+  ],
+);
+
+/** `STATUSES` in lib/status.ts, as SQL. status-changes.test.ts holds the two together. */
+const STATUS_IN = sql.raw(
+  `('LATE', 'STALE_GPS', 'UNASSIGNED', 'AT_RISK', 'NO_APPT', 'ARRIVED', 'ON_TIME', 'TOMORROW')`,
+);
+
+/**
+ * §12.126. The board's status for a stop, logged when it changes.
+ *
+ * One row when the worker first sees a stop as a truck's next stop
+ * (`prevStatus` null), then one per poll in which the shown status or the
+ * engine's own differs from the sequence's newest row. Read from the board's
+ * own rows (`applyStatus` over the fleet query), so it says what a dispatcher
+ * saw, not a second opinion. The sequence is stop + truck + destination;
+ * `destKey` is null for a stop with no coordinates, and null is compared as a
+ * value. Capped at 100 rows a sequence, except the first row in each status.
+ *
+ * The id is an identity because rows of one transaction share `loggedAt`.
+ */
+export const etaStatusChanges = pgTable(
+  'eta_status_changes',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    stopId: uuid('stop_id')
+      .notNull()
+      .references(() => stops.id, { onDelete: 'cascade' }),
+    /** Provenance only. Truck number and stop id are all a log line names. */
+    truckId: uuid('truck_id').notNull(),
+    truckNumber: integer('truck_number'),
+    /** `destinationKey`, as eta_marks writes it; null without coordinates. */
+    destKey: text('dest_key'),
+    status: text('status').notNull(),
+    computed: text('computed').notNull(),
+    overrideLive: boolean('override_live').notNull(),
+    prevStatus: text('prev_status'),
+    prevComputed: text('prev_computed'),
+    fixRecordedAt: timestamp('fix_recorded_at', { withTimezone: true }),
+    fixLat: doublePrecision('fix_lat'),
+    fixLng: doublePrecision('fix_lng'),
+    etaUtc: timestamp('eta_utc', { withTimezone: true }),
+    milesRemaining: doublePrecision('miles_remaining'),
+    deadlineUtc: timestamp('deadline_utc', { withTimezone: true }),
+    precision: geocodePrecision('precision'),
+    distanceBasis: text('distance_basis'),
+    apptType: appointmentType('appt_type'),
+    loggedAt: timestamp('logged_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('eta_status_changes_sequence_idx').on(t.stopId, t.truckId, t.destKey, t.loggedAt),
+    check('eta_status_changes_status_known', sql`status in ${STATUS_IN}`),
+    check('eta_status_changes_computed_known', sql`computed in ${STATUS_IN}`),
+    check(
+      'eta_status_changes_prev_status_known',
+      sql`prev_status is null or prev_status in ${STATUS_IN}`,
+    ),
+    check(
+      'eta_status_changes_prev_computed_known',
+      sql`prev_computed is null or prev_computed in ${STATUS_IN}`,
+    ),
+    check(
+      'eta_status_changes_prev_whole',
+      sql`(prev_status is null) = (prev_computed is null)`,
+    ),
+    check(
+      'eta_status_changes_basis_known',
+      sql`distance_basis is null or distance_basis in ('routed', 'lane-estimate', 'straight-line')`,
+    ),
+    check(
+      'eta_status_changes_dest_key_shape',
+      sql`dest_key is null or dest_key ~ '^-?[0-9]+:-?[0-9]+$'`,
+    ),
   ],
 );
 
