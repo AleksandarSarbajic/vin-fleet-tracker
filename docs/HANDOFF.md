@@ -214,19 +214,32 @@ anywhere.
   wants a scored test of a new layout. New layouts are judged by Alex comparing
   the filled form to the PDF, and after launch by the outcome counts (3s
   queries).
+- Three more decisions, same day (Alex, 2026-10-15, stated in chat):
+  - **EU processing is not required.** Vin Logistics, its brokers and its
+    drivers are not in the EU, so Anthropic's lack of EU processing is not a
+    blocker.
+  - **The basis for "sending is allowed" is business judgment, not the
+    brokers' confidentiality clauses.** Alex describes this as an internal
+    testing app and accepts the risk that a broker's rate confirmation may say
+    it is confidential.
+  - **The Anthropic account spending limit is set.** Which account or
+    workspace it is on is unverified. A separate production key is not yet
+    done.
 
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor: Anthropic** (decided
-   2026-10-13/14; see above). Still open with it: EU processing and the
-   basis for "sending is allowed". Flagged content is decided (below).
-   - **EU processing:** is it required? If so, Anthropic's own API is out
-     today.
+   2026-10-13/14; see above). Nothing is still open with it: EU processing,
+   flagged content and the basis for "sending is allowed" are decided (below).
+   - ~~EU processing:~~ ~~is it required? If so, Anthropic's own API is out
+     today.~~ Decided 2026-10-15: not required; see "The AI reader's use and
+     redaction", above.
    - ~~Flagged content:~~ ~~is the vendors' retention of flagged inputs
      acceptable (up to 2 years at Anthropic)?~~ Decided 2026-10-15:
      accepted; see "The AI reader's use and redaction", above.
-   - **The basis for "sending is allowed":** the brokers' confidentiality
-     clauses, or a business judgment? Write down which.
+   - ~~The basis for "sending is allowed":~~ ~~the brokers' confidentiality
+     clauses, or a business judgment? Write down which.~~ Decided 2026-10-15:
+     business judgment; see "The AI reader's use and redaction", above.
 2. ~~Broker confidentiality.~~ Folded into 1, above.
 3. **Vendor terms.** Researched 2026-10-09; see
    [`llm-reader-vendors.md`](llm-reader-vendors.md) (vendor defaults, may
@@ -3619,16 +3632,17 @@ fingerprint (3y) stay built and unused.
 **Turn it on.** It needs all three of these:
 
 1. **Open decision #1, answered** (see "Open decisions", above):
-   - EU processing: is it required? If so, Anthropic's own API is out today.
-     **Still open:** the decision text does not address it.
+   - EU processing: **settled.** Not required (decision, 2026-10-15, "The AI
+     reader's use and redaction").
    - Flagged content: **settled.** Alex accepts Haiku 5.5 with default
      retention (decision, 2026-10-15, "The AI reader's use and redaction"); before it, 3h and 3u had accepted the default for
      those runs only.
-   - The basis for "sending is allowed": the brokers' confidentiality clauses,
-     or a business judgment. Write down which. **Still open:** the decision
-     text does not address it.
+   - The basis for "sending is allowed": **settled.** Business judgment, not
+     the brokers' confidentiality clauses (decision, 2026-10-15, "The AI
+     reader's use and redaction").
    - Still unread from open decision #3: data-processing agreements,
      sub-processors, what "flagged" means in practice, SOC 2/ISO reports.
+     Not decided here.
 2. **The migrations, in production, before the code that names them: 0026,
    0027, 0028 and 0029.** 0026 is the counts table (2a) and 0027 adds the `anthropic`
    vendor and `vendor_capped` outcome (2b), which the route's rows use; 0028 adds the outcome tables (3s); 0029 adds the layout
@@ -3642,8 +3656,10 @@ fingerprint (3y) stay built and unused.
    `LLM_READER_VENDOR=anthropic`, `LLM_READER_MODEL` (`claude-haiku-5-5`, or
    `claude-sonnet-5-5` by env only), `LLM_READER_API_KEY`. The daily caps stay
    25 a user and 100 a day, counting reads; at the cap about $0.33 a day on
-   Haiku (3m). A key for production, its workspace and spend limit:
-   unverified (2b records the evaluation key's).
+   Haiku (3m). The account spending limit is set (decision, 2026-10-15,
+   "The AI reader's use and redaction"); which account or workspace it is on:
+   unverified (2b records the evaluation key's). A separate production key:
+   not yet done.
 
 **Whether the six controls get a re-run first** is a separate question under
 "turn it on":
@@ -3696,6 +3712,6 @@ fingerprint (3y) stay built and unused.
 | 5. Per-read appointment diagnostics | Done | 3f |
 | 5. The exit code | Done | 3c |
 | "Must approve before step 1": vendor, model, settings | Used in every run; for production, item 3 above | 3b-prep, 3u |
-| Retention | Accepted per run (3h, 3u); the default accepted for use by the decision of 2026-10-15. EU processing and the basis for sending stay open | 3h, 3u |
+| Retention | Accepted per run (3h, 3u); the default accepted for use by the decision of 2026-10-15. EU processing and the basis for sending are decided too (not required; business judgment) | 3h, 3u |
 | Files by number; runs per file | Superseded: each run's approval names its files | 3b, 3h, 3u |
 | Spend ceiling $1.00 and 75 calls | Enforced by the script; used in 3u | 3b-prep, 3u |
