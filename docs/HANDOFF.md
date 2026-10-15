@@ -204,6 +204,17 @@ anywhere.
 - **The `b0bc35b` comparison for the baseline flake is skipped.** See
   "The 'Synced 0s ago' flake" below for the reason.
 
+**The AI reader's use and redaction** (Alex, 2026-10-15):
+
+- The AI reader is for Vin Logistics' own dispatch use only. Alex accepts that
+  redacted rate-confirmation text goes to Anthropic (Haiku 5.5, default
+  retention) and that an unlabelled person name can still go through.
+  Redaction stays at `redact-2026-10-14.5` and is not extended or removed; no
+  further redaction phases unless Alex asks. No new ground truth unless Alex
+  wants a scored test of a new layout. New layouts are judged by Alex comparing
+  the filled form to the PDF, and after launch by the outcome counts (3s
+  queries).
+
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor: Anthropic** (decided
@@ -3584,12 +3595,15 @@ phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
    (sample 7 stop 2 and sample 11 stop 2, run 1). All marked, left for the
    dispatcher. **3w found the cause for the ZIPs on samples 7 and 11:** the
    label rule masks a city line that follows a five-letter label, so the model
-   never sees that ZIP. It was the redaction, not the model; a fix is its own
-   phase, not done (3w).
+   never sees that ZIP. It was the redaction, not the model. **The fix is not
+   planned: redaction is frozen at `.5`** (decision, 2026-10-15, "The AI reader's use and redaction"); the 3w finding stays as a
+   known limit.
 4. **Ground truth and comparability after 3x (3x):** an entry written as a
    couldn't-read for a bare time in a 24-hour document is now stale and would
-   score the AI's correct time as WRONG; `expected.json` was not read, so that
-   check is Alex's or a later phase's. Appointment numbers on 24-hour
+   score the AI's correct time as WRONG; `expected.json` was not read. **It
+   matters only for a scored run:** no new ground truth is required, and the
+   check is Alex's comparison of the filled form to the PDF and, after launch,
+   the outcome counts (3s queries) (decision, 2026-10-15, "The AI reader's use and redaction"). Appointment numbers on 24-hour
    documents are not comparable across 3x.
 
 ### 3. The decision for Alex: turn the reader on or not
@@ -3604,11 +3618,13 @@ fingerprint (3y) stay built and unused.
 
 1. **Open decision #1, answered** (see "Open decisions", above):
    - EU processing: is it required? If so, Anthropic's own API is out today.
-   - Flagged content: is retention of flagged inputs, up to 2 years at
-     Anthropic, acceptable? 3h and 3u accepted the account's default for that
-     run only.
+     **Still open:** the decision text does not address it.
+   - Flagged content: **settled.** Alex accepts Haiku 5.5 with default
+     retention (decision, 2026-10-15, "The AI reader's use and redaction"); before it, 3h and 3u had accepted the default for
+     those runs only.
    - The basis for "sending is allowed": the brokers' confidentiality clauses,
-     or a business judgment. Write down which.
+     or a business judgment. Write down which. **Still open:** the decision
+     text does not address it.
    - Still unread from open decision #3: data-processing agreements,
      sub-processors, what "flagged" means in practice, SOC 2/ISO reports.
 2. **The migrations, in production, before the code that names them: 0026,
@@ -3635,14 +3651,13 @@ fingerprint (3y) stay built and unused.
   18, 19, 23, 24 and 28 now (3w's renumbering of 1, 18, 19, 22, 23, 27).
   Template-read files are read by templates, not by the reader (3r).
 - **What a re-run needs:** a new written approval naming the files (3b; a
-  sent-text hash named in an earlier approval is void, 3u, 3w); ground
-  truth for them (the six were scored in 3b and 3e, so it was complete then;
-  whether 3x's stale entries are among them: unverified; 3w says the new
-  sample 22's is not complete); Alex's redaction
-  review of their sent text (3h and 3u record reviews of the twelve only; the
-  controls: unverified); and the script's ceilings of $1.00 and 75 calls
-  (3b-prep, 3u). At about $0.0033 a pair (3m, 3u), 18 pairs is about $0.06
-  (arithmetic, not a measurement).
+  sent-text hash named in an earlier approval is void, 3u, 3w), and the
+  script's ceilings of $1.00 and 75 calls (3b-prep, 3u). At about $0.0033 a
+  pair (3m, 3u), 18 pairs is about $0.06 (arithmetic, not a measurement).
+  **Ground truth and a redaction review are no longer prerequisites:** the
+  check is Alex's comparison of the filled form to the PDF and, after launch,
+  the outcome counts (3s queries) (decision, 2026-10-15, "The AI reader's use and redaction"). A scored run, if Alex wants
+  one, has the ground truth the six already had (3b, 3e).
 - **Without one,** the reader goes on with the six unmeasured since 3e.
 
 ### 4. Also open
@@ -3672,13 +3687,13 @@ fingerprint (3y) stay built and unused.
 | Appointment WRONG, sample 27 stop 1 | Superseded: marked in 3e; by construction in 3v | 3e, 3v |
 | 1. Review the redaction | Done for the twelve (five in 3h, all twelve under `.4` in 3u; text unchanged under `.5`). Controls: unverified. Unmasked patterns: known limits | 3h, 3u, 3w, 3t |
 | 2. The labelled-name gap | Done | 3a-3 |
-| 3. Write ground truth | Done for the twelve, sample 12 included (scored with its four stops), and for the six controls (scored in 3b, 3e). Stale entries after 3x: open | 3h, 3u, 3b, 3e, 3x |
+| 3. Write ground truth | Done for the twelve, sample 12 included (scored with its four stops), and for the six controls (scored in 3b, 3e). Stale entries after 3x matter only for a scored run; no new ground truth is required (decision, 2026-10-15) | 3h, 3u, 3b, 3e, 3x |
 | 4. Approve step 1 in writing | Done per run; each run needs its own | 3b, 3h, 3u |
 | 5. Dropped-stop cue | Narrowed; "outlast the first keystroke" still open | 3c, 3d |
 | 5. Wire in the pair, or keep single reads | Done: wired, and a failed pair fails whole | 3m, 3f |
 | 5. Per-read appointment diagnostics | Done | 3f |
 | 5. The exit code | Done | 3c |
 | "Must approve before step 1": vendor, model, settings | Used in every run; for production, item 3 above | 3b-prep, 3u |
-| Retention | Accepted per run only; for production, open decision #1 | 3h, 3u |
+| Retention | Accepted per run (3h, 3u); the default accepted for use by the decision of 2026-10-15. EU processing and the basis for sending stay open | 3h, 3u |
 | Files by number; runs per file | Superseded: each run's approval names its files | 3b, 3h, 3u |
 | Spend ceiling $1.00 and 75 calls | Enforced by the script; used in 3u | 3b-prep, 3u |
