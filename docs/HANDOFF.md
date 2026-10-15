@@ -3526,6 +3526,17 @@ killed) are what show they bite.
 5. **Samples mode fingerprints the text that WOULD be sent** (the redacted lines
    of `prepareForReading`, page-selected), which is what the browser hashes.
 
+**Approved by Alex, 2026-10-15.** Phase 3y is approved as built. Decided with it:
+
+- **The known-limit note stands as written** (the text before a colon is a label).
+  No further hardening on names before a colon; do not reopen it.
+- **0029 stays on the LOCAL test databases.** It is applied nowhere else: not
+  production, not any shared database. Nothing is pushed.
+- **Deploy order when the reader is turned on: 0029 to production first, then
+  the code.** Never the other way round (the insert names the column; see
+  "Deploy order" above).
+- **The reader decision** (the "Next" section) is Alex's, to make alone.
+
 ## Next
 
 **Evaluation run 1 (phase 3b) is done: the bar is NOT met.** That was 18
@@ -3622,5 +3633,6 @@ proposals:
   others.
 - **Before the route can count in production,** migrations 0026 and 0027
   must be applied there (and 0028 and 0029, which add the outcome tables and
-  the layout column: apply 0029 before the code that names it).
+  the layout column: **0029 goes to production first, then the code that names
+  it**, and only when the reader is turned on; decided 2026-10-15).
 - Other open decisions are above.
