@@ -3930,6 +3930,129 @@ are Alex's to decide.
   ("Fargo ND 581021234") is still refused, as before: the five are not a whole
   token there.
 
+### Phase 3ac: Route blocks reads a middle stop, its street and city split by the app and marked (2026-10-15)
+
+**Decision (Alex, written, 2026-10-15, in chat):** "yes i want template for
+this also with 3 stops, reason is because we run this load with 3 stops 6 days
+per week". **This supersedes 3aa's decision B for the Route blocks template
+only:** a document whose middle stop the summary line does not name is no
+longer refused for that alone. A SILENT split (3aa's option C) stays
+rejected; a MARKED split is approved. Code and tests are commit `ce654db`;
+NOT pushed, NOT deployed.
+
+**What is read and what is marked:**
+
+- **Stops the summary line names** (the first and the last): read as in
+  3aa, their city confirmed by the summary, **no mark**.
+- **Any other stop:** its run-together street and city are divided by the
+  app's own grammar (`splitStreetCity`, `src/lib/ratecon/street-split.ts`),
+  state and ZIP read as before, and **the street and the city both carry a
+  check**: "Check: the street and city were split by the app from “<the
+  run-together text>”. Confirm them against the PDF."
+- **Nothing else is marked:** no AI mark and no AI check on any template
+  read, appointments included (3v is for model reads only).
+- **The check is cleared, like every check, by editing that field,** and it
+  counts in the strip's "fields to check". That count is shown, never a gate
+  on Save. The brief said "Looks right" clears it "like any Check": it does
+  not, and no check is cleared that way. "Looks right" exists only for fields
+  the AI filled and clears only their AI marks (3v), and a template read has
+  no "Looks right". Not changed: that would be a new control.
+- **The fill change:** `fillStop` keeps a read's check on a field it filled
+  (`ratecon-fill.ts`, one line). Only this template sets one; the verifier
+  sets a check only on a field it left blank.
+- **A pasted address that runs together is still never split (§12.121).**
+  The exception is this template's, written in `street-split.ts`; nothing
+  else calls it.
+
+**The grammar,** over the words before ", ST 12345":
+
+    street = NUMBER NAME+ TYPE [DIR] [UNIT]
+    city   = WORD WORD? WORD?
+
+- **NUMBER:** a house number: digits, then a letter or "-digits" at most.
+- **NAME:** any words, at least one that is not an abbreviated directional.
+- **TYPE:** a street-type word. The vocabulary is USPS Publication 28,
+  Appendix C1: each primary suffix and its standard abbreviation, without FORT
+  and MOUNT, which begin cities. `paste-address.ts` has no suffix list, and
+  `src/lib/address.ts` has a deliberately small one without PARK or LAKE,
+  which could not refuse "Park Ridge".
+- **DIR:** N, S, E, W, NE, NW, SE or SW.
+- **UNIT:** ONE of UNIT, STE, SUITE, APT, BLDG, RM or FL and one token of
+  letters and digits, or "#" with one ("# 4", "#4").
+- **WORD:** letters (and . ' -), so never a number; never a unit word. The
+  FIRST word is never an abbreviated directional. WEST, EAST, NORTH, SOUTH,
+  NEW, FORT and MOUNT may begin a city.
+
+**Why exactly one division:** every division of the words that fits is a
+candidate, and the split is taken only when there is EXACTLY ONE, and its
+city does not begin with a street-type word. Zero, or two or more, and the
+WHOLE document is refused, so it goes to the AI reader as before. A candidate
+whose city begins with a street-type word still COUNTS, because that is where
+the division is ambiguous: "Main St St Louis" could be "St Louis", and
+"Main St Park Ridge" could be "Park Ridge". Counting it refuses the document,
+where filtering it out would have read "Louis". A city beginning with an
+abbreviated directional, a unit word or a number is not counted: under the
+grammar those belong to the street ("St N Fargo" is "St N" and "Fargo").
+Refused on purpose (tested):
+- a city beginning with a street-type word;
+- "Park Ridge"-shaped;
+- a street with no street-type word;
+- a second unit phrase;
+- more than three city words;
+- a street-type word inside the street name before another ("Lake Park
+  Ave");
+- a city with a street-type word before its last word ("Palm Beach
+  Gardens").
+
+**Checked locally (counts and codes only, no values):**
+
+- **`npm run ratecon:score`: sample 8 passes every field at all three stops,
+  stop 2's street and city included,** all three appointments `exact`. The
+  bar is 14 of 14. Against HEAD, compared byte for byte by stashing, only
+  sample 8's lines and the bar line differ; the 13 other template samples are
+  identical.
+- **`recognisedLayouts` per sample:** unchanged against HEAD for all 29.
+  Every file another template reads still matches exactly its own layout.
+- **Alex's two PDFs** (outside `.samples/`, not copied): the 2-stop one is
+  read, 2 stops, no stop marked. The 3-stop one, refused under 3aa, is read,
+  3 stops, street and city marked on 1 stop (stop 2) and on neither of the
+  other two.
+
+**Tests** (invented addresses only): 26 for the grammar
+(`street-split.test.ts`), plus these in the other suites:
+- **`templates.test.ts`:** 2-, 3- and 4-stop reads, the refusal examples as
+  middle stops, a unit phrase, a directional then a unit, a city beginning
+  WEST or NEW, and the marks present on split stops and absent on named ones.
+  3aa's "refuses a three-stop document" test is replaced by the 3-stop read.
+- **`ratecon-fill.test.ts`:** the checks in the form, no AI mark or AI check,
+  the strip count, and an edit clearing the check.
+- **`read-pdf.test.ts`:** a pdf.js round trip of three stops.
+- **The existing "a template read with the same data: no AI check" test** is
+  unchanged and still passes.
+- **`npm run check`:** 192 files, 3483 tests (3451 before).
+
+**Mutations,** each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| unique split (take the first of several) | 1 |
+| the abbreviated-directional ban | 2 |
+| the street-type-start ban | 1 |
+| no mark on a split stop | 6 |
+| the fill dropping a filled field's check | 2 |
+
+The unique-split rule first failed nothing, because the street-type-start
+check refused the same cases; the "Palm Beach Gardens" case was added for it.
+
+**Unverified:**
+
+- **The template's values on Alex's two PDFs,** above all the 3-stop one's
+  split middle stop. Only Alex's by-eye check against the PDFs settles them.
+- **How often the grammar refuses on real loads:** nothing measures it; one
+  live 3-stop file and sample 8 split as tested.
+- **The street-type list** was transcribed from USPS Publication 28 for this
+  phase and not checked against the publication in this session (no network).
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -4103,6 +4226,9 @@ fingerprint (3y) stay built and unused.
 - **ZIP+4 (3ab):** the verifier now fills the five digits of a ZIP+4 the city
   line prints (`aa9c5b2`). Not deployed, and no run measures it; the 15 of
   run 11's 24 blank ZIPs it may explain are inferred from line counts.
+- **Route blocks reads a middle stop, split and marked (3ac, `ce654db`):** a
+  template change, not yet deployed. 3aa and 3ab are pushed (`origin/master` at
+  `82f5f54`); whether they are deployed is unverified (no network call here).
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### 5. Watch for a week
