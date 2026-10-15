@@ -218,11 +218,13 @@ anywhere.
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor: Anthropic** (decided
-   2026-10-13/14; see above). Still open with it:
+   2026-10-13/14; see above). Still open with it: EU processing and the
+   basis for "sending is allowed". Flagged content is decided (below).
    - **EU processing:** is it required? If so, Anthropic's own API is out
      today.
-   - **Flagged content:** is the vendors' retention of flagged inputs
-     acceptable (up to 2 years at Anthropic)?
+   - ~~Flagged content:~~ ~~is the vendors' retention of flagged inputs
+     acceptable (up to 2 years at Anthropic)?~~ Decided 2026-10-15:
+     accepted; see "The AI reader's use and redaction", above.
    - **The basis for "sending is allowed":** the brokers' confidentiality
      clauses, or a business judgment? Write down which.
 2. ~~Broker confidentiality.~~ Folded into 1, above.
