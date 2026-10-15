@@ -3601,7 +3601,8 @@ bar fields, merged and in read A and read B alone.**
 | Merged WRONG on the bar | 0 | **0** |
 
 **WRONG:** none on the bar, so **there is no relation code to report.** **No
-appointment is WRONG:** all 84 filled appointments (stop-runs) are marked, none
+appointment is WRONG:** all 84 appointments (stop-runs) are marked, by the 3v
+check or blank and marked (corrected, see "Appointments" below), none
 silent. 3u's one silent WRONG appointment (sample 10, run 2, stop 1) is marked
 here.
 
@@ -3630,23 +3631,72 @@ here.
   and sample 11 both stops in run 3 (3u: sample 9 both stops in run 1; sample
   11 none).
 
-**Appointments, separately from the bar.** **All 84 filled appointments carry
-the 3v check** (`appointmentScore` reads `fill.checks.appointment`; 84 of 84
-are "marked"). Of the 84, **55 are filled as the PDF says and 29 differently,
+**Appointments, separately from the bar.** **All 84 appointments are marked,
+but not all by the 3v check** (corrected after the run; the first write-up
+said all 84 carried it). `appointmentScore` counts any
+`fill.checks.appointment` as "marked" (`scripts/ratecon-expected.mts:122`), so
+its 84 of 84 includes blanks. **About 58 carry the 3v check and about 26 are
+blank and marked** "Couldn't read" or "The two AI reads differed": inferred
+from the parts that differ, not read from the replies (the script stores no
+reply and prints no check text, so the exact split needs a re-run). **No
+appointment is silent WRONG:** a WRONG is unmarked by definition, and every
+one of the 84 carries a mark. Of the 84, the scorer puts **55 "filled as the
+PDF says" and 29 "filled differently",
 every one marked.** The 29, by sample: 16, 6 (both stops, type, date, time and
 end time, every run); 21, 6 (the same, every run); 7, 5 (date and time on
 both stops in runs 1 and 2; time on stop 2 in run 3); 9, 4 (date and time on
 both stops in runs 2 and 3); 10, 3 (stop 1: type, date, time, end time, every
 run); 12, 3 (stop 1: type and end time, every run); 11, 2 (both stops, run
-2); samples 2, 4, 8, 17 and 29: none. **These numbers are not comparable with
-3u's across 3x:** an entry written as a couldn't-read for a bare time in a
-24-hour document is stale (3x), and the scorer counts the AI's correct time as
-"filled differently". I did not read `expected.json`, so I cannot say which of
-the 29 are stale, and I did not change any. Sample 8's stop 3 time differed in
+2); samples 2, 4, 8, 17 and 29: none. **"Filled differently" is the scorer's
+wording and covers blank-and-marked appointments:** a blank appointment
+differs from any truth (`appointmentDiff`, `scripts/ratecon-expected.mts:96`).
+**By part signature, 26 of the 29 are blanks** (samples 16, 21, 10 and 11;
+samples 7 and 9 in the runs where the pair differed; sample 7, run 3, stop 2);
+inferred, not read from the replies. **Only sample 12 stop 1 (3 cell-runs) is
+a filled value that differs.** **Stale ground truth does not explain the 29**
+(corrected; the first write-up said some might be stale): the diagnosis after
+the run counted the twelve files' ground truth (counts only, no value read
+out) and found no couldn't-read entries, so 3x's stale case does not occur in
+them; samples 16 and 21 are FCFS at every stop. Sample 8's stop 3 time differed in
 every run of 3u and does not here; sample 9 went from stop 2's time in every
 run to date and time on both stops in runs 2 and 3. The counts do not say why
 (a run-to-run change of this size is within what 3p and 3r showed on unchanged
 text, and 3x is one candidate, not shown).
+
+**Samples 16 and 21, and a limit of the verifier** (diagnosis after the run,
+2026-10-15: no code changed, no network call; part names and counts only):
+
+- **Sample 21 did not change:** both stops differ in type, date, time and end
+  time, both reads, every run, in 3p (line 2424), 3r (line 2625), 3u (line
+  3082: "both stops (type, date, time, end time), both reads, every run (as
+  3r)") and here: blank at both stops each time (by part signature). Each
+  read had 2 values that did not stand (this run's stdout).
+- **Sample 16 is run-to-run variance on identical text:** the sent text,
+  prompt and input tokens are 3u's. In every run here exactly one read
+  differed at both stops (read B in runs 1 and 3, read A in run 2; stdout), so
+  the pair differed and the merge blanked the appointment (by part signature;
+  whether that read answered `unclear` or did not verify is not in the
+  stdout). Runs with a blank: 1 in 3u (line 3080), 2 in 3r (line 2623), 3
+  here. 3x cannot produce a blank: it only turns some unreadable reads into
+  ranges, never the reverse (synthetic test on the pre-3x tree and HEAD; the
+  script was not kept).
+- **The limit:** the verifier never accepts a day-first named date (for
+  example `16-Oct-2026`, `16 Oct 2026`, `16OCT26`) or a numeric date range
+  (`10/16-10/17`). It reads ISO, month-first named and numeric M/D dates only
+  (`src/lib/ratecon/verify-read.ts:84` to `97`). The date stays null, which
+  makes the whole appointment unreadable (`verify-read.ts:241` to `261`): the
+  form gets a blank APPT marked "Couldn't read", and the dispatcher enters
+  it. **Sample 21's likely cause is a day-first date: UNVERIFIED.** Its sent
+  text has two lines with a day-first named date; whether those are the
+  appointment dates was not checked. A numeric date range is ruled out for 16
+  and 21 (no such shape in their sent text).
+- **A stop whose truth is FCFS at 120 minutes or less cannot score "same":**
+  the fill makes a window of 120 minutes or less APPT with that window
+  (`appointmentFrom`, `src/components/edit/ratecon-fill.ts:106` to `113`;
+  `APPT_WINDOW_MAX_MINUTES = 120`, line 46), so its type differs from FCFS
+  truth even when read perfectly. One of sample 21's stops is such a stop.
+- **Not changed.** Adding day-first parsing would be a new phase and is
+  Alex's decision; so is a re-run of sample 16 (it needs a written approval).
 
 **Cost** per pair about $0.0033 ($0.1180 for 36). By sample, in dollars (summed
 from the per-run figures, which are rounded) and tokens in/out over 3 runs: 2
@@ -3661,9 +3711,13 @@ sample equal 3u's to the token; the output tokens differ.
 
 - **It shows** that on the same sent text, the code with 3v, 3w and 3x still
   gets zero WRONG on the bar in 36 of 36 runs, in each read and merged, and
-  that no filled appointment is silent (3v, by construction).
+  that no appointment is silent: about 58 carry the 3v check (by
+  construction) and about 26 are blank and marked (corrected, see above).
 - **It does not show** that the appointments are right: 29 of 84 differ from
-  the ground truth, and the ground truth is stale for some (3x). It does not
+  the ground truth (26 blank and marked, 3 a filled value, inferred). Stale
+  ground truth explains none of them (corrected): sample 21 has been blank
+  since 3p, sample 16 is run-to-run variance, and a day-first date is
+  sample 21's likely cause (unverified; see above). It does not
   show that 3x changed anything, or that 3v is "Looks right"-proof.
 - **The zero is still partly blanks:** 24 ZIPs, 7 streets and 4 city-and-state
   cells are left for the dispatcher, marked. The 3q question stands: sample
@@ -3807,6 +3861,13 @@ fingerprint (3y) stay built and unused.
 - **Sample 27, stop 1** (old numbering; 28 now): the template agrees with the
   ground truth, and the AI's appointment is marked in all three runs of 3e. No
   phase records Alex reading its lines in the viewer: unverified.
+- **The verifier never reads a day-first named date or a numeric date range**
+  (3z): `16-Oct-2026`, `16 Oct 2026`, `16OCT26` or `10/16-10/17` leaves the
+  date null, the appointment blank and marked "Couldn't read", and the
+  dispatcher enters it. Sample 21's blanks are likely this: unverified (3z).
+  A stop whose truth is FCFS at 120 minutes or less is filled as APPT with a
+  window and cannot score "same" (3z). Not changed; day-first parsing would
+  be a new phase, and is Alex's decision.
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### The old "Next" list, item by item
