@@ -234,6 +234,21 @@ anywhere.
     workspace it is on is unverified. A separate production key is not yet
     done. **Since done** (Alex reports, 2026-10-15): see "Next", section 1.
 
+**The e2e flakes and the deploy gates** (Alex, 2026-10-16; the four
+questions of phase 3ae):
+
+- **Changing how the login is checked so the tests do not depend on
+  Supabase: no.** It would weaken production security — with `getClaims()`
+  in place of `getUser()`, a revoked login would keep working until its token
+  expired — only to make the tests less sensitive to the network.
+- **Run deploys on a steady setup: yes.** In Alex's words, "that's the whole
+  fix". 3ae's runs were on battery with Low Power Mode on, and the probe saw
+  the stalls on the path to hosted Supabase.
+- **Retries or longer waits: no.** They hide real problems, and a 15 s stall
+  would outlast them anyway.
+- **Printing connection timings at the end of each e2e run: not now.**
+  Revisit only if e2e fails again on a good connection.
+
 ## Open decisions, waiting on Alex
 
 1. **The language-model reader's vendor: Anthropic** (decided
@@ -4409,6 +4424,9 @@ raised and no retry added.
    like the sleep check, with the probe's counts. It would add test-runner
    calls to Supabase.
 
+**Decided** (Alex, 2026-10-16): 1 no, 2 yes, 3 no, 4 not now. The reasons
+are under "Decided by Alex", in "The e2e flakes and the deploy gates".
+
 #### Unverified
 
 - That the three e2e failures were auth stalls. The probe ran in later runs
@@ -4593,9 +4611,10 @@ fingerprint (3y) stay built and unused.
 - **Route blocks reads a middle stop, split and marked (3ac, `ce654db`):** a
   template change. 3aa, 3ab, 3ac and 3ad are pushed (`origin/master` at
   `9a475ca`); whether they are deployed is unverified (no network call here).
-- **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, not
-  deployed. Migration 0030 goes to the hosted database first, then
-  `scripts/deploy.sh`. Four questions for Alex are in 3ad.
+- **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, pushed,
+  not deployed. Migration 0030 is applied to the hosted database (3ae).
+  Next: `scripts/deploy.sh`, run on a steady setup (decision, 2026-10-16,
+  "The e2e flakes and the deploy gates"). Four questions for Alex are in 3ad.
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### 5. Watch for a week
