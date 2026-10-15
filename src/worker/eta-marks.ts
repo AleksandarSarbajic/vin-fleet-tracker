@@ -31,8 +31,11 @@ import { BOARD_NEXT_STOP } from '@/server/next-stop';
  * loses one poll's rows; it cannot lose positions, an arrival or a route.
  */
 
-/** Long enough for a few dozen rows; short enough that a stuck lock cannot stall a poll. */
-const LOG_TIMEOUT_MS = 3_000;
+/**
+ * Long enough for a few dozen rows; short enough that a stuck lock cannot stall a poll.
+ * The status change log (§12.126) runs under the same.
+ */
+export const LOG_TIMEOUT_MS = 3_000;
 /** The settle step runs hourly and reads positions; give it more, but bound it. */
 const SETTLE_TIMEOUT_MS = 10_000;
 /** Destinations settled per run. Arrivals are a handful an hour. */
@@ -236,7 +239,7 @@ export async function logEtaMarks(db: Conn, now: Date = new Date()): Promise<Eta
 }
 
 /** What a warning may say about a failure: the database's own message, short. */
-function describe(error: unknown): string {
+export function describe(error: unknown): string {
   // Drizzle wraps a failed query in an error whose message carries the SQL and
   // its parameters. The cause is the database's sentence, and says enough.
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;

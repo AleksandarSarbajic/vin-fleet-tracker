@@ -11,6 +11,7 @@ import { flushWorkerSentry, initWorkerSentry, sentryActive } from './sentry';
 import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { runEtaLog, runEtaSettle } from './eta-marks';
+import { runStatusLog } from './status-changes';
 import { readBudgetDay } from './budget-day';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
 import { HereRouting } from '@/server/routing/provider';
@@ -535,6 +536,13 @@ async function pollOnce(
    */
   const etaLog = await runEtaLog(db, logger);
 
+  /**
+   * §12.126. Its own step, after the ETA log: its own transaction, timeout and
+   * never-throwing wrapper, so a failure in either loses only its own rows.
+   * The board's status, from the board's own code, in the dispatch zone.
+   */
+  const statusLog = await runStatusLog(db, logger, env.DISPATCH_TZ);
+
   logger.info('poll: ingested', {
     vehicles: page.rows.length,
     /**
@@ -569,6 +577,16 @@ async function pollOnce(
     routeFailures: routing.failures,
     lanesBlocked: routing.blocked,
     etaMarksLogged: etaLog.firstSeen + etaLog.marks,
+    /**
+     * §12.126. `statusCapped` names, by truck number and stop id, each
+     * sequence at the cap whose change was not written this poll;
+     * `statusPastCapWritten` counts the firsts in a status written past it.
+     */
+    statusStopsConsidered: statusLog.considered,
+    statusFirstSeen: statusLog.firstSeen,
+    statusChanges: statusLog.changes,
+    statusCapped: statusLog.capped,
+    statusPastCapWritten: statusLog.pastCapWritten,
   });
 }
 
