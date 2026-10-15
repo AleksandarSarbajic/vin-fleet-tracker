@@ -4,8 +4,9 @@ State on 2026-10-14. Phases 3a and 3a-2 of the language-model reader are
 done, local only: the evaluation PREP, and a second redaction pass that lets
 all 25 text-layer samples be prepared. Nothing was sent anywhere and the API
 key was not used. Phase 2b and its follow-up are built: the Anthropic
-adapter, behind `LLM_READER_ENABLED` (off by default, and OFF in production;
-nothing went to Vercel). It has been called live only with invented text.
+adapter, behind `LLM_READER_ENABLED` (off by default; OFF in production until
+2026-10-15, ON in production since: see "What is live"). On 2026-10-14 it had
+been called live only with invented text.
 See "Language-model reader" below. `npm run check` passed on 2026-10-14
 (170 files, 2503 tests).
 `git log` has the newest; the deploy is checked with the curl calls under
@@ -15,6 +16,11 @@ Read `CLAUDE.md` first. Build from `docs/design-spec.md`; each feature below
 names its § there.
 
 ## What is live
+
+**The AI reader is live since 2026-10-15:** deployed at `cc0e60d`, in
+production behind `LLM_READER_ENABLED`, with the caps 25 a user and 100 a day
+(the defaults, 2b). Who reported what, and what is unverified: "Next",
+section 1. The table below lists only older commits.
 
 | Commit | What | § |
 |---|---|---|
@@ -224,7 +230,7 @@ anywhere.
     it is confidential.
   - **The Anthropic account spending limit is set.** Which account or
     workspace it is on is unverified. A separate production key is not yet
-    done.
+    done. **Since done** (Alex reports, 2026-10-15): see "Next", section 1.
 
 ## Open decisions, waiting on Alex
 
@@ -334,8 +340,8 @@ no network call to any vendor. `LLM_READER_ENABLED` is off by default.
 | `src/components/edit/RateconStrip.tsx`, `StopForm.tsx`, `LoadStrip.tsx`, `Field.tsx` | Read with AI, Show what is sent, Cancel, the AI marks, Looks right, the load number's confirm |
 | `e2e/ratecon-ai.spec.ts` | Through the route and the fake. Runs under `npm run e2e`, which gives the server the reader's env. It still skips, and says why, on a server where the reader is off |
 
-**Phase 2b is built:** the Anthropic adapter. Still OFF in production, and
-nothing was deployed.
+**Phase 2b is built:** the Anthropic adapter. OFF in production until
+2026-10-15; deployed and ON since (see "What is live").
 
 | File | What |
 |---|---|
@@ -3738,8 +3744,32 @@ phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
 
 ### 1. Where things stand
 
-- **The reader is off.** `LLM_READER_ENABLED` is set in no env file (3m, 3s);
-  3y repeats that it stays off by default. The e2e server sets it itself, with the fake vendor (3m).
+- **The reader is ON in production since 2026-10-15** (off until then;
+  `LLM_READER_ENABLED` is still set in no env file in the repo, 3m, 3s, and
+  the e2e server sets it itself, with the fake vendor, 3m). Who reported what
+  ("the advisor" is the assistant reviewing for Alex, outside this repo):
+  - **Alex reports:** `npm run gate` passed before the push, e2e 248 passed
+    (the output's tail). Master was pushed at `cc0e60d` (55 commits; this
+    repo's `git status` agrees: up to date with `origin/master`). A separate
+    production key was created and added in Vercel as `LLM_READER_API_KEY`,
+    Production only. The Anthropic spending limit is set. The reader is on:
+    Alex used it live, and the AI strip appeared. Alex's first read of one
+    broker PDF left a stop's appointment blank and marked because the two
+    reads differed; a second drop of the same PDF filled it.
+  - **The advisor verified:** GitHub's deployments API shows a Production
+    deployment for `cc0e60d` with status "success" (curl). All 30 migrations
+    (0000 to 0029) were applied to the hosted database before the push
+    (read-only query: 30 applied, the layout column present). Counts only,
+    read-only: 3 rows in `ratecon_ai_reads`, all outcome `ok`, vendor
+    `anthropic`, the same input each time (31 lines, 6,652 input tokens);
+    1 outcome row so far.
+  - **Unverified:** the vendor, model and flag values in Vercel (Alex reports
+    them; the advisor saw only that the key exists); which workspace the
+    spending limit is on; whether the worker on the droplet needs a redeploy
+    (it was not redeployed; the only worker-area file changed in the 55
+    commits is `src/db/schema.ts`, new tables and a column only). 3 counts
+    rows against two drops reported: not reconciled (a counts row is one
+    pair, 3s).
 - **Run 10 met the bar** (3u): 36 of 36 runs scored, zero WRONG on all seven
   bar fields, merged and in each read alone; 72 calls, $0.1191, on the 12
   unrecognised files.
@@ -3749,8 +3779,8 @@ phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
 - **Code changed after run 10:** rule C, redaction `.5` (3w; the 12 files'
   sent text is byte-identical, so 3u's result stands for it), the verifier
   (3x) and the appointment check (3v). Run 11 (3z) ran under them; the bar was met.
-- **Nothing is applied beyond the local test databases** for 0029 (3y), and
-  nothing is pushed.
+- **All 30 migrations are applied to the hosted database, and master is
+  pushed at `cc0e60d`** (2026-10-15; see the first bullet).
 
 ### 2. Open risks
 
@@ -3790,7 +3820,14 @@ phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
 
 ### 3. The decision for Alex: turn the reader on or not
 
-Not decided here. What each answer needs:
+**Turned on in production on 2026-10-15** (Alex; section 1). The settings
+are in Vercel, Production, server only (names only, no values here):
+`LLM_READER_ENABLED`, `LLM_READER_VENDOR`, `LLM_READER_MODEL`,
+`LLM_READER_API_KEY`; the caps `LLM_READER_USER_DAILY_CAP` and
+`LLM_READER_DAILY_CAP` default to 25 and 100 when unset (2b). **Rollback:**
+unset `LLM_READER_ENABLED` or set it to `false`, and redeploy (unset, `false`
+or `0` is off: `src/env/schema.ts:391` to `395`). What each answer needed,
+kept as the record:
 
 **Keep it off.** Nothing further is needed. The pair (3m), the outcome
 recording (3s, only for a read that filled the form) and the layout
@@ -3816,9 +3853,9 @@ fingerprint (3y) stay built and unused.
    column to 0028's table (3y), so it comes after 0028. **0029 goes to
    production first, then the code** (3y, approved 2026-10-15): the insert
    names the column, and a database without it answers every outcome post
-   with a 500 (3y). Where 0026 to 0028 are applied today: 0026 and 0027 on
-   the local test databases only (2a, 2b); 0028: unverified. 0029: local test
-   databases only (3y).
+   with a 500 (3y). **Done:** all 30 migrations (0000 to 0029) were applied
+   to the hosted database before the push, 2026-10-15 (the advisor, read-only
+   query; section 1).
 3. **The settings** (server only; "Language-model reader", 2b): the flag on,
    `LLM_READER_VENDOR=anthropic`, `LLM_READER_MODEL` (`claude-haiku-5-5`, or
    `claude-sonnet-5-5` by env only), `LLM_READER_API_KEY`. The daily caps stay
@@ -3826,7 +3863,8 @@ fingerprint (3y) stay built and unused.
    Haiku (3m). The account spending limit is set (decision, 2026-10-15,
    "The AI reader's use and redaction"); which account or workspace it is on:
    unverified (2b records the evaluation key's). A separate production key:
-   not yet done.
+   created 2026-10-15 and added in Vercel as `LLM_READER_API_KEY`, Production
+   only (Alex reports; section 1).
 
 **Whether the six controls get a re-run first** is a separate question under
 "turn it on":
@@ -3869,6 +3907,26 @@ fingerprint (3y) stay built and unused.
   window and cannot score "same" (3z). Not changed; day-first parsing would
   be a new phase, and is Alex's decision.
 - Other open decisions are above ("Open decisions, waiting on Alex").
+
+### 5. Watch for a week
+
+From 2026-10-15. After about a week, Alex runs the three "Reading the
+numbers" queries of 3s on the production database and `npm run
+ratecon:layouts-report` (3y; it reads `DIRECT_URL`, or `LAYOUTS_REPORT_URL`
+when set), and pastes the counts here. Counts only, no values. What to read:
+
+- **How often an appointment is left blank, so a second drop is needed:**
+  query 1's `appointment` row (`blank_filled`, `blank_left`). A second drop
+  in one modal leaves the first read with no outcome (3s, "Two reads in one
+  modal"), so it counts in query 2's gap between reads answered and reads
+  saved, together with loads typed another way or abandoned. Alex's first
+  live read was one such case (section 1).
+- **Which layouts recur:** the layouts report's groups of similar layouts
+  (3y).
+- **How often a filled field is changed:** query 1's `changed` and `cleared`
+  against `kept` (`pct_kept`), by field; query 3's reads saved untouched.
+
+Nothing is decided here: any change these counts suggest is Alex's call.
 
 ### The old "Next" list, item by item
 
