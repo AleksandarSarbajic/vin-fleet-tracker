@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { LABEL_ROWS, PU_SO, STOPS_SECTION, puSoBlocks, type BlockStop } from '@/test/ratecon-fixtures';
+import { LABEL_ROWS, PU_SO, ROUTE_STOPS, STOPS_SECTION, puSoBlocks, routeBlocks, type BlockStop, type RouteStop } from '@/test/ratecon-fixtures';
 import type { TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns } from '@/lib/ratecon/lines';
-import { readRatecon, type RateconRead, type Source, type TimeRead } from '@/lib/ratecon/templates';
+import { SPLIT_CHECK, readRatecon, type RateconRead, type Source, type TimeRead } from '@/lib/ratecon/templates';
 import { MODEL_REPLY, UNKNOWN_LAYOUT, pdfLine } from '@/test/model-read-fixtures';
 import type { Line } from '@/lib/ratecon/lines';
 import type { ModelAppointment, ModelRead } from '@/lib/ratecon/model-read';
@@ -680,5 +680,47 @@ describe('an appointment the AI filled is never silent (phase 3v)', () => {
     const confirmed = confirmAiStop(form, form.stops[0]!.key);
     expect(confirmed.stops[0]!.fill?.checks.appointment).toBe(SAID);
     expect(fieldsToCheck(confirmed)).toBe(fieldsToCheck(form));
+  });
+});
+
+describe('a street and city the app split, filled (3ac)', () => {
+  const MIDDLE: RouteStop = {
+    kind: 'Delivery',
+    name: 'North Yard',
+    street: '77 Depot Ave',
+    city: 'Bismarck',
+    state: 'ND',
+    zip: '58501',
+    date: 'Oct 13, 2026',
+    time: '06:00 Apt',
+    number: '20000002',
+  };
+  const three = () => readOf(routeBlocks([ROUTE_STOPS[0]!, MIDDLE, ROUTE_STOPS[1]!]));
+  const check = SPLIT_CHECK('77 Depot Ave Bismarck');
+
+  it('fills them with a check on the split stop only; no AI mark, and no AI check on an appointment', () => {
+    const form = fill(three());
+    expect(form.stops.map((s) => [s.addressLine, s.city])).toEqual([
+      ['4001 Main St', 'Fargo'],
+      ['77 Depot Ave', 'Bismarck'],
+      ['1200 Harbor Rd Unit 4', 'West Fargo'],
+    ]);
+    expect(form.stops.map((s) => [s.fill?.checks.addressLine, s.fill?.checks.city])).toEqual([
+      [undefined, undefined],
+      [check, check],
+      [undefined, undefined],
+    ]);
+    expect(form.stops.every((s) => s.fill?.ai === undefined && s.fill?.checks.appointment === undefined)).toBe(true);
+    expect(form.fill?.ai).toBeUndefined();
+  });
+
+  it('"fields to check" counts both; editing a field clears its check, as for every check', () => {
+    const read = three();
+    const unsplit = { ...read, stops: read.stops.map(({ fieldChecks: _split, ...s }) => s) };
+    const form = fill(read);
+    expect(fieldsToCheck(form) - fieldsToCheck(fill(unsplit))).toBe(2);
+    const edited = { ...form, stops: form.stops.map((s, i) => (i === 1 ? patchStop(s, { addressLine: '77 Depot Ave' }) : s)) };
+    expect([edited.stops[1]!.fill?.checks.addressLine, edited.stops[1]!.fill?.checks.city]).toEqual([undefined, check]);
+    expect(fieldsToCheck(edited)).toBe(fieldsToCheck(form) - 1);
   });
 });

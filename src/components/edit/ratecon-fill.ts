@@ -167,6 +167,8 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
     } else if (value && !(emptyIsMissing && text === '')) {
       address[field] = text;
       sources[field] = value.source;
+      // Filled, and still to check: a street and city the app split itself (Route blocks, 3ac).
+      if (read.fieldChecks?.[readField]) checks[field] = read.fieldChecks[readField];
     } else {
       checks[field] = read.fieldChecks?.[readField] ?? 'Not found in the PDF.';
     }

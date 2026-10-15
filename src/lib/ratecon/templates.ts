@@ -2,6 +2,7 @@ import { ZONE_BY_STATE } from '../geo/zone-by-state';
 import { startsLikeStreet } from '../paste-address';
 import { documentIs24Hour } from './clock-24';
 import type { Line } from './lines';
+import { splitStreetCity } from './street-split';
 
 /**
  * §12.122. The five rate-confirmation layouts this fleet receives, each
@@ -60,7 +61,7 @@ export interface StopRead {
   state: Sourced<string> | null;
   zip: Sourced<string> | null;
   time: TimeRead;
-  /** Why an address field is blank, when it is not simply absent. Only a model read says (`verify-read.ts`). */
+  /** What to check about an address field: why it is blank (a model read, `verify-read.ts`), or, filled, that the app split it (Route blocks, 3ac). */
   fieldChecks?: Partial<Record<'street' | 'city' | 'state' | 'zip', string>>;
   /** Said under the appointment in place of the fill's own check. Only two-read agreement sets it (`agree-reads.ts`). */
   timeCheck?: string;
@@ -538,7 +539,7 @@ function readColumns(lines: Line[]): RateconRead {
   };
 }
 
-/* ---------------------------- Route blocks (3aa) ---------------------------- */
+/* ------------------------- Route blocks (3aa, 3ac) ------------------------- */
 
 /**
  * A page header on every page ("Page N", "Shipment ID", "Rate Confirmation",
@@ -551,12 +552,13 @@ function readColumns(lines: Line[]): RateconRead {
  *
  * The address is ONE run: street and city with nothing between them, then
  * ", ST 12345". Where the street ends is written down only for the stops the
- * summary line names, and only when the address ends in exactly that city and
- * state. So a document is read only when EVERY stop is one the summary names
- * (Alex, 2026-10-15): a stop it does not name — the middle stop of three — and
- * nothing is read, and the document goes to the AI reader. The split is never
- * guessed from street words, and no stop is read with its street and city
- * left blank.
+ * summary line names (the first and the last), and their address must end in
+ * exactly that city and state: those are read as confirmed, unmarked. A stop
+ * the summary does not name (a middle stop) is split by the app's own grammar
+ * (`splitStreetCity`, 3ac, Alex 2026-10-15: this lane runs with three stops),
+ * only when exactly one division fits, and its street and city then carry
+ * `SPLIT_CHECK` for the dispatcher to confirm. No fitting division, or more
+ * than one: nothing is read, and the document goes to the AI reader.
  *
  * Only "HH:MM Apt" is a time: an appointment at that time. The hour is
  * 24-hour when it is past 12 or has a leading zero, or when the whole
@@ -570,9 +572,10 @@ function readColumns(lines: Line[]): RateconRead {
  * Read by column, so it needs a PDF's positions: pasted text is not read.
  * Strict, because a wrong stop is worse than none: a block of any other
  * shape, a line among the stops that is not a stop's, a city line anywhere but
- * a stop's address, a stop the summary line does not name, a summary line
- * that does not name the first and the last facility, an address that does
- * not end in the summary's city and state — and nothing is read.
+ * a stop's address, a middle stop whose street and city do not divide one
+ * way only, a summary line that does not name the first and the last
+ * facility, an address that does not end in the summary's city and state —
+ * and nothing is read.
  */
 const ROUTE = {
   recognise: [/^Page \d+\s+Shipment ID$/, /^Rate Confirmation$/, /^Route\s+Pickup\s+\S/, /(?:^|\s)Pickup # \d/, /(?:^|\s)Delivery # \d/],
@@ -583,6 +586,12 @@ const ROUTE = {
   summary: /^(.+) \(([^()]+), ([A-Z]{2})\) > (.+) \(([^()]+), ([A-Z]{2})\)$/,
   id: /^[A-Za-z0-9][A-Za-z0-9-]*$/,
 };
+
+/**
+ * Said under the street and the city of a stop the app split itself (3ac). The field shows it after
+ * "Check: ", as every check; edited, the field's check goes.
+ */
+export const SPLIT_CHECK = (text: string) => `the street and city were split by the app from “${text}”. Confirm them against the PDF.`;
 
 function routeTime(dateText: string, timeText: string, hours24: boolean, source: Source): TimeRead {
   if (dateText === '' && timeText === '') return { kind: 'none', source: null };
@@ -664,19 +673,29 @@ function readRouteBlocks(lines: Line[]): RateconRead {
   for (const [n, b] of blocks.entries()) {
     const a = ROUTE.address.exec(b.address.text);
     if (!a || !US.has(a[2]!) || !startsLikeStreet(a[1]!)) return refuse;
-    // Every stop must be one the summary names, with that city and state at the end of its address.
+    // A stop the summary names: that city and state end its address. Any other: the app's split, marked.
     const end = ends.get(n);
-    if (!end || end.name !== b.name || end.state !== a[2] || !a[1]!.endsWith(` ${end.city}`)) return refuse;
-    const street = a[1]!.slice(0, -(end.city.length + 1)).trim();
-    if (!startsLikeStreet(street)) return refuse;
+    let street: string;
+    let city: string;
+    if (end) {
+      if (end.name !== b.name || end.state !== a[2] || !a[1]!.endsWith(` ${end.city}`)) return refuse;
+      street = a[1]!.slice(0, -(end.city.length + 1)).trim();
+      city = end.city;
+      if (!startsLikeStreet(street)) return refuse;
+    } else {
+      const split = splitStreetCity(a[1]!);
+      if (!split) return refuse;
+      ({ street, city } = split);
+    }
     const place: Source = { text: b.address.text, page: b.head.page };
     stops.push({
       type: { value: b.kind === 'Pickup' ? 'PU' : 'DEL', source: src(b.head) },
       typeCheck: null,
       street: { value: street, source: place },
-      city: { value: end.city, source: place },
+      city: { value: city, source: place },
       state: { value: a[2]!, source: place },
       zip: { value: a[3]!, source: place },
+      ...(end ? {} : { fieldChecks: { street: SPLIT_CHECK(a[1]!), city: SPLIT_CHECK(a[1]!) } }),
       time: routeTime(b.date, b.time, hours24, { text: [b.date, b.time].filter(Boolean).join(' · '), page: b.head.page }),
     });
   }

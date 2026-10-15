@@ -48,6 +48,17 @@ describe('reading a PDF', () => {
     ]);
   });
 
+  it('reads a three-stop Route blocks PDF, the middle stop split and marked, through a real PDF (3ac)', async () => {
+    const middle = { ...ROUTE_STOPS[1]!, name: 'North Yard', street: '1907 4th Ave NW Unit 200', city: 'Mandan', zip: '58554', number: '20000002' };
+    const out = await linesFromPdf(tinyPdf(routeBlocks([ROUTE_STOPS[0]!, middle, ROUTE_STOPS[1]!])), pdfjs);
+    const read = readRatecon(out.ok ? out.lines : []);
+    expect(read.ok && read.read.stops.map((s) => [s.street?.value, s.city?.value, s.fieldChecks !== undefined])).toEqual([
+      ['4001 Main St', 'Fargo', false],
+      ['1907 4th Ave NW Unit 200', 'Mandan', true],
+      ['1200 Harbor Rd Unit 4', 'West Fargo', false],
+    ]);
+  });
+
   it('keeps the page each line came from', async () => {
     const out = await linesFromPdf(tinyPdf([...LABEL_ROWS, [{ x: 40, y: 700, text: 'A second page of terms.' }]]), pdfjs);
     expect(out.ok && out.lines.at(-1)).toMatchObject({ page: 2, text: 'A second page of terms.' });

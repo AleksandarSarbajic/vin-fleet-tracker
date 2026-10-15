@@ -14,7 +14,7 @@ import {
 } from '@/test/ratecon-fixtures';
 import type { TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns, linesFromText, type Line } from './lines';
-import { readRatecon, recognisedLayouts, type ReadOutcome, type RateconRead } from './templates';
+import { SPLIT_CHECK, readRatecon, recognisedLayouts, type ReadOutcome, type RateconRead } from './templates';
 
 /** §12.122. The four layouts, read from INVENTED documents (src/test/ratecon-fixtures.ts). */
 
@@ -303,12 +303,57 @@ describe('Route blocks (3aa)', () => {
     });
   });
 
-  it('refuses a three-stop document whole: the summary line does not name the middle stop', () => {
-    const three = doc([ROUTE_STOPS[0]!, MIDDLE, ROUTE_STOPS[1]!]);
-    expect(recognisedLayouts(three)).toEqual(['route-blocks']);
-    expect(readRatecon(three)).toEqual(NOT);
-    // The middle stop is the only reason: with it last, and named, the document reads.
-    expect(read(readRatecon(doc([ROUTE_STOPS[0]!, MIDDLE]))).stops.map((s) => s.city?.value)).toEqual(['Fargo', 'Bismarck']);
+  it('reads a three-stop document: the middle stop split by the app and marked, the named stops unmarked (3ac)', () => {
+    const three = read(readRatecon(doc([ROUTE_STOPS[0]!, MIDDLE, ROUTE_STOPS[1]!])));
+    expect(summary(three)).toEqual([
+      ['PU', '4001 Main St', 'Fargo', 'ND', '58102'],
+      ['DEL', '77 Depot Ave', 'Bismarck', 'ND', '58501'],
+      ['DEL', '1200 Harbor Rd Unit 4', 'West Fargo', 'ND', '58078'],
+    ]);
+    const check = SPLIT_CHECK('77 Depot Ave Bismarck');
+    expect(three.stops.map((s) => s.fieldChecks)).toEqual([undefined, { street: check, city: check }, undefined]);
+    expect(three.stops[1]!.city?.source).toEqual({ text: '77 Depot Ave Bismarck, ND 58501', page: 1 });
+  });
+
+  it('reads a four-stop document: both middle stops split and marked', () => {
+    const second: RouteStop = { ...MIDDLE, name: 'East Yard', street: '1907 4th Ave NW Unit 200', city: 'West Fargo', zip: '58078', number: '20000003' };
+    const four = read(readRatecon(doc([ROUTE_STOPS[0]!, MIDDLE, second, ROUTE_STOPS[1]!])));
+    expect(summary(four).map((s) => [s[1], s[2]])).toEqual([
+      ['4001 Main St', 'Fargo'],
+      ['77 Depot Ave', 'Bismarck'],
+      ['1907 4th Ave NW Unit 200', 'West Fargo'],
+      ['1200 Harbor Rd Unit 4', 'West Fargo'],
+    ]);
+    expect(four.stops.map((s) => s.fieldChecks !== undefined)).toEqual([false, true, true, false]);
+  });
+
+  it('reads a middle stop with a unit phrase, a directional then a unit, or a city beginning WEST or NEW', () => {
+    const middle = (street: string, city: string) =>
+      read(readRatecon(doc([ROUTE_STOPS[0]!, { ...MIDDLE, street, city }, ROUTE_STOPS[1]!]))).stops[1]!;
+    for (const [street, city] of [
+      ['77 Depot Ave Ste 4', 'Bismarck'],
+      ['1907 4th Ave NW Unit 200', 'Mandan'],
+      ['77 Depot Ave', 'West Fargo'],
+      ['77 Depot Ave', 'New Salem'],
+    ] as const) {
+      const s = middle(street, city);
+      expect([s.street?.value, s.city?.value], `${street} ${city}`).toEqual([street, city]);
+      expect(s.fieldChecks?.street).toBe(SPLIT_CHECK(`${street} ${city}`));
+    }
+  });
+
+  it('refuses the whole document when a middle stop divides no way, or more than one', () => {
+    for (const [street, city] of [
+      ['123 Main St', 'St Louis'],
+      ['123 Main St', 'Park Ridge'],
+      ['123 Broadway', 'Fargo'],
+      ['123 Main St Ste 4 Unit 5', 'Fargo'],
+      ['123 Main St', 'Big Stone Gap City'],
+    ] as const) {
+      const three = doc([ROUTE_STOPS[0]!, { ...MIDDLE, street, city }, ROUTE_STOPS[1]!]);
+      expect(recognisedLayouts(three)).toEqual(['route-blocks']);
+      expect(readRatecon(three), `${street} ${city}`).toEqual(NOT);
+    }
   });
 
   it('refuses when the summary line is missing or doubled, or names another first or last facility', () => {
