@@ -1,8 +1,10 @@
 import { ZONE_BY_STATE } from '../geo/zone-by-state';
+import { startsLikeStreet } from '../paste-address';
+import { documentIs24Hour } from './clock-24';
 import type { Line } from './lines';
 
 /**
- * §12.122. The four rate-confirmation layouts this fleet receives, each
+ * §12.122. The five rate-confirmation layouts this fleet receives, each
  * recognised by its labels and read by them. Pure.
  *
  * A layout is used only when EVERY label it is recognised by is present, and
@@ -17,14 +19,15 @@ import type { Line } from './lines';
  * notes, instructions. No pattern below looks at them.
  */
 
-/** The four templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
-export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'model';
+/** The five templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
+export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'route-blocks' | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
   'label-rows': 'label rows (PICKUP DATE / SHIPPER / CONSIGNEE)',
   'stops-section': 'a Stops section (Stop 1 Pickup, Stop 2 Drop)',
   'pu-so-blocks': 'PU / SO blocks (Name, Address, Date)',
   'pickup-delivery-columns': 'Pickup # / Delivery # blocks (address and appointment columns)',
+  'route-blocks': 'Route blocks (Pickup / Delivery, a date and “HH:MM Apt” beside each stop)',
   model: 'an AI read',
 };
 
@@ -535,6 +538,171 @@ function readColumns(lines: Line[]): RateconRead {
   };
 }
 
+/* ---------------------------- Route blocks (3aa) ---------------------------- */
+
+/**
+ * A page header on every page ("Page N", "Shipment ID", "Rate Confirmation",
+ * then a date and the shipment ID), and the stops in three columns, opened by
+ * "Route" in the left one. Each stop is four lines: its type ("Pickup" or
+ * "Delivery") and the facility; the date and the address; the time and
+ * "Pickup #" or "Delivery #" with a number; one more line of the facility's.
+ * Below the stops, one summary line names the first and the last facility
+ * with their city and state: "A (City, ST) > B (City, ST)".
+ *
+ * The address is ONE run: street and city with nothing between them, then
+ * ", ST 12345". Where the street ends is written down only for the stops the
+ * summary line names, and only when the address ends in exactly that city and
+ * state. So a document is read only when EVERY stop is one the summary names
+ * (Alex, 2026-10-15): a stop it does not name — the middle stop of three — and
+ * nothing is read, and the document goes to the AI reader. The split is never
+ * guessed from street words, and no stop is read with its street and city
+ * left blank.
+ *
+ * Only "HH:MM Apt" is a time: an appointment at that time. The hour is
+ * 24-hour when it is past 12 or has a leading zero, or when the whole
+ * document is on a 24-hour clock by the app's rule (`documentIs24Hour`, 3x);
+ * a template sends nothing, so the rule runs over all of it. Anything else
+ * beside a stop is quoted as unreadable.
+ *
+ * The load number is the ID under "Shipment ID" in the page header, not a
+ * "Pickup #" or "Delivery #" number.
+ *
+ * Read by column, so it needs a PDF's positions: pasted text is not read.
+ * Strict, because a wrong stop is worse than none: a block of any other
+ * shape, a line among the stops that is not a stop's, a city line anywhere but
+ * a stop's address, a stop the summary line does not name, a summary line
+ * that does not name the first and the last facility, an address that does
+ * not end in the summary's city and state — and nothing is read.
+ */
+const ROUTE = {
+  recognise: [/^Page \d+\s+Shipment ID$/, /^Rate Confirmation$/, /^Route\s+Pickup\s+\S/, /(?:^|\s)Pickup # \d/, /(?:^|\s)Delivery # \d/],
+  type: /^(Pickup|Delivery)$/,
+  date: /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), (\d{4})$/,
+  time: /^(\d{2}):(\d{2}) Apt$/,
+  address: /^(.+), ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
+  summary: /^(.+) \(([^()]+), ([A-Z]{2})\) > (.+) \(([^()]+), ([A-Z]{2})\)$/,
+  id: /^[A-Za-z0-9][A-Za-z0-9-]*$/,
+};
+
+function routeTime(dateText: string, timeText: string, hours24: boolean, source: Source): TimeRead {
+  if (dateText === '' && timeText === '') return { kind: 'none', source: null };
+  const d = ROUTE.date.exec(dateText);
+  const [y, mo, day] = d ? [Number(d[3]), MONTH_ABBR.indexOf(d[1]!.toLowerCase()) + 1, Number(d[2])] : [0, 0, 0];
+  const date = d && validDate(y, mo, day) ? iso(y, mo, day) : null;
+  const t = ROUTE.time.exec(timeText);
+  const [h, mi] = t ? [Number(t[1]), Number(t[2])] : [-1, -1];
+  // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
+  const clear = t !== null && validClock(h, mi) && (h >= 13 || t[1]!.startsWith('0') || hours24);
+  if (date && clear) return { kind: 'exact', date, time: hhmm(h, mi), flag: 'APPT', source };
+  return { kind: 'unreadable', date, quoted: [dateText, timeText].filter(Boolean).join(' '), source };
+}
+
+function readRouteBlocks(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'route-blocks', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const routeAt = lines.flatMap((l, i) => (l.cells[0]?.text === 'Route' ? [i] : []));
+  if (routeAt.length !== 1 || lines[routeAt[0]!]!.cells.length !== 3) return refuse;
+  const [label, , facility] = lines[routeAt[0]!]!.cells;
+  // The columns, by the "Route" line: labels, then type, date and time, then facility, address and number.
+  const leftX = label!.x!;
+  const rightX = facility!.x!;
+  const columns = (line: Line) => {
+    const at = (c: Line['cells'][number]) =>
+      c.x! <= leftX + 4 ? 'left' : Math.abs(c.x! - rightX) <= 4 ? 'right' : c.x! < rightX ? 'middle' : 'beyond';
+    const of = (where: string) => line.cells.filter((c) => at(c) === where);
+    return { left: of('left'), middle: of('middle'), right: of('right'), beyond: of('beyond') };
+  };
+
+  type Block = { kind: 'Pickup' | 'Delivery'; head: Line; name: string; date: string; address: Line['cells'][number]; time: string };
+  const blocks: Block[] = [];
+  let at = routeAt[0]!;
+  for (;;) {
+    const four = lines.slice(at, at + 4);
+    if (four.length < 4 || four.some((l) => l.page !== four[0]!.page)) return refuse;
+    const [head, dated, timed, last] = four.map(columns) as [ReturnType<typeof columns>, ReturnType<typeof columns>, ReturnType<typeof columns>, ReturnType<typeof columns>];
+    if ([head, dated, timed, last].some((c) => c.beyond.length > 0)) return refuse;
+    // The type and the facility; "Route" before the first, nothing before the others.
+    const kind = head.middle.length === 1 ? ROUTE.type.exec(head.middle[0]!.text)?.[1] : undefined;
+    if (!kind || head.left.length !== (blocks.length === 0 ? 1 : 0) || head.right.length !== 1) return refuse;
+    // The date and the address.
+    if (dated.left.length > 0 || dated.middle.length > 1 || dated.right.length !== 1) return refuse;
+    // The time, and the stop's own number, which must say the same type.
+    if (timed.left.length > 0 || timed.right.length !== 1 || !timed.right[0]!.text.startsWith(`${kind} # `)) return refuse;
+    // One more line of the facility's, and nothing else.
+    if (last.left.length > 0 || last.middle.length > 0 || last.right.length !== 1 || cityLine(last.right[0]!.text)) return refuse;
+    blocks.push({
+      kind: kind as Block['kind'],
+      head: four[0]!,
+      name: head.right[0]!.text,
+      date: dated.middle[0]?.text ?? '',
+      address: dated.right[0]!,
+      time: timed.middle.map((c) => c.text).join(' '),
+    });
+    at += 4;
+    // The stops end where the left column starts again; anything else must be the next stop.
+    const next = lines[at];
+    if (!next || columns(next).left.length > 0) break;
+  }
+  if (blocks[0]!.kind !== 'Pickup' || !blocks.some((b) => b.kind === 'Delivery')) return refuse;
+
+  // Every city line in the document is a stop's address.
+  const addresses = new Set(blocks.map((b) => b.address));
+  if (lines.some((l) => l.cells.some((c) => cityLine(c.text) && !addresses.has(c)))) return refuse;
+
+  // The summary names the first and the last facility, with their city and state.
+  const summaries = lines.filter((l) => l.cells.length === 1 && l.text.split(' > ').length === 2 && ROUTE.summary.test(l.text));
+  if (summaries.length !== 1) return refuse;
+  const s = ROUTE.summary.exec(summaries[0]!.text)!;
+  const ends = new Map([
+    [0, { name: s[1]!, city: s[2]!, state: s[3]! }],
+    [blocks.length - 1, { name: s[4]!, city: s[5]!, state: s[6]! }],
+  ]);
+
+  const hours24 = documentIs24Hour(lines.map((l, n) => ({ n, text: l.text, page: l.page })));
+  const stops: StopRead[] = [];
+  for (const [n, b] of blocks.entries()) {
+    const a = ROUTE.address.exec(b.address.text);
+    if (!a || !US.has(a[2]!) || !startsLikeStreet(a[1]!)) return refuse;
+    // Every stop must be one the summary names, with that city and state at the end of its address.
+    const end = ends.get(n);
+    if (!end || end.name !== b.name || end.state !== a[2] || !a[1]!.endsWith(` ${end.city}`)) return refuse;
+    const street = a[1]!.slice(0, -(end.city.length + 1)).trim();
+    if (!startsLikeStreet(street)) return refuse;
+    const place: Source = { text: b.address.text, page: b.head.page };
+    stops.push({
+      type: { value: b.kind === 'Pickup' ? 'PU' : 'DEL', source: src(b.head) },
+      typeCheck: null,
+      street: { value: street, source: place },
+      city: { value: end.city, source: place },
+      state: { value: a[2]!, source: place },
+      zip: { value: a[3]!, source: place },
+      time: routeTime(b.date, b.time, hours24, { text: [b.date, b.time].filter(Boolean).join(' · '), page: b.head.page }),
+    });
+  }
+
+  // The page header: "Page N  Shipment ID", "Rate Confirmation", then a date and the ID.
+  const ids = lines.flatMap((l, k) => {
+    const row = lines[k + 2];
+    return l.cells.length === 2 && /^Page \d+$/.test(l.cells[0]!.text) && l.cells[1]!.text === 'Shipment ID' &&
+      lines[k + 1]?.text === 'Rate Confirmation' && row?.page === l.page && row.cells.length === 2 && ROUTE.id.test(row.cells[1]!.text)
+      ? [{ value: row.cells[1]!.text, source: { text: `Shipment ID  ${row.cells[1]!.text}`, page: row.page } }]
+      : [];
+  });
+  const distinct = new Set(ids.map((x) => x.value));
+  const loadNumber = distinct.size === 1 ? ids[0]! : null;
+  return {
+    layout: 'route-blocks',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : distinct.size > 1
+        ? `More than one number is under “Shipment ID”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`
+        : 'No number under “Shipment ID”.',
+    stops,
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -542,6 +710,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'stops-section', labels: SECTION.recognise, read: readStopsSection },
   { id: 'pu-so-blocks', labels: BLOCKS.recognise, read: readBlocks },
   { id: 'pickup-delivery-columns', labels: COLUMNS.recognise, read: readColumns },
+  { id: 'route-blocks', labels: ROUTE.recognise, read: readRouteBlocks },
 ];
 
 /** Which layouts have every one of their labels here. */

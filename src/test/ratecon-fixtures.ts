@@ -294,6 +294,103 @@ export function pickupDeliveryColumns(stops: ColumnsStop[]): TinyRun[][] {
   return [loadPage, stopsPage, termsPage];
 }
 
+export interface RouteStop {
+  kind: 'Pickup' | 'Delivery';
+  name: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  /** Beside the address: "Oct 12, 2026". */
+  date: string;
+  /** Beside the stop's number: "14:30 Apt" in one run, or ["08:00", "Apt"] in two. */
+  time: string | [string, string];
+  number: string;
+}
+
+/**
+ * Phase 3aa. Route blocks: a header on every page ("Page N", "Shipment ID",
+ * "Rate Confirmation", a date and the ID), the stops in three columns opened
+ * by "Route", four lines a stop with the street and city in ONE run, then a
+ * summary line naming the first and the last facility with city and state,
+ * the equipment, carrier and rate, and a page of terms. ASCII only: `tinyPdf`
+ * counts its offsets in characters.
+ */
+export function routeBlocks(stops: RouteStop[], summary?: string): TinyRun[][] {
+  const header = (page: number): TinyRun[] => [
+    run(42, 770, `Page ${page}`),
+    run(508, 770, 'Shipment ID'),
+    run(255, 758, 'Rate Confirmation'),
+    run(42, 746, 'Oct 1, 2026'),
+    run(492, 746, '40000-100001'),
+  ];
+  const first: TinyRun[] = [...header(1), run(114, 734, 'Contact: Dana Example - P: (555) 010-0100 - E: dispatch@example.com')];
+  let y = 710;
+  for (const [i, s] of stops.entries()) {
+    if (i === 0) first.push(run(49, y, 'Route'));
+    first.push(
+      run(241, y, s.kind),
+      run(298, y, s.name),
+      run(229, y - 12, s.date),
+      run(298, y - 12, `${s.street} ${s.city}, ${s.state} ${s.zip}`),
+      ...(typeof s.time === 'string' ? [run(236, y - 24, s.time)] : [run(235, y - 24, s.time[0]), run(261, y - 24, s.time[1])]),
+      run(298, y - 24, `${s.kind} # ${s.number} - Live (1 Shipment)`),
+      run(298, y - 36, 'dock_check_in-EXA'),
+    );
+    y -= 48;
+  }
+  const [a, z] = [stops[0]!, stops.at(-1)!];
+  first.push(
+    run(49, y, '**Example: the driver checks in at the window**'),
+    run(49, y - 12, 'Lane'),
+    run(117, y - 12, 'Summary'),
+    run(117, y - 24, summary ?? `${a.name} (${a.city}, ${a.state}) > ${z.name} (${z.city}, ${z.state})`),
+    run(117, y - 36, '1 Shipment - Weight : 20,000 lb'),
+    run(49, y - 48, 'Equipment'),
+    run(118, y - 48, 'Van - dry'),
+    run(49, y - 60, 'Carrier'),
+    run(117, y - 60, 'Sample Carrier LLC'),
+    run(117, y - 72, 'P: (555) 010-0102'),
+    run(49, y - 84, 'Rate'),
+    run(117, y - 84, 'Linehaul - flat'),
+    run(320, y - 84, '$1,900.00'),
+    run(117, y - 96, 'Total'),
+    run(320, y - 96, '$1,900.00'),
+  );
+  const terms: TinyRun[] = [
+    ...header(2),
+    run(51, 710, 'Example terms and conditions'),
+    run(58, 698, '1.'),
+    run(69, 698, 'This is the Carrier Rate Confirmation sheet. It is not a BOL.'),
+  ];
+  return [first, terms];
+}
+
+export const ROUTE_STOPS: RouteStop[] = [
+  {
+    kind: 'Pickup',
+    name: 'Prairie Cold Storage',
+    street: '4001 Main St',
+    city: 'Fargo',
+    state: 'ND',
+    zip: '58102',
+    date: 'Oct 12, 2026',
+    time: '14:30 Apt',
+    number: '10000001',
+  },
+  {
+    kind: 'Delivery',
+    name: 'Lakeside DC',
+    street: '1200 Harbor Rd Unit 4',
+    city: 'West Fargo',
+    state: 'ND',
+    zip: '58078',
+    date: 'Oct 13, 2026',
+    time: ['08:00', 'Apt'],
+    number: '20000001',
+  },
+];
+
 export const COLUMNS_STOPS: ColumnsStop[] = [
   {
     kind: 'Pickup',

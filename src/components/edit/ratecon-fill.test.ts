@@ -647,7 +647,7 @@ describe('an appointment the AI filled is never silent (phase 3v)', () => {
   });
 
   it('a template read with the same data: no AI check, and its fill is as before', () => {
-    for (const layout of ['label-rows', 'pickup-delivery-columns', 'stops-section', 'pu-so-blocks'] as const) {
+    for (const layout of ['label-rows', 'pickup-delivery-columns', 'stops-section', 'pu-so-blocks', 'route-blocks'] as const) {
       const form = fill(withTime(exact(), layout));
       expect(form.stops[0]!.fill?.checks.appointment, layout).toBeUndefined();
       expect(form.stops[0]!.fill?.ai).toBeUndefined();

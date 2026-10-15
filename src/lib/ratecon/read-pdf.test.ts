@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { COLUMNS_STOPS, LABEL_ROWS, PU_SO, pickupDeliveryColumns, puSoBlocks } from '@/test/ratecon-fixtures';
+import { COLUMNS_STOPS, LABEL_ROWS, PU_SO, ROUTE_STOPS, pickupDeliveryColumns, puSoBlocks, routeBlocks } from '@/test/ratecon-fixtures';
 import { tinyPdf } from '@/test/tiny-pdf';
 import { PDF_LIMITS, PDF_MESSAGES, linesFromPdf } from './read-pdf';
 import { readRatecon } from './templates';
@@ -34,6 +34,17 @@ describe('reading a PDF', () => {
     expect(read.ok && read.read.stops.map((s) => [s.street?.value, s.city?.value, s.time.kind])).toEqual([
       ['4001 Main St', 'Fargo', 'exact'],
       ['1200 Harbor Rd', 'Dickinson', 'range'],
+    ]);
+  });
+
+  it('reads Route blocks by their columns, through a real PDF (3aa)', async () => {
+    const out = await linesFromPdf(tinyPdf(routeBlocks(ROUTE_STOPS)), pdfjs);
+    const read = readRatecon(out.ok ? out.lines : []);
+    expect(read.ok && read.read.layout).toBe('route-blocks');
+    expect(read.ok && read.read.loadNumber?.value).toBe('40000-100001');
+    expect(read.ok && read.read.stops.map((s) => [s.type.value, s.street?.value, s.city?.value, s.time.kind])).toEqual([
+      ['PU', '4001 Main St', 'Fargo', 'exact'],
+      ['DEL', '1200 Harbor Rd Unit 4', 'West Fargo', 'exact'],
     ]);
   });
 
