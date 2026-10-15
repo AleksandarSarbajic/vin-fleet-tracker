@@ -21,6 +21,8 @@ names its § there.
 production behind `LLM_READER_ENABLED`, with the caps 25 a user and 100 a day
 (the defaults, 2b). Who reported what, and what is unverified: "Next",
 section 1. The table below lists only older commits.
+**Not deployed yet:** a fifth template, Route blocks (3aa, `c59042e`), is
+committed and not pushed.
 
 | Commit | What | § |
 |---|---|---|
@@ -3735,6 +3737,128 @@ sample equal 3u's to the token; the output tokens differ.
   The six control files have not been re-run since 3e. Nothing was fixed.
   Which Anthropic account or workspace this key bills to: unverified (no phase
   records it). Whether to turn the reader on is Alex's call.
+
+### Phase 3aa: a fifth template, Route blocks, read only when every stop is confirmed (2026-10-15)
+
+**Why:** Alex wants layouts that recur to stop going to the AI reader: a
+template is instant, free and sends nothing out. The advisor's evidence
+(local, no values): sample 8 and a second PDF of the same layout (Alex's own
+file, kept outside `.samples/`, 2 stops; sample 8 has 3) have a layout
+fingerprint similarity of 1.00 on 4 label words, and no template read either.
+The AI read sample 8 right in run 11 (3z) and Alex's file live (Alex checked
+stop 1 field by field). Code and tests are commit `c59042e`; NOT pushed, NOT
+deployed.
+
+**What it reads** (`readRouteBlocks`, `src/lib/ratecon/templates.ts`; layout
+`route-blocks`):
+
+- **The page header,** on every page: "Page N" and "Shipment ID", "Rate
+  Confirmation", then a date and the ID. **The load number is that ID,** not a
+  "Pickup #" or "Delivery #" number. When the pages disagree, it is blank with
+  a check, as in the other templates.
+- **The stops,** in three columns opened by "Route": four lines a stop (the
+  type, "Pickup" or "Delivery", and the facility; the date and the address;
+  the time and the stop's own "Pickup #" or "Delivery #" number, which must
+  say the same type; one more line of the facility's). Any number of stops.
+- **The summary line** below them: "Facility (City, ST) > Facility (City,
+  ST)", naming the FIRST and the LAST stop only.
+- **Never read:** rate, broker contact, phones, emails, carrier, equipment,
+  notes, terms, the stops' own numbers.
+
+**Recognised by** (all five must be present; on the samples and the other
+four templates' fixtures they match nothing else):
+`^Page \d+\s+Shipment ID$` (the header line; it starts with "Page", so the
+columns template's `^Shipment ID\b` does not match it), `^Rate
+Confirmation$` (the whole line), `^Route\s+Pickup\s+\S` (no other layout opens
+its stops with "Route"), and "Pickup # <digit>" and "Delivery # <digit>" with
+a space before the "#" (the columns template's headings are "Pickup #1", on
+their own line). None of them is a time, so an odd time still reaches the
+reader and comes back unreadable.
+
+**The finding: the street and the city are ONE run.** Each address is a
+single pdf.js item, "street city, ST 12345", with single spaces and nothing
+between street and city. Where the street ends is written down only in the
+summary line, and only for the first and the last stop. The first version
+split those two and left a middle stop's street and city blank and marked
+(the §12.121 rule for a pasted address that runs together); on sample 8 that
+scored stop 2's street and city `read is empty` (marked), every other cell
+pass and all three appointments `exact`. Stopped and reported.
+
+**Decision (Alex, written, 2026-10-15): option B, tightened.** The template
+reads a document ONLY when every stop's street and city can be split with the
+summary line's confirmation: the stop is one the summary names, and its
+address ends in exactly that city and state. A document with any stop the
+summary does not name (the middle stop of three) is refused whole, so it goes
+to the AI reader as today. Applied as "every stop confirmed", not as "more
+than two stops". Rejected: splitting by street-suffix words (a guess, and a
+template read carries no AI check), and a partial read with blanks. **So
+sample 8 is now recognised, then refused,** and stays with the AI; two-stop
+documents of this layout are read in full.
+
+**Times:** only "HH:MM Apt" (one run or two) is a time, an appointment at
+that time. The hour is 24-hour when it is past 12 or has a leading zero, or
+when the document is on a 24-hour clock by the app's rule (3x,
+`documentIs24Hour`); a template sends nothing, so the rule runs over the whole
+document. Anything else beside a stop (a range, "FCFS", AM/PM, a one-digit
+hour, "Appt", another date shape) is quoted as unreadable, never guessed:
+template reads carry no "the AI filled this" check (3v), so there is no
+second line of defence.
+
+**Strict, a wrong stop being worse than none:** pasted text (no positions), a
+block of any other shape (a line missing or too many, a cell beyond the
+columns), a stop's number naming the other type, a stop with no city line, a
+city line anywhere but a stop's address, no summary line or two, a summary
+naming another first or last facility, an address that does not end in the
+summary's city and state or does not start like a street, a first stop that
+is not a pickup, or no delivery: and nothing is read.
+
+**The import cycle, closed:** the template needs the verifier's 24-hour rule.
+`documentIs24Hour` and its two patterns moved unchanged to
+`src/lib/ratecon/clock-24.ts`, which both `templates.ts` and `verify-read.ts`
+import, so neither imports the other for it. `verify-read.ts` changed only in
+its imports, plus a re-export, so `verify-read.test.ts` is unchanged (127 tests,
+passing).
+
+**Also:** `ratecon:score` said "not one of the four layouts"; it says five
+(`b613d2b`).
+
+**Checked locally (counts and codes only, no values):**
+
+- `recognisedLayouts` per sample, HEAD against 3aa: the same for all 29 but
+  sample 8 (0 layouts before, `route-blocks` alone after). Every file another
+  template reads matches exactly its own layout. Alex's file: `route-blocks`
+  alone.
+- `readRatecon`: unchanged for every sample (same read or not, same stop
+  counts); sample 8 is not recognised, as before, now because the reader
+  refuses it (0 stops).
+- `npm run ratecon:score`: output identical to HEAD's (`diff` exit 0); the bar
+  13 of 13, appointments silently wrong: none. Sample 8 prints "not a template
+  layout — ground truth for the AI evaluation only".
+- **Alex's file:** read, 2 stops, every field filled (load number; each stop's
+  type, street, city, state, ZIP; both times exact). Not copied into
+  `.samples/`: it would renumber every sample after it (as 3w did).
+
+**Tests** (invented fixtures only, `routeBlocks` in
+`src/test/ratecon-fixtures.ts`): 16 new in `templates.test.ts` (43 there,
+27 before), one pdf.js round trip in `read-pdf.test.ts`, and `route-blocks`
+added to the fill test that a template read carries no AI check. `npm run
+check`: 191 files, 3444 tests (3427 before). Mutations, each applied alone and
+reverted: dropping the 24-hour rule, the stray-city-line refusal, the
+every-stop-confirmed rule, the type check, or "Apt" from the time each fail
+one test. Dropping the no-positions guard fails none: pasted lines are one
+cell each, so the "Route" cell is never found and the document is refused
+anyway; the guard is a second line of defence.
+
+**Unverified:**
+
+- **The template's values on Alex's file.** Only Alex's by-eye check of its
+  two stops against the PDF can settle them; the earlier check was of the
+  AI's fill of stop 1, not the template's.
+- **No ground truth covers the template:** sample 8 is refused, and Alex's
+  file is not in `.samples/`.
+
+**For Alex:** add Alex's file to `.samples/` (it renumbers the samples after
+it), and when to deploy `c59042e`. Neither is decided here.
 
 ## Next
 
