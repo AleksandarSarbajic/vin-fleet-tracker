@@ -3563,6 +3563,119 @@ killed) are what show they bite.
   "Deploy order" above).
 - **The reader decision** (the "Next" section) is Alex's, to make alone.
 
+### Phase 3z: evaluation run 11, paired, the twelve files, first run under 3v, 3w and 3x (2026-10-15)
+
+**Approval (Alex, written, dated 2026-10-15):** `ratecon:eval-ai --pairs` on
+samples 2, 4, 7, 8, 9, 10, 11, 12, 16, 17, 21 and 29 (current numbers; 29 is
+3u's "28"), 3 runs each (72 calls), Claude Haiku 5.5, ceilings $1.00 and 75
+calls, under `redact-2026-10-14.5`. Earlier approvals that named a sent-text
+hash are void. Retention (default) is accepted by the decision of 2026-10-15,
+"The AI reader's use and redaction". The approval covers this one run. I did
+not read the ground truth, any sample text or any value.
+
+**Checked before the run:** the tree was clean (`git status` empty, HEAD
+`eac9976`), `REDACTION_VERSION` was `redact-2026-10-14.5`, and
+`ratecon:redact-report` (local, no network) gave **residual hits 0**.
+**Sent-text hashes (first 12 of sha256) match 3u's for all twelve:** 2
+`fe5f7539e194`, 4 `f05494d30f77`, 7 `baa6c413ef11`, 8 `826196de5a3f`, 9
+`220af5986443`, 10 `0d14bdd88041`, 11 `49288d225e5d`, 12 `282113934c2a`, 16
+`8538f55afaf5`, 17 `5b56633ef15b`, 21 `77b64d5b9b8e`, 29 `435a59f2c590` (3u's
+28). That is what 3w said; the run's input tokens agree (below).
+
+**The command, run once, as given** (not re-run; the reader's settings were not
+changed, it stays off):
+
+    LLM_READER_MODEL=claude-haiku-5-5 npm run ratecon:eval-ai -- --approved=2026-10-15 --files=2,4,7,8,9,10,11,12,16,17,21,29 --runs=3 --pairs
+
+**Result: exit 0, the bar is MET: 36 of 36 runs scored, zero WRONG on all seven
+bar fields, merged and in read A and read B alone.**
+
+| | 3u | 3z |
+|---|---|---|
+| Calls | 72 of 72 | **72 of 72** (ceiling 75) |
+| Tokens | 358,704 in, 166,408 out | **358,704 in, 164,234 out** |
+| Cost | $0.1191 | **$0.1180** (ceiling $1.00) |
+| Runs scored / planned | 36 / 36 | **36 / 36** |
+| Pairs agreed / differed / failed | 26 / 10 / 0 | **22 / 14 / 0** |
+| Address cue fires | 12 of 36 | **12 of 36** (9, 12, 21, 29, every run) |
+| Merged WRONG on the bar | 0 | **0** |
+
+**WRONG:** none on the bar, so **there is no relation code to report.** **No
+appointment is WRONG:** all 84 filled appointments (stop-runs) are marked, none
+silent. 3u's one silent WRONG appointment (sample 10, run 2, stop 1) is marked
+here.
+
+**Pairs per sample** (3 runs each; 3u in brackets):
+
+| Sample | Pairs | Differed on | 3u |
+|---|---|---|---|
+| 2, 4, 8, 21, 29 | 3 agreed | | same |
+| 17 | 1 agreed, 2 differed | street x2 (run 1), street x1 (run 2) | 3 agreed |
+| 11 | 2 agreed, 1 differed | appointment x2, city x1, state x1 (run 2) | 2 / 1: city x1 and state x1 (run 1) |
+| 16 | 0 agreed, 3 differed | appointment x2 (every run) | 2 / 1 |
+| 7 | 1 agreed, 2 differed | appointment x2 (run 1); appointment x2, city x1, state x1 (run 2) | 1 / 2 |
+| 9 | 1 agreed, 2 differed | appointment x2 (runs 2, 3) | 1 / 2 |
+| 10 | 0 agreed, 3 differed | appointment x1 (every run) | 1 / 2 |
+| 12 | 2 agreed, 1 differed | street x4 (run 3) | 1 / 2 |
+
+**Marked fields, cell-runs (3u in brackets):**
+
+- **ZIP blank and marked: 24 (24)**, the same cells: samples 4, 7, 9, 10, 11
+  (one stop, every run) and 12 (stops 2 to 4, every run).
+- **Street blank and marked: 7 (8).** Sample 12, all four stops in run 3 (3u:
+  runs 1 and 2); sample 17, 3 (3u: 0), in the runs whose pairs differed on it.
+- **City and state blank and marked: 4 (2)**: sample 7 stop 2 in run 2, and
+  sample 11 stop 2 in every run (3u: sample 7 and sample 11, run 1 each).
+- **Order and type filled and marked: 5 (5)**: sample 4 stop 1 in every run,
+  and sample 11 both stops in run 3 (3u: sample 9 both stops in run 1; sample
+  11 none).
+
+**Appointments, separately from the bar.** **All 84 filled appointments carry
+the 3v check** (`appointmentScore` reads `fill.checks.appointment`; 84 of 84
+are "marked"). Of the 84, **55 are filled as the PDF says and 29 differently,
+every one marked.** The 29, by sample: 16, 6 (both stops, type, date, time and
+end time, every run); 21, 6 (the same, every run); 7, 5 (date and time on
+both stops in runs 1 and 2; time on stop 2 in run 3); 9, 4 (date and time on
+both stops in runs 2 and 3); 10, 3 (stop 1: type, date, time, end time, every
+run); 12, 3 (stop 1: type and end time, every run); 11, 2 (both stops, run
+2); samples 2, 4, 8, 17 and 29: none. **These numbers are not comparable with
+3u's across 3x:** an entry written as a couldn't-read for a bare time in a
+24-hour document is stale (3x), and the scorer counts the AI's correct time as
+"filled differently". I did not read `expected.json`, so I cannot say which of
+the 29 are stale, and I did not change any. Sample 8's stop 3 time differed in
+every run of 3u and does not here; sample 9 went from stop 2's time in every
+run to date and time on both stops in runs 2 and 3. The counts do not say why
+(a run-to-run change of this size is within what 3p and 3r showed on unchanged
+text, and 3x is one candidate, not shown).
+
+**Cost** per pair about $0.0033 ($0.1180 for 36). By sample, in dollars (summed
+from the per-run figures, which are rounded) and tokens in/out over 3 runs: 2
+$0.0072 (23,442 / 9,714); 4 $0.0104 (25,062 / 15,784); 7 $0.0091 (20,352 /
+14,031); 8 $0.0075 (22,770 / 10,529); 9 $0.0110 (52,920 / 11,491); 10 $0.0093
+(24,192 / 13,743); 11 $0.0087 (19,524 / 13,540); 12 $0.0147 (53,256 /
+18,624); 16 $0.0094 (23,850 / 14,104); 17 $0.0084 (25,812 / 11,728); 21
+$0.0096 (20,670 / 15,025); 29 $0.0126 (46,854 / 15,921). Input tokens per
+sample equal 3u's to the token; the output tokens differ.
+
+**What the run shows, and what it does not:**
+
+- **It shows** that on the same sent text, the code with 3v, 3w and 3x still
+  gets zero WRONG on the bar in 36 of 36 runs, in each read and merged, and
+  that no filled appointment is silent (3v, by construction).
+- **It does not show** that the appointments are right: 29 of 84 differ from
+  the ground truth, and the ground truth is stale for some (3x). It does not
+  show that 3x changed anything, or that 3v is "Looks right"-proof.
+- **The zero is still partly blanks:** 24 ZIPs, 7 streets and 4 city-and-state
+  cells are left for the dispatcher, marked. The 3q question stands: sample
+  12's four streets differ between the reads in one of three runs.
+- **The pair disagreed more** (14 of 36 against 10): on appointments mostly
+  (samples 7, 9, 10, 16), and on street for sample 17 (0 differing in 3u).
+  Single runs of three; I cannot tell a change from run-to-run noise.
+- **Scope:** 12 of the 25 files, 3 runs each, one model (Haiku 5.5), one run.
+  The six control files have not been re-run since 3e. Nothing was fixed.
+  Which Anthropic account or workspace this key bills to: unverified (no phase
+  records it). Whether to turn the reader on is Alex's call.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -3581,7 +3694,7 @@ phases before 3w use the old numbers, and old 22 to 28 are 23 to 29 now.
   been re-run since 3e (3u).
 - **Code changed after run 10:** rule C, redaction `.5` (3w; the 12 files'
   sent text is byte-identical, so 3u's result stands for it), the verifier
-  (3x) and the appointment check (3v). No run has measured 3x or 3v.
+  (3x) and the appointment check (3v). Run 11 (3z) ran under them; the bar was met.
 - **Nothing is applied beyond the local test databases** for 0029 (3y), and
   nothing is pushed.
 
