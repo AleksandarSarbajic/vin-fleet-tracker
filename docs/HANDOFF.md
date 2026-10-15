@@ -3860,6 +3860,76 @@ anyway; the guard is a second line of defence.
 **For Alex:** add Alex's file to `.samples/` (it renumbers the samples after
 it), and when to deploy `c59042e`. Neither is decided here.
 
+### Phase 3ab: the verifier accepts a correct ZIP+4 (2026-10-15)
+
+Approved by Alex, 2026-10-15. Code and tests are commit `aa9c5b2`; NOT pushed,
+NOT deployed.
+
+**Evidence** (the advisor's checks, local, no real values):
+
+- **Alex's live read in production** (2026-10-15, reported to the advisor):
+  a 4-stop load printing ZIP+4 on its city lines. The AI filled street, city,
+  state and appointment, but every ZIP was blank and marked "Read by AI, but it
+  does not follow from “<city line>”. Enter it by hand." In a two-zone state
+  (ND) the blank ZIP also brings "More than one time zone … Enter the ZIP", so
+  Save waits until the dispatcher types it.
+- **A synthetic `verifyRead` test** (advisor, local, invented text): out of
+  the quote "Fargo, ND 58102-1234", the model value "58102" filled and
+  "58102-1234" was blank, "does not follow".
+- **Run 11 (3z) blanked 24 ZIP cell-runs.** City lines with a ZIP+4 in the
+  evaluation files (advisor, local, line counts): sample 12 has 7, samples 4
+  and 10 one each, the rest none. That fits 15 of the 24 (sample 12 stops 2 to
+  4, samples 4 and 10 one stop each, 3 runs). **INFERRED from line counts, not
+  measured from replies.** Samples 7 and 11 are the 3w redaction case; sample
+  9 has no ZIP+4 line, so its 3 cell-runs are unexplained.
+
+**Cause** (`addressField`, `src/lib/ratecon/verify-read.ts`): on a city line
+the model's ZIP was compared with `cityLine`'s ZIP, which is five digits
+(`cityLine` drops the +4), so a ZIP+4 never matched. On any other line the
+value had to be exactly five digits.
+
+**The fix:** a ZIP+4 from the model ("58102-1234", or "581021234", both of
+which `us-zip.ts` reads as ZIP+4) stands only when (a) its first five digits
+are the city line's AND (b) the quote holds the value exactly as given. The
+FIVE digits fill, with the quote as their source. Refused exactly as before,
+with the same "does not follow" message: a +4 the text does not hold, first
+five that differ, and a ZIP below 00501 (`isRealUsZip`: a +4 never lifts a
+placeholder). A line that is not a city line takes a ZIP+4 under the same
+conditions. A five-digit value behaves as before. Nothing else in the verifier
+changed.
+
+**Why five digits:** `isRealUsZip` reads ZIP+4 with or without the hyphen and
+judges the first five, and the fill puts the ZIP in as read. Every template
+fills five (`cityLine` drops the +4), the ground truth is "the five digits as
+printed" (`docs/ground-truth-howto.md`), and the scorer compares exactly. The
+zone lookup and the ZIP-state check read the first five digits, so the zone
+would follow a ZIP+4 too.
+
+**Tests** (invented text, every line with the sentinel): 7 new in
+`verify-read.test.ts`, covering a five-digit value out of a ZIP+4 line, a
+matching ZIP+4, a +4 not in the text, first five that differ (also when the
+quote holds that ZIP+4 elsewhere), a placeholder with a +4, nine digits
+without the hyphen, and a line that is not a city line. The 127 existing
+tests are unchanged and pass. `npm run check`: 191 files, 3451 tests.
+**Mutations,** each applied alone and reverted: dropping condition (a) fails
+1 test, dropping (b) fails 2, and dropping the placeholder check fails 1 on a
+city line and 1 on another line. The first version of the tests did not catch
+(a), because the value was not in the text either; the case where the quote
+holds the model's ZIP+4 but the city line's five differ was added for it.
+
+**Unverified:** no run measures this. Neither the 15 of 24 nor Alex's live
+load has been re-read since the fix. Deploying it, and any evaluation run,
+are Alex's to decide.
+
+**Found, not changed:**
+
+- **Two messages for a ZIP below 00501.** A five-digit one stands in the
+  verifier and the fill marks it "not a real US ZIP"; one with a +4 is refused
+  by the verifier, "does not follow" (as before, as asked).
+- **A five-digit value from a nine-digit ZIP printed without the hyphen**
+  ("Fargo ND 581021234") is still refused, as before: the five are not a whole
+  token there.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -4030,6 +4100,9 @@ fingerprint (3y) stay built and unused.
   A stop whose truth is FCFS at 120 minutes or less is filled as APPT with a
   window and cannot score "same" (3z). Not changed; day-first parsing would
   be a new phase, and is Alex's decision.
+- **ZIP+4 (3ab):** the verifier now fills the five digits of a ZIP+4 the city
+  line prints (`aa9c5b2`). Not deployed, and no run measures it; the 15 of
+  run 11's 24 blank ZIPs it may explain are inferred from line counts.
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### 5. Watch for a week
