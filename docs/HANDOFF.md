@@ -3938,7 +3938,7 @@ per week". **This supersedes 3aa's decision B for the Route blocks template
 only:** a document whose middle stop the summary line does not name is no
 longer refused for that alone. A SILENT split (3aa's option C) stays
 rejected; a MARKED split is approved. Code and tests are commit `ce654db`;
-NOT pushed, NOT deployed.
+pushed (`origin/master` at `9a475ca`, 2026-10-15); deployed: unverified.
 
 **What is read and what is marked:**
 
@@ -4211,6 +4211,212 @@ nothing is pushed.
   catches the failed read as it catches the failed insert in the tests; it
   was not tried against a database without the table.
 
+### Phase 3ae: the flaky tests that blocked the 3ad worker deploy (2026-10-15)
+
+**Where things stand** (the advisor verified, 2026-10-15): 3ac and 3ad are
+pushed (`origin/master` at `9a475ca`), and migration 0030 is applied to the
+hosted database. **The 3ad worker deploy is still pending.**
+`scripts/deploy.sh` failed its gates three times on flaky tests, none of
+them in 3ad's code. Alex runs `scripts/deploy.sh`. This phase changes test
+code only:
+
+- `a801b7c`: the unit fix;
+- no e2e commit, because the cause found is not in test code (below).
+
+Neither is pushed.
+
+#### Gate 1 (vitest): the deadlock
+
+**Evidence:** the local cluster log, `.testdb/postgres.log`, records every
+deadlock with both statements. There were five on 2026-10-15: two before
+this phase and three in its baseline runs. All five have one shape:
+
+- clear-stop's `create trigger clear_stop_break before update on stops`
+  waits for a ShareRowExclusiveLock on `stops`, behind another test file's
+  open transaction that has written to stops;
+- that file's `insert into trucks` waits for the trigger test's
+  transaction, because both inserted `vitest-vehicle-<n>`;
+  `src/test/fleet.ts` numbered fixtures from 1 in every file.
+
+In one of the five, Postgres killed the insert side, which was 3ad's
+agreement test. 3ad added a file that inserts many fixture trucks, so it
+added chances to be the victim. 3ad's own DDL (on `eta_status_changes`) is
+in none of the five.
+
+The older deadlocks in the log (2026-10-08 and -09) are guard 3's truncate
+under running tests: the commit-into-`fleet_test` problem that
+`fleet_commit` fixed (§12.119).
+
+**The class, every site.** 13 tests ran DDL inside `rolledBack()` on
+`fleet_test`, on five shared tables:
+
+| file | tests | DDL | table |
+|---|---|---|---|
+| `src/server/clear-stop.test.ts:401` | 2 | create trigger | stops, audit_log |
+| `src/server/clear-stop.test.ts:846`, `:1171` | 2 | create trigger | stops |
+| `src/server/reopen-load.test.ts:454` | 1 | create trigger | audit_log |
+| `src/db/route-shadow-closed.test.ts:41` | 1 | alter table … disable trigger | route_shadow |
+| `src/worker/eta-marks.test.ts:165`, `:184`, `:217` | 3 | create, drop trigger | eta_marks |
+| `src/worker/eta-marks.test.ts:410` | 1 | alter table … add constraint | eta_marks |
+| `src/worker/status-changes.test.ts:552`, `:578`, `:594` | 3 | create trigger | eta_status_changes, eta_marks |
+
+Found by grep and confirmed by the new guard, which refused exactly these 13
+and nothing else. Two other sites were checked and left as they are:
+
+- `lock table` (`src/server/ratecon-reader/reads.test.ts:165`) runs on
+  `fleet_commit`, where locks between committed transactions are the point
+  (§12.119).
+- `src/db/departure-source.test.ts` runs 0024's `DO` block, which is a read.
+
+**The fix,** at the shared layer (`src/test/db.ts`):
+
+- **One advisory lock in every test transaction, taken first.**
+  `rolledBack()` holds it shared. The new `rolledBackAlone()` holds it
+  alone: it starts only when no other test transaction is open, and none
+  starts until it ends, so there is no row lock left to deadlock against.
+  The 13 tests above use `rolledBackAlone()`.
+- **Enforced, three ways:**
+  - An event trigger, in the test database only, refuses DDL in a shared
+    transaction as it is issued, before it takes its lock. The message names
+    `rolledBackAlone()`.
+  - Any other table lock (`lock table`, `truncate`) still held when a shared
+    transaction ends fails the test.
+  - A test transaction opened inside another is refused, because it would
+    hang.
+- **Why the event trigger is needed:** a check after the body alone missed
+  route_shadow's test. A statement that fails at the top level aborts the
+  transaction, and Postgres releases its locks at once, so a fault-injection
+  test that ends in its expected error showed no lock.
+- **Guard 3:** its truncate runs alone, and its count runs shared.
+
+**The other half** (`src/test/fleet.ts`): fixture unique keys carry the
+vitest worker id (`vitest-vehicle-<worker>-<n>`), so parallel files no
+longer collide on them.
+
+**Before and after.** Full `npx vitest run`, on the local cluster:
+
+| | runs | failed | deadlocks in the cluster log | time a run |
+|---|---|---|---|---|
+| before (`9a475ca`) | 10 | 3 (runs 3, 8, 9; one test each) | 3 | 25–28 s |
+| after (`a801b7c`) | 10 | 0 (193 files, 3509 tests each run) | 0 | 26–30 s |
+
+**Tests:** 6 new in `src/test/guards.test.ts`. `npm run check`: 193 files,
+3509 tests (3503 before).
+
+**Mutations,** each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| `rolledBackAlone` takes the lock shared | 1: waits for the tests already running |
+| the shared mark not set, so the guard never fires | 1: refuses DDL as it is issued |
+| no table-lock check at the end | 1: any other table lock |
+| no nesting check | 1: a transaction inside another |
+| fixture keys without the worker | 1: fixture keys carry the worker |
+
+With the guard in place and the 13 tests not yet switched, all 13 failed
+with the guard's message and the run had 0 deadlocks.
+
+#### Gate 4 (e2e): the three failures
+
+Each was a 10 s expect timeout, with the browser waiting on the server.
+Evidence from the traces (method, path, status and timings only) and from
+the cluster log.
+
+**Phone toast** (13:06 run; the failing context started 15:30:00 CEST):
+
+- In the 11 sizes that passed, the board loaded in about 190 ms.
+- In the failing size, `GET /` took 3,211 ms and the RSC request 3,952 ms.
+- `GET /api/fleet` and `GET /api/trail` never answered within 10 s, and
+  the toast waits for that fleet fetch.
+
+**`e2e/truck-lists.spec.ts:113`** (20:50 run; at 23:10:01 CEST):
+
+- `POST /api/truck-lists` took 5,734 ms; it took 170 ms earlier in the same
+  test.
+- The refetch after it never answered, so the dialog stayed open.
+- In the same seconds, an RSC navigation took 2,655 ms and
+  `GET /api/loads/…` 7,800 ms.
+
+**`e2e/board-return.spec.ts:61`** (21:14 run; at 23:15:01 CEST):
+
+- After the Board link, the RSC request for the board never answered
+  within 9 s.
+
+**Ruled out:**
+
+- **The local database:** the cluster log is silent at each of the three
+  times, and no vitest run overlapped any of them.
+- **Machine sleep:** the power log shows no sleep or wake in any of the
+  windows, and the run-clock reading shows none since the 21:14 run started.
+- **Leaked browser contexts:** each failing run had one failure, and a
+  context leaks only after a failure.
+- **A race in the specs:** each waits on the right thing — the dialog
+  closes when the server answers, the URL changes when the navigation does,
+  and the toast follows the fetch.
+
+**The cause found.** Every request the e2e server answers calls the HOSTED
+Supabase Auth twice: `getUser()` in `src/middleware.ts:33` and again in
+`src/lib/auth.ts:27`. In e2e, data is local but auth is real. A probe ran
+beside the two e2e runs below, every 2 s:
+
+- the app's `/login` (middleware, but no auth call without a session):
+  never over 1 s; mean 3–4 ms, max 204 ms across 1,577 probes;
+- `<supabase>/auth/v1/health`:
+
+| run | probes | over 1 s | over 5 s | max |
+|---|---|---|---|---|
+| 1 | 678 | 35 | 11 | 15.1 s |
+| 2 | 655 | 39 | 14 | 12.8 s |
+
+The long ones were in TCP connect, with DNS at 2 ms: 2.1, 3.3, 7.8 to 9.2,
+12.7 and 15.0 s. That is the shape of lost packets being retransmitted. The
+shorter ones had a fast connect and a slow answer.
+
+The local server answered in milliseconds throughout. So the e2e failures
+are the network path to hosted Supabase stalling, not the tests. A stall
+that lands on a 10 s wait fails one test, a different one each run. This
+stays INFERRED: the probe and the failures were not in the same run, and
+nothing records the server's own calls to Supabase. The Mac was on battery
+with Low Power Mode on (2026-10-15/16); whether it was on at the three
+failures is unknown.
+
+**After** (e2e, `npm run e2e`, at `a801b7c`, on battery):
+
+- run 1: 248 passed (26.8 min); "the machine stayed awake for the whole
+  run";
+- run 2: 248 passed (26.5 min); "the machine stayed awake for the whole
+  run".
+
+Both passed with the stalls above happening during them.
+
+No test code was changed for e2e: nothing found was in it. No timeout was
+raised and no retry added.
+
+**Questions for Alex (not decided here):**
+
+1. **Should the e2e gate depend on hosted auth for every request?** The
+   alternatives are app or harness changes, not test fixes:
+   - verify the session locally, e.g. `getClaims()` with asymmetric keys
+     instead of `getUser()`. That changes what production checks: a revoked
+     session is not caught until its token expires.
+   - or give e2e a local auth stand-in.
+2. **Run deploy gates on a steadier network?** Wired, or not on battery and
+   Low Power Mode. The probe is in this phase's report and can be rerun.
+3. **Retries, or a longer wait** on the three steps? Not done. A retry turns
+   the evidence into a pass (playwright.config.ts says so), and a TCP stall
+   of 15 s outlasts any modest raise.
+4. **Should e2e record the auth path itself?** For example, a teardown line
+   like the sleep check, with the probe's counts. It would add test-runner
+   calls to Supabase.
+
+#### Unverified
+
+- That the three e2e failures were auth stalls. The probe ran in later runs
+  than the failures.
+- Low Power Mode at the failure times.
+- That `rolledBackAlone()` costs nothing beyond the measured 1–2 s a run: a
+  run that queues several alone tests behind slow ones was not measured.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -4385,8 +4591,8 @@ fingerprint (3y) stay built and unused.
   line prints (`aa9c5b2`). Not deployed, and no run measures it; the 15 of
   run 11's 24 blank ZIPs it may explain are inferred from line counts.
 - **Route blocks reads a middle stop, split and marked (3ac, `ce654db`):** a
-  template change, not yet deployed. 3aa and 3ab are pushed (`origin/master` at
-  `82f5f54`); whether they are deployed is unverified (no network call here).
+  template change. 3aa, 3ab, 3ac and 3ad are pushed (`origin/master` at
+  `9a475ca`); whether they are deployed is unverified (no network call here).
 - **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, not
   deployed. Migration 0030 goes to the hosted database first, then
   `scripts/deploy.sh`. Four questions for Alex are in 3ad.
