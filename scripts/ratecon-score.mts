@@ -81,7 +81,7 @@ async function main() {
     }
     const outcome = readRatecon(pdf.lines);
     if ('notRecognised' in want) {
-      console.info(`${label}: layout not recognised — ${outcome.ok ? 'FAIL, it was read as a known layout' : 'pass (expected: not one of the four layouts)'}`);
+      console.info(`${label}: layout not recognised — ${outcome.ok ? 'FAIL, it was read as a known layout' : 'pass (expected: not one of the five layouts)'}`);
       if (outcome.ok) failures += 1;
       continue;
     }
