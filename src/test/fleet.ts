@@ -33,6 +33,16 @@ import type { Tx } from '@/server/audit';
  */
 let seq = 0;
 const nextSeq = () => ++seq;
+/**
+ * The vitest worker running this file, in every unique key (HANDOFF 3ae).
+ * Each test file restarts the counter at 1, and files run in parallel, so
+ * every file's first truck was `vitest-vehicle-1`: the second file's insert
+ * waited for the first file's transaction to roll back. That wait was one
+ * half of every deadlock 3ae found. A worker runs one file at a time, so the
+ * worker and the counter together are unique among the transactions open at
+ * once — still a counter, still reproducible.
+ */
+const worker = process.env['VITEST_POOL_ID'] ?? '0';
 
 export interface TruckOptions {
   truckNumber?: number;
@@ -45,7 +55,7 @@ export async function makeTruck(tx: Tx, options: TruckOptions = {}) {
   const [truck] = await tx
     .insert(trucks)
     .values({
-      samsaraVehicleId: `vitest-vehicle-${n}`,
+      samsaraVehicleId: `vitest-vehicle-${worker}-${n}`,
       samsaraName: `Vitest ${options.truckNumber ?? n}`,
       truckNumber: options.truckNumber ?? 9000 + n,
       active: options.active ?? true,
@@ -60,7 +70,7 @@ export async function makeDriver(tx: Tx, options: { name?: string; active?: bool
   const [driver] = await tx
     .insert(drivers)
     .values({
-      samsaraDriverId: `vitest-driver-${n}`,
+      samsaraDriverId: `vitest-driver-${worker}-${n}`,
       name: options.name ?? `Vitest Driver ${n}`,
       active: options.active ?? true,
     })
@@ -123,7 +133,7 @@ export async function makeDispatcher(tx: Tx, name = 'Vitest Dispatcher') {
   const n = nextSeq();
   const [row] = (await tx.execute(sql`
     insert into auth.users (email, raw_user_meta_data)
-    values (${`vitest-${n}@example.test`}, ${JSON.stringify({ full_name: name })}::jsonb)
+    values (${`vitest-${worker}-${n}@example.test`}, ${JSON.stringify({ full_name: name })}::jsonb)
     returning id
   `)) as unknown as [{ id: string }];
   return { id: row!.id, name };

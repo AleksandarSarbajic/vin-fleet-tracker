@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { auditLog, loads, stops, trucks } from '@/db/schema';
-import { describeDb, rolledBack } from '@/test/db';
+import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import { assign, makeDispatcher, makeDriver, makePosition, makeTruck } from '@/test/fleet';
 import { REOPEN_AUDIT_SOURCE } from '@/lib/reopen-load';
 import { StopEdit } from '@/lib/stop-edit';
@@ -451,7 +451,7 @@ describeDb('Reopen load (§12.107)', () => {
    * load is still closed, the anchor still empty, and there is no entry.
    */
   it('fails on the audit row after writing, and leaves the load closed and its anchors empty', async () => {
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const { truck, dispatcher } = await world(tx);
       const { loadId } = await addLoad(tx, truck.id, 'BREAK-1', [
         { seq: 1, arrivedAt: hoursAgo(1), anchor: { ...ZIP, at: hoursAgo(1) } },

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { asc, eq, sql } from 'drizzle-orm';
 import { etaMarks, etaStatusChanges, loads, overrides, stops } from '@/db/schema';
-import { describeDb, rolledBack } from '@/test/db';
+import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import { assign, makeDriver, makeFullFleetRow, makePosition, makeTruck } from '@/test/fleet';
 import { destinationKey } from '@/lib/eta-marks';
 import { STATUSES, STATUS_DEFAULTS, haversineMiles } from '@/lib/status';
@@ -549,7 +549,7 @@ describeDb('a failure in the status log never reaches the poll', () => {
 
   it('catches a failed insert, warns once, and the ETA marks of the same poll are still written', async () => {
     const logger = quiet();
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const lane = await truckWithStop(tx, new Date());
       await breakInserts(tx, 'eta_status_changes');
       const result = await bothLogs(tx, logger);
@@ -575,7 +575,7 @@ describeDb('a failure in the status log never reaches the poll', () => {
 
   it('and a failed ETA log does not lose the status rows', async () => {
     const logger = quiet();
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const lane = await truckWithStop(tx, new Date());
       await breakInserts(tx, 'eta_marks');
       const result = await bothLogs(tx, logger);
@@ -591,7 +591,7 @@ describeDb('a failure in the status log never reaches the poll', () => {
 
   it('gives up within its own timeout rather than holding the poll', async () => {
     const logger = quiet();
-    const elapsed = await rolledBack(async (tx) => {
+    const elapsed = await rolledBackAlone(async (tx) => {
       await truckWithStop(tx, new Date());
       await breakInserts(tx, 'eta_status_changes', 'perform pg_sleep(30)');
       const started = Date.now();

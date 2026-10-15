@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { trucks } from '@/db/schema';
 import { TEST_DATABASE_URL, refuseUnlessDisposable } from './url';
-import { describeDb, rolledBack, tablesHoldingRows } from './db';
+import { describeDb, rolledBack, rolledBackAlone, tablesHoldingRows } from './db';
 import { makeTruck } from './fleet';
 
 /**
@@ -75,6 +77,80 @@ describeDb('guard 3 — a test that commits is named', () => {
       return tablesHoldingRows(tx);
     });
     expect(dirty.map((d) => d.t)).toContain('trucks');
+  });
+});
+
+/**
+ * HANDOFF 3ae. A test that changed a table's definition inside its
+ * transaction deadlocked against the files running beside it, one run in
+ * three. The test lock makes such a test run alone, and these hold the lock
+ * and its enforcement in place.
+ */
+describeDb('the test lock — no table lock beside another test', () => {
+  it('refuses DDL inside rolledBack, as it is issued, and names the fix', async () => {
+    // Refused before it takes its lock, so nothing here waits on anyone.
+    const said = await rolledBack((tx) =>
+      tx.execute(sql`alter table route_shadow disable trigger route_shadow_closed`),
+    ).then(
+      () => 'NOT REFUSED',
+      // Drizzle wraps the driver's error; Postgres's own message is the cause.
+      (error: unknown) => String((error as { cause?: Error }).cause?.message ?? error),
+    );
+    expect(said).toMatch(/^ALTER TABLE inside rolledBack\(\).*rolledBackAlone\(\)/);
+  });
+
+  it('allows it inside rolledBackAlone', async () => {
+    const done = await rolledBackAlone(async (tx) => {
+      await tx.execute(sql`alter table route_shadow disable trigger route_shadow_closed`);
+      return 'altered';
+    });
+    expect(done).toBe('altered');
+  });
+
+  it('fails a test whose transaction ends holding any other table lock', async () => {
+    // A mode no test's row writes conflict with, so this waits on nobody.
+    await expect(
+      rolledBack((tx) => tx.execute(sql`lock table route_shadow in share update exclusive mode`)),
+    ).rejects.toThrow(/took a table lock inside rolledBack\(\): route_shadow \(ShareUpdateExclusiveLock\)/);
+  });
+
+  it('refuses a test transaction opened inside another, which would hang', async () => {
+    await expect(rolledBack(() => rolledBack(async () => 1))).rejects.toThrow(/inside another one/);
+    await expect(rolledBackAlone(() => rolledBack(async () => 1))).rejects.toThrow(/inside another one/);
+  });
+
+  it('starts a rolledBackAlone only once the tests already running have finished', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let opened!: () => void;
+    const isOpen = new Promise<void>((resolve) => (opened = resolve));
+    const running = rolledBack(async () => {
+      opened();
+      await gate;
+    });
+    await isOpen;
+    const alone = rolledBackAlone(async () => {
+      order.push('alone ran');
+    });
+    // Long enough for a lock that did not exclude to have let it run.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    order.push('running test ended');
+    release();
+    await Promise.all([running, alone]);
+    expect(order).toEqual(['running test ended', 'alone ran']);
+  });
+
+  it('gives fixture keys this worker, so parallel files do not collide on them', async () => {
+    const id = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const [row] = await tx
+        .select({ id: trucks.samsaraVehicleId })
+        .from(trucks)
+        .where(sql`${trucks.id} = ${truck.id}`);
+      return row!.id;
+    });
+    expect(id).toMatch(new RegExp(`^vitest-vehicle-${process.env['VITEST_POOL_ID']}-\\d+$`));
   });
 });
 

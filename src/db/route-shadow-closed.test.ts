@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
-import { describeDb, rolledBack } from '@/test/db';
+import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import { makeRoutableLane } from '@/test/fleet';
 
 /**
@@ -38,7 +38,7 @@ describeDb('the shadow run is closed (§12.73)', () => {
     // A kept row to update. The trigger refuses inserts too, so it is lifted
     // for this one insert only, inside a transaction that always rolls back.
     const message = await refusal(
-      rolledBack(async (tx) => {
+      rolledBackAlone(async (tx) => {
         await tx.execute(sql`alter table route_shadow disable trigger route_shadow_closed`);
         await tx.execute(sql`
           insert into route_shadow

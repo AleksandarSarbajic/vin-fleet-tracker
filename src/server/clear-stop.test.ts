@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { assignments, auditLog, geocodeCache, loads, stops, trucks } from '@/db/schema';
-import { describeDb, rolledBack } from '@/test/db';
+import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import {
   assign,
   makeDispatcher,
@@ -398,7 +398,7 @@ describeDb('Clear stop (§12.88)', () => {
   ] as const)(
     'fails %s after the load has closed, and leaves the load, its stops and its arrival untouched',
     async (_where, table, event, loadIdExpr) => {
-      const seen = await rolledBack(async (tx) => {
+      const seen = await rolledBackAlone(async (tx) => {
         const { truck, dispatcher } = await world(tx);
         const { loadId } = await addLoad(tx, truck.id, 'BREAK-1', [
           {
@@ -843,7 +843,7 @@ describeDb('a new load that closes the previous one (§12.92)', () => {
    * proves the close HAD happened when it failed.
    */
   it('fails after the close, and leaves both untouched', async () => {
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const { truck, dispatcher } = await world(tx);
       const { loadId } = await previous(tx, truck.id);
       const stopsBefore = await stopRows(tx, loadId);
@@ -1168,7 +1168,7 @@ describeDb('a reached stop given a new city or number', () => {
    * saw it — so the test proves the close had happened when it failed.
    */
   it('"Next trip" that fails after the close leaves everything as it was', async () => {
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const { truck, dispatcher } = await world(tx);
       await cacheMoorhead(tx);
       const { loadId, stopIds } = await reachedLoad(tx, truck.id);

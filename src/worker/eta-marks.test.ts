@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { asc, eq, sql } from 'drizzle-orm';
 import { etaMarks, loads, positions, stops } from '@/db/schema';
-import { describeDb, rolledBack } from '@/test/db';
+import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import { makePosition, makeRoutableLane } from '@/test/fleet';
 import { haversineMiles } from '@/lib/status';
 import type { Tx } from '@/server/audit';
@@ -162,7 +162,7 @@ describeDb('a failure in the log never reaches the poll', () => {
 
   it('catches a failed insert, warns once, and leaves the rest of the poll written', async () => {
     const logger = quiet();
-    const seen = await rolledBack(async (tx) => {
+    const seen = await rolledBackAlone(async (tx) => {
       const lane = await laneAt(tx, 205);
       await breakInserts(tx);
       const result = await runEtaLog(tx, logger);
@@ -181,7 +181,7 @@ describeDb('a failure in the log never reaches the poll', () => {
   });
 
   it('rolls back the whole batch: one bad row leaves none of its poll behind', async () => {
-    const rows = await rolledBack(async (tx) => {
+    const rows = await rolledBackAlone(async (tx) => {
       const near = await laneAt(tx, 60);
       const far = await laneAt(tx, 205);
       await logEtaMarks(tx);
@@ -214,7 +214,7 @@ describeDb('a failure in the log never reaches the poll', () => {
 
   it('gives up within its own timeout rather than holding the poll', async () => {
     const logger = quiet();
-    const elapsed = await rolledBack(async (tx) => {
+    const elapsed = await rolledBackAlone(async (tx) => {
       await laneAt(tx, 205);
       await breakInserts(tx, 'perform pg_sleep(30)');
       const started = Date.now();
@@ -407,7 +407,7 @@ describeDb('settling the log, before the prune', () => {
 
   it('never throws from the hourly wrapper, so the prune after it still runs', async () => {
     const logger = quiet();
-    const out = await rolledBack(async (tx) => {
+    const out = await rolledBackAlone(async (tx) => {
       await laneAt(tx, 60);
       await logEtaMarks(tx);
       await tx.execute(sql`alter table eta_marks add constraint refuse_settle check (settled_at is null)`);
