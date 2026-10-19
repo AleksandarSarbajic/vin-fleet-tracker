@@ -4242,7 +4242,8 @@ code only:
 - `a801b7c`: the unit fix;
 - no e2e commit, because the cause found is not in test code (below).
 
-Neither is pushed.
+`a801b7c` is pushed: `git branch -r --contains a801b7c` names `origin/master`
+(the local remote-tracking ref, 2026-10-19, no fetch).
 
 #### Gate 1 (vitest): the deadlock
 
@@ -4454,11 +4455,13 @@ NOT pushed, NOT deployed.
 read-only database check. The check cannot be re-run here, so its figures are
 the advisor's and unverified here:
 
-- 7 extra copies of loads on 5 trucks (113, 116, 128, 133, 145). Each has
-  the same truck, number and stops as the original and was created 10 to
-  75 s after it, between 2026-10-12 and 2026-10-16. None was open on
-  2026-10-19. Clear stop's "3 open loads" on truck 128 was correct for the
-  data.
+- 8 extra loads on 5 trucks (113, 116, 128, 133, 145), each with the same
+  truck and number as its original, between 2026-10-12 and 2026-10-16.
+  Truck 116 got 4 loads from one entry on 2026-10-12, in 56 s. One copy has
+  no stops, so matching by stops counted 7 at first (the advisor's
+  correction, 2026-10-19). The 7 with stops have the same stops and were
+  created 10 to 75 s after the original. None was open on 2026-10-19. Clear
+  stop's "3 open loads" on truck 128 was correct for the data.
 - A screenshot of truck 133 shows the stale refusal and "Saved · one thing
   to know" (an arrival with no anchor, §12.85) at the same time.
 - **Unverified:** that every copy came through the warnings branch. Warnings
@@ -4601,7 +4604,7 @@ defect, the opposite shape: a write that did NOT land, treated as if it had.
   flag, drivers) come from the board row as refetched after the save. If that
   refetch failed, they come from the row before it. That changes what is
   shown; nothing is sent unless the dispatcher changes it.
-- **The 7 copies** are not cleaned up (all closed; out of scope).
+- **The 8 copies** are not cleaned up (all closed; out of scope).
 - **The re-read costs one `GET /api/loads/:id`** per warned save (`read`
   limit: 60, refilling 2 a second).
 
@@ -4646,6 +4649,171 @@ needs a migration, so it is Alex's decision.
    save could return the read from inside its own transaction
    (`loadForEdit(tx, …)`). That needs no second request and has no failed-read
    state, but every save's answer grows.
+
+### Phase 3ag: Clear now that fails says so; the modal's driver is the read's (2026-10-19)
+
+From the advisor's brief, after 3af was approved. No migration. Commits:
+
+- `2af372f`: Clear now that fails;
+- `578a1db`: the driver;
+- one docs commit: this section, §9.5 and §12.127, the copy count and 3ae's
+  push line.
+
+NOT pushed, NOT deployed. 3af's build is unchanged except where named here.
+
+**1. Clear now that fails** (found in 3af; the advisor confirmed it by
+reading). The rule is in §9.5.
+
+- **Before:** any answer to `DELETE /api/overrides` that was neither ok nor
+  409 still set the draft to Auto, with no message. The form said the
+  override was gone while it was live, and the next save sent the clear. A
+  request that threw rejected unhandled (`void clearOverrideNow()`).
+- **Now:** only an ok answer ends the override in the form. Any other
+  answer, or a thrown request, leaves the draft as it was. Beside the button
+  the form says "Nothing was cleared." with the reason: the server's error
+  and reference, or "The server answered 502." when the answer cannot be
+  read, or "The request failed: …". An ok answer with no readable version
+  keeps the version held, so the next save is refused as stale and offers
+  Reload (§12.117). The 409 branch is unchanged, except that it reads its
+  body without throwing.
+- **Not covered:** a request that throws after the server cleared the
+  override (the answer was lost). The form then says nothing was cleared
+  while it was. The next save is refused as stale, because the clear moved
+  the version, and Reload shows it. This is the same lost-answer class as
+  3af's create-key proposal.
+- **Tests:** in `landed-save.test.tsx`, `Clear now`:
+  - ok: unchanged, now also checking that the draft goes to Auto;
+  - refused, 500;
+  - refused, 502 with an HTML body;
+  - thrown, with an `unhandledRejection` listener.
+
+  On the previous code the three new ones fail. The thrown test's listener
+  caught 1 rejection, `TypeError: Failed to fetch`.
+
+**2. The modal's driver.** This was the advisor's reading of the code,
+unverified until step 1.
+
+- **Step 1: reproduced.** The test: `drivers` is the page's list (Ana on
+  904, Bo unassigned) and is never refreshed, as in production, where it is
+  rendered with the page (`src/app/page.tsx`, `loadAssignmentBoard`) and no
+  save refreshes it. The test reassigns 904 to Bo with a warned save; the
+  read of the saved load says Bo. On the previous code it failed:
+
+  ```
+  × the landed editor's driver (§12.127, phase 3ag) > after a warned reassign, is on the driver the save left, and a later save does not send the old one back
+  AssertionError: expected 'Edit load — truck 904VT-3AF-7 · Ana E…' to contain 'VT-3AF-7 · Bo Example'
+  ```
+
+  The landed editor's text also read "Current assignment: Ana Example". With
+  the header checks dropped from a scratch copy, its next save (a ZIP edit)
+  sent `driverId` = Ana's id, no `previewToken`, and asked for no preview
+  (1 preview request in all, the first save's):
+
+  ```
+  SECOND SAVE {"driverId":"99999999-9999-4999-8999-00000000000a","isA":true,"previewToken":null,"previews":1}
+  ```
+
+  **Worse than "offers to reassign back":** every save sends the form's
+  driver, changed or not, so there was no offer at all. By reading
+  `reassign.ts:209–248`, the server applies a change with no token when the
+  driver is on no other truck. It would put Ana back unasked. The server
+  half was read, not run.
+- **Step 2:** when there is a read, the baseline is `read.assignment.driverId`.
+  The list stays for names, the picker and its labels. A new load has no read
+  and keeps the list.
+- **Every other place in the modal that maps a truck to a driver through
+  `drivers`:**
+
+  | site | what it maps | verdict |
+  |---|---|---|
+  | `initialDriverId` (the baseline) | truck → driver | affected; fixed for a read. A new load (no read) still takes the list: question 1 |
+  | `currentDriverName` (header; the picker's "Current assignment") | id → name | by id, so it follows the baseline. A driver missing from the list (for example, created in the picker this session) shows as "Unassigned": display only, the save sends the read's id |
+  | the footer's "Reassigns truck … from … to …" | id → name | by id; as above |
+  | `claimedBy` (the picker's "on truck N" labels) | driver → truck | stale after a reassign the page has not seen: display only. A driver change always goes through the server's preview and confirm (§9.10), which shows the real other truck. Not changed |
+  | `initialFocus` and the picker's `autoFocus` | the baseline | follow the baseline, now the read's |
+  | `DriverSelect`'s `selected` | id → driver | by id; safe |
+
+  Outside the modal, the phone sheet's call button
+  (`Console.tsx:952`, `drivers.find((d) => d.truckId === selectedRow.id)?.phone`)
+  maps truck to driver through the same list: question 3.
+- **Fixtures:** `loadReadFor` takes the truck's assignment (none unless
+  given). `one-stop-body` and `landed-save` put a driver on the truck in
+  `drivers`, and their reads now carry the same one. Before this, those
+  suites opened on a read that said nobody drove the truck. With the read's
+  baseline, they would have tested a state that cannot happen. The golden
+  bodies are unchanged.
+- **Tests:** in `landed-save.test.tsx`:
+  - after a warned reassign, on the new driver, and the next save sends that
+    driver with no preview;
+  - opened on a read that disagrees with a stale list, the read wins;
+  - a new load keeps the list's driver.
+
+  The first two fail on the previous code; the third passes there, by design.
+
+**3. Docs.**
+
+- **The copy count, corrected** (the advisor, 2026-10-19; unverified here):
+  8 extra loads, not 7. Changed in three places:
+  - HANDOFF 3af, "Why", the first bullet;
+  - HANDOFF 3af, "What it does not cover", "The 8 copies";
+  - design-spec §12.127, "Why", the evidence paragraph.
+
+  The 3af docs commit's message (`5739dd8`) still says 7; it is history.
+- **3ae's push line:** `git branch -r --contains a801b7c` prints
+  `origin/master`. "Neither is pushed" now says it is pushed (the local
+  remote-tracking ref; no fetch).
+- **Rules changed, so the spec changed:**
+  - §9.5: `Clear now` that does not clear;
+  - §12.127: the driver is the read's. Its "truck-level values" bullet named
+    the driver list and said "nothing is sent unless the dispatcher changes
+    it". Step 1 proved that wrong for the driver; the bullet is corrected.
+    The same claim stands in HANDOFF 3af's "What it does not cover", left as
+    written: question 4.
+
+**Found, not explained: the copy with no stops.** The only load insert in
+`src/` outside tests is `saveLoadEdit`'s. It writes 1 to 10 stops in the same
+transaction (`LoadEdit`'s `.min(1)`, and the count check in `stop-edit.ts`).
+The only other delete of stops is the demo-data sweep. So the code as it
+stands does not make a load with no stops, and the warned-save path does not
+explain that copy alone. Question 2.
+
+**Tests:** before, 194 files and 3527 tests; after, 194 files and 3533 tests
+(+6: 3 Clear now, 3 driver).
+
+**Mutations,** each applied alone and reverted:
+
+| broken | tests that fail |
+|---|---|
+| a refused Clear now falls through to Auto | 2 |
+| no catch on Clear now | 1 |
+| the Clear now message not shown | 3 |
+| the driver from the list again (the previous code) | 2 |
+| a new load without the list's driver | 1 |
+
+**Unverified:**
+
+- The advisor's corrected figures.
+- The server's silent revert of the driver: read in `reassign.ts`, not run.
+- Whether the console's own address changes (`router.replace`) re-render
+  the page and refresh `drivers`: not checked. No save does.
+- In a real browser: happy-dom only, and no e2e (it is networked).
+
+**Questions for Alex (not decided here):**
+
+1. **A new load still takes its driver from the page's list.** After a
+   reassign the page has not seen, a new load's save sends the old driver
+   back. The fleet query already selects `driver_id`, but `FleetRow` drops
+   it (`fleet-query.ts:442`). Exposing it would give the modal a live driver
+   with no read. It touches the fleet query, which the worker's status log
+   also parses. Do it?
+2. **The copy with no stops, on truck 116:** the save cannot make one. Worth
+   a read-only look at its audit rows?
+3. **The phone sheet's call button** takes the phone from the same list. After
+   a reassign the page has not seen, it would dial the previous driver.
+   Change its source too?
+4. **HANDOFF 3af** still says of truck-level values "nothing is sent unless
+   the dispatcher changes it", which is wrong for the driver. Add a pointer
+   to 3ag there, or leave the record as it is?
 
 ## Next
 

@@ -953,6 +953,13 @@ so the dispatcher can see exactly what they are hiding. The API must return
 both plus the override metadata. **When the two agree, the block collapses to
 a single line saying so.**
 
+**`Clear now` that does not clear** (phase 3ag). Only an ok answer ends the
+override in the form. Any other answer, or no answer, leaves the draft as it
+was: the override is still live, and a draft showing `Auto` would have the
+next save clear it unasked. Under the header, in `status.late.fg`, it says
+"Nothing was cleared." and why: the server's error and reference, the status
+when the answer cannot be read, or the request's failure.
+
 ## 9.6 Search (`2d`)
 
 - **Debounced 250ms**, across truck number, driver, load number, city, state,
@@ -9535,9 +9542,12 @@ meant was the dispatcher's own first save. The version leaves out worker
 writes (§12.117), so nothing else had to happen.
 
 The evidence for this is the advisor's read-only check of 2026-10-19,
-unverified here: 7 extra copies of loads on 5 trucks, each with the same
-truck, number and stops, created 10 to 75 s after the original, between
-2026-10-12 and 2026-10-16. All were closed by 2026-10-19. A screenshot shows
+unverified here: 8 extra loads on 5 trucks, each with the same truck and
+number as its original, between 2026-10-12 and 2026-10-16. Truck 116 got 4
+loads from one entry on 2026-10-12, in 56 s. One copy has no stops, so
+matching by stops counted 7 at first; the 7 with stops have the same stops
+and were created 10 to 75 s after the original. All were closed by
+2026-10-19. A screenshot shows
 the stale refusal under "Saved · one thing to know". That every copy came
 through a warned save is NOT verified: warnings are not stored. It is the only
 path in the code that creates twice from one modal.
@@ -9592,12 +9602,23 @@ not be read again (…), so this form cannot save it." It offers Retry.
   sent with the create, can tell; that needs a migration, which is Alex's
   decision. Save is already off while a save is in flight, so a double click
   is not this case.
-- **Truck-level values on the new editor.** The next stop, the live override,
-  the active flag and the driver list come from the board row as refetched
-  after the save. If that refetch failed, they come from the row before it.
-  That changes what is shown, and nothing is sent unless the dispatcher
-  changes it.
+- **Truck-level values on the new editor.** The next stop, the live override
+  and the active flag come from the board row as refetched after the save.
+  If that refetch failed, they come from the row before it. That changes what
+  is shown, and nothing is sent for them unless the dispatcher changes them.
+  The driver is different, because every save sends it: below.
 - **The copies already made.** They are not cleaned up.
+
+**The driver is the read's** (phase 3ag). Every save sends the form's driver,
+changed or not, and a driver change is measured against the form's baseline.
+That baseline was the console's `drivers` list, which is rendered with the
+page and not refreshed by a save. After a warned save that reassigned the
+truck, the new editor showed the driver before. Its next save sent that
+driver back with no confirm: the server needs no preview token when the
+driver is on no other truck (§9.10). Now, when there is a read, the baseline
+is the read's assignment. The list stays for names, the picker and its
+labels. This holds on every open, not only after a save. A new load has no
+read and still takes the list's driver.
 
 **Tests.** The server suite (`load-edit.test.ts`): the returned version is the
 load's after the save, and a next save with it is accepted; the next trip
