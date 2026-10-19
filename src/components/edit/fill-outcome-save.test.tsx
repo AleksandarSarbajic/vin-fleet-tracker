@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditStopModal } from './EditStopModal';
 import { fleetRow } from '@/test/fleet-row';
-import { primeLoadRead } from '@/test/load-read';
+import { loadReadFor, primeLoadRead } from '@/test/load-read';
 import { MODEL_REPLY, SENTINEL, UNKNOWN_LAYOUT } from '@/test/model-read-fixtures';
 import { PU_SO_PASTED } from '@/test/ratecon-fixtures';
 import type { FleetResponse } from '@/hooks/useFleet';
@@ -44,6 +44,10 @@ let calls: { url: string; body: string }[] = [];
 let readAnswer: () => Response;
 let stopsAnswer: () => Response;
 let outcomeAnswer: () => Promise<Response>;
+/** `GET /api/loads/:id`: the load read again after a save that keeps the modal open (§12.127). */
+let loadAnswer: () => Response;
+const SAVED_LOAD = '77777777-7777-4777-8777-777777777777';
+const SAVED_VERSION = 'abcdef0123456789abcdef0123456789';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const posts = (url: string) => calls.filter((c) => c.url === url);
@@ -61,11 +65,13 @@ beforeEach(() => {
   readAnswer = () => json(200, { ok: true, reads: [SAVEABLE, SAVEABLE], readId: READ_ID });
   stopsAnswer = () => json(200, { ok: true });
   outcomeAnswer = async () => json(200, { ok: true, recorded: true });
+  loadAnswer = () => json(404, { error: 'That load does not exist.' });
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, body: String(init?.body ?? '') });
     if (url === '/api/ratecon/read') return readAnswer();
     if (url === '/api/stops') return stopsAnswer();
     if (url === '/api/ratecon/outcome') return outcomeAnswer();
+    if (url.startsWith('/api/loads/')) return loadAnswer();
     return json(200, { ok: true });
   }) as unknown as typeof fetch;
 });
@@ -198,7 +204,11 @@ describe('an AI fill, saved', () => {
   });
 
   it('only the FIRST save after the fill: a later edit and save posts nothing more', async () => {
-    stopsAnswer = () => json(200, { ok: true, warnings: [{ field: 'zip', message: 'a thing to know' }] });
+    // A warning keeps the modal open, on the load as saved (§12.127).
+    const saved = loadReadFor(fleetRow({ nextStop: { loadId: SAVED_LOAD, loadVersion: SAVED_VERSION } }))!;
+    stopsAnswer = () =>
+      json(200, { loadId: SAVED_LOAD, loadVersion: SAVED_VERSION, warnings: [{ field: 'zip', message: 'a thing to know' }] });
+    loadAnswer = () => json(200, saved);
     await render();
     await aiFill();
     await save();
@@ -206,6 +216,7 @@ describe('an AI fill, saved', () => {
     await type(input(form(), 'Street address'), '9 Elm Ave');
     await save();
     expect(posts('/api/stops')).toHaveLength(2);
+    expect(JSON.parse(posts('/api/stops')[1]!.body)).toMatchObject({ loadId: SAVED_LOAD, version: SAVED_VERSION });
     expect(posts('/api/ratecon/outcome')).toHaveLength(1);
   });
 

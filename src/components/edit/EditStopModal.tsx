@@ -10,6 +10,7 @@ import type { StopEdit } from '@/lib/stop-edit';
 import type { FleetRow } from '@/server/fleet-query';
 import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
+import type { LoadEditResult } from '@/server/stop-edit';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { LOAD_READ_GC_MS, fetchLoadRead, loadReadKey } from '@/hooks/useLoadRead';
 import { OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
@@ -117,9 +118,27 @@ const truckNameOf = (row: FleetRow) =>
   row.truckNumber === null ? row.samsaraName : String(row.truckNumber);
 
 /**
+ * §12.127. The load as a save that landed left it, for the editor opened
+ * again on it: read afresh by the id the save returned, the version the save
+ * returned, what the save said, and the stop that was selected — by place,
+ * because the saved load keeps the form's order, its new stops last.
+ */
+interface Landed {
+  read: LoadForEdit;
+  version: string;
+  warnings: FieldError[];
+  selected: number;
+}
+
+/** §12.127. A save that landed, before its load is read again. */
+type Landing = Omit<Landed, 'read'> & { loadId: string };
+
+/**
  * The read, then the editor. The read's key is taken once, when the modal
  * opens; the read itself is kept from the first answer, and nothing after it
- * — a refetch, a poll's new key — replaces it.
+ * — a refetch, a poll's new key — replaces it. Only a save that lands and
+ * keeps the modal open moves it on (§12.127): the editor is opened afresh on
+ * the load as that save left it.
  */
 export function EditStopModal(props: Props) {
   const queryClient = useQueryClient();
@@ -139,6 +158,12 @@ export function EditStopModal(props: Props) {
   useEffect(() => {
     if (read === null && query.data) setRead(query.data);
   }, [query.data, read]);
+  /** §12.127. Each landing opens a new editor: `n` is its React key. */
+  const [landed, setLanded] = useState<{ n: number; at: Landed } | null>(null);
+  const onLanded = useCallback(
+    (at: Landed) => setLanded((was) => ({ n: (was?.n ?? 0) + 1, at })),
+    [],
+  );
 
   if (key !== null && read === null) {
     return (
@@ -150,7 +175,15 @@ export function EditStopModal(props: Props) {
       />
     );
   }
-  return <LoadEditor {...props} read={read} />;
+  return (
+    <LoadEditor
+      key={landed?.n ?? 0}
+      {...props}
+      read={landed?.at.read ?? read}
+      landed={landed?.at ?? null}
+      onLanded={onLanded}
+    />
+  );
 }
 
 /** While the load is read — no time at all when the prefetch got there first. */
@@ -234,7 +267,14 @@ function LoadEditor({
   onReload,
   aiReader = false,
   read,
-}: Props & { read: LoadForEdit | null }) {
+  landed,
+  onLanded,
+}: Props & {
+  read: LoadForEdit | null;
+  /** §12.127. Set when this editor is the load as a save left it. */
+  landed: Landed | null;
+  onLanded: (at: Landed) => void;
+}) {
   const queryClient = useQueryClient();
   /**
    * §12.119. The opening focus stays the appointment date, as it was — when
@@ -263,7 +303,6 @@ function LoadEditor({
    */
   const [openedAt] = useState(() => new Date().toISOString());
   const [nextKey] = useState(() => (read ? (row.nextStop?.stopId ?? null) : null));
-  const [openedOverride] = useState(() => row.override);
   const [openedActive] = useState(() => row.active);
   const [initialDriverId] = useState(
     () => drivers.find((d) => d.truckId === row.id)?.id ?? null,
@@ -271,13 +310,32 @@ function LoadEditor({
   const [initialForm] = useState<LoadForm>(() => loadFormFrom(read, openedAt, initialDriverId));
   const [form, setForm] = useState<LoadForm>(initialForm);
   const [selected, setSelected] = useState(() =>
-    Math.max(0, initialForm.stops.findIndex((s) => s.key === nextKey)),
+    landed
+      ? Math.min(landed.selected, initialForm.stops.length - 1)
+      : Math.max(0, initialForm.stops.findIndex((s) => s.key === nextKey)),
   );
 
-  /** §12.117. The version the form opened with; moved only by this modal's own Clear now. */
-  const [version, setVersion] = useState(() => read?.version ?? null);
+  /**
+   * §12.117. The version the form opened with — after a save that landed,
+   * the one that save returned (§12.127) — moved only by this modal's own
+   * Clear now.
+   */
+  const [version, setVersion] = useState(() => landed?.version ?? read?.version ?? null);
   /** §12.117. A save was refused because the load changed; Reload is offered. */
   const [stale, setStale] = useState(false);
+  /**
+   * §12.127. This form's save landed, and the modal stays open on the load
+   * as saved: until the read of it is in hand, this form is spent. Nothing in
+   * it is unsaved, it is never sent again, and Cancel closes.
+   */
+  const [landing, setLanding] = useState<Landing | null>(null);
+  const spent = landing !== null;
+  /**
+   * The live override the form opened on, which the draft is measured
+   * against (§9.5). Moved only by this modal's own Clear now, which ends it
+   * (§12.127).
+   */
+  const [openedOverride, setOpenedOverride] = useState(() => row.override);
 
   const [override, setOverride] = useState<OverrideDraft>(() => ({
     forced: row.override?.forcedStatus ?? 'AUTO',
@@ -298,7 +356,7 @@ function LoadEditor({
   /** Errors the server answered with, routed to their stop. */
   const [errors, setErrors] = useState<FieldError[]>([]);
   /** §12.24. The save SUCCEEDED and something about it is worth knowing. */
-  const [saveWarnings, setSaveWarnings] = useState<FieldError[]>([]);
+  const [saveWarnings, setSaveWarnings] = useState<FieldError[]>(() => landed?.warnings ?? []);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
   const [discarding, setDiscarding] = useState(false);
@@ -412,14 +470,18 @@ function LoadEditor({
 
   const dirty = useMemo(() => dirtyOf(initialForm, form, row.id), [form, initialForm, row.id]);
   const unsaved = useMemo(
-    () => [
-      ...dirtyLabels(dirty, form, initialForm),
-      ...(active === openedActive ? [] : ['active flag']),
-    ],
-    [active, dirty, form, initialForm, openedActive],
+    () =>
+      // §12.127. A spent form's changes are saved: there is nothing to lose.
+      spent
+        ? []
+        : [
+            ...dirtyLabels(dirty, form, initialForm),
+            ...(active === openedActive ? [] : ['active flag']),
+          ],
+    [active, dirty, form, initialForm, openedActive, spent],
   );
 
-  const driverChanged = form.driverId !== initialDriverId;
+  const driverChanged = !spent && form.driverId !== initialDriverId;
 
   /**
    * The override travels inside the save, on the next stop (§12.28, D2) — but
@@ -489,6 +551,7 @@ function LoadEditor({
 
   const canSave =
     mayEdit &&
+    !spent &&
     parsed !== null &&
     overrideErrors.length === 0 &&
     (unsaved.length > 0 || overrideChanged) &&
@@ -524,6 +587,8 @@ function LoadEditor({
       if (response.ok) {
         const body = (await response.json()) as { loadVersion?: string };
         if (body.loadVersion) setVersion(body.loadVersion);
+        // §12.127. The override has ended: the draft's AUTO is no change to save.
+        setOpenedOverride(null);
       }
       setOverride((d) => ({ ...d, forced: 'AUTO', reason: '' }));
       await queryClient.invalidateQueries({ queryKey: ['fleet'] });
@@ -532,12 +597,52 @@ function LoadEditor({
     }
   }, [nextKey, queryClient, version]);
 
+  /* ------------------------------ a save landed ------------------------- */
+
+  /**
+   * §12.127. The ONE way a save that landed keeps the modal open — to say
+   * something about it: a warning (§12.24, §12.85), or the active flag
+   * refused (§12.14). The modal goes onto the load AS SAVED: read again by the
+   * id the save returned, and an editor opened afresh on that read, checked
+   * against the version the save returned. So a later save edits that load
+   * (a new load is never created twice), is not refused by this save, and
+   * nothing the form held is "unsaved" any more.
+   *
+   * The read, not this form patched: the form's stops are built from a read
+   * (their ids, what is stored, what was reached), and a new stop has no id
+   * until the server gives it one.
+   */
+  const landOn = useCallback(
+    async (at: Landing) => {
+      setLanding(at);
+      setSaveWarnings(at.warnings);
+      setErrors([]);
+      // The reassign confirm this save came from is answered.
+      setPreview(null);
+      try {
+        const saved = await fetchLoadRead(at.loadId);
+        onLanded({ read: saved, version: at.version, warnings: at.warnings, selected: at.selected });
+      } catch (error: unknown) {
+        const reason = error instanceof Error ? error.message.replace(/\.$/, '') : 'no answer';
+        setErrors([
+          {
+            field: '*',
+            message: `The save landed, but the load could not be read again (${reason}), so this form cannot save it. Retry, or close and open the load again.`,
+          },
+        ]);
+      }
+    },
+    [onLanded],
+  );
+
   /* --------------------------------- send ------------------------------- */
 
   /** POSTs the edit. `token` is the preview the dispatcher confirmed. */
   const sendSave = useCallback(
     async (token?: string, closeList = closes, reached = reachedAnswer) => {
-      if (!parsed) return;
+      // §12.127. Here, not only in Save's `canSave`: the reassign confirm
+      // sends through this too, and a spent form's save has landed already.
+      if (!parsed || spent) return;
       setSaving(true);
       setErrors([]);
 
@@ -682,7 +787,11 @@ function LoadEditor({
           return;
         }
 
-        const saved = (await response.json()) as { warnings?: FieldError[] };
+        // §12.127. Where the save left the load. An answer without them fails
+        // the read in `landOn`, which leaves the form spent: never a second create.
+        const saved = (await response.json()) as Pick<LoadEditResult, 'loadId' | 'loadVersion'> & {
+          warnings?: FieldError[];
+        };
 
         /**
          * The load has saved. Tell the server, once, what was done with an AI
@@ -694,32 +803,43 @@ function LoadEditor({
         pendingOutcome.current = null;
         void recordFillOutcome(pending, form);
 
+        /** What the save itself said (§12.24, §12.85), routed to its stop. */
+        const warnings = (saved.warnings ?? []).map((w) => {
+          const routed = routeServerError(w, sentKeys.current);
+          // On a load of several stops, the warning says which.
+          return form.stops.length > 1 && routed.stopKey
+            ? { ...routed, message: `${stopName(form, routed.stopKey)}: ${routed.message}` }
+            : routed;
+        });
+
         /**
          * §12.14. A second request, deliberately, and only when the flag
          * moved — after the save, not before: a truck vanishing from the
          * console while its stop failed to save would be the worse half.
+         *
+         * Refused or unanswered, the stop IS saved. Saying otherwise would
+         * send the dispatcher back to redo work that landed (§12.24's
+         * warning-not-error rule) — and a second save from this form would
+         * be that work again (§12.127).
          */
         if (active !== openedActive) {
-          const flipped = await fetch('/api/trucks', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ truckId: row.id, active }),
-          });
-          if (!flipped.ok) {
-            const body = (await flipped.json().catch(() => null)) as { error?: string } | null;
-            await queryClient.invalidateQueries({ queryKey: key });
-            // The stop IS saved. Saying otherwise would send the dispatcher
-            // back to redo work that landed (§12.24's warning-not-error rule).
+          const refused = await (async (): Promise<string | null> => {
+            try {
+              const flipped = await fetch('/api/trucks', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ truckId: row.id, active }),
+              });
+              if (flipped.ok) return null;
+              const body = (await flipped.json().catch(() => null)) as { error?: string } | null;
+              return body?.error ?? 'the change was refused.';
+            } catch (error: unknown) {
+              return error instanceof Error ? error.message : 'the request failed.';
+            }
+          })();
+          if (refused !== null) {
             setActive(openedActive);
-            setSaveWarnings([
-              {
-                field: 'active',
-                message: `The stop saved. The active flag did not: ${
-                  body?.error ?? 'the change was refused.'
-                }`,
-              },
-            ]);
-            return;
+            warnings.push({ field: 'active', message: `The stop saved. The active flag did not: ${refused}` });
           }
         }
 
@@ -731,19 +851,11 @@ function LoadEditor({
           ]);
         }
 
-        if (saved.warnings?.length) {
-          setSaveWarnings(
-            saved.warnings.map((w) => {
-              const routed = routeServerError(w, sentKeys.current);
-              // On a load of several stops, the warning says which.
-              return form.stops.length > 1 && routed.stopKey
-                ? { ...routed, message: `${stopName(form, routed.stopKey)}: ${routed.message}` }
-                : routed;
-            }),
-          );
+        if (warnings.length === 0) {
+          onClose();
           return;
         }
-        onClose();
+        await landOn({ loadId: saved.loadId, version: saved.loadVersion, warnings, selected });
       } catch (error: unknown) {
         queryClient.setQueryData(key, snapshot);
         setCloses(null);
@@ -755,7 +867,7 @@ function LoadEditor({
         setSaving(false);
       }
     },
-    [active, closes, form, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, send, version],
+    [active, closes, form, landOn, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, selected, send, spent, version],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */
@@ -947,6 +1059,16 @@ function LoadEditor({
                     Reload
                   </button>
                 ) : null}
+                {landing ? (
+                  <button
+                    type="button"
+                    // §12.127. The save landed; only the read of it failed.
+                    onClick={() => void landOn(landing)}
+                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+                  >
+                    Retry
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -1054,7 +1176,7 @@ function LoadEditor({
             />
 
             {/* §12.122. Only while every stop is unsaved: a fill replaces stops. */}
-            {mayEdit && !saving && form.stops.every((s) => s.stored === null) ? (
+            {mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null) ? (
               <RateconStrip
                 hasEntries={
                   form.loadNumber.trim() !== '' ||
