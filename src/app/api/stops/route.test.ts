@@ -89,6 +89,25 @@ describeDb('POST /api/stops, a reached stop (§12.119)', () => {
     });
   });
 
+  it('passes a landed save’s load id and version through to the modal (§12.127)', async () => {
+    const landed = 'fedcba9876543210fedcba9876543210';
+    vi.mocked(saveLoadEdit).mockResolvedValue({
+      saveId: '44444444-4444-4444-8444-444444444444',
+      loadId: LOAD,
+      loadVersion: landed,
+      stops: [{ stopId: STOP, appointment: null }],
+      reassignment: null,
+      warnings: [{ field: 'stops.0.arrivedAt', message: 'Arrival saved, but there is no position for this truck.' }],
+    });
+    const response = await post(edit);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      loadId: LOAD,
+      loadVersion: landed,
+      warnings: [{ field: 'stops.0.arrivedAt' }],
+    });
+  });
+
   it('says null for a stop the request did not include', async () => {
     vi.mocked(saveLoadEdit).mockRejectedValue(
       new ReachedStopError('2026-09-18T11:44:00.000Z', STOP, null),

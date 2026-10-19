@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest';
-import { and, asc, count, eq, isNull, sql } from 'drizzle-orm';
+import { expect, it, vi } from 'vitest';
+import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { assignments, auditLog, loads, overrides, stops, trucks } from '@/db/schema';
 import { commitDb, describeDb, rolledBack } from '@/test/db';
 import { assign, makeDriver, makeTruck } from '@/test/fleet';
@@ -124,6 +124,21 @@ function skippedHour() {
   );
   return { type: 'APPT' as const, date, time: { h: before + 1, min: 30 }, tz: TZ, windowMinutes: null };
 }
+
+/** A wall time `minutesAgo` before now, at the stops' zone. */
+const wallAgo = (minutesAgo: number) => {
+  const instant = new Date(Date.now() - minutesAgo * 60_000);
+  const [h, min] = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .format(instant)
+    .split(':')
+    .map(Number);
+  return { date: localDateOf(TZ, instant), time: { h: h!, min: min! }, tz: TZ };
+};
 
 async function save(tx: Tx, input: LoadEditInput) {
   return saveLoadEdit(tx as never, { ...DISPATCH, edit: LoadEdit.parse(input) });
@@ -408,21 +423,6 @@ describeDb('one save writes several stops (§12.117)', () => {
     expect(seen.second?.arrivedAt).toBeNull();
   });
 
-  /** A wall time `minutesAgo` before now, at the stops' zone. */
-  const wallAgo = (minutesAgo: number) => {
-    const instant = new Date(Date.now() - minutesAgo * 60_000);
-    const [h, min] = new Intl.DateTimeFormat('en-GB', {
-      timeZone: TZ,
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    })
-      .format(instant)
-      .split(':')
-      .map(Number);
-    return { date: localDateOf(TZ, instant), time: { h: h!, min: min! }, tz: TZ };
-  };
-
   it('counts a departure marked on stop 1 in the same save (§12.119)', async () => {
     const seen = await rolledBack(async (tx) => {
       const lane = await loadWith(tx, [{ city: 'A', arrived: true }, { city: 'B' }]);
@@ -701,6 +701,132 @@ describeDb('the version check (§12.117)', () => {
     expect(seen.stale).toBeInstanceOf(StaleLoadError);
     expect(seen.cleared.cleared).toBe(true);
     expect(seen.next.error).toBeNull();
+  });
+});
+
+/**
+ * §12.127. The save hands back the load it wrote and that load's version, so
+ * a modal that stays open after it — to show a warning — edits the same load
+ * next time, and is not refused by its own save.
+ */
+describeDb('the save returns the load and version it leaves (§12.127)', () => {
+  it('an edit: the version is the load’s after every write, its override included, and the next save with it is accepted', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A' }]);
+      const v0 = await readLoadVersion(tx, lane.loadId);
+      const first = await save(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: v0!,
+        loadStatus: 'DISPATCHED',
+        stops: [await draftOf(tx, lane.stopIds[0]!, { dispatcherNote: 'Dock 7', override: forced })],
+      });
+      const after = await readLoadVersion(tx, lane.loadId);
+      const next = await attempt(tx, {
+        loadId: first.loadId,
+        truckId: lane.truck.id,
+        version: first.loadVersion,
+        loadStatus: 'DISPATCHED',
+        stops: [await draftOf(tx, lane.stopIds[0]!, { dispatcherNote: 'Dock 8' })],
+      });
+      return { lane, v0, first, after, next };
+    });
+
+    expect(seen.first.loadId).toBe(seen.lane.loadId);
+    expect(seen.first.loadVersion).toBe(seen.after);
+    expect(seen.first.loadVersion).not.toBe(seen.v0);
+    expect(seen.next.error).toBeNull();
+  });
+
+  it('the next trip: the id and version are the NEW load’s', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A', arrived: true }]);
+      const first = await save(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: (await readLoadVersion(tx, lane.loadId))!,
+        loadStatus: 'DISPATCHED',
+        reachedStop: 'next-trip',
+        stops: [await draftOf(tx, lane.stopIds[0]!, { city: 'Somewhere Else' })],
+      });
+      return { lane, first, created: await readLoadVersion(tx, first.loadId) };
+    });
+
+    expect(seen.first.loadId).not.toBe(seen.lane.loadId);
+    expect(seen.first.loadVersion).toBe(seen.created);
+  });
+
+  it('a new load, saved with a warning and then again with what it returned: one load, edited — read after the commit', async () => {
+    const db = commitDb();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('No call leaves this test.');
+    });
+    const truck = await makeTruck(db as never);
+    const unplaced = {
+      stopType: 'DEL' as const,
+      addressLine: null,
+      city: null,
+      state: null,
+      zip: null,
+      appointment: null,
+    };
+    try {
+      // No address, so nothing is geocoded; a hand arrival on a truck with
+      // no position, so the save warns (§12.85) and the modal would stay open.
+      const first = await saveLoadEdit(db as never, {
+        ...DISPATCH,
+        fetchImpl,
+        edit: LoadEdit.parse({
+          loadId: null,
+          truckId: truck.id,
+          loadNumber: 'VT-LAND-1',
+          loadStatus: 'DISPATCHED',
+          stops: [{ ...unplaced, stopId: null, arrivedAt: wallAgo(15) }],
+        }),
+      });
+      const committed = await readLoadVersion(db as never, first.loadId);
+
+      const second = await saveLoadEdit(db as never, {
+        ...DISPATCH,
+        fetchImpl,
+        edit: LoadEdit.parse({
+          loadId: first.loadId,
+          truckId: truck.id,
+          version: first.loadVersion,
+          loadNumber: 'VT-LAND-1',
+          loadStatus: 'DISPATCHED',
+          stops: [{ ...unplaced, stopId: first.stops[0]!.stopId, dispatcherNote: 'Door 12' }],
+        }),
+      });
+      const onTruck = await db.select({ id: loads.id }).from(loads).where(eq(loads.truckId, truck.id));
+      const rows = await db
+        .select({ id: stops.id, note: stops.dispatcherNote })
+        .from(stops)
+        .where(eq(stops.loadId, first.loadId));
+
+      expect(first.warnings).toEqual([
+        { field: 'stops.0.arrivedAt', message: expect.stringContaining('there is no position for this truck') },
+      ]);
+      expect(first.loadVersion).toBe(committed);
+      expect(second.loadId).toBe(first.loadId);
+      expect(onTruck).toEqual([{ id: first.loadId }]);
+      expect(rows).toEqual([{ id: first.stops[0]!.stopId, note: 'Door 12' }]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      const ids = (
+        await db
+          .select({ id: stops.id })
+          .from(stops)
+          .innerJoin(loads, eq(loads.id, stops.loadId))
+          .where(eq(loads.truckId, truck.id))
+      ).map((s) => s.id);
+      if (ids.length > 0) {
+        await db.delete(auditLog).where(inArray(auditLog.entityId, ids));
+        await db.delete(stops).where(inArray(stops.id, ids));
+      }
+      await db.delete(loads).where(eq(loads.truckId, truck.id));
+      await db.delete(trucks).where(eq(trucks.id, truck.id));
+    }
   });
 });
 

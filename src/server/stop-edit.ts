@@ -47,7 +47,15 @@ export interface SavedStop {
 export interface LoadEditResult {
   /** Shared by every audit row this save wrote (§12.117). */
   saveId: string;
+  /** The load written: the request's, or the one created — a new load, or the next trip. */
   loadId: string;
+  /**
+   * §12.127. The load's version after this save, read in its transaction
+   * after the last write — as `clearOverrideAt` returns it. A modal that stays
+   * open on the saved load checks its next save against this, so its own
+   * save never makes that one stale.
+   */
+  loadVersion: string;
   /** In the order the request named them. */
   stops: SavedStop[];
   reassignment: ReassignPreview | null;
@@ -692,6 +700,9 @@ export async function saveLoadEdit(
     return {
       saveId,
       loadId,
+      // After every write above, the overrides included: the version names a
+      // stop's live override (load-version.ts). The load exists, so never null.
+      loadVersion: (await readLoadVersion(tx, loadId))!,
       stops: written.map((w) => ({ stopId: w.stopId, appointment: w.appointment })),
       reassignment,
       warnings,
