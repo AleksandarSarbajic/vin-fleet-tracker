@@ -548,6 +548,91 @@ describe('a save sends the driver only when the dispatcher changed it (§9.10, p
   });
 });
 
+describe('a driver change is never saved unconfirmed (§9.10, phase 3ai)', () => {
+  const PAGE_DRIVERS = [boardDriver(DRIVER_A, 'Ana Example', EXISTING.id), boardDriver(DRIVER_B, 'Bo Example', null)];
+  const previews = () => calls.filter((c) => c.url === '/api/assignments/preview');
+  /** `POST /api/assignments/preview` answered by `answer`; every other request as before. */
+  const previewAnswers = (answer: () => Promise<Response>) => {
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url !== '/api/assignments/preview') return base(url, init);
+      calls.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
+      return answer();
+    }) as unknown as typeof fetch;
+  };
+  const toBo = async () => {
+    await render(EXISTING, undefined, PAGE_DRIVERS);
+    const picker = field('Assigned driver', container!);
+    await act(async () => picker.click());
+    await type(picker, 'Bo');
+    const option = [...container!.querySelectorAll<HTMLElement>('[role="option"]')].find((o) =>
+      (o.textContent ?? '').includes('Bo Example'),
+    )!;
+    await act(async () => {
+      option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      option.click();
+    });
+    await settle();
+    await click(button('Confirm reassign & save'));
+  };
+  const confirmOpen = () => [...container!.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Assign driver');
+
+  it('a preview answered 500 stops the save, and says nothing was saved and why', async () => {
+    previewAnswers(async () => json(500, { error: 'Could not preview.', reference: 'PREVIEW-500-3AI' }));
+    await toBo();
+    expect(previews()).toHaveLength(1);
+    expect(posted()).toHaveLength(0);
+    expect(confirmOpen()).toBe(false);
+    expect(text()).toContain('Nothing was saved: the driver change could not be previewed. Could not preview. (PREVIEW-500-3AI)');
+    // The change is still in the form, to try again.
+    expect(text()).toContain('Unsaved changes — assigned driver');
+  });
+
+  it('a preview with no readable answer says so with the status', async () => {
+    previewAnswers(async () => new Response('<html>Bad gateway</html>', { status: 502 }));
+    await toBo();
+    expect(posted()).toHaveLength(0);
+    expect(text()).toContain('Nothing was saved: the driver change could not be previewed. The server answered 502.');
+  });
+
+  it('a preview that never answers stops the save the same way, and rejects nothing unhandled', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      previewAnswers(async () => {
+        throw new TypeError('Failed to fetch');
+      });
+      await toBo();
+      await settle();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(posted()).toHaveLength(0);
+      expect(text()).toContain(
+        'Nothing was saved: the driver change could not be previewed. The request failed: Failed to fetch.',
+      );
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('a save answered 409 with a fresh preview re-opens the confirm, and confirming sends that token', async () => {
+    const FRESH = { ...PREVIEW, token: 'preview-token-fresh' };
+    saves = [
+      () => json(409, { error: 'The assignment changed while the confirmation was open.', preview: FRESH, stalePreview: true }),
+      () => landed(LOAD, RETURNED),
+    ];
+    await toBo();
+    await click(button('Assign driver'));
+    expect(posted()[0]).toMatchObject({ driverId: DRIVER_B, previewToken: 'preview-token-3af' });
+    expect(confirmOpen()).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+
+    await click(button('Assign driver'));
+    expect(posted()).toHaveLength(2);
+    expect(posted()[1]).toMatchObject({ driverId: DRIVER_B, previewToken: 'preview-token-fresh' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the stop saved, the active flag did not (§12.14, §12.127)', () => {
   const untickActive = async () => {
     const box = container!.querySelector<HTMLInputElement>('input[aria-label="Active — on the console"]')!;

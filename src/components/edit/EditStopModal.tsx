@@ -936,16 +936,36 @@ function LoadEditor({
         return;
       }
       setCloses(answered);
+      /**
+       * §9.10, phase 3ai. A driver change is saved only through its confirm.
+       * A preview that fails, or never answers, stops here: nothing is sent,
+       * and the form says why. It used to fall through to a save with no
+       * token, which applied a change to a driver on no other truck
+       * unconfirmed.
+       */
       if (driverChanged) {
-        const response = await fetch('/api/assignments/preview', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ truckId: row.id, driverId: form.driverId }),
-        });
-        if (response.ok) {
-          setPreview((await response.json()) as ReassignPreview);
-          return;
+        setErrors([]);
+        const failed = await (async (): Promise<string | null> => {
+          try {
+            const response = await fetch('/api/assignments/preview', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ truckId: row.id, driverId: form.driverId }),
+            });
+            if (!response.ok) {
+              const body = (await response.json().catch(() => null)) as { error?: string; reference?: string } | null;
+              return `${body?.error ?? `The server answered ${response.status}.`}${body?.reference ? ` (${body.reference})` : ''}`;
+            }
+            setPreview((await response.json()) as ReassignPreview);
+            return null;
+          } catch (error: unknown) {
+            return `The request failed: ${error instanceof Error ? error.message : 'no answer'}.`;
+          }
+        })();
+        if (failed !== null) {
+          setErrors([{ field: '*', message: `Nothing was saved: the driver change could not be previewed. ${failed}` }]);
         }
+        return;
       }
       await sendSave(undefined, answered, given);
     },
