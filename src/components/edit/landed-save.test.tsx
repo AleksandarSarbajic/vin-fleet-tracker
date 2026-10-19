@@ -107,8 +107,18 @@ const settle = () =>
     for (let i = 0; i < 10; i += 1) await new Promise((r) => setTimeout(r, 0));
   });
 
-const render = async (row: FleetRow, extra?: Parameters<typeof loadReadFor>[1], drivers: BoardDriver[] = []) => {
-  primeLoadRead(client, row, extra);
+const render = async (
+  row: FleetRow,
+  extra?: Parameters<typeof loadReadFor>[1],
+  drivers: BoardDriver[] = [],
+) => {
+  // Unless a test says otherwise, the opened read agrees with the page's list
+  // about who drives the truck (phase 3ag).
+  const onTruck = drivers.find((d) => d.truckId === row.id);
+  primeLoadRead(client, row, {
+    assignment: onTruck ? { id: '99999999-9999-4999-8999-0000000003a8', driverId: onTruck.id } : null,
+    ...extra,
+  });
   client.setQueryData<FleetResponse>(['fleet'], { fleet: [row], fetchedAt: NOW.toISOString() } as FleetResponse);
   await act(async () => {
     root!.render(
@@ -402,6 +412,76 @@ describe('an existing load, saved with a warning (§12.127)', () => {
     expectOnSaved('Stop 2 (Superior, WI): ');
     expect(tabs()[1]!.getAttribute('aria-selected')).toBe('true');
     expect(field('ZIP').value).toBe('54881');
+  });
+});
+
+describe('the landed editor’s driver (§12.127, phase 3ag)', () => {
+  /**
+   * The console's `drivers` is rendered with the page and not refreshed by a
+   * save, so here it stays as it was when the modal opened: Ana on 904. The
+   * read of the saved load says who drives the truck now.
+   */
+  const PAGE_DRIVERS = [boardDriver(DRIVER_A, 'Ana Example', EXISTING.id), boardDriver(DRIVER_B, 'Bo Example', null)];
+  const ASSIGNED = (driverId: string) => ({ id: '99999999-9999-4999-8999-0000000003a9', driverId });
+  const pick = async (name: string) => {
+    const picker = field('Assigned driver', container!);
+    await act(async () => picker.click());
+    await type(picker, name.slice(0, 2));
+    const option = [...container!.querySelectorAll<HTMLElement>('[role="option"]')].find((o) =>
+      (o.textContent ?? '').includes(name),
+    )!;
+    await act(async () => {
+      option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      option.click();
+    });
+    await settle();
+  };
+  const previews = () => calls.filter((c) => c.url === '/api/assignments/preview');
+
+  it('after a warned reassign, is on the driver the save left, and a later save does not send the old one back', async () => {
+    saves = [() => landed(LOAD, RETURNED, [{ field: 'stops.0.arrivedAt', message: NO_ANCHOR }]), () => landed(LOAD, 'c'.repeat(32))];
+    reads[LOAD] = [
+      () => json(200, { ...readOf(fleetRow({ ...truck, nextStop: stop({ loadVersion: RETURNED }) })), assignment: ASSIGNED(DRIVER_B) }),
+    ];
+    await render(EXISTING, undefined, PAGE_DRIVERS);
+    await pick('Bo Example');
+    await click(button('Confirm reassign & save'));
+    await click(button('Assign driver'));
+    expectOnSaved(NO_ANCHOR);
+
+    // The header names the truck's driver as the save left it.
+    expect(text()).toContain('VT-3AF-7 · Bo Example');
+    expect(text()).not.toContain('Reassigns truck 904');
+
+    await type(field('ZIP'), '55804');
+    expect(button('Save').textContent).toBe('Save');
+    await click(button('Save'));
+    expect(previews()).toHaveLength(1);
+    expect(posted()[1]).toMatchObject({ loadId: LOAD, version: RETURNED, driverId: DRIVER_B });
+  });
+
+  it('opened after a reassign the page has not seen, is on the read’s driver, not the list’s', async () => {
+    // The list still says Ana; the truck was moved to Bo since the page loaded.
+    await render(EXISTING, { assignment: ASSIGNED(DRIVER_B) }, PAGE_DRIVERS);
+    expect(text()).toContain('VT-3AF-7 · Bo Example');
+    expect(text()).toContain('Current assignment: Bo Example.');
+    expect(button('Save').disabled).toBe(true);
+
+    await type(field('ZIP'), '55804');
+    expect(button('Save').textContent).toBe('Save');
+    await click(button('Save'));
+    expect(previews()).toHaveLength(0);
+    expect(posted()[0]).toMatchObject({ version: OPENED, driverId: DRIVER_B });
+  });
+
+  it('a new load has no read: its driver is the list’s, as before', async () => {
+    saves = [() => landed(CREATED, RETURNED)];
+    await render(fleetRow({ ...truck, nextStop: null, openLoadCount: 0 }), undefined, PAGE_DRIVERS);
+    expect(text()).toContain('· Ana Example');
+    await typeNewLoad();
+    await click(button('Save'));
+    expect(previews()).toHaveLength(0);
+    expect(posted()[0]).toMatchObject({ loadId: null, driverId: DRIVER_A });
   });
 });
 

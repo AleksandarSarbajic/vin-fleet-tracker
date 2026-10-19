@@ -10,11 +10,18 @@ type StopRead = LoadForEdit['stops'][number];
  * for component tests: the row's next stop as the load's one stop, and the
  * version the row carries — the same md5 the server computes for both.
  *
- * `extra` adds stops around it, in sequence order, for the multi-stop suites.
+ * `extra` adds stops around it, in sequence order, for the multi-stop suites,
+ * and the truck's open assignment — none unless given. A suite that puts a
+ * driver on the truck in the modal's `drivers` gives the same one here: a
+ * read and the page's list agree when the modal opens (phase 3ag).
  */
 export function loadReadFor(
   row: FleetRow,
-  extra: { before?: Partial<StopRead>[]; after?: Partial<StopRead>[] } = {},
+  extra: {
+    before?: Partial<StopRead>[];
+    after?: Partial<StopRead>[];
+    assignment?: LoadForEdit['assignment'];
+  } = {},
 ): LoadForEdit | null {
   const s = row.nextStop;
   if (!s) return null;
@@ -63,7 +70,7 @@ export function loadReadFor(
     truckId: row.id,
     loadNumber: s.loadNumber ?? null,
     status: s.loadStatus,
-    assignment: null,
+    assignment: extra.assignment ?? null,
     stops,
     version: s.loadVersion ?? '0123456789abcdef0123456789abcdef',
   };

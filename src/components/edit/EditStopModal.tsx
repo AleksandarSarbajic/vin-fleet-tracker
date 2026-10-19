@@ -304,8 +304,17 @@ function LoadEditor({
   const [openedAt] = useState(() => new Date().toISOString());
   const [nextKey] = useState(() => (read ? (row.nextStop?.stopId ?? null) : null));
   const [openedActive] = useState(() => row.active);
-  const [initialDriverId] = useState(
-    () => drivers.find((d) => d.truckId === row.id)?.id ?? null,
+  /**
+   * The truck's driver, the baseline a driver change is measured against —
+   * and every save sends the form's driver, changed or not. From the read's
+   * assignment when there is a read: the console's `drivers` is rendered with
+   * the page and no save refreshes it, so after a reassign (this modal's own,
+   * landed, §12.127) it names the driver before, and the next save would put
+   * them back unasked. The list stays for names and the picker. A new load has
+   * no read, so only the list (phase 3ag).
+   */
+  const [initialDriverId] = useState(() =>
+    read ? (read.assignment?.driverId ?? null) : (drivers.find((d) => d.truckId === row.id)?.id ?? null),
   );
   const [initialForm] = useState<LoadForm>(() => loadFormFrom(read, openedAt, initialDriverId));
   const [form, setForm] = useState<LoadForm>(initialForm);

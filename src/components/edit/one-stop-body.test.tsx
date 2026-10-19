@@ -96,11 +96,14 @@ const preview = {
 };
 
 /** Every request the modal makes, answered as the server would. */
-const serve = (row: FleetRow) => {
+const serve = (row: FleetRow, drivers: BoardDriver[]) => {
+  // The read agrees with the page's list about who drives the truck (phase 3ag).
+  const onTruck = drivers.find((d) => d.truckId === row.id);
+  const assignment = onTruck ? { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', driverId: onTruck.id } : null;
   globalThis.fetch = vi.fn(async (url: string) => {
     const path = String(url);
     const body = path.startsWith('/api/loads/')
-      ? loadReadFor(row)
+      ? loadReadFor(row, { assignment })
       : path.startsWith('/api/timeline')
         ? { stops: [previousStop] }
         : path === '/api/assignments/preview'
@@ -141,7 +144,7 @@ const settle = () =>
   });
 
 const render = async (row: FleetRow, drivers: BoardDriver[] = []) => {
-  serve(row);
+  serve(row, drivers);
   client.setQueryData<FleetResponse>(['fleet'], {
     fleet: [row],
     fetchedAt: NOW.toISOString(),
