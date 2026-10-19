@@ -241,9 +241,9 @@ questions of phase 3ae):
   Supabase: no.** It would weaken production security — with `getClaims()`
   in place of `getUser()`, a revoked login would keep working until its token
   expired — only to make the tests less sensitive to the network.
-- **Run deploys on a steady setup: yes.** In Alex's words, "that's the whole
-  fix". 3ae's runs were on battery with Low Power Mode on, and the probe saw
-  the stalls on the path to hosted Supabase.
+- **Run deploys on a steady setup: yes.** The advisor said "that's the whole
+  fix", and Alex agreed. 3ae's runs were on battery with Low Power Mode on,
+  and the probe saw the stalls on the path to hosted Supabase.
 - **Retries or longer waits: no.** They hide real problems, and a 15 s stall
   would outlast them anyway.
 - **Printing connection timings at the end of each e2e run: not now.**
@@ -4079,6 +4079,10 @@ Commits:
 NOT pushed, NOT deployed. Migration 0030 is applied to the local test
 databases only. The design is §12.126.
 
+**Deployed later** (added 2026-10-19): the worker went live on 2026-10-15 at
+23:35 UTC, the first row in `eta_status_changes` (the advisor's read-only
+check, 2026-10-19; unverified here).
+
 **Why:** the ETA log (§12.112) writes only at distance marks, and the board
 recomputes its status on every read. So a truck can turn AT_RISK and then
 LATE between two marks with nothing recorded, and how early the board warned
@@ -4819,10 +4823,11 @@ fingerprint (3y) stay built and unused.
 - **Route blocks reads a middle stop, split and marked (3ac, `ce654db`):** a
   template change. 3aa, 3ab, 3ac and 3ad are pushed (`origin/master` at
   `9a475ca`); whether they are deployed is unverified (no network call here).
-- **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, pushed,
-  not deployed. Migration 0030 is applied to the hosted database (3ae).
-  Next: `scripts/deploy.sh`, run on a steady setup (decision, 2026-10-16,
-  "The e2e flakes and the deploy gates"). Four questions for Alex are in 3ad.
+- **Status change log (3ad, `5341943`, `2db9c3c`):** a worker change, pushed
+  and deployed. The worker went live on 2026-10-15 at 23:35 UTC: the first
+  row in `eta_status_changes` (the advisor's read-only check, 2026-10-19;
+  unverified here). Migration 0030 is applied to the hosted database (3ae).
+  Four questions for Alex are in 3ad.
 - Other open decisions are above ("Open decisions, waiting on Alex").
 
 ### 5. Watch for a week
