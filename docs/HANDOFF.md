@@ -4456,12 +4456,16 @@ read-only database check. The check cannot be re-run here, so its figures are
 the advisor's and unverified here:
 
 - 8 extra loads on 5 trucks (113, 116, 128, 133, 145), each with the same
-  truck and number as its original, between 2026-10-12 and 2026-10-16.
-  Truck 116 got 4 loads from one entry on 2026-10-12, in 56 s. One copy has
-  no stops, so matching by stops counted 7 at first (the advisor's
-  correction, 2026-10-19). The 7 with stops have the same stops and were
-  created 10 to 75 s after the original. None was open on 2026-10-19. Clear
-  stop's "3 open loads" on truck 128 was correct for the data.
+  truck and stops as its original and saved with the same load number,
+  between 2026-10-12 and 2026-10-16. Truck 116 got 4 loads from one entry on
+  2026-10-12, in 56 s, each with one stop and all saved with a blank load
+  number; the first was given its number on 2026-10-13, which is why
+  matching by number counted 7. The 7 that first matched were created 10 to
+  75 s after their original. None was open on 2026-10-19. Clear stop's "3
+  open loads" on truck 128 was correct for the data.
+- **Corrected 2026-10-19** (the advisor's read-only check; unverified here):
+  3ag wrote in this bullet that one copy had no stops, so matching by stops
+  counted 7. That was the advisor's guess, and it was wrong.
 - A screenshot of truck 133 shows the stale refusal and "Saved · one thing
   to know" (an arrival with no anchor, §12.85) at the same time.
 - **Unverified:** that every copy came through the warnings branch. Warnings
@@ -4604,6 +4608,7 @@ defect, the opposite shape: a write that did NOT land, treated as if it had.
   flag, drivers) come from the board row as refetched after the save. If that
   refetch failed, they come from the row before it. That changes what is
   shown; nothing is sent unless the dispatcher changes it.
+  Wrong for the driver, which every save sent: see 3ag and 3ah (2026-10-19).
 - **The 8 copies** are not cleaned up (all closed; out of scope).
 - **The re-read costs one `GET /api/loads/:id`** per warned save (`read`
   limit: 60, refilling 2 a second).
@@ -4770,7 +4775,13 @@ unverified until step 1.
     The same claim stands in HANDOFF 3af's "What it does not cover", left as
     written: question 4.
 
-**Found, not explained: the copy with no stops.** The only load insert in
+**~~Found, not explained: the copy with no stops.~~ Corrected 2026-10-19:
+there is no such copy.** The advisor's read-only check (unverified here):
+all four truck 116 loads of 2026-10-12 have one stop each. All four were
+saved with a blank load number, and the first was given its number on
+2026-10-13, which is why matching by number counted 7. "A copy has no stops"
+was the advisor's guess. The reading of the code below, written against that
+guess, still holds. The only load insert in
 `src/` outside tests is `saveLoadEdit`'s. It writes 1 to 10 stops in the same
 transaction (`LoadEdit`'s `.min(1)`, and the count check in `stop-edit.ts`).
 The only other delete of stops is the demo-data sweep. So the code as it
@@ -4806,14 +4817,159 @@ explain that copy alone. Question 2.
    it (`fleet-query.ts:442`). Exposing it would give the modal a live driver
    with no read. It touches the fleet query, which the worker's status log
    also parses. Do it?
-2. **The copy with no stops, on truck 116:** the save cannot make one. Worth
-   a read-only look at its audit rows?
+2. ~~**The copy with no stops, on truck 116:** the save cannot make one. Worth
+   a read-only look at its audit rows?~~ Answered 2026-10-19 by the advisor's
+   read-only check: there is no such copy (above, corrected).
 3. **The phone sheet's call button** takes the phone from the same list. After
    a reassign the page has not seen, it would dial the previous driver.
    Change its source too?
 4. **HANDOFF 3af** still says of truck-level values "nothing is sent unless
    the dispatcher changes it", which is wrong for the driver. Add a pointer
    to 3ag there, or leave the record as it is?
+
+### Phase 3ah: a save sends the driver only when the dispatcher changed it (2026-10-19)
+
+From the advisor's brief, after 3af and 3ag were approved. No migration.
+Commits:
+
+- `f6ad632`: the fix and its tests;
+- one docs commit: this section, §9.10 and §12.127, and the corrections below.
+
+NOT pushed, NOT deployed. 3af and 3ag are unchanged except where named here.
+
+**Why.** 3ag found, and the advisor confirmed by reading, two things:
+
+- every save sent the form's driver, changed or not;
+- `applyReassignment` changes the truck's driver with no preview token when
+  that driver is on no other truck.
+
+So any stale baseline could silently put back a previous driver. 3ag fixed
+the baseline when there is a read, but not for a new load, whose baseline
+comes from the page's `drivers`.
+
+The server half is now run, not only read: a scratch test, not committed, on
+the test database. It sent the pre-3ah request for a new load (the list's
+driver A, no token) on a truck the server had with B, and A on no truck. The
+truck moved back to A, with no error:
+
+```
+SCRATCH {"assignmentWasB":true,"afterIsA":true,"afterIsB":false,"reassignmentReturned":true,"tokenSent":false}
+```
+
+It has not happened in production, by the advisor's read-only check of
+2026-10-19 (unverified here): 5 driver moves through the edit modal ever
+(2026-09-21 to 28), 1 assignment started in October, and no A→B→A on any
+truck.
+
+**The change** (`src/components/edit/EditStopModal.tsx`, `sendSave`):
+
+- every request is built in `sendSave`'s `edits`, and `driverId` now goes in
+  only when `driverChanged`, the same comparison the Save label and the
+  preview use. Otherwise the key is absent (`loadEditFromStops` already
+  omits an undefined one), and the server leaves the assignment alone;
+- a real change still asks for the server's preview and is confirmed
+  (§9.10);
+- Unassigned, when there was a driver, still sends null;
+- `stopEditOf` and `dirtyOf` are unchanged. They still compare the driver,
+  so "assigned driver" in the unsaved banner works as before. Only what is
+  SENT changed, so there was no reason to move both.
+
+**Every path, confirmed:**
+
+| path | how it sends | shown by |
+|---|---|---|
+| Save, and Cmd+Enter | `save()` → `sendSave` | 3ah "an existing load, no driver change"; golden `plain` |
+| a new load | `save()` → `sendSave` | 3ah "a new load, no driver change"; 3ag "a new load has no read" |
+| the reassign confirm | `ReassignConfirm` → `sendSave(token)` | 3ah "a real change", "Unassigned"; golden `reassign`, unchanged |
+| the previous-load question (§12.92) | `answer` → `save(closes)` → `sendSave`, or the effect when none is open any more | golden `previous-load-close` |
+| the reached stop, correction | `ReachedStopQuestion` → `save(undefined, answer)` → `sendSave` | golden `reached-correction` |
+| the next trip | the same | golden `next-trip` |
+| the landed editor (§12.127) | its own `sendSave` | 3ag "after a warned reassign", its second save |
+
+There is no other request builder for `POST /api/stops` in `src/` outside
+tests. A re-confirm after a stale preview (409 with a fresh preview) is the
+reassign confirm path again; it was not tested separately.
+
+**Tests:** before, 194 files and 3533 tests; after, 194 files and 3539 tests
+(+6).
+
+- `landed-save.test.tsx`, 4 new:
+  - an existing load, no driver change: no `driverId`;
+  - a new load, no driver change, with the page's list naming a driver: no
+    `driverId`;
+  - a real change: named unsaved, previewed, confirmed, driver sent;
+  - Unassigned: sends null.
+- `load-edit.test.ts`, 2 new: a save with no `driverId` leaves the
+  assignment, on an existing load and on a new load.
+- On the previous code the first two failed:
+
+  ```
+  × … > an existing load, no driver change: the request has no driverId
+  AssertionError: expected { …(7) } to not have property "driverId"
+  + Received: "99999999-9999-4999-8999-00000000000b"
+  × … > a new load, no driver change: the request has no driverId, though the page's list names a driver
+  AssertionError: expected { loadId: null, …(5) } to not have property "driverId"
+  + Received: "99999999-9999-4999-8999-00000000000a"
+  ```
+
+  The existing load re-sent Bo's id (the read's; harmless). The new load
+  sent Ana's, the page list's: the silent revert.
+- Changed with the rule:
+  - 3ag's three driver tests now expect no `driverId` on an unchanged save;
+    their other checks are as they were;
+  - four goldens (`plain`, `previous-load-close`, `reached-correction`,
+    `next-trip`) lose exactly `"driverId":null,`. A word diff shows 4
+    removals and nothing else; `reassign` is unchanged. This is the
+    deliberate request change the golden suite asks to be shown.
+- Mutations: always sending the driver fails 9; never sending it fails 4.
+
+**Docs** (this commit):
+
+- **The "copy with no stops" story was the advisor's guess, and it is
+  corrected.** The advisor's read-only check, 2026-10-19 (unverified here):
+  all four truck 116 loads of 2026-10-12 have one stop each. All four were
+  saved with a blank load number, and the first was given its number on
+  2026-10-13, so matching by number counted 7. Corrected, marked and not
+  deleted, in:
+  - HANDOFF 3af, "Why";
+  - HANDOFF 3ag, "Found, not explained", and its question 2;
+  - design-spec §12.127, "Why".
+- **HANDOFF 3af** gains one pointer line under "nothing is sent unless the
+  dispatcher changes it": wrong for the driver, see 3ag and 3ah. This answers
+  3ag's question 4.
+- **Rules changed, so the spec changed:**
+  - §9.10: a save sends the driver only when the dispatcher changed it, a new
+    bullet under "Behaviour";
+  - §12.127: two sentences said every save sends the driver. They now say it
+    did until 3ah, pointing to §9.10.
+
+**Not covered:**
+
+- **A new load's shown driver can still be stale.** The header and the
+  picker show the page list's driver, but nothing is sent unless the
+  dispatcher changes it. When they do, the server's preview names the real
+  current driver. 3ag's question 1 (a live driver id on `FleetRow`) is
+  narrowed to that display, and was out of scope here.
+- **Found, not changed: a real change can skip the confirm.** In `save()`,
+  when the preview request answers not ok, the code falls through to
+  `sendSave` with no token. A change to a driver on no other truck is then
+  applied without the confirm; a two-sided one is refused by the server,
+  which answers with a fresh preview. If that request throws, the rejection
+  is unhandled (`void save()`), which is CLAUDE.md's rule again.
+
+**Unverified:**
+
+- The advisor's figures.
+- In a real browser: happy-dom only, and no e2e (it is networked).
+
+**Questions for Alex (not decided here):**
+
+1. **The preview that fails:** stop the save, say why, and catch the thrown
+   request? That would be a small phase like 3ag's Clear now.
+2. **Close the class at the server too?** `applyReassignment` could require a
+   preview token for every change, not only a two-sided one. Then no client,
+   stale or not, could change a driver unconfirmed. It changes §9.10's
+   server rule; the save (`stop-edit.ts:411`) is its only caller in `src/`.
 
 ## Next
 

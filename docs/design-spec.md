@@ -1175,6 +1175,13 @@ the left; `Cancel` and `Reassign both trucks` (primary) on the right.
 - **The dialog renders both sides from the server's own preview of the
   change**, not the client's guess.
 - Reversible from the losing truck's history for the rest of the shift.
+- **A save sends the driver only when the dispatcher changed it** in the
+  modal (phase 3ah). Otherwise the key is absent and the server leaves the
+  assignment alone. The server applies a change of driver with no preview
+  token when that driver is on no other truck, so a save that re-sent the
+  form's driver from a baseline it could not vouch for put a previous driver
+  back unasked. A real change still asks for the server's preview and is
+  confirmed here; choosing Unassigned still sends null.
 
 ## 9.11 Feedback set (`2h`)
 
@@ -9543,11 +9550,13 @@ writes (§12.117), so nothing else had to happen.
 
 The evidence for this is the advisor's read-only check of 2026-10-19,
 unverified here: 8 extra loads on 5 trucks, each with the same truck and
-number as its original, between 2026-10-12 and 2026-10-16. Truck 116 got 4
-loads from one entry on 2026-10-12, in 56 s. One copy has no stops, so
-matching by stops counted 7 at first; the 7 with stops have the same stops
-and were created 10 to 75 s after the original. All were closed by
-2026-10-19. A screenshot shows
+stops as its original and saved with the same load number, between
+2026-10-12 and 2026-10-16. Truck 116 got 4 loads from one entry on
+2026-10-12, in 56 s, all saved with a blank number; the first was given its
+number on 2026-10-13, so matching by number counted 7. (Phase 3ag wrote here
+that one copy had no stops: the advisor's guess, corrected on 2026-10-19.)
+The 7 that first matched were created 10 to 75 s after their original. All
+were closed by 2026-10-19. A screenshot shows
 the stale refusal under "Saved · one thing to know". That every copy came
 through a warned save is NOT verified: warnings are not stored. It is the only
 path in the code that creates twice from one modal.
@@ -9606,11 +9615,12 @@ not be read again (…), so this form cannot save it." It offers Retry.
   and the active flag come from the board row as refetched after the save.
   If that refetch failed, they come from the row before it. That changes what
   is shown, and nothing is sent for them unless the dispatcher changes them.
-  The driver is different, because every save sends it: below.
+  The driver is different, because every save sent it until phase 3ah: below.
 - **The copies already made.** They are not cleaned up.
 
-**The driver is the read's** (phase 3ag). Every save sends the form's driver,
-changed or not, and a driver change is measured against the form's baseline.
+**The driver is the read's** (phase 3ag). Every save sent the form's driver,
+changed or not, until phase 3ah (§9.10), and a driver change is measured
+against the form's baseline.
 That baseline was the console's `drivers` list, which is rendered with the
 page and not refreshed by a save. After a warned save that reassigned the
 truck, the new editor showed the driver before. Its next save sent that
