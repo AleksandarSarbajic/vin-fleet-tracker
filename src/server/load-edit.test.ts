@@ -10,7 +10,7 @@ import type { Tx } from './audit';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { loadForEdit } from './load-read';
 import { readLoadVersion } from './load-version';
-import { applyReassignment, previewReassignment } from './reassign';
+import { applyReassignment, previewReassignment, StalePreviewError } from './reassign';
 import { recentlyClosed, reopenLoad } from './reopen-load';
 import {
   AtStopError,
@@ -875,6 +875,49 @@ describeDb('a save with no driverId leaves the assignment alone (phase 3ah)', ()
   });
 });
 
+/**
+ * §9.10, phase 3ai (Alex, 2026-10-19): every driver change needs the preview
+ * token. A save that names a new driver without one is refused with the
+ * preview, and the save is one transaction, so nothing else lands either.
+ */
+describeDb('a driver change needs its confirm (phase 3ai)', () => {
+  it('a save naming a driver on no other truck, with no token, is refused with the preview and writes nothing', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A' }]);
+      const other = await makeDriver(tx);
+      const v0 = await readLoadVersion(tx, lane.loadId);
+      const audit0 = await auditRows(tx);
+      const outcome = await attempt(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: v0!,
+        loadStatus: 'DISPATCHED',
+        driverId: other.id,
+        stops: [await draftOf(tx, lane.stopIds[0]!, { dispatcherNote: 'Dock 9' })],
+      });
+      const [stop] = await tx.select({ note: stops.dispatcherNote }).from(stops).where(eq(stops.id, lane.stopIds[0]!));
+      return {
+        outcome,
+        lane,
+        other,
+        v0,
+        v1: await readLoadVersion(tx, lane.loadId),
+        audit0,
+        audit1: await auditRows(tx),
+        note: stop!.note,
+        driver: await openDriver(tx, lane.truck.id),
+      };
+    });
+
+    expect(seen.outcome.error).toBeInstanceOf(StalePreviewError);
+    expect((seen.outcome.error as StalePreviewError).fresh.gaining.toDriverId).toBe(seen.other.id);
+    expect(seen.driver).toBe(seen.lane.driver.id);
+    expect(seen.v1).toBe(seen.v0);
+    expect(seen.note).toBeNull();
+    expect(seen.audit1).toBe(seen.audit0);
+  });
+});
+
 describeDb('one transaction (§12.117)', () => {
   it('breaks after the first write and leaves nothing behind — load, stops, driver, override, audit', async () => {
     const seen = await rolledBack(async (tx) => {
@@ -889,6 +932,8 @@ describeDb('one transaction (§12.117)', () => {
         version: opened!,
         // Written first: the assignment, the load, stop 1 and its override…
         driverId: other.id,
+        // …the assignment confirmed, as every change must be (phase 3ai)…
+        previewToken: (await previewReassignment(tx, { truckId: lane.truck.id, driverId: other.id })).token,
         loadNumber: 'NEVER',
         loadStatus: 'LOADED',
         stops: [

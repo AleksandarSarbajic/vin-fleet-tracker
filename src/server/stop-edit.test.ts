@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { assignments, loads, overrides, stopRoutes, stops, auditLog } from '@/db/schema';
 import { describeDb, rolledBack } from '@/test/db';
-import { makeDispatcher, makeDriver, makePosition, makeTruck } from '@/test/fleet';
+import { assign, makeDispatcher, makeDriver, makePosition, makeTruck } from '@/test/fleet';
 import { LATEST_POSITION_SQL, parseFleetRows } from './fleet-query';
 import { AppointmentTimeError, storedWindowMinutes } from '@/lib/appointment';
 import { StopEdit } from '@/lib/stop-edit';
@@ -52,14 +52,24 @@ const openDriverFor = async (tx: Tx, truckId: string) => {
   return rows[0]?.driverId ?? null;
 };
 
+/**
+ * A driver change the way the modal makes one since phase 3ai: previewed, then
+ * applied with that preview's token. For set-up that is not the rule under test.
+ */
+const confirmedMove = async (tx: Tx, truckId: string, driverId: string | null) =>
+  applyReassignment(tx, {
+    truckId,
+    driverId,
+    actorUserId: null,
+    previewToken: (await previewReassignment(tx, { truckId, driverId })).token,
+  });
+
 withDb('reassignment', () => {
   it('moves the driver and closes the losing side in one transaction', async () => {
     const seen = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
       // Driver starts on truck A.
-      await applyReassignment(tx, {
-        truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null,
-      });
+      await assign(tx, t[0]!.id, d[0]!.id);
       const preview = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
       await applyReassignment(tx, {
         truckId: t[1]!.id,
@@ -85,7 +95,7 @@ withDb('reassignment', () => {
   it('previews from the server, including the losing truck the client cannot know', async () => {
     const preview = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await assign(tx, t[0]!.id, d[0]!.id);
       return previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
     });
     expect(preview.losing).not.toBeNull();
@@ -97,11 +107,11 @@ withDb('reassignment', () => {
   it('refuses a confirmation whose preview went stale', async () => {
     const outcome = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await assign(tx, t[0]!.id, d[0]!.id);
       const stale = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
 
       // Someone else moves the driver away while the dialog is open.
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[1]!.id, actorUserId: null });
+      await confirmedMove(tx, t[0]!.id, d[1]!.id);
       await applyReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id, actorUserId: null,
         previewToken: stale.token });
       return 'accepted';
@@ -115,17 +125,82 @@ withDb('reassignment', () => {
     // one case the design names twice. No token, no move.
     const outcome = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await assign(tx, t[0]!.id, d[0]!.id);
       await applyReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id, actorUserId: null });
       return 'accepted';
     }).catch((error: unknown) => error);
     expect(outcome).toBeInstanceOf(StalePreviewError);
   });
 
-  it('does nothing when the driver is already the one asked for', async () => {
+  /**
+   * §9.10, phase 3ai (Alex, 2026-10-19): EVERY driver change needs the
+   * preview token, not only one that takes a driver off another truck. The
+   * set-up here puts drivers on trucks with `assign`, not through the rule
+   * under test.
+   */
+  it('refuses a change to a driver on no other truck with no token: the preview back, nothing written', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await assign(tx, t[0]!.id, d[0]!.id);
+      const outcome = await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[1]!.id, actorUserId: null }).then(
+        () => 'applied',
+        (error: unknown) => error,
+      );
+      return { outcome, onTruck: await openDriverFor(tx, t[0]!.id), kept: d[0]!.id, asked: d[1]!.id };
+    });
+    expect(seen.outcome).toBeInstanceOf(StalePreviewError);
+    const fresh = (seen.outcome as StalePreviewError).fresh;
+    expect(fresh.losing).toBeNull();
+    expect(fresh.gaining.toDriverId).toBe(seen.asked);
+    expect(seen.onTruck).toBe(seen.kept);
+  });
+
+  it('applies that change with the token of its preview', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await assign(tx, t[0]!.id, d[0]!.id);
+      const preview = await previewReassignment(tx, { truckId: t[0]!.id, driverId: d[1]!.id });
+      const applied = await applyReassignment(tx, {
+        truckId: t[0]!.id,
+        driverId: d[1]!.id,
+        actorUserId: null,
+        previewToken: preview.token,
+      });
+      return { applied, onTruck: await openDriverFor(tx, t[0]!.id), asked: d[1]!.id };
+    });
+    expect(seen.applied.changed).toBe(true);
+    expect(seen.onTruck).toBe(seen.asked);
+  });
+
+  it('refuses that change with a stale token, and clearing the driver with none', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const { trucks: t, drivers: d } = await fixtures(tx);
+      await assign(tx, t[0]!.id, d[0]!.id);
+      // The preview is taken while the truck is empty; then d[0] is put on it.
+      await tx.update(assignments).set({ endedAt: sql`now()` }).where(eq(assignments.truckId, t[0]!.id));
+      const stale = await previewReassignment(tx, { truckId: t[0]!.id, driverId: d[1]!.id });
+      await assign(tx, t[0]!.id, d[0]!.id);
+      const withStale = await applyReassignment(tx, {
+        truckId: t[0]!.id,
+        driverId: d[1]!.id,
+        actorUserId: null,
+        previewToken: stale.token,
+      }).then(() => 'applied', (error: unknown) => error);
+      const cleared = await applyReassignment(tx, { truckId: t[0]!.id, driverId: null, actorUserId: null }).then(
+        () => 'applied',
+        (error: unknown) => error,
+      );
+      return { withStale, cleared, onTruck: await openDriverFor(tx, t[0]!.id), kept: d[0]!.id };
+    });
+    expect(seen.withStale).toBeInstanceOf(StalePreviewError);
+    expect(seen.cleared).toBeInstanceOf(StalePreviewError);
+    expect(seen.onTruck).toBe(seen.kept);
+  });
+
+  it('does nothing when the driver is already the one asked for, and needs no token for it', async () => {
     const result = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await assign(tx, t[0]!.id, d[0]!.id);
       return applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
     });
     expect(result.changed).toBe(false);
@@ -952,7 +1027,7 @@ withDb('the edit modal save', () => {
   it('saves the stop and the two-sided move in the same transaction', async () => {
     const seen = await rolledBack(async (tx) => {
       const { trucks: t, drivers: d } = await fixtures(tx);
-      await applyReassignment(tx, { truckId: t[0]!.id, driverId: d[0]!.id, actorUserId: null });
+      await assign(tx, t[0]!.id, d[0]!.id);
       const preview = await previewReassignment(tx, { truckId: t[1]!.id, driverId: d[0]!.id });
       const result = await saveStopEdit(tx as never, {
         actorUserId: null,

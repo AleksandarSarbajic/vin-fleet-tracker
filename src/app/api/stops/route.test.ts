@@ -36,6 +36,7 @@ vi.mock('@/server/stop-edit', async (importOriginal) => {
 });
 
 const { ReachedStopError, saveLoadEdit } = await import('@/server/stop-edit');
+const { StalePreviewError } = await import('@/server/reassign');
 const { POST } = await import('./route');
 
 const LOAD = '33333333-3333-4333-8333-333333333333';
@@ -106,6 +107,31 @@ describeDb('POST /api/stops, a reached stop (§12.119)', () => {
       loadVersion: landed,
       warnings: [{ field: 'stops.0.arrivedAt' }],
     });
+  });
+
+  it('answers an unconfirmed driver change 409 with the fresh preview, so the modal opens the confirm (§9.10, phase 3ai)', async () => {
+    const fresh = {
+      gaining: {
+        truckId: TRUCK,
+        truckLabel: '904',
+        driverId: null,
+        driverName: null,
+        driverSource: null,
+        driverSamsaraId: null,
+        nextApptUtc: null,
+        nextApptTz: null,
+        toDriverId: '99999999-9999-4999-8999-00000000000b',
+        toDriverName: 'Bo Example',
+      },
+      losing: null,
+      summary: 'Reassigns 904 from Unassigned to Bo Example.',
+      note: 'Nothing is sent to the driver — notifications aren’t built.',
+      token: 'fresh-token-3ai',
+    };
+    vi.mocked(saveLoadEdit).mockRejectedValue(new StalePreviewError(fresh));
+    const response = await post({ ...edit, driverId: '99999999-9999-4999-8999-00000000000b' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ stalePreview: true, preview: { token: 'fresh-token-3ai' } });
   });
 
   it('says null for a stop the request did not include', async () => {

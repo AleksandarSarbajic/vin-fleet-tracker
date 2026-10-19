@@ -196,7 +196,7 @@ export async function applyReassignment(
     truckId: string;
     driverId: string | null;
     actorUserId: string | null;
-    /** Required when the driver comes off another truck. */
+    /** Required for every change of driver (§9.10, phase 3ai); not for the same driver. */
     previewToken?: string | undefined;
   },
 ): Promise<{ preview: ReassignPreview; changed: boolean }> {
@@ -209,22 +209,22 @@ export async function applyReassignment(
   if (preview.gaining.driverId === input.driverId) return { preview, changed: false };
 
   /**
-   * Two rules, and both matter for the same reason: the dispatcher acts on
-   * what the dialog said.
+   * Every change of driver is applied only as its confirm described it: the
+   * token of THIS preview, recomputed under the lock. One rule, for one
+   * reason: the dispatcher acts on what the dialog said.
    *
    *   A token that no longer matches means the world moved under the open
    *   dialog — even when it moved in the harmless direction, the confirmation
    *   described something that is no longer what will happen.
    *
-   *   A two-sided move with NO token was never confirmed at all. Taking a
-   *   driver off another truck is not something to do on an unconfirmed
-   *   request, whatever the UI believes it showed.
+   *   NO token means it was never confirmed at all — taking a driver off
+   *   another truck, and, since phase 3ai (Alex, 2026-10-19), any change. A
+   *   driver on no other truck used to need none, so a request that re-sent a
+   *   driver from a stale form put them back silently (3ag, 3ah).
+   *
+   * Refused either way with the fresh preview, so the modal opens the confirm.
    */
-  const tokenStale =
-    input.previewToken !== undefined && input.previewToken !== preview.token;
-  if (tokenStale || (preview.losing !== null && input.previewToken === undefined)) {
-    throw new StalePreviewError(preview);
-  }
+  if (input.previewToken !== preview.token) throw new StalePreviewError(preview);
 
   if (preview.losing) {
     await tx
