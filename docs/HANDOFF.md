@@ -4435,6 +4435,214 @@ are under "Decided by Alex", in "The e2e flakes and the deploy gates".
 - That `rolledBackAlone()` costs nothing beyond the measured 1–2 s a run: a
   run that queues several alone tests behind slow ones was not measured.
 
+### Phase 3af: after a save lands, the edit modal is on the saved load (2026-10-19)
+
+From the advisor's brief, approved by Alex (as the user relayed it). No
+migration. The design is §12.127. Commits:
+
+- `bdbb0e7`: the save returns the version it leaves;
+- `1b28877`: the modal, and its tests;
+- this section and §12.127, then a separate commit for two HANDOFF fixes.
+
+NOT pushed, NOT deployed.
+
+**Why.** These are the advisor's findings of 2026-10-19, from the code and a
+read-only database check. The check cannot be re-run here, so its figures are
+the advisor's and unverified here:
+
+- 7 extra copies of loads on 5 trucks (113, 116, 128, 133, 145). Each has
+  the same truck, number and stops as the original and was created 10 to
+  75 s after it, between 2026-10-12 and 2026-10-16. None was open on
+  2026-10-19. Clear stop's "3 open loads" on truck 128 was correct for the
+  data.
+- A screenshot of truck 133 shows the stale refusal and "Saved · one thing
+  to know" (an arrival with no anchor, §12.85) at the same time.
+- **Unverified:** that every copy came through the warnings branch. Warnings
+  are not stored. It is the path in the code that creates twice from one
+  modal.
+
+**What was wrong**, from the code. On the old modal, 13 of this phase's 14
+modal tests fail. Two branches kept the modal open after a save landed: the
+save's warnings, and the stop saved with the active flag refused (§12.14).
+Both set the warning and returned, with the form's baseline, load id and
+version unchanged:
+
+- "Unsaved changes" stayed, Save stayed on, and Cancel asked to discard saved
+  work;
+- on a new load, a second Save sent `loadId: null`, and the server created a
+  second load;
+- on an existing load, a second Save carried the opened version and was
+  refused as stale by the dispatcher's own first save.
+
+**What was built:**
+
+- **Server** (`src/server/stop-edit.ts`): `LoadEditResult.loadVersion` is
+  read with `readLoadVersion` in the save's transaction, after every write,
+  the overrides included, as `clearOverrideAt` does. `POST /api/stops`
+  returns the result whole, so the route passes it through unchanged.
+- **Modal** (`src/components/edit/EditStopModal.tsx`): one step, `landOn`,
+  for every branch where a save landed and the modal stays open. It reads the
+  load again by the returned id (`GET /api/loads/:id`). The wrapper then opens
+  a NEW editor on that read, keyed per landing. The editor holds the version
+  the save returned, the warnings and the selected stop. Until the read
+  arrives, the old form is "spent": nothing unsaved, Save off, Cancel and Esc
+  close, no rate-confirmation strip, no pending reassign. `sendSave` refuses
+  it too. If the read fails, the form stays spent, says so, and offers Retry.
+- **The route chosen: re-open on a fresh read.** This is Reload's route,
+  but by the id the save returned, not the board row's. The form patched in
+  place was rejected. The form's stops are built from a read (ids, stored
+  values, arrivals), and a new stop has no id until the server gives it one.
+  The row's next stop was rejected too: after a save it need not be on the
+  saved load, for example on the next trip or when every stop is left.
+- **The version held is the one the save returned, not the read's.** They
+  differ only if someone else changed the load between the commit and the
+  read; the next save is then refused as stale, and Reload shows the change.
+  A test pins this.
+- **Same class, same step:**
+  - an active-flag request that throws counts as refused. It used to show
+    "Save failed" and restore the pre-save board row over a landed save;
+  - a warning and a refused flag are shown together; the refused flag used
+    to replace the warning;
+  - the reassign confirm closes with its save. After a warned save it used
+    to stay open over the modal, still able to send;
+  - `Clear now` that lands moves the override baseline. Save used to light up
+    with nothing typed, and a save re-sent the clear.
+
+**Sites checked:** every request in `src/components/edit` and
+`src/components/console/phone`, plus the one write the modal renders from
+elsewhere.
+
+| site | what it writes | verdict |
+|---|---|---|
+| `EditStopModal` `sendSave`, `POST /api/stops` | the load | affected; fixed (`landOn`) |
+| `EditStopModal`, `POST /api/trucks` | the active flag | affected; fixed, a throw counted as refused |
+| `ReassignConfirm` → `sendSave` | the load | affected; closes with its save, and `sendSave` refuses a spent form |
+| `EditStopModal` `Clear now`, `DELETE /api/overrides` | ends the override | affected in part: it took back the version (§12.117) but not the override baseline; fixed. Its failure branch is a different defect, below |
+| `EditStopModal`, `POST /api/assignments/preview` | nothing (a read) | safe |
+| `ClearStopConfirm`, `POST /api/stops/clear` | closes a load | safe: success closes the whole modal; a retry after a lost answer is refused ("already Delivered") |
+| `ReopenConfirm`, `POST /api/stops/reopen` | reopens a load | safe: success closes the whole modal; a retry is refused ("Already reopened") |
+| `RecentlyClosed`, `GET /api/stops/reopen` | nothing (a read) | safe |
+| `RateconStrip`, `POST /api/ratecon/read` | a counts row | safe: a read, not a save; a second read is allowed by design (3s) |
+| `record-outcome`, `POST /api/ratecon/outcome` | counts | safe: dropped before it is sent, once per read; a new editor holds none |
+| `DriverSelect` → `AddDriverInline`, `POST /api/drivers` (in `components/assignments`, rendered in the modal) | a driver | safe: the inline form closes on success and the picker holds the new driver (§12.38) |
+| `src/components/console/phone/*` | nothing: no request in any file | safe; editing is desktop-only there |
+
+`PhoneTopBar` renders `AccountMenu` and `ScopeMenu` from
+`src/components/console`. Neither file makes a request. They were not
+followed further.
+
+**Found, not changed: `Clear now`'s failure branch.** It is a different
+defect, the opposite shape: a write that did NOT land, treated as if it had.
+
+- Any answer but 200 or 409 (403, 429, 500) still sets the draft to "Auto",
+  with no message. The override stays live, and the next save clears it
+  inside the save.
+- A request that throws leaves `clearOverrideNow` with no catch, so its
+  rejection is unhandled (CLAUDE.md: "No unhandled rejections").
+
+**Tests:** before, 193 files and 3509 tests; after, 194 files and 3527 tests
+(+18).
+
+- `src/server/load-edit.test.ts`, 3:
+  - the returned version is the load's after the save, its override
+    included, and a next save with it is accepted;
+  - the next trip returns the new load's id and version;
+  - on `fleet_commit`: a new load saved with a §12.85 warning, then saved
+    again with what it returned. Exactly one load results, edited, and the
+    version read after the commit equals the one returned. No network call
+    is made.
+- `src/app/api/stops/route.test.ts`, 1: the route passes `loadId` and
+  `loadVersion` through.
+- `src/components/edit/landed-save.test.tsx`, 14:
+  - new load: on the created load; the next save carries its id, its stop's
+    id and the returned version; a failed read leaves the form spent, then
+    Retry;
+  - existing load: a second save is accepted on the returned version; the
+    returned version is held over the read's; Cancel and Esc close; an
+    override in a spent form's draft keeps Save off; a reassign; the
+    selected stop;
+  - the flag refused, unanswered, and with a warning;
+  - a save with nothing to say still closes;
+  - `Clear now`.
+- `src/components/edit/fill-outcome-save.test.tsx`: one test changed. Its
+  warned save was answered without a load id, and its second save created
+  again: the defect itself, pinned as passing. It now answers as the server
+  does and checks that the second save edits the created load.
+
+**Mutations,** each applied alone and reverted:
+
+| broken | tests that fail |
+|---|---|
+| server: the version read before the overrides | 1 |
+| server: the request's version returned | 3 |
+| modal: "Unsaved" not emptied when spent | 1 |
+| modal: Save not off when spent | 1, the override in a spent draft (it survived until that test was added) |
+| modal: the read's version held, not the returned one | 1 |
+| modal: the selected stop not carried | 1 |
+| modal: no new editor per landing | 6 |
+| modal: the old branches (warnings set, no `landOn`) | 12 |
+| modal: `Clear now` leaves the override baseline | 1 |
+| modal: the flag's throw not caught | 1 |
+| modal: the strip shown on a spent form | 1 |
+| modal: the reassign confirm left open | 1 |
+| modal: `driverChanged` not off when spent | 1 |
+| modal: `sendSave` not guarded | **0**: no path reaches it while the confirm closes first; it guards the one place a save is sent |
+
+**What it does not cover:**
+
+- **A create whose answer never arrives:** a network error after the server
+  committed, or an answer that cannot be read. The modal says the save
+  failed, and a second Save creates again. A server guard is needed: below.
+- **Truck-level values on the new editor** (next stop, live override, active
+  flag, drivers) come from the board row as refetched after the save. If that
+  refetch failed, they come from the row before it. That changes what is
+  shown; nothing is sent unless the dispatcher changes it.
+- **The 7 copies** are not cleaned up (all closed; out of scope).
+- **The re-read costs one `GET /api/loads/:id`** per warned save (`read`
+  limit: 60, refilling 2 a second).
+
+**Proposal, NOT built: the smallest guard against a create sent twice.** It
+needs a migration, so it is Alex's decision.
+
+- **What it stores:** `loads.create_key uuid`, nullable, with a unique index
+  where it is not null. The modal makes one key per new-load form and sends
+  it with every create from that form.
+- **The server:** the create inserts the key. A second create with the same
+  key hits the index: nothing is written, and the answer is 409 with the
+  existing load's id and version. The modal then lands on that load with
+  `landOn`. The first attempt's warnings are lost, because they are not
+  stored.
+- **Migration 0031,** additive: `alter table loads add column create_key
+  uuid;` and `create unique index loads_create_key_key on loads (create_key)
+  where create_key is not null;`. Existing rows stay null. `loads` keeps its
+  RLS and grants.
+- **Rollback:** deploy the previous commit. The column can stay, because
+  nothing else names it, or be dropped with the index.
+- **What it covers that 3af does not:** a create retried from the same form
+  after its answer was lost.
+- **What it does not cover:** an edit of an existing load re-sent after a
+  lost answer. That is refused as stale (§12.117), which is safe; the
+  dispatcher reloads.
+
+**Unverified:**
+
+- The advisor's figures above, and that the copies came through a warned
+  save.
+- In a real browser. The modal is tested in happy-dom only, and e2e was not
+  run: it signs in through hosted Supabase, which is a networked call this
+  phase excludes.
+
+**Questions for Alex (not decided here):**
+
+1. **Build the create-key guard** (migration 0031, above)?
+2. **Fix `Clear now`'s failure branch** in a small phase? It turns a refused
+   clear into "Auto" with no message, and its thrown request is an unhandled
+   rejection.
+3. **Keep the re-read, or have the save return the load read itself?** The
+   save could return the read from inside its own transaction
+   (`loadForEdit(tx, …)`). That needs no second request and has no failed-read
+   state, but every save's answer grows.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

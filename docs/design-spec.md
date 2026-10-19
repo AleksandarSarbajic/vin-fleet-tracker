@@ -9509,6 +9509,106 @@ reverted:
 | no cap | 1 |
 | no `statement_timeout` | 1 |
 
+## 12.127 A save that lands puts the modal on the saved load
+
+**The rule.** When a save lands and the edit modal stays open, the modal is
+on the load as saved, never on the form it sent. The modal stays open when
+the save has something to say: a warning (§12.24's unlocated address,
+§12.85's arrival with no anchor), or the stop saved and the active flag did
+not (§12.14). Every such branch goes through one step, and after it:
+
+- nothing is "Unsaved": the saved state is the baseline, so Save is off until
+  something changes, and Cancel and Esc close with no discard question;
+- the modal holds the load id and version the save returned, so a later save
+  edits that load (a new load is never created twice) and is not refused by
+  its own earlier save;
+- the warning stays on screen.
+
+**Why.** Before this, those branches set the warning and returned. The form's
+baseline, its load id and its version stayed as they were when the modal
+opened. So "Unsaved changes" stayed, Save stayed on, and Cancel asked to
+discard work that had been saved. On a NEW load the read was null, so a
+second Save sent `loadId: null` and the server created a second load. On an
+existing load the version was the opened one, so a second Save was refused:
+"This load was changed since you opened it. Nothing was saved." The change it
+meant was the dispatcher's own first save. The version leaves out worker
+writes (§12.117), so nothing else had to happen.
+
+The evidence for this is the advisor's read-only check of 2026-10-19,
+unverified here: 7 extra copies of loads on 5 trucks, each with the same
+truck, number and stops, created 10 to 75 s after the original, between
+2026-10-12 and 2026-10-16. All were closed by 2026-10-19. A screenshot shows
+the stale refusal under "Saved · one thing to know". That every copy came
+through a warned save is NOT verified: warnings are not stored. It is the only
+path in the code that creates twice from one modal.
+
+**How.**
+
+- **The server** (`saveLoadEdit`) returns `loadVersion` beside `loadId`. It
+  is read with `readLoadVersion` inside the save's transaction, after every
+  write, the overrides included: the version names a stop's live override.
+  This is how `clearOverrideAt` returns it. On the next trip both are the new
+  load's.
+- **The modal** reads the load again by the returned id
+  (`GET /api/loads/:id`) and opens its editor afresh on that read, keyed per
+  landing. It carries the warnings, the version the save returned and the
+  selected stop. The stop is carried by place: the saved load keeps the
+  form's order, with new stops last.
+
+**Why a fresh read, not the form patched.** The form's stops are built from a
+read: their ids, what is stored, what was reached (§12.119). A new stop has
+no id until the server gives it one. Patching the form would mean the browser
+guessing what the server stored. The read is what Reload already opens on.
+
+**Which version.** The modal holds the one the save returned, not the
+read's. The two differ only if someone else changed the load between the
+commit and the read. The modal then sends the version it saved, so the next
+save is refused as stale and Reload offers the change (§12.117). It is never
+saved over unseen.
+
+**Until the read is in hand, the old form is spent.** Nothing in it is
+unsaved and Save is off. Cancel closes. The rate-confirmation strip is gone,
+because a fill replaces stops (§12.122), and no reassign is pending. The send
+itself refuses a spent form, and the reassign confirm closes with its save.
+If the read fails, the form stays spent: "The save landed, but the load could
+not be read again (…), so this form cannot save it." It offers Retry.
+
+**Closed with it, the same class.**
+
+- An active-flag request that throws counts as refused (§12.14). It used to
+  fall to "Save failed" and put back the pre-save board row, over a save that
+  had landed.
+- A warning and a refused flag are shown together. The refused flag used to
+  replace the warning.
+- `Clear now` that lands moves the override the form measures against. The
+  draft's "Auto" used to count as a change: Save lit up with nothing typed,
+  and a save re-sent the clear.
+
+**What it does not cover.**
+
+- **A save whose answer never arrives.** If the network fails after the
+  server committed, or the answer cannot be read, the modal says the save
+  failed. A second Save then creates again. Only a server-side guard, a key
+  sent with the create, can tell; that needs a migration, which is Alex's
+  decision. Save is already off while a save is in flight, so a double click
+  is not this case.
+- **Truck-level values on the new editor.** The next stop, the live override,
+  the active flag and the driver list come from the board row as refetched
+  after the save. If that refetch failed, they come from the row before it.
+  That changes what is shown, and nothing is sent unless the dispatcher
+  changes it.
+- **The copies already made.** They are not cleaned up.
+
+**Tests.** The server suite (`load-edit.test.ts`): the returned version is the
+load's after the save, and a next save with it is accepted; the next trip
+returns the new load's id and version; on `fleet_commit`, a new load is saved
+with a warning, then saved again with what it returned. That leaves one load,
+edited, and the version read after the commit is the one returned. The route
+passes both through. The modal suite (`landed-save.test.tsx`, 14): new load,
+existing load, the flag refused and unanswered, Cancel and Esc, a failed read
+and Retry, the selected stop, a reassign, and `Clear now`. 13 of the 14 fail
+on the modal before this.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
