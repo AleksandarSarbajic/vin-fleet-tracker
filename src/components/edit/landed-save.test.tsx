@@ -457,7 +457,9 @@ describe('the landed editor’s driver (§12.127, phase 3ag)', () => {
     expect(button('Save').textContent).toBe('Save');
     await click(button('Save'));
     expect(previews()).toHaveLength(1);
-    expect(posted()[1]).toMatchObject({ loadId: LOAD, version: RETURNED, driverId: DRIVER_B });
+    // Neither Ana back nor Bo again: no change, no driver sent (phase 3ah).
+    expect(posted()[1]).toMatchObject({ loadId: LOAD, version: RETURNED });
+    expect(posted()[1]).not.toHaveProperty('driverId');
   });
 
   it('opened after a reassign the page has not seen, is on the read’s driver, not the list’s', async () => {
@@ -471,7 +473,8 @@ describe('the landed editor’s driver (§12.127, phase 3ag)', () => {
     expect(button('Save').textContent).toBe('Save');
     await click(button('Save'));
     expect(previews()).toHaveLength(0);
-    expect(posted()[0]).toMatchObject({ version: OPENED, driverId: DRIVER_B });
+    expect(posted()[0]).toMatchObject({ version: OPENED });
+    expect(posted()[0]).not.toHaveProperty('driverId');
   });
 
   it('a new load has no read: its driver is the list’s, as before', async () => {
@@ -481,7 +484,67 @@ describe('the landed editor’s driver (§12.127, phase 3ag)', () => {
     await typeNewLoad();
     await click(button('Save'));
     expect(previews()).toHaveLength(0);
-    expect(posted()[0]).toMatchObject({ loadId: null, driverId: DRIVER_A });
+    // Unchanged, so not sent (phase 3ah): the list's driver is shown, never put back.
+    expect(posted()[0]).toMatchObject({ loadId: null });
+    expect(posted()[0]).not.toHaveProperty('driverId');
+  });
+});
+
+describe('a save sends the driver only when the dispatcher changed it (§9.10, phase 3ah)', () => {
+  /** The page's list: Ana on 904. The server has since moved 904 to Bo. */
+  const PAGE_DRIVERS = [boardDriver(DRIVER_A, 'Ana Example', EXISTING.id), boardDriver(DRIVER_B, 'Bo Example', null)];
+  const ASSIGNED = (driverId: string) => ({ id: '99999999-9999-4999-8999-0000000003ab', driverId });
+  const previews = () => calls.filter((c) => c.url === '/api/assignments/preview');
+  const pick = async (label: string) => {
+    const picker = field('Assigned driver', container!);
+    await act(async () => picker.click());
+    if (label !== 'Unassigned') await type(picker, label.slice(0, 2));
+    const option = [...container!.querySelectorAll<HTMLElement>('li > button')].find((o) =>
+      (o.textContent ?? '').includes(label),
+    )!;
+    await act(async () => {
+      option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      option.click();
+    });
+    await settle();
+  };
+
+  it('an existing load, no driver change: the request has no driverId', async () => {
+    await render(EXISTING, { assignment: ASSIGNED(DRIVER_B) }, PAGE_DRIVERS);
+    await type(field('ZIP'), '55804');
+    await click(button('Save'));
+    expect(previews()).toHaveLength(0);
+    expect(posted()[0]).not.toHaveProperty('driverId');
+  });
+
+  it('a new load, no driver change: the request has no driverId, though the page’s list names a driver', async () => {
+    saves = [() => landed(CREATED, RETURNED)];
+    await render(NEW_LOAD, undefined, PAGE_DRIVERS);
+    await typeNewLoad();
+    await click(button('Save'));
+    expect(previews()).toHaveLength(0);
+    expect(posted()[0]).toMatchObject({ loadId: null });
+    expect(posted()[0]).not.toHaveProperty('driverId');
+  });
+
+  it('a real change is still named unsaved, goes through the preview and confirm, and sends the driver', async () => {
+    await render(EXISTING, { assignment: ASSIGNED(DRIVER_A) }, PAGE_DRIVERS);
+    await pick('Bo Example');
+    expect(text()).toContain('Unsaved changes — assigned driver');
+    await click(button('Confirm reassign & save'));
+    await click(button('Assign driver'));
+    expect(previews()).toHaveLength(1);
+    expect(posted()[0]).toMatchObject({ driverId: DRIVER_B, previewToken: 'preview-token-3af' });
+  });
+
+  it('Unassigned, when the truck had a driver, still sends null', async () => {
+    await render(EXISTING, { assignment: ASSIGNED(DRIVER_A) }, PAGE_DRIVERS);
+    await pick('Unassigned');
+    expect(text()).toContain('Unsaved changes — assigned driver');
+    await click(button('Confirm reassign & save'));
+    await click(button('Assign driver'));
+    expect(previews()).toHaveLength(1);
+    expect(posted()[0]).toMatchObject({ driverId: null, previewToken: 'preview-token-3af' });
   });
 });
 

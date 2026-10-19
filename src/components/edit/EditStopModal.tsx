@@ -717,8 +717,18 @@ function LoadEditor({
       );
 
       const edits = parsed.map(
-        (edit, i): StopEdit => ({
+        ({ driverId, ...edit }, i): StopEdit => ({
           ...edit,
+          /**
+           * §9.10, phase 3ah. The driver only when the dispatcher changed it
+           * in this modal; absent, the server leaves the assignment alone.
+           * A driver on no other truck needs no preview token, so a baseline
+           * this form cannot vouch for — a new load's, from the page's list —
+           * would otherwise put a previous driver back unasked. Here, because
+           * every path sends through here: Save, the reassign confirm, the
+           * previous-load and reached-stop answers, the landed editor.
+           */
+          ...(driverChanged ? { driverId } : {}),
           ...(token ? { previewToken: token } : {}),
           ...(overrideEdit && send[i]!.key === fallbackKey ? { override: overrideEdit } : {}),
           // §12.92: closed in the same transaction as the new load.
@@ -893,7 +903,7 @@ function LoadEditor({
         setSaving(false);
       }
     },
-    [active, closes, form, landOn, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, selected, send, spent, version],
+    [active, closes, driverChanged, form, landOn, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, selected, send, spent, version],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */

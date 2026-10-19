@@ -830,6 +830,51 @@ describeDb('the save returns the load and version it leaves (§12.127)', () => {
   });
 });
 
+/**
+ * §9.10, phase 3ah. The modal sends `driverId` only when the dispatcher
+ * changed the driver; with the key absent the truck keeps its driver,
+ * whatever the browser's list believed.
+ */
+describeDb('a save with no driverId leaves the assignment alone (phase 3ah)', () => {
+  it('an existing load', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const lane = await loadWith(tx, [{ city: 'A' }]);
+      const result = await attempt(tx, {
+        loadId: lane.loadId,
+        truckId: lane.truck.id,
+        version: (await readLoadVersion(tx, lane.loadId))!,
+        loadStatus: 'DISPATCHED',
+        stops: [await draftOf(tx, lane.stopIds[0]!, { dispatcherNote: 'Dock 9' })],
+      });
+      return { lane, result, driver: await openDriver(tx, lane.truck.id) };
+    });
+
+    expect(seen.result.error).toBeNull();
+    expect(seen.result.result?.reassignment).toBeNull();
+    expect(seen.driver).toBe(seen.lane.driver.id);
+  });
+
+  it('a new load', async () => {
+    const seen = await rolledBack(async (tx) => {
+      const truck = await makeTruck(tx);
+      const driver = await makeDriver(tx);
+      await assign(tx, truck.id, driver.id);
+      const result = await attempt(tx, {
+        loadId: null,
+        truckId: truck.id,
+        loadNumber: 'VT-3AH-1',
+        loadStatus: 'DISPATCHED',
+        stops: [newStop('Mandan', { state: 'ND' })],
+      });
+      return { driver, result, onTruck: await openDriver(tx, truck.id) };
+    });
+
+    expect(seen.result.error).toBeNull();
+    expect(seen.result.result?.reassignment).toBeNull();
+    expect(seen.onTruck).toBe(seen.driver.id);
+  });
+});
+
 describeDb('one transaction (§12.117)', () => {
   it('breaks after the first write and leaves nothing behind — load, stops, driver, override, audit', async () => {
     const seen = await rolledBack(async (tx) => {
