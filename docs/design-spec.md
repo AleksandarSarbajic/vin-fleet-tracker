@@ -1177,11 +1177,22 @@ the left; `Cancel` and `Reassign both trucks` (primary) on the right.
 - Reversible from the losing truck's history for the rest of the shift.
 - **A save sends the driver only when the dispatcher changed it** in the
   modal (phase 3ah). Otherwise the key is absent and the server leaves the
-  assignment alone. The server applies a change of driver with no preview
-  token when that driver is on no other truck, so a save that re-sent the
-  form's driver from a baseline it could not vouch for put a previous driver
-  back unasked. A real change still asks for the server's preview and is
-  confirmed here; choosing Unassigned still sends null.
+  assignment alone. Until phase 3ai the server applied a change of driver
+  with no preview token when that driver was on no other truck, so a save
+  that re-sent the form's driver from a baseline it could not vouch for put
+  a previous driver back unasked. A real change still asks for the server's
+  preview and is confirmed here; choosing Unassigned still sends null.
+- **Every change of driver needs the preview token** (phase 3ai; Alex,
+  2026-10-19). Not only a move that takes a driver off another truck: a
+  driver on no other truck, and Unassigned, too. The server recomputes the
+  preview under the lock. With no token, or one that no longer matches, it
+  refuses (409 with the fresh preview) and writes nothing; the modal opens
+  the confirm on that preview, and confirming sends its token. The same
+  driver needs no token: nothing changes.
+- **A preview that fails stops the save** (phase 3ai). If the preview request
+  answers with an error, or never answers, nothing is sent and the modal
+  says "Nothing was saved: the driver change could not be previewed." with
+  the reason. The change stays in the form, to try again.
 
 ## 9.11 Feedback set (`2h`)
 

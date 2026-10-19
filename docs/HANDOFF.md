@@ -4971,6 +4971,151 @@ reassign confirm path again; it was not tested separately.
    stale or not, could change a driver unconfirmed. It changes §9.10's
    server rule; the save (`stop-edit.ts:411`) is its only caller in `src/`.
 
+### Phase 3ai: a driver change is never applied unconfirmed (2026-10-19)
+
+From the advisor's brief, after 3af to 3ah were approved. Alex approved
+changing §9.10's server rule (2026-10-19). This answers both of 3ah's
+questions. No migration. Commits:
+
+- `867ad4e`: the client;
+- `237f81c`: the server;
+- one docs commit: this section and §9.10.
+
+NOT pushed, NOT deployed.
+
+**Why** (found in 3ah; the advisor confirmed by reading):
+
+- in `save()`, a preview that answered with an error fell through to
+  `sendSave` with no token, so a change to a driver on no other truck was
+  applied without the confirm; a preview request that threw rejected
+  unhandled (`void save()`);
+- `applyReassignment` wanted a token only when another truck lost its
+  driver, so any request naming a new driver without a confirm went through.
+
+**1. The client** (`src/components/edit/EditStopModal.tsx`, `save()`): a
+preview that is not ok, or that throws, stops the save. Nothing goes to
+`/api/stops`, and the change stays in the form. The banner says "Nothing was
+saved: the driver change could not be previewed." with the reason: the
+server's error and reference, "The server answered 502." when the answer
+cannot be read, or "The request failed: …". A preview that answers ok opens
+the confirm as before.
+
+- **Before:** on the previous code, a preview answered 500 still saved. A
+  scratch copy of the test printed what that save carried:
+
+  ```
+  UNCONFIRMED SAVE {"driverId":"99999999-9999-4999-8999-00000000000b","isBo":true,"previewToken":null}
+  ```
+
+  The new tests on the previous code:
+
+  ```
+  × … > a preview answered 500 stops the save, and says nothing was saved and why
+  AssertionError: expected [ { …(7) } ] to have a length of +0 but got 1
+  × … > a preview with no readable answer says so with the status
+  AssertionError: expected [ { …(7) } ] to have a length of +0 but got 1
+  × … > a preview that never answers stops the save the same way, and rejects nothing unhandled
+  AssertionError: expected "spy" to not be called at all, but actually been called 1 times
+  Received: [TypeError: Failed to fetch]
+  ```
+
+- **Tests** (`landed-save.test.tsx`, 4): the three above, and the re-confirm
+  path: a save answered 409 with a fresh preview keeps the confirm open on
+  it, and confirming sends that token. The re-confirm test passes on the
+  previous code too. It is existing behaviour, untested until now (3ah).
+- **Mutations:** falling through to the save again fails 3; no catch fails 1.
+
+**2. The server** (`src/server/reassign.ts`, `applyReassignment`): every
+change of the truck's driver needs the token of the preview recomputed under
+the lock. Not only a move off another truck: a driver on no other truck, and
+Unassigned, too. Missing or stale, it is refused with `StalePreviewError` and
+the fresh preview (409 from `POST /api/stops`), and nothing is written. The
+same driver is still a no-op with no token. A save with no `driverId` still
+leaves the assignment alone (3ah). Its only caller is `saveLoadEdit`
+(`stop-edit.ts:411`); `scripts/` and `e2e/` do not call it.
+
+- **Tests:**
+  - `stop-edit.test.ts`, 3 new: a driver on no other truck with no token is
+    refused with the preview, and the assignment is unchanged; with its
+    preview's token it applies; a stale token, and clearing the driver with
+    none, are refused. The same-driver test now also says it needs no token.
+  - `load-edit.test.ts`, 1 new: such a save is refused and writes nothing.
+    The version, the note, the audit count and the assignment are unchanged.
+  - `route.test.ts`, 1 new: `StalePreviewError` answers 409 with the preview
+    and `stalePreview: true`, which is what the modal's 409 branch opens the
+    confirm on. It passes on the previous code too, because the mapping
+    existed; it pins the contract.
+- **On the previous server** the three refusal tests failed:
+
+  ```
+  × a driver change needs its confirm (phase 3ai) > a save naming a driver on no other truck, with no token, is refused …
+  AssertionError: expected null to be an instance of StalePreviewError
+  × reassignment > refuses a change to a driver on no other truck with no token: …
+  AssertionError: expected 'applied' to be an instance of StalePreviewError
+  × reassignment > refuses that change with a stale token, and clearing the driver with none
+  AssertionError: expected 'applied' to be an instance of StalePreviewError
+  ```
+
+  The third failed on its second half, the clear; a stale token was already
+  refused.
+- **Set-up repaired.** Six existing `stop-edit` tests put a driver on a truck
+  with `applyReassignment` and no token. They now use `assign()` or a
+  confirmed move (a new `confirmedMove` helper). `load-edit`'s rollback test
+  sends its preview's token, so the assignment is still written and then
+  rolled back. Two of the six would otherwise have passed for the wrong
+  reason, because their set-up threw the very error they expect: "refuses a
+  confirmation whose preview went stale" and "refuses a two-sided move that
+  was never confirmed at all".
+- **Mutations:**
+
+  | broken | tests that fail |
+  |---|---|
+  | no token check at all | 5, the two repaired tests among them |
+  | the old rule (stale, or two-sided with none) | 3 |
+  | refusing only a missing token, not a stale one | 2 |
+
+**Deploying it.** The client and server ship together. A browser still on an
+older bundle sends a driver change with its preview's token, as before. Only
+its failed-preview fall-through, and a pre-3ah unchanged driver re-sent from a
+stale baseline, are now refused. Both get a 409 with the preview, which that
+bundle's 409 branch opens as the confirm. This was reasoned from the code,
+not run.
+
+**Not under this rule** (other writers of `assignments`, not changed):
+
+- the assignment board's batch save (`POST /api/assignments`,
+  `src/server/assignments.ts:331–340`) changes drivers with no preview token;
+- adding a driver onto a truck (`drivers.ts:120`) refuses a truck that
+  already has one;
+- the driver merge (`drivers.ts:424`) moves history rows, not a truck's
+  driver.
+
+**Tests:** before, 194 files and 3539 tests; after, 194 files and 3548 tests
+(+9: client 4, server 5).
+
+**Docs:** §9.10 gains two bullets, "Every change of driver needs the preview
+token" and "A preview that fails stops the save". Its 3ah bullet now says the
+old server rule held until 3ai. §12.127's "the server needs no preview token
+when the driver is on no other truck (§9.10)" describes the old rule; it is
+left as written, because this brief allows nothing else in the file
+(question 2).
+
+**Unverified:**
+
+- In a real browser: happy-dom only, and no e2e (it is networked).
+- An older bundle against the new server: reasoned, not run.
+
+**Questions for Alex (not decided here):**
+
+1. **The assignment board's batch save** changes drivers with no preview
+   token. Is the board itself the confirmation, or should it come under the
+   same rule?
+2. **§12.127's sentence on the old rule:** update it in the next docs pass?
+3. **`StalePreviewError`'s message**, "The assignment changed while the
+   confirmation was open.", is now also the answer to a change that was never
+   confirmed. The modal does not show it (it opens the confirm), and there is
+   no other caller. Reword it?
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
