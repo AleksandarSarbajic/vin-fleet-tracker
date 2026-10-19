@@ -49,6 +49,9 @@ export interface OverrideDraft {
   customTime: string;
 }
 
+/** The `errors` key for a `Clear now` that did not clear (§9.5): shown in the live block. */
+export const CLEAR_NOW_FIELD = 'clearNow';
+
 const SEGMENTS: { value: ForcedStatus | 'AUTO'; label: string }[] = [
   { value: 'AUTO', label: 'Auto' },
   { value: 'LATE', label: 'Force late' },
@@ -245,6 +248,12 @@ export function OverrideBlock({
               Clear now
             </button>
           </div>
+          {/* Beside the button that failed: the override is still live. */}
+          {errors(CLEAR_NOW_FIELD) ? (
+            <p role="alert" className="mb-2 text-small text-status-late-fg">
+              {errors(CLEAR_NOW_FIELD)}
+            </p>
+          ) : null}
           <dl className="grid grid-cols-[auto_1fr] gap-x-[14px] gap-y-[7px] text-body">
             <dt className="text-text-mutedOnOverlay">Showing</dt>
             <dd className="text-text">{live.forcedStatus} — forced</dd>

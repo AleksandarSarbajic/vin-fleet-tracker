@@ -14,7 +14,7 @@ import type { LoadEditResult } from '@/server/stop-edit';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { LOAD_READ_GC_MS, fetchLoadRead, loadReadKey } from '@/hooks/useLoadRead';
 import { OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
-import { OverrideBlock, type OverrideDraft } from './OverrideBlock';
+import { CLEAR_NOW_FIELD, OverrideBlock, type OverrideDraft } from './OverrideBlock';
 import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
@@ -568,10 +568,18 @@ function LoadEditor({
    * `Clear now` from the block — immediate, not part of the save (§9.5). It
    * changes the load's version, so it carries the version this modal holds
    * and takes back the new one (§12.117).
+   *
+   * Only an ok answer ends the override in the form. Any other answer, or no
+   * answer, leaves the draft as it was — the override is still live, and a
+   * draft showing Auto would have the next save clear it unasked — and says
+   * beside the button that nothing was cleared, and why.
    */
   const clearOverrideNow = useCallback(async () => {
     if (!nextKey) return;
     setSaving(true);
+    setErrors((list) => list.filter((e) => e.field !== CLEAR_NOW_FIELD));
+    const notCleared = (why: string) =>
+      setErrors((list) => [...list, { field: CLEAR_NOW_FIELD, message: `Nothing was cleared. ${why}` }]);
     try {
       const response = await fetch('/api/overrides', {
         method: 'DELETE',
@@ -579,19 +587,28 @@ function LoadEditor({
         body: JSON.stringify({ stopId: nextKey, ...(version ? { version } : {}) }),
       });
       if (response.status === 409) {
-        const body = (await response.json()) as { error?: string };
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
         setStale(true);
-        setErrors([{ field: '*', message: body.error ?? 'This load was changed since you opened it.' }]);
+        setErrors([{ field: '*', message: body?.error ?? 'This load was changed since you opened it.' }]);
         return;
       }
-      if (response.ok) {
-        const body = (await response.json()) as { loadVersion?: string };
-        if (body.loadVersion) setVersion(body.loadVersion);
-        // §12.127. The override has ended: the draft's AUTO is no change to save.
-        setOpenedOverride(null);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string; reference?: string } | null;
+        notCleared(
+          `${body?.error ?? `The server answered ${response.status}.`}${body?.reference ? ` (${body.reference})` : ''}`,
+        );
+        return;
       }
+      // The clear landed. An answer with no version keeps the one held, and
+      // the next save is refused as stale and offers Reload (§12.117).
+      const body = (await response.json().catch(() => null)) as { loadVersion?: string } | null;
+      if (body?.loadVersion) setVersion(body.loadVersion);
+      // §12.127. The override has ended: the draft's AUTO is no change to save.
+      setOpenedOverride(null);
       setOverride((d) => ({ ...d, forced: 'AUTO', reason: '' }));
       await queryClient.invalidateQueries({ queryKey: ['fleet'] });
+    } catch (error: unknown) {
+      notCleared(`The request failed: ${error instanceof Error ? error.message : 'no answer'}.`);
     } finally {
       setSaving(false);
     }

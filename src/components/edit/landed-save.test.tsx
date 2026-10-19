@@ -472,9 +472,9 @@ describe('a save with nothing to say still closes (§12.127)', () => {
   });
 });
 
-describe('Clear now that lands moves what the form measures against (§12.117, §12.127)', () => {
-  it('leaves nothing to save: the override it ended is not sent again', async () => {
-    const forced = fleetRow({
+describe('Clear now (§9.5, §12.117, §12.127)', () => {
+  const FORCED = () =>
+    fleetRow({
       ...truck,
       nextStop: stop(),
       override: {
@@ -486,17 +486,71 @@ describe('Clear now that lands moves what the form measures against (§12.117, �
         expiresAtUtc: new Date(NOW.getTime() + 3 * 3_600_000).toISOString(),
       },
     });
+  /** `DELETE /api/overrides` answered by `answer`; every other request as before. */
+  const clearAnswers = (answer: () => Promise<Response>) => {
     const base = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) =>
-      url === '/api/overrides' ? json(200, { cleared: true, loadVersion: RETURNED }) : base(url, init),
+      url === '/api/overrides' ? answer() : base(url, init),
     ) as unknown as typeof fetch;
-    await render(forced);
+  };
+  const pressed = (label: string) => button(label).getAttribute('aria-pressed') === 'true';
+
+  /** The override is still live and the form still says so: nothing to save, nothing cleared by a save. */
+  const expectStillForced = async () => {
+    expect(pressed('Force late')).toBe(true);
+    expect(pressed('Auto')).toBe(false);
+    expect(button('Save').disabled).toBe(true);
+    await type(field('ZIP'), '55803');
+    await click(button('Save'));
+    expect(posted()[0]).toMatchObject({ version: OPENED });
+    expect(posted()[0]!.stops[0]).not.toHaveProperty('override');
+  };
+
+  it('that lands ends the override in the form, leaves nothing to save, and is not sent again', async () => {
+    clearAnswers(async () => json(200, { cleared: true, loadVersion: RETURNED }));
+    await render(FORCED());
     await click(button('Clear now'));
+    expect(pressed('Auto')).toBe(true);
+    expect(text()).not.toContain('Nothing was cleared');
     expect(button('Save').disabled).toBe(true);
 
     await type(field('ZIP'), '55803');
     await click(button('Save'));
     expect(posted()[0]).toMatchObject({ version: RETURNED });
     expect(posted()[0]!.stops[0]).not.toHaveProperty('override');
+  });
+
+  it('that is refused leaves the draft as it was, and says nothing was cleared and why', async () => {
+    clearAnswers(async () => json(500, { error: 'The override failed.', reference: 'OVR-500-3AG' }));
+    await render(FORCED());
+    await click(button('Clear now'));
+    expect(text()).toContain('Nothing was cleared. The override failed. (OVR-500-3AG)');
+    await expectStillForced();
+  });
+
+  it('that is refused with no readable answer says so with the status', async () => {
+    clearAnswers(async () => new Response('<html>Bad gateway</html>', { status: 502 }));
+    await render(FORCED());
+    await click(button('Clear now'));
+    expect(text()).toContain('Nothing was cleared. The server answered 502.');
+    await expectStillForced();
+  });
+
+  it('that never answers leaves the draft as it was, says why, and rejects nothing unhandled', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      clearAnswers(async () => {
+        throw new TypeError('Failed to fetch');
+      });
+      await render(FORCED());
+      await click(button('Clear now'));
+      await settle();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(text()).toContain('Nothing was cleared. The request failed: Failed to fetch.');
+      await expectStillForced();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
   });
 });
