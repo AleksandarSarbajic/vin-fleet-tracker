@@ -56,5 +56,11 @@ export const config = {
   // `manifest.webmanifest` is fetched WITHOUT cookies (the HTML spec's default for
   // manifests), so behind the auth redirect it would always come back as the
   // login page and the PWA icons would never be read.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|ico)$).*)'],
+  //
+  // `/ocr/` (§12.128) is served WITHOUT sign-in: the scan reader's worker,
+  // core and language data, copied from npm packages — open-source files
+  // anyone can download from npm, nothing of ours and nothing secret. Behind
+  // the matcher, each of those fetches waited on the Supabase login check
+  // above. The scan itself never leaves the browser.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|ocr/|.*\\.(?:svg|png|ico)$).*)'],
 };
