@@ -5,7 +5,7 @@ import type { Line } from './lines';
 import { splitStreetCity } from './street-split';
 
 /**
- * §12.122. The five rate-confirmation layouts this fleet receives, each
+ * §12.122. The six rate-confirmation layouts this fleet receives, each
  * recognised by its labels and read by them. Pure.
  *
  * A layout is used only when EVERY label it is recognised by is present, and
@@ -20,8 +20,8 @@ import { splitStreetCity } from './street-split';
  * notes, instructions. No pattern below looks at them.
  */
 
-/** The five templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
-export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'route-blocks' | 'model';
+/** The six templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
+export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'route-blocks' | 'stop-table' | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
   'label-rows': 'label rows (PICKUP DATE / SHIPPER / CONSIGNEE)',
@@ -29,6 +29,7 @@ export const LAYOUT_NAME: Record<LayoutId, string> = {
   'pu-so-blocks': 'PU / SO blocks (Name, Address, Date)',
   'pickup-delivery-columns': 'Pickup # / Delivery # blocks (address and appointment columns)',
   'route-blocks': 'Route blocks (Pickup / Delivery, a date and “HH:MM Apt” beside each stop)',
+  'stop-table': 'a stop table (Stop, From, To, Name, City, St; two lines a stop)',
   model: 'an AI read',
 };
 
@@ -722,6 +723,237 @@ function readRouteBlocks(lines: Line[]): RateconRead {
   };
 }
 
+/* ------------------------------ Stop table (3ak) ------------------------------ */
+
+/**
+ * A "LOAD NUMBER" box at the top right of page 1, the number under it and
+ * the document's date under that; and the stops in ONE table under a
+ * two-line header:
+ *
+ *     Stop  From  To  Name     City   St   Ref      Appt
+ *                     Address  Phone  Zip  Contact  Appt Ref
+ *
+ * Each stop is two lines, and a "Notes" line may follow it:
+ *
+ *     A: <n> <PU|Del> <from date> <to date> <name> <city> <state> <ref> <Yes|No>
+ *     B: <from time> <to time> <street> <phone> <ZIP> <contact> <appt ref>
+ *
+ * The table ends at "Commodity". Later pages repeat the number as
+ * "Load No <n> - <date>"; when one disagrees with the box, the load number
+ * is blank with a check, as in the other templates. Arrives as a scan (OCR,
+ * §12.128) or as a text PDF: the same lines either way.
+ *
+ * Line A is read by COLUMN: the city and the state are the cells that start
+ * under the "City" and "St" headings, the name the cells under "Name". Before
+ * them, the stop's number, its type and its two dates are read by their
+ * shapes, so a date that OCR runs together with the name ("10/12 PRAIRIE
+ * FOODS") is still read. A name and a city in one cell are never divided:
+ * there is then no cell under "City", and nothing is read.
+ *
+ * Line B is read in order: the times, then the street up to the phone, then
+ * the ZIP, the five digits after the phone. The phone only marks where the
+ * street ends; it is never read or quoted. It may be one token or two
+ * ("(555) 010-0100", "555-010-0100", OCR's "(555)010-0100").
+ *
+ * Dates are M/D with no year: the year is the one that puts the date nearest
+ * the document's own date (the box's, else a "Load No" line's); with neither,
+ * the time is quoted as unreadable. A stop runs from its From date and time
+ * to its To date and time, and the fill's window rules decide what that is
+ * (`appointmentFrom`). The Appt column (Yes/No) is NOT read. Times are read as
+ * Route blocks reads them: 24-hour when past 12, with a leading zero, or on a
+ * 24-hour document (`documentIs24Hour`).
+ *
+ * Read by column, so it needs a PDF's positions: pasted text is not read.
+ * Strict, because a wrong stop is worse than none: a heading not in its own
+ * cell; any line in the table that is not a stop's two lines or a note; a
+ * line A with no cell under "City" or "St", or a state that is not one; a
+ * line B with no phone, no five-digit ZIP after it, or a street that does
+ * not start like one; stops not numbered 1, 2, 3…; a first stop that is not a
+ * pickup, or a last stop of several that is not a delivery; a table with no
+ * "Commodity" after it on its page — and nothing is read. Every stop must be
+ * read, or none is, and the document goes to the AI reader as before.
+ */
+const TABLE = {
+  recognise: [/^Stop\s+From\s+To\s+Name\s+City\s+St\s+Ref\s+Appt$/, /^Address\s+Phone\s+Zip\s+Contact\s+Appt\s+Ref$/],
+  /** The headings whose cells set the columns line A is read by. */
+  headings: ['Name', 'City', 'St', 'Ref', 'Appt'] as const,
+  number: /^\d{1,2}$/,
+  type: /^(PU|Del)$/,
+  date: /^(\d{1,2})\/(\d{1,2})$/,
+  clock: /^(\d{1,2}):(\d{2})$/,
+  phone: /^\(?\d{3}\)?[-.\s]?\d{3}[-.]\d{4}$/,
+  zip: /^(\d{5})(?:-\d{4})?$/,
+  boxDate: /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+  later: /^Load No\s+(\S+)\s+-\s+(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
+  id: /^[A-Za-z0-9][A-Za-z0-9-]*$/,
+  notes: /^Notes\b/,
+  end: /^Commodity\b/,
+  /** A cell starts under its heading when its x is this close to the heading's. */
+  slack: 4,
+};
+
+type DocDate = { y: number; m: number; d: number };
+
+/** M/D with no year, in the year that puts it nearest the document's date. */
+function nearestYear(m: number, d: number, doc: DocDate): string | null {
+  const at = Date.UTC(doc.y, doc.m - 1, doc.d);
+  const gap = (y: number) => Math.abs(Date.UTC(y, m - 1, d) - at);
+  const years = [doc.y - 1, doc.y, doc.y + 1].filter((y) => validDate(y, m, d));
+  if (years.length === 0) return null;
+  const y = years.reduce((a, b) => (gap(b) < gap(a) ? b : a));
+  return iso(y, m, d);
+}
+
+function tableTime(dates: [string, string], times: string[], doc: DocDate | null, hours24: boolean, source: Source): TimeRead {
+  const day = (text: string) => {
+    const m = TABLE.date.exec(text);
+    return m && doc ? nearestYear(Number(m[1]), Number(m[2]), doc) : null;
+  };
+  const clock = (text: string) => {
+    const t = TABLE.clock.exec(text);
+    const [h, mi] = t ? [Number(t[1]), Number(t[2])] : [-1, -1];
+    // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
+    return t && validClock(h, mi) && (h >= 13 || t[1]!.startsWith('0') || hours24) ? hhmm(h, mi) : null;
+  };
+  const [date, endDate] = dates.map(day) as [string | null, string | null];
+  const [time, endTime] = times.length === 2 ? (times.map(clock) as [string | null, string | null]) : [null, null];
+  if (date && endDate && time && endTime) {
+    return date === endDate && time === endTime
+      ? { kind: 'exact', date, time, flag: null, source }
+      : { kind: 'range', date, time, endDate, endTime, flag: null, source };
+  }
+  return { kind: 'unreadable', date, quoted: [...dates, ...times].join(' '), source };
+}
+
+/** The number under "LOAD NUMBER", the document's date under it, and the "Load No" lines of later pages. */
+function tableNumbers(lines: Line[]) {
+  const labels = lines.flatMap((l, i) => l.cells.filter((c) => c.text === 'LOAD NUMBER').map((c) => ({ i, x: c.x!, page: l.page })));
+  const under = (label: (typeof labels)[number], pattern: RegExp) =>
+    lines
+      .slice(label.i + 1, label.i + 5)
+      .filter((l) => l.page === label.page)
+      .flatMap((l) => l.cells.filter((c) => c.x! >= label.x - 12 && pattern.test(c.text)).map((c) => ({ text: c.text, page: l.page })))[0] ?? null;
+  const boxed = labels.flatMap((label) => {
+    const number = under(label, TABLE.id);
+    return number ? [{ value: number.text, source: { text: `LOAD NUMBER  ${number.text}`, page: number.page } }] : [];
+  });
+  const later = lines.flatMap((l) => {
+    const m = TABLE.later.exec(l.text);
+    return m ? [{ value: m[1]!, date: { y: 2000 + Number(m[4]), m: Number(m[2]), d: Number(m[3]) } }] : [];
+  });
+  const boxDate = labels.map((label) => under(label, TABLE.boxDate)).find(Boolean);
+  const b = boxDate ? TABLE.boxDate.exec(boxDate.text)! : null;
+  const date: DocDate | null = b ? { y: Number(b[3]), m: Number(b[1]), d: Number(b[2]) } : (later[0]?.date ?? null);
+
+  const distinct = new Set([...boxed, ...later].map((x) => x.value));
+  const loadNumber = boxed.length > 0 && distinct.size === 1 ? boxed[0]! : null;
+  const loadNumberCheck = loadNumber
+    ? null
+    : boxed.length === 0
+      ? 'No number under “LOAD NUMBER”.'
+      : `More than one number is under “LOAD NUMBER” or after “Load No”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`;
+  return { loadNumber, loadNumberCheck, date };
+}
+
+function readStopTable(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'stop-table', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const heads = lines.flatMap((l, i) => (TABLE.recognise[0]!.test(l.text) ? [i] : []));
+  if (heads.length !== 1) return refuse;
+  const header = lines[heads[0]!]!;
+  const second = lines[heads[0]! + 1];
+  if (!second || second.page !== header.page || !TABLE.recognise[1]!.test(second.text)) return refuse;
+  // Each heading line A is read by is its own cell (the header's pattern has them in order).
+  const xs = TABLE.headings.map((name) => header.cells.find((c) => c.text === name)?.x ?? null);
+  if (xs.some((x) => x === null)) return refuse;
+  const [nameX, cityX, stX, refX, apptX] = xs as [number, number, number, number, number];
+  const column = (cell: Line['cells'][number]) => {
+    const x = cell.x! + TABLE.slack;
+    return x < nameX ? 'lead' : x < cityX ? 'name' : x < stX ? 'city' : x < refX ? 'st' : x < apptX ? 'ref' : 'appt';
+  };
+  const under = (cell: Line['cells'][number], x: number) => Math.abs(cell.x! - x) <= TABLE.slack;
+  const words = (cells: Line['cells']) => cells.flatMap((c) => c.text.split(' ').filter((w) => w !== ''));
+
+  /** Line A: the number, type and dates by shape; the city and state by column. */
+  const lineA = (line: Line) => {
+    const [n, type, from, to, ...spill] = words(line.cells.filter((c) => column(c) === 'lead'));
+    if (!n || !TABLE.number.test(n) || !type || !TABLE.type.test(type) || !from || !TABLE.date.test(from) || !to || !TABLE.date.test(to)) return null;
+    const of = (where: string) => line.cells.filter((c) => column(c) === where);
+    const [names, cities, states] = [of('name'), of('city'), of('st')];
+    // The name: words after the To date, run into its cell, or a cell under "Name".
+    if (spill.length === 0 && !(names[0] && under(names[0], nameX))) return null;
+    if (cities.length !== 1 || !under(cities[0]!, cityX) || /\d/.test(cities[0]!.text)) return null;
+    if (states.length !== 1 || !under(states[0]!, stX)) return null;
+    const state = states[0]!.text.split(' ')[0]!;
+    if (!US.has(state)) return null;
+    return { n: Number(n), type: type as 'PU' | 'Del', dates: [from, to] as [string, string], city: cities[0]!.text, state };
+  };
+
+  /** Line B: the times, the street up to the phone, the ZIP after it. */
+  const lineB = (line: Line) => {
+    const tokens = words(line.cells);
+    let k = 0;
+    while (k < 2 && k < tokens.length && TABLE.clock.test(tokens[k]!)) k += 1;
+    let phone = -1;
+    let width = 0;
+    for (let j = k + 1; j < tokens.length && phone === -1; j += 1) {
+      if (TABLE.phone.test(tokens[j]!)) [phone, width] = [j, 1];
+      else if (j + 1 < tokens.length && TABLE.phone.test(`${tokens[j]} ${tokens[j + 1]}`)) [phone, width] = [j, 2];
+    }
+    if (phone === -1) return null;
+    const street = tokens.slice(k, phone).join(' ');
+    const zip = TABLE.zip.exec(tokens[phone + width] ?? '');
+    if (!zip || !startsLikeStreet(street)) return null;
+    return { times: tokens.slice(0, k), street, zip: zip[1]! };
+  };
+
+  type Row = NonNullable<ReturnType<typeof lineA>> & NonNullable<ReturnType<typeof lineB>> & { page: number | null };
+  const rows: Row[] = [];
+  let i = heads[0]! + 2;
+  for (;;) {
+    const line = lines[i];
+    // The table ends at "Commodity", on its own page.
+    if (!line || line.page !== header.page) return refuse;
+    if (TABLE.end.test(line.text)) break;
+    const a = lineA(line);
+    if (a) {
+      const next = lines[i + 1];
+      const b = next && next.page === line.page ? lineB(next) : null;
+      if (!b) return refuse;
+      rows.push({ ...a, ...b, page: line.page });
+      i += 2;
+      continue;
+    }
+    // A note after a stop, and the lines its text wraps onto, under that text.
+    if (rows.length > 0 && TABLE.notes.test(line.cells[0]?.text ?? '') && column(line.cells[0]!) === 'lead') {
+      const textX = line.cells[1]?.x ?? null;
+      i += 1;
+      while (textX !== null && lines[i]?.page === line.page && Math.abs(lines[i]!.cells[0]!.x! - textX) <= TABLE.slack) i += 1;
+      continue;
+    }
+    return refuse;
+  }
+  if (rows.length === 0 || rows.some((r, k) => r.n !== k + 1)) return refuse;
+  if (rows[0]!.type !== 'PU' || (rows.length > 1 && rows.at(-1)!.type !== 'Del')) return refuse;
+
+  const { loadNumber, loadNumberCheck, date } = tableNumbers(lines);
+  const hours24 = documentIs24Hour(lines.map((l, n) => ({ n, text: l.text, page: l.page })));
+  const stops: StopRead[] = rows.map((r) => {
+    const at = (text: string): Source => ({ text, page: r.page });
+    return {
+      type: { value: r.type === 'PU' ? 'PU' : 'DEL', source: at(`${r.n} ${r.type}`) },
+      typeCheck: null,
+      street: { value: r.street, source: at(r.street) },
+      city: { value: r.city, source: at(`${r.city} ${r.state}`) },
+      state: { value: r.state, source: at(`${r.city} ${r.state}`) },
+      zip: { value: r.zip, source: at(r.zip) },
+      time: tableTime(r.dates, r.times, date, hours24, at([r.dates.join(' '), r.times.join(' ')].filter(Boolean).join(' · '))),
+    };
+  });
+  return { layout: 'stop-table', loadNumber, loadNumberCheck, stops };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -730,6 +962,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'pu-so-blocks', labels: BLOCKS.recognise, read: readBlocks },
   { id: 'pickup-delivery-columns', labels: COLUMNS.recognise, read: readColumns },
   { id: 'route-blocks', labels: ROUTE.recognise, read: readRouteBlocks },
+  { id: 'stop-table', labels: TABLE.recognise, read: readStopTable },
 ];
 
 /** Which layouts have every one of their labels here. */

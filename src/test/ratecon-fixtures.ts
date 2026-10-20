@@ -409,3 +409,161 @@ export const COLUMNS_STOPS: ColumnsStop[] = [
     appt: 'FCFS',
   },
 ];
+
+export interface TableStop {
+  type: 'PU' | 'Del';
+  /** Month and day, no year, as the layout prints them: "10/12". */
+  from: string;
+  to: string;
+  /** "08:00". */
+  fromTime: string;
+  toTime: string;
+  name: string;
+  city: string;
+  state: string;
+  ref: string;
+  appt: 'Yes' | 'No';
+  street: string;
+  phone: string;
+  zip: string;
+  apptRef: string;
+  notes?: string;
+}
+
+/**
+ * Phase 3ak. A stop table: a "LOAD NUMBER" box at the top right with the
+ * number and the document's date under it; the stops in one table under a
+ * two-line header ("Stop From To Name City St Ref Appt", "Address Phone Zip
+ * Contact Appt Ref"), two lines a stop and a "Notes" line after some; then
+ * "Commodity", the rate, and a page of terms that repeats the number as
+ * "Load No <n> - <date>". The columns sit where the layout prints them. Only
+ * the printed headings are the layout's: every value is made up. ASCII only.
+ */
+export function stopTable(
+  stops: TableStop[],
+  options: { loadNumber?: string; later?: string; date?: string; laterDate?: string } = {},
+): TinyRun[][] {
+  const { loadNumber = '610042', date = '10/9/2026', laterDate = '10/9/26' } = options;
+  const later = options.later ?? loadNumber;
+  const first: TinyRun[] = [
+    run(154, 758, 'SAMPLE BROKERAGE LLC'),
+    run(487, 758, 'LOAD NUMBER'),
+    run(155, 746, 'PO BOX 100'),
+    run(506, 745, loadNumber),
+    run(155, 734, 'EXAMPLE, ND 58000'),
+    run(155, 722, 'MC: 000000 P: 555-010-0199'),
+    run(500, 722, date),
+    run(233, 700, 'DISPATCH CONFIRMATION'),
+    run(42, 680, 'Carrier:'),
+    run(78, 680, 'SAMPLE CARRIER LLC'),
+    run(299, 680, 'MCID:'),
+    run(352, 680, '000000'),
+    run(258, 650, 'Pay Code'),
+    run(357, 650, 'Pay Type'),
+    run(449, 650, 'Rate'),
+    run(510, 650, 'Total'),
+    run(258, 638, 'Load'),
+    run(357, 638, 'Flat'),
+    run(432, 638, '1,900.00'),
+    run(495, 638, '1,900.00'),
+    ...(
+      [
+        [45, 'Stop'], [98, 'From'], [126, 'To'], [156, 'Name'], [295, 'City'], [392, 'St'], [431, 'Ref'], [507, 'Appt'],
+      ] as const
+    ).map(([x, text]) => run(x, 610, text)),
+    ...([[156, 'Address'], [295, 'Phone'], [392, 'Zip'], [431, 'Contact'], [507, 'Appt Ref']] as const).map(([x, text]) => run(x, 598, text)),
+  ];
+  let y = 580;
+  for (const [i, s] of stops.entries()) {
+    first.push(
+      run(45, y, String(i + 1)),
+      run(65, y, s.type),
+      run(98, y, s.from),
+      run(127, y, s.to),
+      run(156, y, s.name),
+      run(295, y, s.city),
+      run(392, y, s.state),
+      run(431, y, s.ref),
+      run(508, y, s.appt),
+      run(97, y - 12, s.fromTime),
+      run(127, y - 12, s.toTime),
+      run(156, y - 12, s.street),
+      run(295, y - 12, s.phone),
+      run(392, y - 12, s.zip),
+      run(507, y - 12, s.apptRef),
+    );
+    if (s.notes) first.push(run(51, y - 28, 'Notes'), run(105, y - 28, s.notes));
+    y -= s.notes ? 48 : 36;
+  }
+  first.push(
+    run(45, y, 'Commodity'),
+    run(138, y, 'Description'),
+    run(377, y, 'Pieces'),
+    run(432, y, 'Weight'),
+    run(45, y - 20, 'GENERAL FREIGHT'),
+    run(432, y - 20, '20,000'),
+    run(42, y - 50, '$100 FEE FOR LATE PAPERWORK'),
+  );
+  const terms: TinyRun[] = [
+    run(42, 770, 'DISPATCH CONFIRMATION'),
+    run(525, 770, 'Page 2 of 2'),
+    run(42, 758, `Load No ${later} - ${laterDate}`),
+    run(60, 720, 'Example terms and conditions apply to this load.'),
+  ];
+  return [first, terms];
+}
+
+/** A pickup with a note, and a delivery whose phone is one token: the two-stop table. */
+export const TABLE_STOPS: TableStop[] = [
+  {
+    type: 'PU',
+    from: '10/12',
+    to: '10/12',
+    fromTime: '08:00',
+    toTime: '16:00',
+    name: 'PRAIRIE FOODS',
+    city: 'BEMIDJI',
+    state: 'MN',
+    ref: 'R-1001',
+    appt: 'No',
+    street: '4001 MAIN ST',
+    phone: '(555) 010-0100',
+    zip: '56601',
+    apptRef: 'A-1001',
+    notes: 'CLEAN DRY TRAILER REQUIRED',
+  },
+  {
+    type: 'Del',
+    from: '10/13',
+    to: '10/13',
+    fromTime: '09:00',
+    toTime: '10:30',
+    name: 'LAKESIDE DC',
+    city: 'DICKINSON',
+    state: 'ND',
+    ref: 'R-2002',
+    appt: 'Yes',
+    street: '1200 HARBOR RD',
+    phone: '555-010-0101',
+    zip: '58601',
+    apptRef: 'A-2002',
+  },
+];
+
+/** A middle stop for the three-stop table: one time, and the phone OCR runs together. */
+export const TABLE_MIDDLE: TableStop = {
+  type: 'Del',
+  from: '10/12',
+  to: '10/12',
+  fromTime: '18:00',
+  toTime: '18:00',
+  name: 'NORTH YARD',
+  city: 'WILLISTON',
+  state: 'ND',
+  ref: 'R-3003',
+  appt: 'Yes',
+  street: '77 DEPOT AVE',
+  phone: '(555)010-0102',
+  zip: '58801',
+  apptRef: 'A-3003',
+};
