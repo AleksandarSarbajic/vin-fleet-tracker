@@ -5475,6 +5475,74 @@ matcher, and nothing else is.
 **Tests:** before, 198 files and 3599 tests; after, 200 files and 3608 (+9:
 check-said 3, strip 1, middleware 4, read-scan 1).
 
+#### 3aj, second follow-up, 2026-10-20: the scan e2e test found a field by a word its neighbour's source line contains
+
+From the advisor's brief. Test and docs only: nothing under `src/` changed.
+Commits:
+
+- `8055f20`: the rate-con specs find a field by its own label word;
+- one docs commit: this section, and one sentence in design-spec §12.128
+  (`/ocr/` is served without the login check).
+
+NOT pushed, NOT deployed.
+
+**Alex's two e2e runs at `8e2a177`** (the advisor read the run folders):
+
+- `test-results/2026-10-20T16-56-50-118Z`: 247 passed, 2 failed
+  (ratecon-scan.spec.ts:124, history.spec.ts:216), 1 did not run
+  (phone-signout, which depends on the chromium project).
+- `test-results/2026-10-20T17-38-20-382Z`: 3 failed (ratecon-scan.spec.ts:124,
+  ratecon-fill.spec.ts:88, reopen-load.spec.ts:135).
+
+**The scan failure was the test's, not the app's.** ratecon-scan.spec.ts:124
+failed in both runs, the same way: `form.getByLabel('City')` was a
+strict-mode violation that resolved to ZIP, City and State. `Field.tsx`
+renders the field's check and its source line inside its `<label>` ("From
+p.1: “CITY, STATE FARGO, ND 58102”"), and `getByLabel` matches a
+case-insensitive substring of the whole label's text. The app filled the
+right values: ZIP 58102, City Fargo, State ND (the page snapshot in each
+run's `error-context.md`).
+
+**The fix** (`8055f20`). `e2e/field.ts`: `field(scope, word)` finds the
+`<label>` holding an element whose whole text is exactly the word, case and
+all, and returns its input (`fieldLabel` returns the label). Only the label
+word can match: a check starts "Check:", and a source line "From …" or "Read
+by AI …".
+
+- ratecon-scan, ratecon-fill and ratecon-ai use it for every address field
+  and the load number they found by label, and the scan spec for the one
+  label it found by `hasText`.
+- Only the lookups changed; every assertion is the same. `Field.tsx` and
+  `src/` are unchanged. The strip's own two inputs (an `aria-label`, no check
+  or source) keep `getByLabel`.
+- Checked before the run on a static copy of the failing form, in a local
+  browser: `getByLabel('City')` matched 3; `field` matched exactly 1 for
+  each of Load number, Street address, ZIP, City and State, filled and
+  empty.
+
+**The other three failures were server stalls, left unchanged.**
+history.spec.ts:216 (run 1), ratecon-fill.spec.ts:88 and
+reopen-load.spec.ts:135 (run 2). In each trace the server stopped
+answering: requests with no answer for 10–20 s (the advisor, from the
+traces). The advisor reads this as the known stall on the path to hosted
+Supabase Auth: **unverified**, as no probe was run. The tests are left as
+they are, per "The e2e flakes and the deploy gates" (Alex, 2026-10-16): no
+retries, no longer waits or timeouts, no change to how login is checked, no
+timing printout.
+
+**This follow-up's run:** `npm run e2e -- ratecon-`, once, at `8055f20`
+(`test-results/2026-10-20T18-20-10-143Z`): **7 passed** in 46.0 s (setup,
+ratecon-ai 3, ratecon-fill 1, ratecon-scan 2), none skipped or failed. Its
+build ran `copy-ocr-assets` first ("OCR assets: 5 files copied into
+public/ocr/"). It is the first browser run of the scan specs: the template
+scan read and marked (3.9 s), and the AI scan answered in the browser (5.2
+s), each with the origin check. The logged "ratecon read failed … 503" is
+ratecon-ai's planned failed second read. The full suite was not run.
+
+**Tests:** vitest unchanged at 200 files and 3608 tests (the e2e files are
+not vitest's). The e2e suite has the same tests; `e2e/field.ts` is a helper,
+not a spec.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

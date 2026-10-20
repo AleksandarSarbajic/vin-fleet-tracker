@@ -9745,7 +9745,9 @@ tesseract.js fetches its worker, its WebAssembly core and the language data
 from cdn.jsdelivr.net unless told otherwise. All three paths point at our own
 origin, `/ocr/…`. `npm run build` and `npm run dev` first copy the files out
 of `node_modules` into `public/ocr/` (`scripts/copy-ocr-assets.mts`). That
-folder is git-ignored, so nothing is committed.
+folder is git-ignored, so nothing is committed. `/ocr/` is served without
+the login check: the middleware matcher excludes `/ocr/` only, the files are
+public open-source assets, and pages and `/api/` are still checked.
 
 - The worker script is 109 KB (33 KB sent).
 - The core comes in three builds, of which the browser loads one by what its
