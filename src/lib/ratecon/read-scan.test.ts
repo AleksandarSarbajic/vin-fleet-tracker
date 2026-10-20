@@ -3,10 +3,14 @@ import { SCAN_CHECK, fillLoad } from '@/components/edit/ratecon-fill';
 import { loadFormFrom } from '@/components/edit/load-form';
 import { blankScan, nodePdfjs, nodeScanReading, scanOf, type PdfJs } from '@/test/ocr-node';
 import { LABEL_ROWS, STOPS_SECTION } from '@/test/ratecon-fixtures';
+import { replyPointedAt, unknownLayoutPages } from '@/test/scan-ai-fixtures';
 import { tinyPdf, type TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns, type Line, type TextRun } from './lines';
 import { PDF_LIMITS, PDF_MESSAGES, linesFromPdf, type ScanReading } from './read-pdf';
+import type { ReadFailCode } from './read-codes';
+import { readPair } from './read-pair';
 import { runsFromScan, type ScanProgress } from './read-scan';
+import { prepareForReading } from './redact';
 import { readRatecon, type RateconRead } from './templates';
 
 /**
@@ -192,6 +196,33 @@ describe('a scan, through linesFromPdf', () => {
           expect(stop.fill?.checks[field], field).toContain(SCAN_CHECK);
         }
       }
+    },
+    OCR,
+  );
+
+  it(
+    'the e2e’s AI scan, here in Node: no template reads it, redaction masks it as it masks the text, and its reply — pointed at what would be sent — verifies and fills, marked',
+    async () => {
+      const out = await linesFromPdf(await scanOf(tinyPdf(unknownLayoutPages()), pdfjs, 300), pdfjs, nodeScanReading());
+      if (!out.ok) throw new Error(out.message);
+      expect(out.fromScan).toBe(true);
+      expect(readRatecon(out.lines).ok).toBe(false);
+      const prepared = prepareForReading(out.lines);
+      if (!prepared.ok) throw new Error(prepared.reason);
+      expect(prepared.text).toContain('Booked by: [REMOVED]');
+      expect(prepared.text).not.toContain('dispatch@example.com');
+      const reply = replyPointedAt(prepared.text);
+      const now = new Date('2026-10-10T15:00:00.000Z');
+      const pair = readPair<ReadFailCode>({ ok: true, reply }, { ok: true, reply }, prepared.lines, now);
+      if (!pair.ok) throw new Error(pair.code);
+      const filled = fillLoad(loadFormFrom(null, now.toISOString(), null), pair.agreement.read, now.toISOString(), now, 'scan');
+      if (!filled.ok) throw new Error(filled.message);
+      expect(filled.form.loadNumber).toBe('EX-40417');
+      expect(filled.form.stops.map((s) => [s.addressLine, s.city, s.state, s.zip])).toEqual([
+        ['4001 Main St', 'Fargo', 'ND', '58102'],
+        ['220 Harbor Rd', 'Duluth', 'MN', '55802'],
+      ]);
+      expect(filled.form.stops[0]!.fill?.checks.addressLine).toBe(SCAN_CHECK);
     },
     OCR,
   );

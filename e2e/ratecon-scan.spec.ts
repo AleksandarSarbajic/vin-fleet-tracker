@@ -1,7 +1,6 @@
-import { writeFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
-import { MODEL_REPLY, UNKNOWN_LAYOUT } from '../src/test/model-read-fixtures';
 import { LABEL_ROWS } from '../src/test/ratecon-fixtures';
+import { replyPointedAt, unknownLayoutPages } from '../src/test/scan-ai-fixtures';
 import { nodePdfjs, scanOf } from '../src/test/scan-pdf';
 import { tinyPdf, type TinyRun } from '../src/test/tiny-pdf';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
@@ -9,11 +8,10 @@ import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 /**
  * §12.128. A scanned rate confirmation, read by OCR in the real browser: the
  * real modal, the browser's pdf.js drawing each page, tesseract.js from OUR
- * origin (`/ocr/…`, copied there by `npm run build`), then the same path as a
- * text PDF — a template, or Read with AI through the real route and the FAKE
- * vendor, as e2e/ratecon-ai.spec.ts runs it. Every scan is made here, in
- * memory, from invented text (`scanOf`); none is a file, and no screenshot
- * is taken.
+ * origin (`/ocr/…`, copied there by `npm run build`, served without the
+ * login check), then the same path as a text PDF — a template, or Read with
+ * AI. Every scan is made here, in memory, from invented text (`scanOf`);
+ * none is a file, and no screenshot is taken.
  *
  * Origins. The console already talks to Mapbox and to hosted Supabase, so
  * "nothing but our origin" would fail on the map, not the scan. The rule
@@ -22,18 +20,19 @@ import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
  * are seen coming from our origin, which proves the worker's own requests
  * are watched at all. Before the drop, nothing under `/ocr/` is fetched.
  *
- * The AI test makes one read. The reader allows a user three, then one a
- * minute (`LIMITS.llm`, in the server's memory), and ratecon-ai.spec.ts
- * spends three: run in the usual order, a minute has passed by then. Run
- * straight after that file, this one can be refused ("Wait a minute and try
- * again."), and the test says that is why rather than failing on a blank form.
+ * The AI test's read is answered IN THE BROWSER (`page.route`), with the
+ * route's own answer shape: it never reaches the server, so it spends none of
+ * the user's reads (three, then one a minute, `LIMITS.llm`), which
+ * ratecon-ai.spec.ts has just spent — the files run in name order, a few
+ * seconds apart (3aj follow-up). The real route and the fake vendor are that
+ * file's to prove. This one proves the browser's half on a scan: its own OCR
+ * text, the redaction, exactly what leaves the page, and the fill. The same
+ * reply against the same scan is checked in Node (`read-scan.test.ts`).
  *
- * NEEDS, for the AI test only, the e2e server started as `npm run e2e`
- * starts it (LLM_READER_ENABLED=true, LLM_READER_VENDOR=fake,
- * LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json).
+ * NEEDS, for the AI test only, the server to offer Read with AI, as
+ * `npm run e2e` starts it (LLM_READER_ENABLED=true, a vendor).
  */
 
-const FAKE_SCRIPT = 'e2e/.fake-reader.json';
 const TRUCK = TRUCK_NUMBERS.chicago;
 /** The first scan fetches about 4.3 MB and starts a WebAssembly engine before its first page. */
 const FIRST_SCAN = 90_000;
@@ -70,7 +69,6 @@ async function openNewLoad(page: Page, context: BrowserContext) {
   await db(async (sql) => {
     await sql`delete from stops where load_id = ${IDS.loadChicago}`;
     await sql`delete from loads where id = ${IDS.loadChicago}`;
-    await sql`delete from ratecon_ai_reads`;
   });
   const requests = watch(context);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -135,47 +133,6 @@ test('a scan is read by OCR from our own origin, with its progress shown, and fi
   expectOnlyKnownOrigins(page, requests, droppedAt);
 });
 
-/** The invented unknown layout as a page of a PDF: each line's cells where `pdfLine` put them, a line every 14 points. */
-function unknownLayoutPages(): TinyRun[][] {
-  const pages = new Map<number, TinyRun[]>();
-  for (const line of UNKNOWN_LAYOUT) {
-    const runs = pages.get(line.page!) ?? [];
-    const y = 740 - 14 * new Set(runs.map((r) => r.y)).size;
-    for (const cell of line.cells) runs.push({ x: cell.x!, y, text: cell.text });
-    pages.set(line.page!, runs);
-  }
-  return [...pages.keys()].sort().map((n) => pages.get(n)!);
-}
-
-/**
- * The scripted reply, its quotes pointed at the lines the browser's OCR is
- * about to send — read from "Show what is sent", so the reply verifies
- * against exactly that text. A quote the OCR did not give back fails here,
- * naming it: that is an OCR miss on this page, not the reader's.
- */
-function replyFor(sent: string): typeof MODEL_REPLY {
-  const lines = sent.split('\n').flatMap((l) => {
-    const m = /^L(\d+) (.*)$/.exec(l);
-    return m ? [{ n: Number(m[1]), text: m[2]! }] : [];
-  });
-  const point = (quote: { line: number; text: string }) => {
-    const at = lines.filter((l) => l.text.includes(quote.text));
-    if (at.length === 0) throw new Error(`The scan's OCR sent no line with “${quote.text}”.`);
-    const nearest = at.reduce((a, b) => (Math.abs(a.n - quote.line) <= Math.abs(b.n - quote.line) ? a : b));
-    return { line: nearest.n, text: quote.text };
-  };
-  const walk = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(walk);
-    if (value && typeof value === 'object') {
-      const o = value as Record<string, unknown>;
-      if (typeof o.line === 'number' && typeof o.text === 'string') return point(o as { line: number; text: string });
-      return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, walk(v)]));
-    }
-    return value;
-  };
-  return walk(MODEL_REPLY) as typeof MODEL_REPLY;
-}
-
 test('a scan no template reads goes to Read with AI as any template miss does, the redaction unchanged, and what it fills is marked Check', async ({
   page,
   context,
@@ -187,7 +144,7 @@ test('a scan no template reads goes to Read with AI as any template miss does, t
   await expect(strip.locator('[data-ratecon-scan]')).toHaveText('Read from a scan, by OCR in this browser: every field it fills is marked Check.');
   test.skip(
     !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
-    'The e2e server runs with the reader off. Start it with LLM_READER_ENABLED=true, LLM_READER_VENDOR=fake, LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json.',
+    'The e2e server runs with the reader off. Start it as `npm run e2e` does (LLM_READER_ENABLED=true, a vendor).',
   );
 
   await strip.locator('[data-ratecon-sent] summary').click();
@@ -195,20 +152,29 @@ test('a scan no template reads goes to Read with AI as any template miss does, t
   // The same redaction as for text: the labelled name and the email do not go.
   expect(sent).toContain('Booked by: [REMOVED]');
   expect(sent).not.toContain('dispatch@example.com');
-  const reply = replyFor(sent);
-  writeFileSync(FAKE_SCRIPT, JSON.stringify([0, 1].map(() => ({ reply, usage: { inputTokens: 3200, outputTokens: 540 } }))));
 
+  // The read, answered here as the route answers: a pair, both the scripted reply pointed at this OCR's lines.
+  const reply = replyPointedAt(sent);
+  const bodies: { redactionVersion?: unknown; lines: Record<string, unknown>[] }[] = [];
+  await page.route('**/api/ratecon/read', async (route) => {
+    bodies.push(route.request().postDataJSON() as (typeof bodies)[number]);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, reads: [reply, reply] }) });
+  });
   await strip.getByRole('button', { name: 'Read with AI' }).click();
-  const answered = strip.locator('[data-ratecon-said]').filter({ hasText: /Filled|did not complete|Wait a minute/ });
-  await expect(answered).toBeVisible({ timeout: 20_000 });
-  expect(
-    await answered.textContent(),
-    'the reader’s per-user limit (three, then one a minute) was spent by ratecon-ai.spec.ts less than a minute ago',
-  ).not.toContain('Wait a minute');
   await expect(strip.locator('[data-ratecon-said]')).toHaveText(
     'Filled 2 stops, read by AI from a scan: every field is marked Check. Check each stop against its quote and the PDF, then press Looks right. Nothing is saved until Save.',
     { timeout: 20_000 },
   );
+
+  // What left the page is exactly "Show what is sent": numbered lines, no pages, no positions.
+  expect(bodies).toHaveLength(1);
+  const shown = sent.split('\n').flatMap((l) => {
+    const m = /^L(\d+) (.*)$/.exec(l);
+    return m ? [{ n: Number(m[1]), text: m[2]! }] : [];
+  });
+  expect(bodies[0]!.lines).toEqual(shown);
+  expect(typeof bodies[0]!.redactionVersion).toBe('string');
+
   await expect(editModal(page).getByLabel('Load number')).toHaveValue('EX-40417');
   const form = stopForm(page);
   await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
