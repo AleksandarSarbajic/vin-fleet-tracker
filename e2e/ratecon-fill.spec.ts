@@ -3,6 +3,7 @@ import { normalizeAddress } from '../src/lib/address';
 import { CHAIN_VERSION } from '../src/server/geocode';
 import { PU_SO, puSoBlocks } from '../src/test/ratecon-fixtures';
 import { tinyPdf } from '../src/test/tiny-pdf';
+import { field } from './field';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -71,14 +72,14 @@ test('an invented rate confirmation PDF fills a new load in the browser, and sav
     { timeout: 20_000 },
   );
 
-  await expect(editModal(page).getByLabel('Load number')).toHaveValue('88123');
+  await expect(field(editModal(page), 'Load number')).toHaveValue('88123');
   const form = stopForm(page);
-  await expect(form.getByLabel('City')).toHaveValue('Fargo');
-  await expect(form.getByLabel('ZIP')).toHaveValue('58102');
+  await expect(field(form, 'City')).toHaveValue('Fargo');
+  await expect(field(form, 'ZIP')).toHaveValue('58102');
   await expect(form.locator('[data-field-source]').first()).toContainText('From p.1:');
   await expect(editModal(page).getByRole('tab')).toHaveCount(2);
   await editModal(page).getByRole('tab').nth(1).click();
-  await expect(form.getByLabel('City')).toHaveValue('Dickinson');
+  await expect(field(form, 'City')).toHaveValue('Dickinson');
   await expect(form.locator('[data-appointment-check]')).toContainText('filled as FCFS receiving hours');
   await expect(editModal(page)).toContainText('Unsaved changes');
 

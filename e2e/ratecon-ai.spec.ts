@@ -3,6 +3,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { normalizeAddress } from '../src/lib/address';
 import { CHAIN_VERSION } from '../src/server/geocode';
 import { MODEL_REPLY, UNKNOWN_LAYOUT } from '../src/test/model-read-fixtures';
+import { field } from './field';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -119,9 +120,9 @@ test('after a template miss, Read with AI makes a PAIR through the route and the
   await expect(strip.locator('[data-ratecon-said]')).toHaveText(
     'Filled 2 stops, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.',
   );
-  await expect(editModal(page).getByLabel('Load number')).toHaveValue('EX-40417');
+  await expect(field(editModal(page), 'Load number')).toHaveValue('EX-40417');
   const form = stopForm(page);
-  await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
+  await expect(field(form, 'Street address')).toHaveValue('4001 Main St');
   await expect(form.locator('[data-field-ai]').first()).toContainText('Read by AI from the pasted text');
   await expect(strip.locator('[data-ai-to-confirm]')).toHaveText('2 stops read by AI to confirm');
 
@@ -184,8 +185,8 @@ test('a pair whose second read fails fills nothing, says the AI read did not com
     'The AI read did not complete. The AI reader is not available right now. Nothing was filled.',
   );
   // Read A answered and stood; it is not used.
-  await expect(editModal(page).getByLabel('Load number')).toHaveValue('');
-  await expect(stopForm(page).getByLabel('Street address')).toHaveValue('');
+  await expect(field(editModal(page), 'Load number')).toHaveValue('');
+  await expect(field(stopForm(page), 'Street address')).toHaveValue('');
   await expect(strip.getByRole('button', { name: 'Read with AI' })).toBeVisible();
 
   const rows = await db((sql) => sql<{ outcome: string; input_tokens: number }[]>`select outcome, input_tokens from ratecon_ai_reads`);
@@ -200,7 +201,7 @@ test('a pair whose reads differ fills what both said, blanks and marks what they
 
   await expect(strip.locator('[data-ratecon-notice]')).toHaveText('The two AI reads differed on 1 field; each is left blank and marked.');
   const form = stopForm(page);
-  await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
-  await expect(form.getByLabel('ZIP')).toHaveValue('');
+  await expect(field(form, 'Street address')).toHaveValue('4001 Main St');
+  await expect(field(form, 'ZIP')).toHaveValue('');
   await expect(form.getByText('The two AI reads differed. Enter it by hand.')).toBeVisible();
 });

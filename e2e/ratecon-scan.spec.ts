@@ -3,6 +3,7 @@ import { LABEL_ROWS } from '../src/test/ratecon-fixtures';
 import { replyPointedAt, unknownLayoutPages } from '../src/test/scan-ai-fixtures';
 import { nodePdfjs, scanOf } from '../src/test/scan-pdf';
 import { tinyPdf, type TinyRun } from '../src/test/tiny-pdf';
+import { field, fieldLabel } from './field';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -118,11 +119,11 @@ test('a scan is read by OCR from our own origin, with its progress shown, and fi
     { timeout: FIRST_SCAN },
   );
 
-  await expect(editModal(page).getByLabel('Load number')).toHaveValue('550123');
+  await expect(field(editModal(page), 'Load number')).toHaveValue('550123');
   const form = stopForm(page);
-  await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
-  await expect(form.getByLabel('City')).toHaveValue('Fargo');
-  await expect(form.getByLabel('ZIP')).toHaveValue('58102');
+  await expect(field(form, 'Street address')).toHaveValue('4001 Main St');
+  await expect(field(form, 'City')).toHaveValue('Fargo');
+  await expect(field(form, 'ZIP')).toHaveValue('58102');
   for (const check of await form.locator('[data-field-check]').all()) await expect(check).toContainText('read from a scan');
   await expect(form.locator('[data-field-check]')).toHaveCount(4);
   await expect(form.locator('[data-appointment-check]')).toContainText('Check: read from a scan');
@@ -175,10 +176,10 @@ test('a scan no template reads goes to Read with AI as any template miss does, t
   expect(bodies[0]!.lines).toEqual(shown);
   expect(typeof bodies[0]!.redactionVersion).toBe('string');
 
-  await expect(editModal(page).getByLabel('Load number')).toHaveValue('EX-40417');
+  await expect(field(editModal(page), 'Load number')).toHaveValue('EX-40417');
   const form = stopForm(page);
-  await expect(form.getByLabel('Street address')).toHaveValue('4001 Main St');
-  await expect(form.locator('label', { hasText: 'Street address' }).locator('[data-field-check]')).toContainText('read from a scan');
+  await expect(field(form, 'Street address')).toHaveValue('4001 Main St');
+  await expect(fieldLabel(form, 'Street address').locator('[data-field-check]')).toContainText('read from a scan');
   await expect(strip.locator('[data-ai-to-confirm]')).toHaveText('2 stops read by AI to confirm');
 
   expectOnlyKnownOrigins(page, requests, droppedAt);
