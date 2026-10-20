@@ -5397,6 +5397,84 @@ not run, because this brief allows no hosted database.
    invented layouts? A real comparison needs Alex to look at the filled forms
    for the three scans.
 
+**Alex's answers (2026-10-20):** not now, to all four: no page cap, no
+change to "Looks right", no outcome migration, no change of page
+segmentation.
+
+#### Addendum, 2026-10-20: the advisor's review, before e2e
+
+From the advisor's review of 3aj. Commits:
+
+- `6c4c89e`: "Check:" said once;
+- `0564527`: `/ocr/` served without the login check;
+- `06f8cca`: the scan spec's AI read answered in the browser;
+- one docs commit: this addendum.
+
+NOT pushed, NOT deployed, e2e still NOT run. Each commit passed `npm run
+check` on its own content.
+
+**1. The scan spec's AI test would have failed** (`06f8cca`). The e2e files
+run one at a time in name order. ratecon-ai.spec.ts spends the user's three
+reads, and ratecon-fill.spec.ts is one test of about 6 s. So the scan spec's
+AI read came 10–30 s later, not a minute, and would have been refused ("Wait
+a minute and try again."). This corrects item 8 above, which said a minute
+would have passed. No retries or longer waits (Alex, 2026-10-16), and the
+reader's limits are unchanged.
+
+- **Kept, not dropped.** `ratecon-scan.test.tsx` proves the strip marks an
+  AI fill from a scan, but on lines it is handed. Only this e2e puts the
+  browser's own OCR text through the redaction, the request and the
+  verifier.
+- **How.** Its read is now answered inside the browser (`page.route`, in the
+  route's answer shape, `{ ok: true, reads: [reply, reply] }`), so it never
+  reaches the server or the per-user limit. The real route and the fake
+  vendor stay ratecon-ai.spec.ts's to prove.
+- **New check.** What leaves the page must equal "Show what is sent":
+  numbered lines, no pages, no positions.
+- **Unchanged:** the template-scan test and the other-origin check.
+- **Pinned in Node.** The scan layout and the reply-pointing moved to
+  `src/test/scan-ai-fixtures.ts`. `read-scan.test.ts` (+1) runs the same scan
+  through OCR in Node: no template reads it, the masks are the same, and the
+  pointed reply verifies, agrees, and fills with every field marked. Every
+  quote of the reply was found in Node's OCR text. In the browser it is
+  unverified until the e2e runs.
+
+**2. `/ocr/` is served without sign-in** (`0564527`). Before this, every fetch
+of `/ocr/…` (the worker, the core, the language data: about 4.3 MB on a first
+scan) ran the middleware's Supabase `getUser()`. That was slower, and exposed
+to the auth stalls 3ae measured. `/ocr/` is now left out of the middleware's
+matcher, and nothing else is.
+
+- **Why that is safe.** The files are byte-for-byte copies of three public
+  npm packages (tesseract.js, tesseract.js-core, @tesseract.js-data/eng):
+  open-source code and language data that anyone can download from npm. They
+  hold nothing of ours and nothing secret. No document, no data and no route
+  handler is under `/ocr/`, and a scan never leaves the browser. A signed-out
+  visitor can now fetch those files, and nothing more.
+- **Still checked:** pages and `/api/` (including `/api/ocr/…`), and a path
+  that only starts with "ocr" (`/ocr`, `/ocrx`).
+- **Test** (`middleware.test.ts`, 4): the matcher compiled by Next's own
+  `getMiddlewareMatchers`, as the build compiles it. That function is
+  internal: exported by Next 15.5's build, not by its types. If a later Next
+  drops it, the test fails at load. Without the change, the `/ocr/` test
+  fails.
+- Not in design-spec §12.128 (this brief allowed HANDOFF only).
+
+**3. "Check: Check:"** (`6c4c89e`). This was found in 3aj and listed under
+"Found in the design, not changed"; it is fixed now. `ZIP_NOT_REAL` carries
+"Check:", and `Field` added it again.
+
+- **The fix.** `checkSaid()` (`src/components/edit/check-said.ts`) adds
+  "Check: " unless the message starts with it. `Field` and the stop type's
+  check in `StopForm`, the two places that prefix, both use it. No message
+  text changed.
+- **Tests:** `check-said.test.ts` (3); `ratecon-strip.test.tsx` (+1): a
+  placeholder ZIP's check reads "Check: the PDF's ZIP…" once. On the
+  previous `Field` it fails with "Check: Check: …".
+
+**Tests:** before, 198 files and 3599 tests; after, 200 files and 3608 (+9:
+check-said 3, strip 1, middleware 4, read-scan 1).
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
