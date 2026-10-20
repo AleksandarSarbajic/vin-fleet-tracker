@@ -984,7 +984,7 @@ templates meet. Appointments are scored as `ratecon:score` scores them.
      fake; 2b, the Anthropic adapter, tried only on invented text.
 3. **Real-sample evaluation,** as §8.2, under its own approval. The result
    decides whether the flag goes on.
-4. **OCR for scans.**
+4. **OCR for scans.** Built in phase 3aj (`design-spec.md` §12.128).
    - **The interface, and nothing more is designed:**
      `linesFromScan(file): Promise<PdfOutcome>`, in the browser, yielding
      `Line[]` with pages and positions. Scans then take the same path:
@@ -994,6 +994,10 @@ templates meet. Appointments are scored as `ratecon:score` scores them.
    - **The limit to know now:** quotes verify against the OCR text as sent,
      not against the paper. An OCR error that the model faithfully quotes
      will verify. Everything stays marked Check.
+   - **As built (3aj):** the scan path sits inside `linesFromPdf`, which
+     reads a scan when given a `ScanReading`, so a file is opened and its
+     limits checked once; `linesFromScan(doc, engine)` reads the pages. Every
+     field filled from a scan, template or AI, is marked Check.
 
 ## 10. Open questions, and what I think is a bad idea
 

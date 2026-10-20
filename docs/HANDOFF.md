@@ -5116,6 +5116,287 @@ left as written, because this brief allows nothing else in the file
    confirmed. The modal does not show it (it opens the confirm), and there is
    no other caller. Reword it?
 
+**Answered (the advisor, 2026-10-19; recorded in 3aj):**
+
+1. The assignment board's batch save stays as it is. It sends only the rows
+   changed on that screen, and the board is its own confirmation.
+2. §12.127 gets a one-line fix. Done in 3aj: the sentence now says the
+   server *then* needed no token, and that since 3ai every change of driver
+   needs one.
+3. `StalePreviewError`'s wording stays.
+
+### Phase 3aj: scanned rate confirmations are read by OCR in the browser (2026-10-20)
+
+From the advisor's brief. Alex approved building it (2026-10-20). It is
+phase 4 of `llm-reader-design.md` §9, designed there as an interface only.
+design-spec §12.128 is the full rule. No migration. Commits:
+
+- `d9ea9d0`: the OCR core, its runs, the limits, self-hosting, and their tests;
+- `737e1ec`: the strip, progress and Cancel, and the Check marks;
+- `dcb11b0`: the e2e spec (written, NOT run);
+- `cc410e3`: `npm run ratecon:scan-report`;
+- one docs commit: this section, §12.128, §12.122, §12.127 and
+  llm-reader-design §9.
+
+NOT pushed, NOT deployed. Each commit passed `npm run check` on its own
+content: the working tree was set to exactly that commit's files before it
+was made, and the pre-commit hook ran the check.
+
+**Why.** A PDF with under 40 characters of text was refused ("This is a
+scan; there's no text to read."), and Alex typed those loads by hand. Counted
+here (29 samples): 3 scans, samples 3, 5 and 6. That matches the advisor's
+3 (of 28 then).
+
+**1. The engine** (`read-pdf.ts`, `read-scan.ts`, `ocr-engine.ts`,
+`ocr-browser.ts`):
+
+- `linesFromPdf(bytes, pdfjs, scan?)`. When the text layer is under
+  `PDF_LIMITS.minText` and a `ScanReading` is given, each page is drawn with
+  the pdf.js that opened the file and read by OCR. Pages are drawn at
+  300 dpi, held under 16 MP and 4096 px a side.
+- The limits are checked first, as before.
+- OCR reading under 40 characters is refused with "This is a scan, and no
+  text could be read from it. Type the load from the PDF." An engine that
+  will not start is refused with "This is a scan, and the scan reader did not
+  work, so nothing was read. Type the load from the PDF."
+- No `ScanReading` (the local scripts): refused as before.
+- `PdfOutcome` gains `fromScan`.
+- tesseract.js 7.0.0, English LSTM (`4.0.0_best_int`), automatic page
+  segmentation, the same settings in the browser and in Node.
+- A Cancel rejects the page being read at once. A terminated tesseract.js
+  worker never settles the page it was reading; without this, a cancelled
+  read hung and kept the pdf.js document open.
+- **The interface differs from §9's sketch** (`linesFromScan(file)`): the
+  scan path sits inside `linesFromPdf`, so a file is opened and its limits
+  checked once.
+
+**2. Positions** (`ocr-runs.ts`). OCR's word boxes are turned into the runs
+pdf.js gives: PDF units, origin bottom-left, y up, through the page's
+`viewport.convertToPdfPoint`. Then `linesFromRuns` runs unchanged.
+
+- **The run rule.** A gap wider than about one capital's height
+  (`CELL_GAP` = 0.97) starts a new run. That mirrors pdf.js's own
+  `SPACE_IN_FLOW_MAX_FACTOR` (0.6 em between advances). The first rule tried
+  was a median letter height, and it split runs at ordinary word spaces.
+- **Another row.** A word whose top AND bottom are both off its line's
+  baseline by more than half a capital, the same way, keeps its own row.
+  Tried first: per-glyph boxes (wrong on skewed pages, where the LSTM's
+  glyph boxes are approximations) and the top alone (fooled by a word the
+  engine boxed 57 px tall).
+- **Deskew.** The median slope of lines of three or more words is turned
+  back when it is 0.1° or more.
+- **The twin test, and its tolerance.** An invented PDF with a text layer
+  is scanned in memory (300 dpi, JPEG) and OCR'd. The Stops section (2
+  pages) and label rows give the same lines and cells, text equal with
+  whitespace removed, and the same template read with the same values.
+  Every run's start is within **2 PDF units (0.7 mm)** in x and y.
+  Measured: **0.76 in x, 0.24 in y**. Whitespace is removed because pdf.js
+  joins two touching runs with no space ("07:00 -Tuesday") where OCR sees
+  one.
+- **Skew.** Scanned 1° askew: the same lines (text) and the same read.
+  Cells can split.
+- **All five invented layouts, at 0°, 1°, −1.5° and 2.5° skew** (scratch
+  runs, not in the suite):
+  - every OCR'd document has the same line count as its text layer;
+  - four of five layouts read by their template at every angle;
+  - Pickup # / Delivery # columns never reads: its fixture draws "Driver
+    Instructions:" over its own value (the label ends past the value's x), so
+    on paper the two are garbled. That is the fixture, not OCR; it was not
+    changed;
+  - other misreads seen on the fixtures: "Load" as "|oad", "PRAIRIE7" as
+    "PRAIRIE?", "lbs" as "Ibs" (at 200 dpi also "PU 1" as "PU1", "SO 2" as
+    "S02").
+- **Page segmentation.** Automatic (PSM 3) was kept. Sparse text (PSM 11)
+  read sample 6 by the PU / SO template, which PSM 3 does not, and gave
+  equal or higher confidence on the 3 scans. But on the invented layouts it
+  dropped colons ("Address:" read as "Address") and broke the PU / SO and
+  Route reads, 14 to 39 lines differing against 8 to 10. Counts only;
+  question 4.
+
+**3. The same path after OCR.** The OCR lines go through `take` as text
+lines do: templates, then Read with AI on a miss. The redaction is
+unchanged (`redact-2026-10-14.5`), and so are the templates, prompt, model,
+verifier and caps. Only text is sent.
+
+**4. Everything from a scan is marked Check** (`ratecon-fill.ts`,
+`SCAN_CHECK`):
+
+- "read from a scan; OCR can misread it. Check it against the PDF." goes on
+  every field filled or left blank with a reason, template or AI, after the
+  field's own check, and on the load number when filled or explained.
+- The strip: "Filled 2 stops from …, read from a scan: every field is marked
+  Check." For an AI read: "…read by AI from a scan…". Beside Read with AI:
+  "Read from a scan, by OCR in this browser: every field it fills is marked
+  Check."
+- "Looks right" clears the AI's marks, not the scan's, so a two-stop scan
+  starts at 13 fields to check (question 2).
+- The outcome recorded after an AI read's save is unchanged (same fields,
+  same blanks; tested). "From a scan" is not recorded (question 3).
+
+**5. While reading** (`RateconStrip.tsx`):
+
+- "Reading the scan — starting the reader…", then "Reading the scan — page
+  2 of 3", with a Cancel. The Cancel was not in the brief; it is one button
+  on the abort a closed modal needs anyway.
+- The modal is never blocked. Typing folds the strip, but the read stays on
+  it.
+- A newer file, Cancel or closing the modal stops the read, and what it
+  would have read is dropped.
+- **Found and fixed:** a read that lands seconds later filled through the
+  `onFill` captured at the drop, which held the form as it was then.
+  Anything changed meanwhile (a driver, the status) would have been
+  overwritten. The AI read had the same shape since 3m, so it was fixed once,
+  in the strip's shared `fill`, which now calls the modal's latest `onFill`.
+  Replace or Keep mine is now decided when the read lands, not at the drop.
+  - **Mutations:** filling through the captured `onFill` fails 1 test;
+    deciding Replace at the drop fails 1.
+  - **Not tested:** the AI path's own case; it goes through the same `fill`.
+
+**6. Self-hosted, loaded only for a scan** (`ocr-assets.ts`,
+`scripts/ocr-assets.mts`, `scripts/copy-ocr-assets.mts`):
+
+- `workerPath`, `corePath` and `langPath` are absolute URLs on the page's
+  origin, under `/ocr/`, and `workerBlobURL` is off.
+- `npm run build` and `npm run dev` run the copy first: written into the
+  scripts themselves, not as `pre*` hooks, which npm's `ignore-scripts`
+  skips. It copies the worker, the three LSTM core builds and the language
+  data from `node_modules` into `public/ocr/` (git-ignored). No binary is
+  committed.
+- The language data may be kept in IndexedDB under `ocr-eng-4.0.0_best_int`.
+- `ocr-assets.test.ts` (13) fails if:
+  - any configured path is not same-origin (three origins);
+  - tesseract.js's source holds a CDN default other than the three we set;
+  - the served worker script holds other CDN URLs;
+  - the browser engine is created with anything else;
+  - a core build the worker can ask for is not served;
+  - the copy differs from `node_modules`;
+  - `public/ocr/` is not git-ignored;
+  - anything imports tesseract.js, `ocr-engine` or `ocr-browser` eagerly.
+- **Sizes:** worker 109 KB (33 KB gzipped); each core build about 3.8 MB
+  (1.4 MB gzipped); language data 2.9 MB (already gzip). **A first scan
+  fetches about 4.3 MB.**
+
+**7. Tests.** Invented data only. Scanned PDFs are built at test time
+(`tinyScanPdf`, `scan-pdf.ts`). @napi-rs/canvas draws pages in Node.
+
+| File | Tests | What |
+|---|---|---|
+| `ocr-runs.test.ts` | 10 | invented boxes |
+| `read-scan.test.ts` | 12 | real pdf.js, canvas and tesseract.js; about 7–10 s of the run |
+| `ocr-assets.test.ts` | 13 | same-origin, eager imports |
+| `ratecon-fill.test.ts` | +5 | the marks |
+| `ratecon-scan.test.tsx` | 11 | the modal |
+
+Covered: a scan read and filled with every field marked; a scan OCR cannot
+read; a text PDF unchanged, with no OCR started; the limits unchanged and
+checked before OCR; the twin test; the same-origin test.
+
+- **Mutations** (each restored and checked with diff):
+
+  | broken | tests that fail |
+  |---|---|
+  | no deskew | 1 |
+  | one edge enough for "another row" | 1 |
+  | every word on its line's baseline | 1 |
+  | `CELL_GAP` 0.45 | 7, the twins among them |
+  | no mid-page stop | 1 |
+
+- **Test counts:** before, 194 files and 3548 tests (3ai); after, **198
+  files and 3599 tests**.
+
+**8. e2e** (`e2e/ratecon-scan.spec.ts`, 2 tests). **Written, NOT run**;
+Alex runs it before the push.
+
+- A label-rows scan is filled and marked, with progress shown.
+- An unknown-layout scan goes to Read with AI with the fake vendor. Its
+  scripted reply is pointed at the lines "Show what is sent" holds, so it
+  verifies against the browser's own OCR text.
+- **Origins:** the console already talks to Mapbox and hosted Supabase. The
+  rule held is: no request during the read goes to an origin the page had
+  not used before the drop, nor to a CDN. The `/ocr/` files must be seen
+  coming from our origin, which proves the worker's requests are watched.
+  Nothing under `/ocr/` is fetched before the drop.
+- **The reader's limit:** three reads per user, then one a minute, in the
+  server's memory. ratecon-ai.spec.ts spends three. If the two specs run
+  within a minute, the AI test fails saying so.
+
+**9. Local evaluation** (`npm run ratecon:scan-report`). This Mac, no
+network, counts only, nothing printed but numbers.
+
+| sample | pages | OCR ms per page | chars | lines | template | prepared | lines sent |
+|---|---|---|---|---|---|---|---|
+| 3 | 3 | 3419 / 1287 / 3046 | 6263 | 120 | not recognised | yes | 75 |
+| 5 | 3 | 1428 / 3714 / 395 | 5233 | 90 | not recognised | yes | 85 |
+| 6 | 2 | 2917 / 1476 | 3989 | 78 | not recognised | yes | 78 |
+
+- Read with AI would be offered for all three. Nothing was sent.
+- **First-scan cost:** about 4.3 MB from our origin. Starting the engine in
+  Node from disk took 96 ms; in a browser it was not measured.
+- tesseract's mean confidence was 91–95 per page.
+
+**Packages** (npm registry; exact versions):
+
+| Package | Version | Licence | Where |
+|---|---|---|---|
+| `tesseract.js` | 7.0.0 | Apache-2.0 | brings `tesseract.js-core` 7.0.0 (Apache-2.0) and small helpers: `bmp-js`, `idb-keyval`, `is-url`, `node-fetch`, `opencollective-postinstall`, `regenerator-runtime`, `wasm-feature-detect`, `zlibjs` |
+| `@tesseract.js-data/eng` | 1.0.0 | MIT | the language data |
+| `@napi-rs/canvas` | 0.1.100 | MIT | devDependency; already installed as pdf.js's optional dependency |
+
+npm 11 did not run tesseract.js's `postinstall` (an opencollective notice)
+under its install-scripts policy.
+
+**Found in the design, not changed:**
+
+- `ZIP_NOT_REAL` starts with "Check:", and `Field` adds "Check: " itself, so
+  a placeholder ZIP shows "Check: Check: the PDF's ZIP…" (§12.122). Seen
+  while writing the scan marks.
+- The Pickup / Delivery columns fixture draws a label over its own value
+  (above).
+
+**Unverified:**
+
+- **The build.** A local `next build` was not run: it fetches Google Fonts,
+  and Sentry's build plugin sends telemetry, both network.
+  - So tesseract.js in the client bundle, webpack's handling of its
+    CommonJS entry, and the copy into `public/ocr/` under the real build are
+    proved first by the e2e run, which builds with `npm run build`.
+  - Vercel running `npm run build` (the script, so the copy) rather than
+    `next build` directly is assumed, from its usual default, and unchecked
+    (no network here). If it does not, `/ocr/` 404s, and a scan says "the
+    scan reader did not work".
+- **OCR in a real browser:** no timing, no first-scan download measured,
+  and the progress text was not seen.
+- **Playwright and the worker's requests:** whether `context.on('request')`
+  sees requests made inside a dedicated worker. The e2e asserts it does
+  (`/ocr/core/…` and `/ocr/lang/…` must appear), so a miss fails loudly.
+- **Determinism elsewhere:** the twin's exact OCR text was measured on this
+  Mac only. Another CPU or Skia build could misread a character and fail it.
+- **The 3 real scans:** whether the misses are layout or OCR error. Reading
+  the text would answer it, and nothing was printed.
+- Skew beyond 2.5°, a page turned 90°, handwriting, photos: not tried.
+
+**Not done** (the brief's scope): no change to redaction, templates,
+prompt, model, verifier, caps, the outcome schema, the status engine or the
+modal's save logic. No Content-Security-Policy. No push, deploy, e2e,
+hosted database or paid call. The advisor's working-day "burst query" was
+not run, because this brief allows no hosted database.
+
+**Questions for Alex (not decided here):**
+
+1. **A page cap for scans.** None below the 10-page limit. Here a page is
+   0.4–3.7 s. On a slower office PC it may be several times that, so a
+   10-page scan could take a minute. Cap scans (say, the first 3 pages), or
+   leave it?
+2. **"Looks right" and the scan marks.** A scan's marks stay until each
+   field is edited, so a two-stop scan starts at 13 fields to check. Should
+   "Looks right" on a stop also clear its scan marks?
+3. **Record "from a scan" in the outcome counts?** It would need a
+   migration (a column on `ratecon_ai_outcomes` or the counts row). Not done.
+4. **Page segmentation.** Keep automatic (PSM 3), or try sparse text
+   (PSM 11), which read sample 6 by template but loses colons on the
+   invented layouts? A real comparison needs Alex to look at the filled forms
+   for the three scans.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

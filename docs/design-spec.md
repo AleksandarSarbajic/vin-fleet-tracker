@@ -9191,8 +9191,9 @@ and no message quotes it: a parse error is named, never repeated.
 
 Refused, in words: a file whose first bytes are not `%PDF-` (the name and
 the browser's type are not evidence), more than 5 MB, more than 10 pages, a
-password, a damaged file — and a PDF with next to no text (under 40
-characters): "This is a scan; there's no text to read." No OCR.
+password, a damaged file. A PDF with next to no text (under 40 characters)
+is a scan, read by OCR in the browser since phase 3aj (§12.128); until then
+it was refused: "This is a scan; there's no text to read."
 
 ### Three layouts, recognised by their labels
 
@@ -9635,8 +9636,9 @@ against the form's baseline.
 That baseline was the console's `drivers` list, which is rendered with the
 page and not refreshed by a save. After a warned save that reassigned the
 truck, the new editor showed the driver before. Its next save sent that
-driver back with no confirm: the server needs no preview token when the
-driver is on no other truck (§9.10). Now, when there is a read, the baseline
+driver back with no confirm: the server then needed no preview token when
+the driver was on no other truck (§9.10; since phase 3ai every change of
+driver needs one). Now, when there is a read, the baseline
 is the read's assignment. The list stays for names, the picker and its
 labels. This holds on every open, not only after a save. A new load has no
 read and still takes the list's driver.
@@ -9650,6 +9652,149 @@ passes both through. The modal suite (`landed-save.test.tsx`, 14): new load,
 existing load, the flag refused and unanswered, Cancel and Esc, a failed read
 and Retry, the selected stop, a reassign, and `Clear now`. 13 of the 14 fail
 on the modal before this.
+
+## 12.128 Scans are read by OCR, in the browser
+
+Phase 3aj (Alex approved building it, 2026-10-20): phase 4 of
+`docs/llm-reader-design.md` §9, "OCR for scans".
+
+**The rule.** A dropped PDF whose text layer has under 40 characters
+(`PDF_LIMITS.minText`) is a scan. It is no longer refused (§12.122). Each
+page is drawn with the pdf.js that opened the file and read by OCR, in the
+browser: tesseract.js 7.0.0, its English LSTM model (`4.0.0_best_int`),
+pages segmented automatically. The lines it gives take the same path as a
+text layer's lines: the five templates first, then, on a miss, Read with AI,
+with the redaction unchanged (`redact-2026-10-14.5`). No template, redaction
+rule, prompt, model, verifier or cap was changed for OCR. Only text is ever
+sent to the model, never a page image.
+
+**Limits and refusals.** The same limits as a text PDF, checked before any
+OCR starts: 5 MB, 10 pages, a password, a damaged file, not a PDF. Two new
+refusals, each a fixed sentence that quotes nothing:
+
+- OCR read under 40 characters: "This is a scan, and no text could be read
+  from it. Type the load from the PDF."
+- The engine would not start or failed (its files missing, no WebAssembly):
+  "This is a scan, and the scan reader did not work, so nothing was read.
+  Type the load from the PDF."
+
+The local scripts (`ratecon:score`, the reports) give no OCR and still
+refuse a scan with the old sentence, except `ratecon:scan-report`, below.
+
+**Pages into lines** (`src/lib/ratecon/read-scan.ts`, `ocr-runs.ts`):
+
+- Each page is drawn at 300 dpi, or less if that passes 16 million pixels
+  or 4096 px a side (a browser canvas's limits).
+- OCR's words are turned into the runs pdf.js gives for a text layer: PDF
+  units, origin bottom-left, y up (`transform[4]`, `[5]`), through the page's
+  own `viewport.convertToPdfPoint`. Then `linesFromRuns` makes lines and
+  cells exactly as it does for a text layer.
+- Words a word space apart are one run. A gap wider than a capital letter's
+  height starts a new run (a new cell): pdf.js itself starts a new run where
+  the gap passes 0.6 of the font size (`SPACE_IN_FLOW_MAX_FACTOR`), which is
+  about one capital's height between inked edges.
+- A word stands on its line's baseline. If the engine took two touching
+  rows as one line, a word whose top AND bottom are both more than half a
+  capital off the baseline, the same way, keeps its own row. One edge alone
+  is not enough: a bigger word has a higher top, a descender a lower bottom,
+  and the engine sometimes boxes a word too tall.
+- The page's skew, the median slope of its lines' baselines, is turned back
+  when it is 0.1° or more, so the two ends of one row stay one line.
+
+**The twin test** proves it (`read-scan.test.ts`). An invented rate
+confirmation with a text layer is scanned in memory (drawn at 300 dpi, saved
+as JPEG, wrapped with no text layer) and OCR'd. For the Stops-section layout
+(two pages; its reader splits each line at the "Date:" label's x) and label
+rows: the same lines, with the same cells, text equal once whitespace is
+removed; every run's start within **2 PDF units** (0.7 mm) in x and y of
+pdf.js's (measured: 0.76 in x, 0.24 in y); the same template read with the
+same values. Whitespace is left out of the comparison because pdf.js joins
+two runs that touch with no space, and OCR sees the gap as one. Scanned 1°
+askew, the same lines and the same read. Cells can split there, and positions
+move with the paper.
+
+**Everything from a scan is marked Check** (`ratecon-fill.ts`, `SCAN_CHECK`).
+Every field the fill filled, or left blank with its reason, carries "read
+from a scan; OCR can misread it. Check it against the PDF." This applies to
+a template read and to an AI read, after the field's own check. The load
+number carries it when it was filled, or not filled with a reason. The strip
+says the document was read from a scan:
+
+- "Filled 2 stops from …, read from a scan: every field is marked Check."
+- "Filled 2 stops, read by AI from a scan: every field is marked Check.
+  Check each stop against its quote and the PDF, then press Looks right."
+- Beside Read with AI: "Read from a scan, by OCR in this browser: every
+  field it fills is marked Check."
+
+"Looks right" clears the AI's marks, not the scan's. Editing a field clears
+its check, as for every check. So a two-stop scan starts at 13 fields to
+check. What an AI read records after the save (HANDOFF, phase 3s) is
+unchanged: the same fields and the same blanks. "From a scan" is not
+recorded.
+
+**While it reads.** The strip says "Reading the scan — starting the
+reader…", then "Reading the scan — page 2 of 3", with a Cancel. The modal is
+never blocked: the dispatcher can type, and the read stays on the strip.
+Whether to ask Replace or Keep mine is decided when the read lands, and it
+fills the form as it is then, not as it was at the drop. Cancel, a newer file
+or closing the modal stops it at once, even in the middle of a page. Whatever
+it would have read is dropped.
+
+**Self-hosted, loaded only for a scan** (`ocr-assets.ts`, `ocr-browser.ts`).
+tesseract.js fetches its worker, its WebAssembly core and the language data
+from cdn.jsdelivr.net unless told otherwise. All three paths point at our own
+origin, `/ocr/…`. `npm run build` and `npm run dev` first copy the files out
+of `node_modules` into `public/ocr/` (`scripts/copy-ocr-assets.mts`). That
+folder is git-ignored, so nothing is committed.
+
+- The worker script is 109 KB (33 KB sent).
+- The core comes in three builds, of which the browser loads one by what its
+  WebAssembly supports. Each is about 3.8 MB, 1.4 MB sent.
+- The language data is 2.9 MB, already gzip.
+- A first scan fetches about 4.3 MB. After that the files are cached as any
+  file is, and the language data also in the browser's IndexedDB, under a
+  key naming its version. The document is never uploaded, stored, cached or
+  logged, and no message quotes it.
+- Nothing of it is fetched on the console's first load: tesseract.js is
+  imported only inside `ocr-browser.ts`, which `read-pdf.ts` imports only
+  when a PDF turns out to be a scan.
+- `ocr-assets.test.ts` fails if any configured path is not same-origin, if
+  tesseract.js gains a CDN default we do not set, if a core build the worker
+  can ask for is not served, or if anything else imports it eagerly.
+
+**What it does not promise.**
+
+- OCR misreads: 5 for S, 0 for O, l for I, a colon lost, "lbs" read as
+  "Ibs". A template can fill a misread value.
+- The model's quotes are checked against the OCR text as sent, not against
+  the paper. An OCR error the model quotes faithfully still verifies. That is
+  why everything is marked.
+- Handwriting, a page turned 90°, a photo of a page, a coloured background,
+  and skew beyond a few degrees: not handled, and not tested.
+- English only. There is no page cap below the 10-page limit, so a slow
+  machine can take tens of seconds on a long scan.
+
+**Measured** (3aj, this Mac, local, counts only; `npm run
+ratecon:scan-report`). The 3 scans among the 29 samples, of 3, 3 and 2
+pages: 0.4 to 3.7 s a page in Node, 4,000 to 6,300 characters and 78 to 120
+lines each. No template reads any of them. Redaction prepares all three, so
+Read with AI is offered for each, sending 75, 85 and 78 lines. Nothing was
+sent. In a browser: not measured.
+
+**Tests.** `ocr-runs.test.ts` (10, invented boxes): spaces and cell gaps,
+baselines, another row, a box too tall, skew. `read-scan.test.ts` (12, the
+real pdf.js, @napi-rs/canvas and tesseract.js in Node, every scan built in
+memory): the twins; a scan read, with its progress, and filled with every
+field marked; a text PDF read as before with no OCR started; a blank scan
+refused; an engine that will not start; a stop before a page and in the
+middle of one; the limits before any OCR. `ocr-assets.test.ts` (13).
+`ratecon-fill.test.ts` (+5): the marks, a load number left alone, the AI's
+marks and outcome unchanged. `ratecon-scan.test.tsx` (11, the modal):
+progress, typing meanwhile, Replace decided on landing, the form as it is
+then, Cancel, a newer file, closing the modal, a scan OCR cannot read, Read
+with AI from a scan. `e2e/ratecon-scan.spec.ts` (2): a scan made at test time
+read in a real browser, fields filled and marked, and no request during the
+read to an origin new to the page or to a CDN. Written, not run in 3aj.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
