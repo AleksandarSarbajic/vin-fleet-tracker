@@ -42,6 +42,23 @@ export const ZIP_NOT_REAL = "Check: the PDF's ZIP is not a real US ZIP. Enter it
  */
 export const AI_APPOINTMENT_CHECK = 'Check: the AI filled this appointment. Confirm the date and time against the PDF.';
 
+/**
+ * §12.128. Said under EVERY field a read from a scan filled or left marked, template or AI: OCR reads
+ * pixels, and a 5 that came back as an S, or a ZIP one digit off, looks right. After whatever the field
+ * already says. The fields' own "Check: " comes first, so this one starts lower case.
+ */
+export const SCAN_CHECK = 'read from a scan; OCR can misread it. Check it against the PDF.';
+
+/** A fill's check with the scan's added: in a field that prefixes "Check: " itself, and in one that does not (the appointment's). */
+function withScan(said: string | undefined, prefixed: boolean): string {
+  const scan = prefixed ? SCAN_CHECK : `Check: ${SCAN_CHECK}`;
+  if (!said) return scan;
+  return `${said} ${prefixed ? `${SCAN_CHECK[0]!.toUpperCase()}${SCAN_CHECK.slice(1)}` : scan}`;
+}
+
+/** Where a read's lines came from: a text layer or pasted text, or OCR of a scan (§12.128). */
+export type ReadFrom = 'text' | 'scan';
+
 /** A window this long or shorter is an appointment window; longer is receiving hours. */
 export const APPT_WINDOW_MAX_MINUTES = 120;
 /** A date this many days out is far enough to be a typo. */
@@ -141,7 +158,7 @@ function dateCheck(date: string, tz: string, now: Date): string | null {
   return null;
 }
 
-function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean): StopForm {
+function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean, from: ReadFrom): StopForm {
   const sources: StopFill['sources'] = { stopType: read.type.source };
   const checks: StopFill['checks'] = {};
   if (read.typeCheck) checks.stopType = read.typeCheck;
@@ -185,6 +202,12 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
   const aiFilled = byModel && stop.appointment.enabled && stop.appointment.time !== '';
   const said = [read.timeCheck ?? appointment.check, when, aiFilled ? AI_APPOINTMENT_CHECK : null].filter(Boolean).join(' ');
   if (said) checks.appointment = said;
+  // From a scan, every field the fill touched says so: filled, or left blank with its reason.
+  if (from === 'scan') {
+    for (const field of ['stopType', 'addressLine', 'city', 'state', 'zip', 'appointment'] as const) {
+      if (field in sources || field in checks) checks[field] = withScan(checks[field], field !== 'appointment');
+    }
+  }
   return { ...stop, fill: byModel ? { sources, checks, ai: true } : { sources, checks } };
 }
 
@@ -192,12 +215,14 @@ function fillStop(blank: StopForm, read: StopRead, now: Date, byModel: boolean):
  * The read, as the form. Replaces the stops the form has — every one of them
  * unsaved, or the strip would not have been offered — and the load number;
  * keeps the driver, the status and anything the load itself already is.
+ * A read from a scan marks everything it filled (`SCAN_CHECK`).
  */
 export function fillLoad(
   form: LoadForm,
   read: RateconRead,
   openedAt: string,
   now: Date,
+  from: ReadFrom = 'text',
 ): { ok: true; form: LoadForm } | { ok: false; message: string } {
   if (read.stops.length > MAX_STOPS_PER_LOAD) return { ok: false, message: TOO_MANY_STOPS(read.stops.length) };
   const firstKey = form.stops[0]?.key ?? 'new-1';
@@ -205,7 +230,11 @@ export function fillLoad(
   const loadFill: LoadFill = {
     layout: read.layout,
     loadNumber: read.loadNumber?.source ?? null,
-    loadNumberCheck: read.loadNumberCheck,
+    // From a scan, a load number filled, or not filled and said why, says so; one with nothing to say stays so.
+    loadNumberCheck:
+      from === 'scan' && (read.loadNumber || read.loadNumberCheck)
+        ? withScan(read.loadNumberCheck ?? undefined, true)
+        : read.loadNumberCheck,
   };
   let next: LoadForm = {
     ...form,
@@ -218,7 +247,7 @@ export function fillLoad(
     const at = next.stops.length - 1;
     next = {
       ...next,
-      stops: next.stops.map((s, j) => (j === at ? fillStop(s, stopRead, now, byModel) : s)),
+      stops: next.stops.map((s, j) => (j === at ? fillStop(s, stopRead, now, byModel, from) : s)),
     };
   });
   return { ok: true, form: next };

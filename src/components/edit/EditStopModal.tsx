@@ -1245,8 +1245,8 @@ function LoadEditor({
                 aiReader={aiReader}
                 countsVersion={countsVersion}
                 editsVersion={editsVersion}
-                onFill={(read, meta) => {
-                  const filled = fillLoad(form, read, openedAt, new Date());
+                onFill={(read, meta, from) => {
+                  const filled = fillLoad(form, read, openedAt, new Date(), from);
                   if (!filled.ok) return filled.message;
                   setForm(filled.form);
                   setSelected(0);

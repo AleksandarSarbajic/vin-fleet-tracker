@@ -11,6 +11,7 @@ import { NOT_IN_TEXT, verifyRead } from '@/lib/ratecon/verify-read';
 import { AGREE_DIFFERED, agreeReads } from '@/lib/ratecon/agree-reads';
 import { loadFormFrom, patchStop, type LoadForm } from './load-form';
 import {
+  SCAN_CHECK,
   TOO_MANY_STOPS,
   ZIP_NOT_REAL,
   aiMarkedFields,
@@ -722,5 +723,70 @@ describe('a street and city the app split, filled (3ac)', () => {
     const edited = { ...form, stops: form.stops.map((s, i) => (i === 1 ? patchStop(s, { addressLine: '77 Depot Ave' }) : s)) };
     expect([edited.stops[1]!.fill?.checks.addressLine, edited.stops[1]!.fill?.checks.city]).toEqual([undefined, check]);
     expect(fieldsToCheck(edited)).toBe(fieldsToCheck(form) - 1);
+  });
+});
+
+describe('a read from a scan (§12.128)', () => {
+  const scanFill = (read: RateconRead) => {
+    const out = fillLoad(loadFormFrom(null, OPENED, null), read, OPENED, NOW, 'scan');
+    if (!out.ok) throw new Error(out.message);
+    return out.form;
+  };
+  const FIELDS = ['stopType', 'addressLine', 'city', 'state', 'zip', 'appointment'] as const;
+  const modelRead = (): RateconRead => {
+    const prepared = prepareForReading(UNKNOWN_LAYOUT);
+    if (!prepared.ok) throw new Error('not prepared');
+    const out = verifyRead(MODEL_REPLY, prepared.lines, NOW);
+    if (!out.ok) throw new Error('not verified');
+    return out.read;
+  };
+
+  it('a template read: every field of every stop, and the load number, marked; the values the same as from text', () => {
+    const read = readOf(LABEL_ROWS);
+    const text = fill(read);
+    const scan = scanFill(read);
+    expect(scan.stops.map((s) => [s.stopType, s.addressLine, s.city, s.state, s.zip, s.appointment])).toEqual(
+      text.stops.map((s) => [s.stopType, s.addressLine, s.city, s.state, s.zip, s.appointment]),
+    );
+    expect(scan.loadNumber).toBe(text.loadNumber);
+    for (const stop of scan.stops) {
+      for (const field of FIELDS) expect(stop.fill?.checks[field], field).toContain(field === 'appointment' ? `Check: ${SCAN_CHECK}` : SCAN_CHECK);
+    }
+    expect(scan.fill?.loadNumberCheck).toBe(SCAN_CHECK);
+    expect(fieldsToCheck(scan)).toBe(13);
+    // From text, none of it.
+    expect(JSON.stringify(text)).not.toContain(SCAN_CHECK);
+  });
+
+  it("a field already marked keeps its reason first, and the scan's after it", () => {
+    const read = readOf(LABEL_ROWS);
+    const placeholder = { ...read, stops: read.stops.map((s, i) => (i === 0 ? { ...s, zip: { ...s.zip!, value: '00001' } } : s)) };
+    const stop = scanFill(placeholder).stops[0]!;
+    expect(stop.fill?.checks.zip).toBe(`${ZIP_NOT_REAL} Read from a scan; OCR can misread it. Check it against the PDF.`);
+    const second = scanFill(read).stops[1]!;
+    expect(second.fill?.checks.appointment).toBe(`${fill(read).stops[1]!.fill?.checks.appointment ?? ''} Check: ${SCAN_CHECK}`.trim());
+  });
+
+  it('a load number neither read nor explained stays without a mark', () => {
+    const read = { ...readOf(LABEL_ROWS), loadNumber: null, loadNumberCheck: null };
+    expect(scanFill(read).fill?.loadNumberCheck).toBeNull();
+  });
+
+  it('an AI read: marked as well, its AI marks as they were, and its outcome counted as before (no new field, no new blank)', () => {
+    const read = modelRead();
+    const text = fill(read);
+    const scan = scanFill(read);
+    for (const stop of scan.stops) for (const field of FIELDS) expect(stop.fill?.checks[field], field).toContain(SCAN_CHECK);
+    expect(aiMarks(scan)).toEqual(aiMarks(text));
+    expect(scan.stops.map(aiMarkedFields)).toEqual(text.stops.map(aiMarkedFields));
+    expect(fillSnapshot(scan)).toEqual(fillSnapshot(text));
+    expect(outcomeFields(fillSnapshot(scan), scan)).toEqual(outcomeFields(fillSnapshot(text), text));
+  });
+
+  it('editing a field clears its scan mark with the rest of its check, as for every check', () => {
+    const form = scanFill(readOf(LABEL_ROWS));
+    const edited = patchStop(form.stops[0]!, { city: 'Fargo' });
+    expect(edited.fill?.checks.city).toBeUndefined();
+    expect(edited.fill?.checks.state).toContain(SCAN_CHECK);
   });
 });

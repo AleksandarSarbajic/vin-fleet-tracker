@@ -6,11 +6,12 @@ import { linesFromText, type Line } from '@/lib/ratecon/lines';
 import { READ_MESSAGES, readFailureMessage, type ReadFailCode } from '@/lib/ratecon/read-codes';
 import { requestModelReads } from '@/lib/ratecon/read-client';
 import { readPair } from '@/lib/ratecon/read-pair';
-import { linesFromPdfFile } from '@/lib/ratecon/read-pdf';
+import { PDF_MESSAGES, linesFromPdfFile } from '@/lib/ratecon/read-pdf';
 import { layoutLabels } from '@/lib/ratecon/layout';
 import { prepareForReading, type Prepared } from '@/lib/ratecon/redact';
 import { bumpCount, readCounts, type FillCounts } from '@/lib/ratecon/session-counts';
 import { LAYOUT_NAME, readRatecon, type RateconRead } from '@/lib/ratecon/templates';
+import type { ReadFrom } from './ratecon-fill';
 
 /**
  * §12.122. "Fill from rate confirmation": drop a PDF, choose one, or paste
@@ -44,6 +45,16 @@ import { LAYOUT_NAME, readRatecon, type RateconRead } from '@/lib/ratecon/templa
  * what was sent. It cannot catch a dropped first stop. The cue blocks
  * nothing and changes no mark. Like everything in the detail, both fold away
  * when the load is typed into.
+ *
+ * A scan (§12.128): a PDF with next to no text is read by OCR, here in the
+ * browser, page by page, with its progress on the strip and a Cancel; the
+ * dispatcher can type meanwhile, and the read stays on the strip. Its lines
+ * then take the same path — templates, then Read with AI — and the fill
+ * marks every field it touches as read from a scan.
+ *
+ * A read lands seconds after it starts (a scan, an AI read), so what it
+ * fills with is the modal's latest `onFill`, never the one it started with,
+ * and whether to ask Replace or Keep mine is decided when it lands.
  */
 
 export const NOT_RECOGNISED = 'Layout not recognised, nothing filled.';
@@ -56,11 +67,20 @@ type Cue = { text: string; sent: string };
 type Status =
   | { kind: 'idle' }
   | { kind: 'reading' }
+  /** A scan being read by OCR: page 0 while the reader starts. */
+  | { kind: 'scanning'; page: number; of: number }
   | { kind: 'said'; tone: 'fault' | 'done'; text: string; cue?: Cue; notices?: string[] }
-  | { kind: 'confirm'; read: RateconRead; cue?: Cue; notices?: string[]; meta?: ReadMeta }
+  | { kind: 'confirm'; read: RateconRead; from: ReadFrom; cue?: Cue; notices?: string[]; meta?: ReadMeta }
   /** A template miss, with "Read with AI" offered when the document can be prepared. */
-  | { kind: 'missed'; prepared: Prepared; note: Said | null }
-  | { kind: 'ai-reading'; prepared: PreparedOk };
+  | { kind: 'missed'; prepared: Prepared; from: ReadFrom; note: Said | null }
+  | { kind: 'ai-reading'; prepared: PreparedOk; from: ReadFrom };
+
+/** Said while a scan is read. */
+export const scanProgress = (page: number, of: number) =>
+  page === 0 ? 'Reading the scan — starting the reader…' : `Reading the scan — page ${page} of ${of}`;
+
+/** Said beside "Read with AI" when the lines came from a scan. */
+export const SCAN_NOTE = 'Read from a scan, by OCR in this browser: every field it fills is marked Check.';
 
 /** What the modal keeps of an AI read for the outcome it records after the save: the read, and its layout fingerprint. */
 export interface ReadMeta {
@@ -103,9 +123,9 @@ export function RateconStrip({
   /**
    * Fill the form; returns why it could not, or null. For an AI read, `meta`
    * names the read (its counts row), so the modal can later tell the server
-   * what the dispatcher did with it.
+   * what the dispatcher did with it. `from` says the lines came from a scan.
    */
-  onFill: (read: RateconRead, meta?: ReadMeta) => string | null;
+  onFill: (read: RateconRead, meta: ReadMeta | undefined, from: ReadFrom) => string | null;
   /** Bumped by the modal when it counts an edit, so the counts line re-reads. */
   countsVersion: number;
   /** Bumped by the modal whenever the dispatcher types into the load: the strip folds. */
@@ -117,25 +137,37 @@ export function RateconStrip({
   const fileInput = useRef<HTMLInputElement>(null);
   /** The read in flight, so Cancel can stop it and closing the modal does. */
   const inFlight = useRef<AbortController | null>(null);
+  /** The scan being read, so Cancel, a newer file and closing the modal stop it. */
+  const scanning = useRef<AbortController | null>(null);
+  /** The modal's latest fill: a read that lands seconds later fills the form as it is then. */
+  const latestFill = useRef(onFill);
+  latestFill.current = onFill;
   /** Read when the AI's answer lands, not when the click happened: the load may have been typed into meanwhile. */
   const entries = useRef(hasEntries);
   entries.current = hasEntries;
 
   useEffect(() => setCounts(readCounts()), [countsVersion]);
-  useEffect(() => () => inFlight.current?.abort(), []);
+  useEffect(
+    () => () => {
+      inFlight.current?.abort();
+      scanning.current?.abort();
+    },
+    [],
+  );
   // Typing into the load folds the strip back to its one line — but a read
-  // in flight stays on it, and is not cancelled.
+  // in flight (AI or scan) stays on it, and is not cancelled.
   const seenEdits = useRef(editsVersion);
   useEffect(() => {
     if (editsVersion === seenEdits.current) return;
     seenEdits.current = editsVersion;
-    setStatus((s) => (s.kind === 'ai-reading' ? s : { kind: 'idle' }));
+    setStatus((s) => (s.kind === 'ai-reading' || s.kind === 'scanning' ? s : { kind: 'idle' }));
   }, [editsVersion]);
 
   const fill = useCallback(
-    (read: RateconRead, cue?: Cue, notices?: string[], meta?: ReadMeta) => {
-      const refused = onFill(read, meta);
+    (read: RateconRead, from: ReadFrom, cue?: Cue, notices?: string[], meta?: ReadMeta) => {
+      const refused = latestFill.current(read, meta, from);
       const n = read.stops.length;
+      const stops = `${n} ${n === 1 ? 'stop' : 'stops'}`;
       setStatus(
         refused
           ? { kind: 'said', tone: 'fault', text: refused }
@@ -146,40 +178,44 @@ export function RateconStrip({
               ...(notices && notices.length > 0 ? { notices } : {}),
               text:
                 read.layout === 'model'
-                  ? `Filled ${n} ${n === 1 ? 'stop' : 'stops'}, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.`
-                  : `Filled ${n} ${n === 1 ? 'stop' : 'stops'} from ${LAYOUT_NAME[read.layout]}. Nothing is saved until Save.`,
+                  ? from === 'scan'
+                    ? `Filled ${stops}, read by AI from a scan: every field is marked Check. Check each stop against its quote and the PDF, then press Looks right. Nothing is saved until Save.`
+                    : `Filled ${stops}, read by AI. Check each stop against its quote, then press Looks right. Nothing is saved until Save.`
+                  : from === 'scan'
+                    ? `Filled ${stops} from ${LAYOUT_NAME[read.layout]}, read from a scan: every field is marked Check. Nothing is saved until Save.`
+                    : `Filled ${stops} from ${LAYOUT_NAME[read.layout]}. Nothing is saved until Save.`,
             },
       );
     },
-    [onFill],
+    [],
   );
 
   const take = useCallback(
-    (lines: Line[]) => {
+    (lines: Line[], from: ReadFrom) => {
       const outcome = readRatecon(lines);
       if (!outcome.ok) {
         setCounts(bumpCount('notRecognised'));
         setStatus(
           aiReader
-            ? { kind: 'missed', prepared: prepareForReading(lines), note: null }
-            : { kind: 'said', tone: 'fault', text: NOT_RECOGNISED },
+            ? { kind: 'missed', prepared: prepareForReading(lines), from, note: null }
+            : { kind: 'said', tone: 'fault', text: from === 'scan' ? `${NOT_RECOGNISED} ${SCAN_NOTE}` : NOT_RECOGNISED },
         );
         return;
       }
-      if (hasEntries) setStatus({ kind: 'confirm', read: outcome.read });
-      else fill(outcome.read);
+      if (entries.current) setStatus({ kind: 'confirm', read: outcome.read, from });
+      else fill(outcome.read, from);
     },
-    [aiReader, fill, hasEntries],
+    [aiReader, fill],
   );
 
   const readWithAi = useCallback(
-    async (prepared: PreparedOk) => {
+    async (prepared: PreparedOk, from: ReadFrom) => {
       const abort = new AbortController();
       inFlight.current = abort;
-      setStatus({ kind: 'ai-reading', prepared });
+      setStatus({ kind: 'ai-reading', prepared, from });
       const out = await requestModelReads(prepared.lines, abort.signal);
       inFlight.current = null;
-      const missed = (text: string): Status => ({ kind: 'missed', prepared, note: { tone: 'fault', text } });
+      const missed = (text: string): Status => ({ kind: 'missed', prepared, from, note: { tone: 'fault', text } });
       if (!out.ok) {
         setStatus(missed(failure(out.code, out.reference)));
         return;
@@ -198,18 +234,30 @@ export function RateconStrip({
       const { read, notices } = pair.agreement;
       const meta = out.readId ? { readId: out.readId, layout: layoutOf(prepared.lines) } : undefined;
       if (entries.current) {
-        setStatus({ kind: 'confirm', read, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}), ...(meta ? { meta } : {}) });
-      } else fill(read, cue, notices, meta);
+        setStatus({ kind: 'confirm', read, from, ...(cue ? { cue } : {}), ...(notices.length > 0 ? { notices } : {}), ...(meta ? { meta } : {}) });
+      } else fill(read, from, cue, notices, meta);
     },
     [fill],
   );
 
   const readFile = useCallback(
     async (file: File) => {
+      // A newer file replaces a scan still being read.
+      scanning.current?.abort();
+      const abort = new AbortController();
+      scanning.current = abort;
       setStatus({ kind: 'reading' });
-      const pdf = await linesFromPdfFile(file);
+      const pdf = await linesFromPdfFile(file, {
+        signal: abort.signal,
+        onProgress: ({ page, of }) => {
+          if (!abort.signal.aborted) setStatus({ kind: 'scanning', page, of });
+        },
+      });
+      // Cancelled, replaced by a newer file, or the modal closed: whatever it read is dropped.
+      if (abort.signal.aborted) return;
+      scanning.current = null;
       if (!pdf.ok) setStatus({ kind: 'said', tone: 'fault', text: pdf.message });
-      else take(pdf.lines);
+      else take(pdf.lines, pdf.fromScan ? 'scan' : 'text');
     },
     [take],
   );
@@ -270,7 +318,8 @@ export function RateconStrip({
           onChange={() => undefined}
           onPaste={(e) => {
             e.preventDefault();
-            take(linesFromText(e.clipboardData.getData('text/plain')));
+            scanning.current?.abort();
+            take(linesFromText(e.clipboardData.getData('text/plain')), 'text');
           }}
           className="h-[26px] min-w-[120px] flex-1 resize-none border border-line-hair bg-surface-sunken px-2 py-0.5 text-small text-text"
         />
@@ -296,6 +345,24 @@ export function RateconStrip({
       {open ? (
         <div data-ratecon-detail="" aria-live="polite" className="flex flex-col gap-1.5 pb-2.5">
           {status.kind === 'reading' ? <p className="text-small text-text-mutedOnOverlay">Reading…</p> : null}
+          {status.kind === 'scanning' ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small">
+              <p data-ratecon-scanning="" className="text-text-mutedOnOverlay">
+                {scanProgress(status.page, status.of)}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  scanning.current?.abort();
+                  scanning.current = null;
+                  setStatus({ kind: 'said', tone: 'done', text: PDF_MESSAGES.scanCancelled });
+                }}
+                className="h-[26px] border border-line-hair px-2.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
           {status.kind === 'said' ? (
             <p
               data-ratecon-said={status.tone}
@@ -327,6 +394,11 @@ export function RateconStrip({
           {status.kind === 'missed' ? (
             <>
               <p className="text-small text-status-risk-fg">{NOT_RECOGNISED}</p>
+              {status.from === 'scan' ? (
+                <p data-ratecon-scan="" className="text-small text-text-mutedOnOverlay">
+                  {SCAN_NOTE}
+                </p>
+              ) : null}
               {status.prepared.ok ? (
                 <>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small">
@@ -334,10 +406,10 @@ export function RateconStrip({
                       type="button"
                       data-read-with-ai=""
                       onClick={() => {
-                        const prepared = status.prepared;
+                        const { prepared, from } = status;
                         if (!prepared.ok) return;
-                        readWithAi(prepared).catch(() =>
-                          setStatus({ kind: 'missed', prepared, note: { tone: 'fault', text: READ_MESSAGES.error } }),
+                        readWithAi(prepared, from).catch(() =>
+                          setStatus({ kind: 'missed', prepared, from, note: { tone: 'fault', text: READ_MESSAGES.error } }),
                         );
                       }}
                       className="h-[26px] border border-line-hair px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-secondary"
@@ -386,7 +458,7 @@ export function RateconStrip({
               </p>
               <button
                 type="button"
-                onClick={() => fill(status.read, status.cue, status.notices, status.meta)}
+                onClick={() => fill(status.read, status.from, status.cue, status.notices, status.meta)}
                 className="h-[26px] border border-status-risk-bd px-2.5 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-risk-fg"
               >
                 Replace

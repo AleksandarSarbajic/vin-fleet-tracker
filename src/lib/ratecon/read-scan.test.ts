@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { SCAN_CHECK, fillLoad } from '@/components/edit/ratecon-fill';
+import { loadFormFrom } from '@/components/edit/load-form';
 import { blankScan, nodePdfjs, nodeScanReading, scanOf, type PdfJs } from '@/test/ocr-node';
 import { LABEL_ROWS, STOPS_SECTION } from '@/test/ratecon-fixtures';
 import { tinyPdf, type TinyRun } from '@/test/tiny-pdf';
@@ -173,7 +175,23 @@ describe('a scan, through linesFromPdf', () => {
       expect(out.ok && out.fromScan).toBe(true);
       expect(seen).toEqual([{ page: 0, of: 1 }, { page: 1, of: 1 }]);
       expect([reading.opened(), reading.closed()]).toEqual([1, 1]);
-      expect(readRatecon(out.ok ? out.lines : []).ok).toBe(true);
+
+      // …and filled: every field of every stop, and the load number, marked as read from a scan.
+      const read = readRatecon(out.ok ? out.lines : []);
+      expect(read.ok && read.read.layout).toBe('label-rows');
+      const filled = fillLoad(loadFormFrom(null, '2026-10-10T15:00:00.000Z', null), read.ok ? read.read : (null as never), '2026-10-10T15:00:00.000Z', new Date('2026-10-10T15:00:00.000Z'), 'scan');
+      if (!filled.ok) throw new Error(filled.message);
+      expect(filled.form.loadNumber).toBe('550123');
+      expect(filled.form.fill?.loadNumberCheck).toBe(SCAN_CHECK);
+      expect(filled.form.stops.map((s) => [s.addressLine, s.city, s.state, s.zip])).toEqual([
+        ['4001 Main St', 'Fargo', 'ND', '58102'],
+        ['1200 Harbor Rd', 'Dickinson', 'ND', '58601'],
+      ]);
+      for (const stop of filled.form.stops) {
+        for (const field of ['stopType', 'addressLine', 'city', 'state', 'zip', 'appointment'] as const) {
+          expect(stop.fill?.checks[field], field).toContain(SCAN_CHECK);
+        }
+      }
     },
     OCR,
   );
