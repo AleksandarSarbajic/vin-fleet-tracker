@@ -6,7 +6,9 @@
  * git-ignored and never committed — and scores each PDF against that
  * folder's own `expected.json`, which is ground truth written by hand and
  * lives there for the same reason. The PDFs go through the same code the
- * browser runs: read, recognise, fill.
+ * browser runs: read, recognise, fill. A scan is read by OCR as the browser
+ * reads one (§12.128), here in Node (`src/test/ocr-node.ts`: nothing
+ * fetched, nothing cached), and filled as a scan, every field marked.
  *
  * Prints PASS or FAIL per field per file and NEVER a value: files are
  * numbered, not named (a file name can be a load number), and no field's
@@ -24,6 +26,7 @@ import { fillLoad } from '../src/components/edit/ratecon-fill';
 import { loadFormFrom, type StopForm } from '../src/components/edit/load-form';
 import { linesFromPdf } from '../src/lib/ratecon/read-pdf';
 import { readRatecon } from '../src/lib/ratecon/templates';
+import { nodeScanReading } from '../src/test/ocr-node';
 import { appointmentScore, appointmentVerdict, inspect, type CompleteEntry, type ExpectedStop } from './ratecon-expected.mts';
 
 const DIR = '.samples/rate-confirmations';
@@ -73,7 +76,7 @@ async function main() {
       continue;
     }
     const want: CompleteEntry = inspected.entry;
-    const pdf = await linesFromPdf(new Uint8Array(readFileSync(join(DIR, file))), pdfjs);
+    const pdf = await linesFromPdf(new Uint8Array(readFileSync(join(DIR, file))), pdfjs, nodeScanReading());
     if (!pdf.ok) {
       console.info(`${label}: FAIL — the PDF was not read (${pdf.message})`);
       failures += 1;
@@ -81,7 +84,7 @@ async function main() {
     }
     const outcome = readRatecon(pdf.lines);
     if ('notRecognised' in want) {
-      console.info(`${label}: layout not recognised — ${outcome.ok ? 'FAIL, it was read as a known layout' : 'pass (expected: not one of the five layouts)'}`);
+      console.info(`${label}: layout not recognised — ${outcome.ok ? 'FAIL, it was read as a known layout' : 'pass (expected: not one of the six layouts)'}`);
       if (outcome.ok) failures += 1;
       continue;
     }
@@ -97,7 +100,7 @@ async function main() {
       failures += 1;
       continue;
     }
-    const filled = fillLoad(loadFormFrom(null, now.toISOString(), null), outcome.read, now.toISOString(), now);
+    const filled = fillLoad(loadFormFrom(null, now.toISOString(), null), outcome.read, now.toISOString(), now, pdf.fromScan ? 'scan' : 'text');
     if (!filled.ok) {
       console.info(`${label}: FAIL — ${filled.message}`);
       failures += 1;
@@ -124,7 +127,7 @@ async function main() {
     if (allBar) bar += 1;
     const wrong = !allBar || appts.includes('WRONG');
     if (wrong) failures += 1;
-    console.info(`${label} (${outcome.read.layout}, ${stops.length} stops): ${wrong ? 'FAIL' : 'pass'}`);
+    console.info(`${label} (${outcome.read.layout}, ${stops.length} stops${pdf.fromScan ? ', a scan read by OCR' : ''}): ${wrong ? 'FAIL' : 'pass'}`);
     for (const [name, ok] of results) console.info(`  ${name.padEnd(14)} ${mark(ok)}`);
     for (const [name, oks] of fields) console.info(`  ${name.padEnd(14)} ${oks.map((ok, i) => `stop ${i + 1} ${mark(ok)}`).join('   ')}`);
     console.info(`  ${'appointment'.padEnd(14)} ${apptsSaid.map((a, i) => `stop ${i + 1} ${a}`).join('   ')}`);
