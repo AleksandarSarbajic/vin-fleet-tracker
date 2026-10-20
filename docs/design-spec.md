@@ -9195,7 +9195,7 @@ password, a damaged file. A PDF with next to no text (under 40 characters)
 is a scan, read by OCR in the browser since phase 3aj (§12.128); until then
 it was refused: "This is a scan; there's no text to read."
 
-### Three layouts, recognised by their labels
+### Six layouts, recognised by their labels
 
 `src/lib/ratecon/templates.ts`. Each layout is used only when **every** label
 it is recognised by is present, and only when exactly one layout is.
@@ -9207,10 +9207,31 @@ from a layout we do not know.
 | label rows | ORDER CONFIRMATION, Order ID, PICKUP DATE, DELIVERY DATE, CITY, STATE | the number under "Order ID" | each PICKUP/DELIVERY DATE block: ADDRESS, CITY, STATE |
 | a Stops section | Rate Confirmation, LOAD ID:, Stops, Stop n Pickup/Drop, Customer | LOAD ID: | the Stops section only; the date column split from the address column by the "Date:" label's x |
 | PU / SO blocks | PU/SO … Name:, Address:, Driver Load:, Order: or Load Number: | Order: or Load Number: (two different → none, said) | Name/Date, Address/second date, the city line within three (a facility code may sit between) |
+| Pickup # / Delivery # columns | §12.125 | §12.125 | §12.125 |
+| Route blocks | HANDOFF, phases 3aa and 3ac | the ID under "Shipment ID" | four lines a stop in three columns; a summary line confirms the first and last |
+| a stop table (3ak) | the table's two header lines: "Stop From To Name City St Ref Appt", "Address Phone Zip Contact Appt Ref" | the number in the "LOAD NUMBER" box (a later page's "Load No" that differs → none, said) | two lines a stop: line A by column, line B in order; below |
 
 An SO (stop-off) before the last stop is read as a delivery and **said**: a
 stop-off can be a pickup. Pasted text has no pages or positions; the readers
 work on the same lines either way.
+
+**The stop table** (3ak; a layout that arrives as a scan every week,
+§12.128, read the same from a text PDF). Line A is `<n> <PU|Del> <from date>
+<to date> <name> <city> <state> <ref> <Yes|No>`, read by column: the city and
+state are the cells that start under the "City" and "St" headings; the
+number, type and dates before them by shape, so a date OCR runs into the name
+is still read. Line B is `<from time> <to time> <street> <phone> <ZIP> …`,
+read in order: the street up to the phone, the ZIP the five digits after it.
+A stop runs from its From date and time to its To date and time, under the
+rules below; the Appt Yes/No column is not read. Dates have no year: the year
+nearest the document's own date (the box's, else a "Load No" line's), and
+with neither the time is quoted, never guessed. A name and a city in one cell
+are never divided. Every stop is read or none is: a line in the table that is
+not a stop's two lines or a note, a stop with no cell under "City" or "St",
+no phone or no ZIP after it, stops out of order, a first stop that is not a
+pickup or a last of several that is not a delivery, no "Commodity" after the
+table on its page, pasted text — "Layout not recognised", and Read with AI is
+offered as for any other.
 
 No pattern looks at the rate, broker, contacts, phones, emails, driver,
 trailer, notes or instructions, so none of them can be filled. Status and
@@ -9663,7 +9684,7 @@ Phase 3aj (Alex approved building it, 2026-10-20): phase 4 of
 page is drawn with the pdf.js that opened the file and read by OCR, in the
 browser: tesseract.js 7.0.0, its English LSTM model (`4.0.0_best_int`),
 pages segmented automatically. The lines it gives take the same path as a
-text layer's lines: the five templates first, then, on a miss, Read with AI,
+text layer's lines: the six templates first, then, on a miss, Read with AI,
 with the redaction unchanged (`redact-2026-10-14.5`). No template, redaction
 rule, prompt, model, verifier or cap was changed for OCR. Only text is ever
 sent to the model, never a page image.
@@ -9679,7 +9700,9 @@ refusals, each a fixed sentence that quotes nothing:
   Type the load from the PDF."
 
 The local scripts (`ratecon:score`, the reports) give no OCR and still
-refuse a scan with the old sentence, except `ratecon:scan-report`, below.
+refuse a scan with the old sentence, except `ratecon:scan-report`, below,
+and, since 3ak, `ratecon:score`, which reads a scan by OCR in Node as the
+browser does and fills it as a scan.
 
 **Pages into lines** (`src/lib/ratecon/read-scan.ts`, `ocr-runs.ts`):
 
@@ -9782,6 +9805,15 @@ pages: 0.4 to 3.7 s a page in Node, 4,000 to 6,300 characters and 78 to 120
 lines each. No template reads any of them. Redaction prepares all three, so
 Read with AI is offered for each, sending 75, 85 and 78 lines. Nothing was
 sent. In a browser: not measured.
+
+**A scan of a known layout is read by its template** (3ak). OCR's lines go to
+the same six templates as a text layer's, so a scan of a layout a template
+knows is filled with no AI read and nothing sent, every field still marked
+Check. The stop table (§12.122) is the first template built for a layout
+that arrives as a scan. Of its two samples (5 and 30; 30 was added in 3ak),
+sample 30 is read, 13 of 13 fields as its ground truth; sample 5 is refused,
+because OCR runs its second stop's long name and its city into one cell, and
+goes to Read with AI as before.
 
 **Tests.** `ocr-runs.test.ts` (10, invented boxes): spaces and cell gaps,
 baselines, another row, a box too tall, skew. `read-scan.test.ts` (12, the

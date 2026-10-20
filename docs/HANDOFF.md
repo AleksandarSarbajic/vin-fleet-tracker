@@ -5543,6 +5543,197 @@ ratecon-ai's planned failed second read. The full suite was not run.
 not vitest's). The e2e suite has the same tests; `e2e/field.ts` is a helper,
 not a spec.
 
+### Phase 3ak: a sixth template, "stop table", for a layout that arrives as a scan every week (2026-10-20)
+
+From the advisor's brief. Commits:
+
+- `2e32d6d`: the template, its invented fixture and its line-level tests;
+- `f1d3ae9`: the same documents read both ways, as a text PDF and as a scan by OCR;
+- `45eff73`: `npm run ratecon:score` reads a scan by OCR;
+- one docs commit: this section, design-spec §12.122 and §12.128.
+
+NOT pushed, NOT deployed. No migration: layout ids are stored nowhere.
+
+**Why.** Alex gets this layout every week, as an image-only PDF. In production
+on 2026-10-20, OCR and Read with AI filled 12 of 13 fields of one; the first
+stop's city was left blank, and the two AI reads disagreed on the stop count
+(the advisor). A template is instant and free, sends nothing, and reads the
+same lines whether OCR or a text layer gave them.
+
+**Sample 30.** The second copy was not in `.samples/` when the phase started,
+so it stopped and said so. Alex then attached it in chat; the file was found
+in Downloads, checked by counts (3 pages, no text layer), and copied into
+`.samples/rate-confirmations/` under the name the brief gave. The Downloads
+copy is untouched. It sorts last, so no sample was renumbered.
+
+**What it reads** (`readStopTable`, `templates.ts`; layout `stop-table`; the
+rule is design-spec §12.122):
+
+- **Recognised by** the table's two header lines, each a whole line in that
+  word order: "Stop From To Name City St Ref Appt", "Address Phone Zip
+  Contact Appt Ref".
+- **Line A by column:** the city and the state are the cells that start under
+  the "City" and "St" headings (within 4 PDF units). Before them, the stop's
+  number, PU or Del, and the two dates are read by their shapes.
+- **Line B in order:** the times, then the street up to the phone, then the
+  ZIP, the five digits after the phone. The phone may be one token or two, in
+  any of the shapes OCR gave ("(555) 010-0100", "555-010-0101",
+  "(555)010-0102"). It is never read or quoted.
+- **The appointment** runs from the From date and time to the To date and
+  time; the fill's existing window rules decide APPT or FCFS. Times follow
+  Route blocks' 24-hour rule.
+- **The load number** is the number in the "LOAD NUMBER" box. A later page's
+  "Load No" that differs leaves it blank with a check.
+- **Never read:** the name, ref, Appt, contact, appt ref, phone, notes, rate,
+  carrier, commodity.
+
+**Decisions made here, each small and each listed as a question below:**
+
+- **The year.** The dates print as M/D. The year is the one nearest the
+  document's own date: the box's M/D/YYYY, else a "Load No" line's M/D/YY.
+  So 1/2 on a document of 12/30/2026 is 2027-01-02. With no document date,
+  the time is quoted as unreadable. The fill's existing checks (a date passed,
+  or more than 30 days out) still apply.
+- **One stop is read,** as one pickup. Two or more must end with a delivery,
+  and the first must be a pickup.
+- **The Appt column is not read,** as the brief said. The count is below.
+- **The table must end at "Commodity" on its own page.** A table that breaks
+  across pages is refused, because no copy shows what the break looks like.
+- **Cells OCR runs together** are read only where the leading part has a
+  fixed shape: the number and type, a date and the name, a time and the
+  street, the state and the ref. Two free-text columns run together are
+  never divided, so a name and a city in one cell are refused.
+
+**Finding: the brief's "name, city and state are separate cells" holds for
+sample 30, not for sample 5.** In sample 5's second stop, OCR gives the name
+and the city as ONE cell, so nothing starts under "City".
+
+- The name fills its column. Its last word ends 15 px (at 300 dpi) before
+  the city's first word, which is a word space, and the city's first word
+  starts under the "City" heading. OCR's word boxes show this, but the lines
+  the templates read carry only where each cell starts.
+- So sample 5 is recognised and refused whole, and goes to Read with AI as
+  before.
+- Reading it would need either a guess at where the name ends (the brief
+  forbids it) or a change to 3aj's scan-to-runs step: split OCR's runs where
+  a word crosses a known table's heading. That is out of scope; it is
+  question 1.
+- Sample 30's first stop has its To date and name in one cell. That is read,
+  by the date's shape.
+
+**Checked locally (counts only, by sample number):**
+
+- **Ground truth:** entries for samples 5 and 30 were added to
+  `expected.json`, which is git-ignored. The file as it was is beside it as
+  `expected.json.before-3ak`.
+  - Sample 30's entry was written from the PDF Alex attached in chat.
+  - Sample 5's was written from its OCR text, read at the browser's 300 dpi
+    and again at 400 dpi. The two reads agree on every field written.
+  - `ratecon:check-expected`: both complete. Sample 5 is priority 1, since
+    no template reads it (as sample 8 was in 3aa); sample 30 is priority 2.
+- **The template on the two:**
+  - Sample 30: 2 stops found (2 in the truth); 13 of 13 fields filled, and
+    13 of 13 match the truth. Those are the load number, each stop's type,
+    street, city, state and ZIP, and both appointments (FCFS receiving
+    hours, marked).
+  - Sample 5: refused, so 0 stops and 0 fields (above).
+- **The Appt column** against the window rule's outcome (Yes taken as APPT,
+  No as FCFS): 0 of 4 stops disagree. All four print "No" and are 8-hour
+  windows.
+- **Every other sample:** each sample's recognised layouts and read (layout,
+  stop count, load number filled or not) compared with HEAD's, with the
+  scans read by OCR. Only samples 5 and 30 changed. Every other template
+  sample is read by exactly the template it was before; none is read by
+  `stop-table`.
+- **`npm run ratecon:score`:** the other samples' lines are identical. The
+  bar is 15 of 15 (14 of 14 before); appointments silently wrong: none.
+
+**`ratecon:score` reads scans** (`45eff73`). With the new truth entries, the
+score failed both scans ("the PDF was not read"): it had no OCR.
+
+- It now reads a scan by OCR in Node with the browser's settings
+  (`src/test/ocr-node.ts`, as `ratecon:scan-report` does), and fills it as a
+  scan.
+- A text PDF is read as before.
+- `npm run check` does not see `scripts/*.mts`, so the script was
+  typechecked with a scratch tsconfig.
+
+**Tests.** Invented fixtures only: `stopTable`, `TABLE_STOPS` and
+`TABLE_MIDDLE` in `src/test/ratecon-fixtures.ts`. No name, place, street,
+number or phone comes from the real PDFs; only the printed headings are the
+layout's.
+
+- **`templates.test.ts`, 21 new:**
+  - 1, 2 and 3 stops; a note, and a note wrapped onto the next line;
+  - the phone's shapes; OCR's run-together cells;
+  - the load number disagreeing across pages, or no box;
+  - the year across New Year, and no document date;
+  - the 24-hour rule; the Appt column ignored;
+  - the refusals: a name and a city in one cell (sample 5's shape), a city
+    and a state in one cell, no phone, no ZIP, a street that does not start
+    like one, another stop type, a state that is not one, stops out of
+    order, a line A without its line B, a first stop that is not a pickup or
+    a last that is not a delivery, a stray line, a note's wrap not under its
+    text, no "Commodity", a heading not its own cell, a city or state not
+    under its heading, pasted text;
+  - nothing of the rate, phone, ref, name, note or carrier in the read.
+- **`stop-table-scan.test.ts`, 5 new:** each document read as a text PDF
+  through pdf.js and as its scan by OCR in Node, and both must give the
+  expected values. The cases are one stop; two with a note, filled from the
+  scan with every field marked Check (unchanged) and its windows filled by
+  their rules; three, the phone in three shapes; the load number
+  disagreeing; and a near miss (a line B with no phone) refused both ways.
+  About 10 s.
+- **`ratecon-fill.test.ts`:** `stop-table` was added to "a template read
+  carries no AI check".
+- **`npm run check`:** 201 files and 3634 tests, from 200 and 3608 before.
+
+**Mutations** (`templates.test.ts`), each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| the city, or the state, starting under its heading | 1 each |
+| a cell under "City" at all | 1 |
+| the two-token phone | all: the shared read throws |
+| the ZIP's shape; the street's shape; a US state | 1 each |
+| the load numbers agreeing | 1 |
+| the nearest year | 1 |
+| stops numbered in order; first a pickup, last a delivery | 1 each |
+| a note's wrap under its text | 2 |
+| the 24-hour rule | 1 |
+| the table ending on its page | 1 |
+| a date run into the name | 1 |
+| positions needed | 0 |
+
+The positions guard is a second line of defence, as in 3aa: pasted lines
+have no heading cells, so they are refused anyway. Two checks that no
+mutation could fail were removed as redundant. One was that the headings are
+in order, which the header's pattern already ensures. The other was that a
+line B is not another line A; that cannot be read as a phone and ZIP, and
+the numbering check would refuse it.
+
+**Unverified:**
+
+- That this broker always sends scans, and that two copies cover the layout.
+  No copy has 3 or more stops, a table across pages, or an Appt "Yes": all
+  four stops print "No".
+- How often a long name will run into the city, as in sample 5: 1 stop of
+  the 4 seen.
+- Sample 5's truth came from OCR text, not from a look at the page. The two
+  resolutions agree, but a character both misread would be in the truth too.
+- In a browser: not run (no e2e, per the brief).
+
+**Questions for Alex:**
+
+1. Sample 5's shape is refused and goes to the AI. Splitting OCR's runs
+   where a word crosses a known table's heading would read it. That changes
+   3aj's scan-to-runs step for every scan: a phase of its own, or not?
+2. A one-stop table is read as one pickup. Keep that, or refuse it?
+3. The year rule (the year nearest the document's date): fine?
+4. Sample 5's truth was written from OCR text. Is that acceptable, or will
+   you check its four address fields and two appointments against the PDF?
+5. When to push and deploy 3ak.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
