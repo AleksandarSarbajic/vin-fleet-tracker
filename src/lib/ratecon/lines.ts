@@ -27,7 +27,7 @@ export interface Line {
 }
 
 /** Runs on the same baseline, give or take this, are one line. */
-const SAME_LINE = 3;
+export const SAME_LINE = 3;
 
 /** A PDF's runs as lines: page by page, top to bottom, left to right. */
 export function linesFromRuns(runs: readonly TextRun[]): Line[] {

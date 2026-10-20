@@ -47,3 +47,73 @@ export function tinyPdf(pages: TinyRun[][]): Uint8Array {
   out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return new TextEncoder().encode(out);
 }
+
+/** One scanned page: a JPEG, its size in pixels, and the page it covers in PDF units (Letter unless said). */
+export interface ScannedPage {
+  jpeg: Uint8Array;
+  width: number;
+  height: number;
+  media?: [number, number];
+}
+
+/**
+ * §12.128. A scan, as a scanner writes one: every page a single JPEG drawn
+ * over the whole page, and no text at all. Built in bytes, not characters,
+ * because the images are binary. No file is read and none is written.
+ */
+export function tinyScanPdf(pages: ScannedPage[]): Uint8Array {
+  const encoder = new TextEncoder();
+  const objects: (string | { head: string; data: Uint8Array })[] = [];
+  const add = (body: string | { head: string; data: Uint8Array }) => {
+    objects.push(body);
+    return objects.length;
+  };
+  const pagesId = 1 + pages.length * 3;
+  const kids: number[] = [];
+  for (const page of pages) {
+    const [w, h] = page.media ?? [612, 792];
+    const image = add({
+      head: `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>`,
+      data: page.jpeg,
+    });
+    const stream = `q ${w} 0 0 ${h} 0 0 cm /Im1 Do Q`;
+    const content = add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    kids.push(
+      add(
+        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im1 ${image} 0 R >> >> /Contents ${content} 0 R >>`,
+      ),
+    );
+  }
+  add(`<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(' ')}] /Count ${kids.length} >>`);
+  const catalog = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+  const parts: Uint8Array[] = [];
+  let length = 0;
+  const write = (part: string | Uint8Array) => {
+    const bytes = typeof part === 'string' ? encoder.encode(part) : part;
+    parts.push(bytes);
+    length += bytes.length;
+  };
+  write('%PDF-1.4\n');
+  const offsets: number[] = [];
+  objects.forEach((body, i) => {
+    offsets.push(length);
+    if (typeof body === 'string') write(`${i + 1} 0 obj\n${body}\nendobj\n`);
+    else {
+      write(`${i + 1} 0 obj\n${body.head}\nstream\n`);
+      write(body.data);
+      write('\nendstream\nendobj\n');
+    }
+  });
+  const xref = length;
+  write(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+  for (const offset of offsets) write(`${String(offset).padStart(10, '0')} 00000 n \n`);
+  write(`trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
