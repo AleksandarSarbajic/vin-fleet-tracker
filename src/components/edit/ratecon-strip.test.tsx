@@ -244,6 +244,15 @@ describe('Fill from rate confirmation (§12.122)', () => {
     expect(form().querySelector('[data-appointment-check]')).toBeNull();
   });
 
+  it('a ZIP that cannot exist is left blank and its check says "Check:" once (3aj)', async () => {
+    await render();
+    await pasteText(PU_SO_PASTED.replace('58102', '00001'));
+    expect(field('ZIP').value).toBe('');
+    expect(labelled('ZIP').querySelector('[data-field-check]')?.textContent).toBe(
+      "Check: the PDF's ZIP is not a real US ZIP. Enter it by hand.",
+    );
+  });
+
   it('is never offered on a load with a saved stop', async () => {
     await render(ROW);
     expect(strip()).toBeNull();

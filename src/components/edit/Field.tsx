@@ -1,6 +1,7 @@
 'use client';
 
 import type React from 'react';
+import { checkSaid } from './check-said';
 
 /** A labelled text input, its error under it, never in a summary banner (§9.9). */
 export function Field({
@@ -52,7 +53,7 @@ export function Field({
         <span className="mt-1 block text-small text-status-late-fg">{error}</span>
       ) : check ? (
         <span data-field-check="" className="mt-1 block text-small text-status-risk-fg">
-          Check: {check}
+          {checkSaid(check)}
         </span>
       ) : help && !source ? (
         <span className="mt-1 block text-small text-text-mutedOnOverlay">{help}</span>

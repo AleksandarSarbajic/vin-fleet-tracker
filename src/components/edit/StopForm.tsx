@@ -5,6 +5,7 @@ import type { Status } from '@/lib/status';
 import { StatusChip } from '@/components/console/StatusChip';
 import { AppointmentFields } from './AppointmentFields';
 import { ArrivalFields } from './ArrivalFields';
+import { checkSaid } from './check-said';
 import { Field } from './Field';
 import { splitPastedAddress, type AddressField } from '@/lib/paste-address';
 import { zipStateCheck } from '@/lib/geo/zip-state';
@@ -190,7 +191,7 @@ export function StopForm({
 
       {fill?.sources.stopType || fill?.checks.stopType ? (
         <div data-type-fill="" className="flex flex-col gap-0.5 text-small">
-          {fill.checks.stopType ? <p className="text-status-risk-fg">Check: {fill.checks.stopType}</p> : null}
+          {fill.checks.stopType ? <p className="text-status-risk-fg">{checkSaid(fill.checks.stopType)}</p> : null}
           {fill.sources.stopType ? (
             <p {...(aiFields.has('stopType') ? { 'data-field-ai': '' } : {})} className="break-words text-text-mutedOnOverlay">
               {sourceOf('stopType')}
