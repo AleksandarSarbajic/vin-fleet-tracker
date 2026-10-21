@@ -5552,7 +5552,8 @@ From the advisor's brief. Commits:
 - `45eff73`: `npm run ratecon:score` reads a scan by OCR;
 - one docs commit: this section, design-spec §12.122 and §12.128.
 
-NOT pushed, NOT deployed. No migration: layout ids are stored nowhere.
+Pushed and deployed 2026-10-21 (see "Alex's answers" below). No migration:
+layout ids are stored nowhere.
 
 **Why.** Alex gets this layout every week, as an image-only PDF. In production
 on 2026-10-20, OCR and Read with AI filled 12 of 13 fields of one; the first
@@ -5733,6 +5734,26 @@ the numbering check would refuse it.
 4. Sample 5's truth was written from OCR text. Is that acceptable, or will
    you check its four address fields and two appointments against the PDF?
 5. When to push and deploy 3ak.
+
+**Alex's answers (2026-10-21):**
+
+1. Not now. At the week check, his saved PDFs of this broker go through the
+   templates locally (free, counts only) to count how often a stop is refused
+   as sample 5's is. If refusals are common, splitting OCR runs at a known
+   table's headings becomes a phase of its own. Until then such a load goes
+   to Read with AI, as today.
+2. Keep it: a one-stop table is read as one pickup.
+3. Keep the nearest-year rule (the year nearest the document's date): at the
+   turn of the year, a rate con dated late December with a "1/2" delivery
+   must get the next January, which a fixed "current year" would put in the
+   past. No code change.
+4. Acceptable for now. Before any paid AI run scores sample 5, its truth (the
+   four address fields and two appointments) is checked against the PDF.
+5. Pushed 2026-10-21 after `npm run e2e -- ratecon-` passed 7 of 7 at
+   `1961b5e` (run folder test-results/2026-10-21T13-46-21-979Z, 46.9 s, no
+   stalls). The Vercel production deploy of `1961b5e` reported success at
+   2026-10-21 13:53:58 UTC (the advisor, from the GitHub deployments API;
+   unverified here).
 
 ## Next
 
