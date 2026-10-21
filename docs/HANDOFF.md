@@ -6894,7 +6894,7 @@ a truly long one, with the full name in a title.
 ### Phase 3an, step 2: Night desk built on the assignment page (2026-10-21)
 
 From the advisor's brief: build direction 1, Night desk, on `/assignments`
-only, as answered above. **NOT pushed, NOT deployed.** No migration, no
+only, as answered above. **NOT pushed, NOT deployed; e2e verified 2026-10-21 (see below), ready to push.** No migration, no
 server code, no API route, no handler, no change to the save request (same
 rows, same payload). No e2e spec changed; no baseline PNG created, changed
 or deleted; e2e not run.
@@ -7188,6 +7188,44 @@ npm run e2e -- desktop-baseline history-baseline history-phone-baseline --update
    next/font's renamed, self-hosted family does not match. Check in a small
    phase of its own whether the console really draws the self-hosted Barlow?
    Recommended: yes; nothing was changed here.
+
+**Alex's answers (2026-10-21):**
+
+1. Yes: restyle MergePrompt and the picker's "Add a driver" form in Night
+   desk, as a small follow-up phase.
+2. Keep a viewer's locked field boxed, with a quiet edge and muted text.
+3. Header counts in Public Sans: fine.
+4. The phone editor's Save is also a solid accent button: keep, so a filled
+   accent always means "save".
+5. The console's literal 'Barlow' vs next/font's renamed family: check it in
+   its own small phase, later. Confirmed by the advisor: layout.tsx loads
+   Barlow with `variable: '--font-barlow'`, while tailwind.config.ts asks for
+   the literal family 'Barlow'. Unverified what the console actually
+   renders. A fix would change every console page and its baselines, so it
+   needs its own decision.
+
+**e2e (Alex, 2026-10-21):**
+
+- Two first attempts did not start: ports 3199 (`e2e/sentry-sink.mjs`) and
+  3100 (`next start`) were held by processes left from an interrupted run
+  started 20:45 CEST, likely from VS Code's Playwright extension (its
+  test-server had run since 19:33). Alex stopped them; nothing ran.
+- `assignments-baseline --update-snapshots=none` (run
+  2026-10-21T18-47-23-554Z): all 8 differed, as expected. The advisor
+  reviewed the actual images (768, 1024, picker-open-1024, changed-1440,
+  1920) before any was saved.
+- `desktop-baseline history-baseline history-phone-baseline dispatch
+  driver-phone driver-picker --update-snapshots=none` (run
+  2026-10-21T18-47-51-529Z): 31 passed. All 72 other baselines unchanged;
+  the page's e2e specs pass.
+- `--update-snapshots=changed` (run 2026-10-21T18-58-45-899Z): 9 passed, 8
+  re-saved. The advisor confirmed all 8 saved files are byte-identical to
+  the reviewed actual images. Committed as written in `37d21fa` (each opened
+  first: only the spec's invented seed).
+- `--repeat-each=3 --update-snapshots=none` (run 2026-10-21T18-59-09-894Z):
+  25 passed.
+- Not shown by any baseline: Save's solid accent (no shot has a valid,
+  savable change). Alex to check it live after deploy.
 
 ## Next
 
