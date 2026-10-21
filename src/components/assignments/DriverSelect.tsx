@@ -313,8 +313,19 @@ export function DriverSelect({
           {matches.map((driver, index) => {
             const claim = claimedBy.get(driver.id);
             const takenElsewhere = claim !== undefined && claim !== truckLabel;
+            /**
+             * §12.129: a rule where the drivers with no truck end and the
+             * drivers on one begin, so the free ones read as a group.
+             */
+            const previous = index > 0 ? matches[index - 1] : undefined;
+            const firstOnATruck =
+              previous !== undefined && claim !== undefined && !claimedBy.has(previous.id);
             return (
-              <li key={driver.id}>
+              <li
+                key={driver.id}
+                data-first-on-a-truck={firstOnATruck ? '' : undefined}
+                className={firstOnATruck ? 'border-t border-line-soft' : undefined}
+              >
                 <button
                   type="button"
                   role="option"
@@ -343,7 +354,10 @@ export function DriverSelect({
                       ? `on truck ${claim}`
                       : driver.truckLabel
                         ? `currently ${driver.truckLabel}`
-                        : 'unassigned'}
+                        : // A driver with no truck, as the panel says it.
+                          // "unassigned" sat one line under "Unassigned —
+                          // clear this truck", the same word for a truck.
+                          'no truck'}
                   </span>
                 </button>
               </li>

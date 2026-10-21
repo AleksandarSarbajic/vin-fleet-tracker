@@ -385,3 +385,37 @@ describe('the quiet field and its size', () => {
     expect(container!.querySelector('[title*="not in Samsara"]')!.parentElement!.className).toContain('h-8');
   });
 });
+
+describe('the free drivers in the list (§12.129)', () => {
+  const tagOf = (name: string) =>
+    [...container!.querySelectorAll('[role="option"]')]
+      .find((o) => o.textContent?.includes(name))!
+      .lastElementChild!.textContent;
+  const ruled = () => [...container!.querySelectorAll('[data-first-on-a-truck]')];
+
+  it('tags a driver with no truck "no truck", not "unassigned"', () => {
+    render({ claimedBy: new Map([['d-1', '200']]) });
+    act(() => input().click());
+    expect(tagOf('Hand Entered Hal')).toBe('no truck');
+    expect(tagOf('Samsara Sam')).toBe('on truck 200');
+  });
+
+  it('rules off the first driver on a truck after the free ones', () => {
+    render({ claimedBy: new Map([['d-1', '200']]) });
+    act(() => input().click());
+    expect(ruled()).toHaveLength(1);
+    expect(ruled()[0]!.textContent).toContain('Samsara Sam');
+    expect(ruled()[0]!.className).toContain('border-t');
+  });
+
+  it('draws no rule when every driver is free, or none is', () => {
+    render();
+    act(() => input().click());
+    expect(ruled()).toHaveLength(0);
+    act(() => root!.unmount());
+    root = createRoot(container!);
+    render({ claimedBy: new Map([['d-1', '200'], ['d-2', '201']]) });
+    act(() => input().click());
+    expect(ruled()).toHaveLength(0);
+  });
+});
