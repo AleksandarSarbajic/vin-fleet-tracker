@@ -265,3 +265,69 @@ describe('the closed input carries the No ELD tag (§12.37)', () => {
     expect(list()).not.toBeNull();
   });
 });
+
+const optionNames = () =>
+  [...container!.querySelectorAll('[role="option"] span.truncate')].map((s) => s.textContent);
+
+describe('the order of the list', () => {
+  const many = (n: number): BoardDriver[] =>
+    Array.from({ length: n }, (_, i) => ({
+      ...DRIVERS[0]!,
+      id: `m-${i}`,
+      name: `Driver ${String(i).padStart(2, '0')}`,
+    }));
+
+  it('puts drivers with no truck first, then the rest, each in its own order', () => {
+    render({ claimedBy: new Map([['d-1', '200']]) });
+    act(() => input().click());
+    expect(optionNames()).toEqual(['Hand Entered Hal', 'Samsara Sam']);
+  });
+
+  it('counts the 40-match cap after the sort, so a free driver is never cut', () => {
+    // 45 drivers, the last three free: unsorted, all three fell past 40.
+    const drivers = many(45);
+    const claimedBy = new Map(drivers.slice(0, 42).map((d, i) => [d.id, String(100 + i)]));
+    render({ drivers, claimedBy });
+    act(() => input().click());
+    const names = optionNames();
+    expect(names).toHaveLength(40);
+    expect(names.slice(0, 3)).toEqual(['Driver 42', 'Driver 43', 'Driver 44']);
+  });
+
+  it('caps an unfiltered list at 40', () => {
+    render({ drivers: many(45) });
+    act(() => input().click());
+    expect(optionNames()).toHaveLength(40);
+  });
+});
+
+describe('the keys that clear and close', () => {
+  const key = (k: string) =>
+    act(() => input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })));
+
+  it('Backspace on an empty search clears the truck', () => {
+    const onChange = vi.fn();
+    render({ value: 'd-1', onChange });
+    act(() => input().focus());
+    key('Backspace');
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it('Backspace while a search is typed edits the search, and clears nothing', () => {
+    const onChange = vi.fn();
+    render({ value: 'd-1', onChange });
+    type('Sa');
+    key('Backspace');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('Escape closes the list and keeps the driver', () => {
+    const onChange = vi.fn();
+    render({ value: 'd-1', onChange });
+    act(() => input().click());
+    key('Escape');
+    expect(list()).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input().value).toBe('Samsara Sam');
+  });
+});

@@ -139,8 +139,18 @@ export function DriverSelect({
     const list = needle
       ? known.filter((d) => d.name.toLowerCase().includes(needle))
       : known;
-    return list.slice(0, 40);
-  }, [known, typed]);
+    /**
+     * Drivers with no truck first (Alex, 2026-10-21), then everyone else,
+     * each group in the order it came. On a board where nearly everyone is
+     * on a truck, the one free driver was somewhere in a grey list. The
+     * 40-match cap counts AFTER the sort, so a free driver is never the one
+     * cut off. "No truck" is `claimedBy`: the draft on the board, the saved
+     * assignments in the edit modal.
+     */
+    const free = list.filter((d) => !claimedBy.has(d.id));
+    const onATruck = list.filter((d) => claimedBy.has(d.id));
+    return [...free, ...onATruck].slice(0, 40);
+  }, [known, typed, claimedBy]);
 
   useEffect(() => {
     if (!open) return;
