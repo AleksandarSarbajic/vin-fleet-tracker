@@ -3,8 +3,9 @@ import { connect, seedUser, truncateAll } from './fixtures';
 
 /**
  * §12.129–§12.132 — the assignment board, pixel for pixel, at the six desktop
- * widths the console's baselines use, and once with the driver picker open at
- * 1024 (the narrow-desktop layout, the width the list was too narrow at).
+ * widths the console's baselines use, once with the driver picker open at
+ * 1024 (the narrow-desktop layout, the width the list was too narrow at), and
+ * once at 1440 with changed rows and a double-booking (3am).
  *
  * Held still by:
  *
@@ -95,6 +96,33 @@ for (const width of WIDTHS) {
     await expect(page).toHaveScreenshot(`assignments-${width}.png`, { stylePath: 'e2e/screenshot.css' });
   });
 }
+
+/**
+ * 3am: the states the first seven do not show, at 1440, nothing saved.
+ *
+ *   - 410, empty, takes the free driver: a "was —" row (§12.130);
+ *   - 404 takes 401's driver: a "was" row with its old driver struck and the
+ *     No ELD tag not (§12.133), and a double-booking, so 401 and 404 are on
+ *     the conflicted ground and the footer names both, in primary ink.
+ *
+ * Focus is taken off the last picker before the shot, so no field shows its
+ * focus box.
+ */
+test('changed rows and a double-booking at 1440px match their baseline', async ({ page }) => {
+  await open(page, 1440);
+  const pick = async (truck: number, driver: string) => {
+    await page.getByRole('combobox', { name: `Driver for truck ${truck}` }).click();
+    await page.getByRole('option', { name: new RegExp(`^${driver}`) }).click();
+  };
+  await pick(410, FREE);
+  await pick(404, 'Ada Okonkwo-Lindqvist');
+  await expect(page.getByText('2 rows changed · a driver is on trucks 401 and 404')).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.mouse.move(2, HEIGHT - 2);
+  await expect(page).toHaveScreenshot('assignments-changed-1440.png', {
+    stylePath: 'e2e/screenshot.css',
+  });
+});
 
 test('the driver picker open at 1024px matches its baseline', async ({ page }) => {
   await open(page, 1024);
