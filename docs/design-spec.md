@@ -10016,6 +10016,59 @@ box on hover and the 44px pitch were seen in a local render and are held by
 `e2e/assignments-baseline.spec.ts` (eight shots, one new: changed rows and a
 double-booking at 1440).
 
+## 12.136 The assignment page has its own look, Night desk
+
+**What.** `/assignments` is drawn in "Night desk" (HANDOFF 3an), and only
+`/assignments`. Alex asked for the page to look and feel premium. Of three
+mockups, he chose the dark one built for long shifts (2026-10-21).
+
+**Why this page only.** The page is used for minutes at a time, apart from
+the console, so it can try a look without moving the console's. The console,
+the history page, the edit modal, the map popup and the phone sheet are
+unchanged. Whether the console follows is decided after a week of use.
+
+**How it is scoped.**
+
+- The parts the page shares take a `look` prop that defaults to the
+  console: `DriverSelect` (the modal's picker) and `DriverName` / `NoEldTag`
+  (every driver name).
+- Only the board passes `look="nightDesk"`.
+- Without it, each renders the pre-3an markup exactly
+  (`look-scope.test.tsx`).
+- `DriverPhone` is the board's alone and is drawn in Night desk directly.
+- MergePrompt and the "Add a driver" form keep the console look for now.
+
+**Tokens and faces.**
+
+- `palette.nightDesk` (ground, surface, raised, raisedHigh, rowHover,
+  border, rule, control, controlHover, ink, inkSecondary, muted, tagInk,
+  accent, accentHover, onAccent, negative, negativeBg). Font sizes
+  `nightDesk-title/gap/data/body/small/tag` (22/20/14/13/12/11), radius
+  `nightDesk` (6px), spacing `row-nightDesk` (42px).
+- No existing token changed. Every pair the page draws is measured in
+  `contrast.test.ts`; the worst is `muted` on `raisedHigh`, 5.01.
+- Public Sans for text and IBM Plex Mono for truck and phone numbers, both
+  SIL OFL 1.1. They load with `next/font/google` in
+  `src/app/assignments/layout.tsx` only, self-hosted at build, and are read
+  through `--font-nightdesk-sans` / `--font-nightdesk-mono`.
+
+**The look, in short.**
+
+- Cards darker than the ground; rows on a 42px pitch.
+- One 1px accent line marks every selection: focus, the open field, the
+  list's cursor, a changed row's left edge.
+- An empty truck is a dashed empty slot.
+- A double-booked row is on the negative ground.
+- From 1100px up, the 940px board (was 1000, §12.135) and its panels are
+  centred together.
+- Save is a solid accent fill whenever there is something valid to save,
+  disabled but readable otherwise; Discard is an outline.
+- No shadow on the open list (3al).
+- The viewer's reason is still the title (§12.14).
+
+Behaviour is unchanged: every rule of §12.129–§12.135 and the save request
+stand.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

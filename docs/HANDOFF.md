@@ -6870,6 +6870,325 @@ calmest, but it is light.
    keep it for now, and raise it as its own small item if keyboard users
    matter.
 
+**Alex's answers (2026-10-21):**
+
+1. Direction: Night desk.
+2. This page only. The console, the history page, the edit modal, the map
+   popup, the phone sheet and every other surface look exactly as today.
+   The rest of the console is decided after a week of use.
+3. Dark.
+4. Truck numbers and phone numbers in IBM Plex Mono; text in Public Sans.
+5. From 1100px up, the board capped at 940px and centred together with its
+   panels.
+6. Save is not an outlined pill. It is a solid, filled button in Night desk's
+   accent (as a token) whenever there is something valid to save. It is
+   disabled at rest and while Save is refused (a double-booking): visibly
+   disabled, but readable. Discard stays the quieter, outlined button.
+7. The open list has no shadow (as decided in 3al).
+8. The viewer's lock reason stays a hover tooltip, as today.
+
+Also: in "Drivers with no truck", the mockup cut a long name off ("…") at
+1440. Give the name room, so a normal-length name shows whole; truncate only
+a truly long one, with the full name in a title.
+
+### Phase 3an, step 2: Night desk built on the assignment page (2026-10-21)
+
+From the advisor's brief: build direction 1, Night desk, on `/assignments`
+only, as answered above. **NOT pushed, NOT deployed.** No migration, no
+server code, no API route, no handler, no change to the save request (same
+rows, same payload). No e2e spec changed; no baseline PNG created, changed
+or deleted; e2e not run.
+
+Commits (each passed `npm run check` in the pre-commit hook):
+
+- `b0673a9`: the tokens and the fonts, scoped to the page (no existing token
+  changed); the contrast of every Night desk pair (+17 tests);
+- `63fa1e2`: a `look` prop on DriverSelect and DriverName / NoEldTag,
+  defaulting to the console; the scope test (+15);
+- `1762660`: the board, its rows and its panels in Night desk; DriverPhone;
+  the source scan (+3); +5 board tests; three class assertions follow;
+- `8ee6493`: the footer, with a solid Save and an outlined Discard (+4); one
+  class assertion follows;
+- `3c38517`: 20px sides from 1100 to 1279, so the rows fit beside the panels;
+- one docs commit: this section, Alex's answers above, design-spec §12.136.
+
+#### The scope: a prop, not a CSS scope
+
+The parts the page shares take `look?: 'console' | 'nightDesk'`, defaulting
+to `'console'`, as 3am did with `quiet` and `size`:
+
+- `DriverSelect`: the edit modal's picker, in `LoadStrip`.
+- `DriverName` and `NoEldTag`: every driver name, in TruckRow, MapPopup,
+  TruckSheet, ReassignConfirm and LoadStrip.
+
+Only `AssignmentBoard` passes `'nightDesk'`; DriverName also passes it on to
+its own tag, inside its Night desk branch.
+
+Why a prop: the default path is then the old code itself. A scope on the
+page's root (a data attribute with CSS variables) would leave the old
+classes in place plus selectors that must never match anywhere else, which
+only a browser can check.
+
+**Proof that the other surfaces are unchanged.** `look-scope.test.tsx` pins
+the markup of nine cases exactly as the pre-3an source rendered it (captured
+from `b0673a9`, where those components had not changed): the tag; a name,
+struck and not; a struck fallback; the modal's picker closed, empty and open
+with its list; the quiet row field; a viewer's locked field. Each still
+renders character for character, and `look="console"` equals no `look`. A
+source scan finds `look="nightDesk"` only in AssignmentBoard and DriverName,
+the faces' variables only in `src/app/assignments/layout.tsx`, and
+LoadStrip's DriverSelect passing no look.
+
+`DriverPhone` and `MergePrompt` are rendered by the board only (grep), so
+they need no prop. DriverPhone is restyled directly. **MergePrompt and
+`AddDriverInline`** (the "Add a driver" form inside the picker's list, shared
+with the modal) **keep the console look**: they are left out of this phase
+(question 1).
+
+#### Tokens added (no existing value changed)
+
+All are in `src/design/tokens.ts` (`palette.nightDesk`) and
+`tailwind.config.ts`.
+
+| Token | Value | Role |
+|---|---|---|
+| `nightDesk.ground` | #171719 | the page |
+| `nightDesk.surface` | #131217 | cards (the rows, the panels, the footer): darker than the ground |
+| `nightDesk.raised` | #212023 | a changed row; the open list; a disabled Save |
+| `nightDesk.raisedHigh` | #2a292d | the open field; the list's cursor row |
+| `nightDesk.rowHover` | #18171c | a resting row on hover |
+| `nightDesk.border` | #26252a | card and header edges; a viewer's locked field |
+| `nightDesk.rule` | #1f1e23 | between rows |
+| `nightDesk.control` | #3a3a3e | control edges; the empty truck's dashed slot; a field's hover line |
+| `nightDesk.controlHover` | #55555b | a control's edge on hover |
+| `nightDesk.ink` | #ffffff | names, truck numbers, the changed count |
+| `nightDesk.inkSecondary` | #c9cacd | phone numbers; a driver on a truck in the list |
+| `nightDesk.muted` | #96989e | headers, "Unassigned", Edit / Add, "was", disabled labels |
+| `nightDesk.tagInk` | #a3a5aa | the No ELD tag's word |
+| `nightDesk.accent` | #4a8ad6 | the 1px line (focus, open field, cursor, changed row) and Save's fill |
+| `nightDesk.accentHover` | #6ea2e0 | Save on hover |
+| `nightDesk.onAccent` | #131217 | Save's label (white on the accent is 3.56) |
+| `nightDesk.negative` | #e5566f | a double-booked truck's number and line; refusals |
+| `nightDesk.negativeBg` | #2c1a20 | a double-booked row; the conflict and failure notes |
+
+- **Font sizes:** `nightDesk-title` 22, `-gap` 20, `-data` 14, `-body` 13,
+  `-small` 12, `-tag` 11.
+- **Font families:** `nightDesk` (Public Sans) and `nightDesk-mono` (IBM
+  Plex Mono), read through CSS variables.
+- **Other keys:** radius `nightDesk` 6px; spacing `row-nightDesk` 42px.
+- **One departure from the mockup:** `muted` is #96989e, not #8a8c92. The
+  mockup's value measured 4.30:1 on the list's cursor row; #96989e measures
+  5.01 there, its worst ground. All 17 pairs the page draws are in
+  `contrast.test.ts`.
+
+#### Fonts
+
+- `src/app/assignments/layout.tsx` loads Public Sans (400/500/600) and IBM
+  Plex Mono (400/500) with `next/font/google`, self-hosted at build like
+  Barlow, so no runtime CDN request. Both are SIL OFL 1.1.
+- The route's layout is the only place they load, so no other page downloads
+  them. They reach the page as `--font-nightdesk-sans` and
+  `--font-nightdesk-mono` on a `display: contents` wrapper.
+- They are read through the variables because next/font renames the family it
+  self-hosts (`'__Public_Sans_…'`; see next's `postcss-next-font.js`).
+- Plex Mono sets truck numbers (the rows and the "Trucks with no driver"
+  panel) and phone numbers (shown and while editing). The header's counts and
+  all other text are Public Sans (answer 4 names truck and phone numbers only;
+  question 3).
+
+**Found, not changed.** The console's own Tailwind family is the literal
+`'Barlow'` (`tailwind.config.ts`), not next/font's variable
+(`--font-barlow`, read only by HistoryPage's print style). For the reason
+above, the console may be drawing Barlow from a locally installed copy or a
+fallback rather than the self-hosted file. Unverified; question 5.
+
+#### Per area
+
+- **Page** (`AssignmentBoard.tsx`).
+  - `main` sits on the page's ground, in its face and ink.
+  - One `FRAME` column (max 1288px) for header, board and footer. From
+    1100px up, the 940px board and the 260px panels are centred together
+    (answer 5).
+  - 32px sides below 1100 and from 1280; 20px from 1100 to 1279, because
+    beside the panels 32px ran the rows up to 4px past their card at
+    1100–1103 (a local render; commit `3c38517`).
+  - Below 1024 the gaps and padding tighten so 768 still closes: 674 + 36 +
+    12 + 2 = 724 in 728.
+  - The below-768 message is in Night desk, with its text unchanged.
+- **Header.** "Assignments" at 22/600 in sentence case (it was condensed caps
+  by CSS; the text is the same). Counts in muted Public Sans. Back to console
+  is an outlined pill.
+- **Rows.**
+  - The rows sit on one card darker than the ground, on a 42px pitch.
+  - Truck numbers are Plex Mono 14/500, muted when the truck is empty and in
+    the negative when double-booked.
+  - A changed row is one step lighter with a 1px accent line on its left
+    edge. A double-booked row is on the negative ground with the line in the
+    negative.
+  - An empty truck has no ground of its own: its field is the dashed empty
+    slot.
+  - The column header is muted 12px sentence case, sticky as before.
+- **Picker field** (`DriverSelect` `look="nightDesk"`, still `quiet` and
+  `size="row"`).
+  - No box at rest; a 1px line under it on hover; the accent line and one
+    step of lightness when focused or open.
+  - An empty truck's field is a dashed box.
+  - A viewer's locked field keeps a box (§12.134) in the quieter edge, with
+    muted ink and a not-allowed cursor; its reason is still the title
+    (answer 8; question 2).
+  - The No ELD tag is in sentence case in a 4px box.
+- **Open list.**
+  - No shadow (answer 7): a tone step and a 1px control edge, 6px corners.
+  - The cursor row is one step lighter with a 1px accent line on its left.
+  - A free driver is in ink with "no truck"; a driver on a truck in
+    secondary ink with "on truck N".
+  - The rule after the free drivers is kept. The width rule, the order and
+    the cap after the sort are untouched (§12.129).
+- **Phone** (`DriverPhone`).
+  - The number is in Plex Mono, secondary ink; "No phone" is in muted Public
+    Sans; Edit / Add are 12px sentence case on the same 28px targets.
+  - Disabled for a viewer it stays readable: muted at 6.46:1 and a
+    not-allowed cursor, not 45%.
+  - In the editor, the field is Plex Mono with a negative edge on a refusal,
+    and the refusal is in the negative.
+  - The editor's Save is a solid accent fill too (question 4), and Cancel an
+    outline.
+- **"Currently".** "was" is muted. The struck name truncates before its No
+  ELD tag (`DriverName` `look="nightDesk"` lets the name shrink), so the tag
+  is never the part cut off.
+- **Panels.**
+  - Cards, with titles at 14/600.
+  - The no-driver trucks are Plex Mono 20/500, wrapping as before.
+  - From 1100 up, a free driver's name has the whole first line, and Retire
+    sits beside the phone under it (Alex's panel fix). Measured at 1440:
+    "Lior Mbeki-Saarinen" and its tag show whole.
+  - A truly long name truncates, whole in its title. Below 1100 the entry is
+    one line, as before.
+- **Footer.**
+  - The count is in ink while dirty and muted at rest.
+  - Save is a solid accent fill with `onAccent` text whenever it is enabled.
+    Disabled (at rest, for a viewer, while a double-booking refuses it), it
+    has no fill, a control edge, the `raised` ground and muted text at
+    5.62:1, not 45% (answer 6).
+  - Discard is an outlined pill.
+  - The server's conflict list and a failure sit on the negative ground.
+- **Focus.** Every control on the page carries `ND_FOCUS`: 1px of the
+  accent, 2px out, drawn inside the list. Measured in the local render
+  below.
+
+#### Tests
+
+- Counts: 203 → 204 files, 3,682 → 3,726 tests (+44): contrast +17,
+  `look-scope.test.tsx` +18 (new file), AssignmentBoard +9.
+- **Changed assertions**, all in `AssignmentBoard.test.tsx`, all class checks
+  for classes this phase replaces. No behaviour assertion changed.
+  1. "marks a truck with nobody as an empty slot" (was "puts a truck with
+     nobody on the unassigned ground"): `bg-row-unassigned` becomes the
+     field's `border-dashed`, on the empty truck only.
+  2. "puts a changed row on its own ground, with the accent line, over the
+     empty slot" (was "lets a changed row's ground win over the empty
+     one"): `bg-row-selected` and not `bg-row-unassigned` become
+     `bg-nightDesk-raised`, `before:bg-nightDesk-accent` and not the
+     resting hover.
+  3. "sits each row on Night desk's 42px row" (was "the console's 44px
+     row"): `min-h-row-comfortable` becomes `min-h-row-nightDesk`.
+  4. The footer's count: `text-text-secondary` / `text-text` become
+     `text-nightDesk-muted` / `text-nightDesk-ink`.
+- `DriverSelect.test.tsx`, `DriverName.test.tsx`, `ReassignConfirm.test.tsx`
+  and every other test file: unchanged. They render the default look, and
+  pass as they are.
+
+**What the test DOM cannot prove** (happy-dom draws nothing):
+
+- that the faces load (in the app, next/font at build);
+- any colour as seen, any width, the 940 cap and the centring;
+- that the dashed slot, the 1px lines and the focus ring draw;
+- the 42px pitch;
+- that a long name truncates before its tag;
+- that nothing scrolls sideways.
+
+The scope test proves markup, not pixels: the pixels of the other surfaces
+are the 72 baselines' to hold.
+
+**Seen in a local render** (as in 3al and 3am; `.taste-skill/3an/render/`,
+git-ignored):
+
+- **Setup.** The real AssignmentBoard bundled with esbuild (`next/link` and
+  `next/navigation` stubbed, `fetch` answering no merge candidates), the
+  app's own Tailwind build, and the e2e seed. Both faces were loaded from
+  Google Fonts for that render only, since the app self-hosts them. Opened
+  in Playwright's Chromium on `file://`; no server, no DB, no sign-in.
+- **States checked.** At rest, the picker open, changed rows with a
+  double-booking, the phone editor with a refusal, a viewer, focus, and a
+  valid change.
+- **Measured.**
+  - Row pitch 42.
+  - No sideways scroll and no row past its card at 768, 1024, 1099, 1100,
+    1279, 1280, 1440 and 1920.
+  - Picker 242px at 768, 250 at 1100, 360 elsewhere.
+  - Equal outer margins (76/76 at 1440, 316/316 at 1920).
+  - Faces loaded: Public Sans and IBM Plex Mono.
+  - Save with a valid change: fill rgb(74,138,214), label rgb(19,18,23).
+- **Inspector.** `inspect.mjs --app` on that render at 1440 and 1024:
+  0 FAIL, 1 WARN (`hero-void` at 1440, the same block defended in step 1).
+  Sizes 11/12/13/14/20/22.
+
+#### Baselines
+
+| Group | PNGs | Expected | Why |
+|---|---|---|---|
+| `assignments-baseline` | 8 | **all change** | the whole page's look |
+| `desktop-baseline` | 60 | unchanged | it never visits `/assignments`; the modal's picker, every DriverName and every No ELD tag render the pre-3an markup (look-scope.test.tsx); new tokens only add classes; the faces load on `/assignments` only |
+| `history-baseline` | 6 | unchanged | nothing on the history page changed |
+| `history-phone-baseline` | 6 | unchanged | the same |
+
+All of these are expectations, unverified until Alex's run. The e2e specs
+that visit the page (`dispatch`, `driver-phone`, `assignments-baseline`)
+select by role and text, and no text changed.
+
+**Alex's commands** (hosted sign-in; the advisor looks at the diffs of the
+eight before any is saved):
+
+```
+# 1. see the diffs (8 differ)
+npm run e2e -- assignments-baseline --update-snapshots=none
+# 2. once approved, re-save them and check they hold
+npm run e2e -- assignments-baseline --update-snapshots=changed
+npm run e2e -- assignments-baseline --update-snapshots=none --repeat-each=3
+# 3. the specs that touch the page and the picker; the other 72, expected unchanged
+npm run e2e -- dispatch driver-phone driver-picker assignments-baseline --update-snapshots=none
+npm run e2e -- desktop-baseline history-baseline history-phone-baseline --update-snapshots=none
+```
+
+**Unverified:**
+
+- the faces self-hosted by next/font at build (typechecked; no `next build`
+  was run here; Vercel's build is the check);
+- the page in the app at any width (local render only);
+- the 72 baselines unchanged, until Alex's run;
+- MergePrompt and the "Add a driver" form as they look on the page (not
+  rendered: no merge candidate, no search with no match).
+
+**Questions for Alex** (one decision each; the recommendation first):
+
+1. MergePrompt and the "Add a driver" form inside the picker keep the
+   console's look (condensed caps, square boxes) on this page. Restyle them
+   in Night desk in a small follow-up? Recommended: yes, a small follow-up.
+2. A viewer's locked field stays boxed (§12.134) in Night desk's quiet edge
+   and muted ink, rather than the mockup's line under it. Keep?
+   Recommended: keep. A box with muted ink reads as locked; a line reads
+   like an ordinary field.
+3. The header's counts ("14 active trucks · 12 active drivers") are in
+   Public Sans, since answer 4 names truck and phone numbers only. Fine?
+   Recommended: yes.
+4. The phone editor's own Save is a solid accent fill too, like Save
+   assignments. Keep? Recommended: yes, for one meaning of a filled accent
+   on the page.
+5. Found: the console's Tailwind font is the literal `'Barlow'`, which
+   next/font's renamed, self-hosted family does not match. Check in a small
+   phase of its own whether the console really draws the self-hosted Barlow?
+   Recommended: yes; nothing was changed here.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
