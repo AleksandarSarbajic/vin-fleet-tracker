@@ -5755,6 +5755,257 @@ the numbering check would refuse it.
    2026-10-21 13:53:58 UTC (the advisor, from the GitHub deployments API;
    unverified here).
 
+### Phase 3al, step 1: the assignment page reviewed (2026-10-21)
+
+From the advisor's brief: a review and plan only, for `/assignments`, with the
+design-taste-frontend skill (`references/app-screens.md` read whole, its
+"Redesign, restyle or review" steps 1–2, `references/critique.md`). Commits:
+
+- `4774817`: `.taste-skill/` ignored (the skill's working folder);
+- one docs commit: this section.
+
+No app code changed. Step 2 (building) waits for Alex's approval of the plan.
+
+**The "before".** Alex's screenshot of 2026-10-21, not the skill's inspector:
+`inspect.mjs` opens a browser that cannot sign in, and `/assignments` sends it
+to `/login`. Measurements below are taken from the screenshot and the source.
+The screenshot's grid lands on the code's columns at a scale of 1.25 (92 + 16
+px of truck column = 135 image px; 216 = 270; 220 = 275), so it is about a
+**1000 CSS px wide window at 125% display scaling** (inferred, unverified).
+The skill's `lint.mjs --app` on the six source files: 0 FAIL, 1 WARN (6 em
+dashes, in comments and in UI copy that e2e asserts by name).
+
+**Why the picker list is narrow.** The table is `grid-cols-[92px_1fr_200px_220px]`
+with a 16px gap, beside a 260px aside, inside `p-5` with a 20px gap. The driver
+column is the only flexible one, so it gets what is left: **W − 880 px** for a
+window W wide. At 1440 that is 560; at 1280, 400; at about 1000, 120 (the
+screenshot: about 130). The list is `absolute left-0 right-0`, so it is exactly
+as narrow, and its options do not stop names wrapping or tags shrinking. Below
+about 880 the fixed columns alone overflow the section (arithmetic,
+unverified in a browser). The edit modal is not the same case: its picker
+column is about 313px at 1008px and up (`110px 1.6fr 1.3fr 1.1fr` in a 960px
+modal), so the defect is mainly the board's.
+
+**The screen's question:** which trucks have no driver, and who is free to put
+on them? The board's own comment says "the gaps are the whole point". Its most
+frequent job: pick a driver for a truck, then Save.
+
+#### Critique, by area
+
+ROUND 1 (before, Alex's screenshot), in critique.md §4's shape. The picture,
+motion and live-thing caps are page rules and do not apply to an app screen
+(app-screens §2.7).
+
+```
+Seen in one second: a long column of names in boxes, and a narrow dropdown of wrapped names.
+Idea: none, as expected of an internal tool; the job is the screen's question above.
+Live thing: n/a (app screen).
+Layout words: header=bar / table=ruled list / side=two stacked boxes.
+Scores: design 5.5 · usability 5 · creativity 5 · content 7 -> overall 5.4
+Caps applied: content clipped off-screen (the picker's tags), usability <= 5.
+Top three: 1. the picker list (every width under ~1300); 2. the driver column starved
+by fixed columns; 3. Save below the fold.
+```
+
+- **Header.** Clear: title, counts (22 trucks, 18 drivers; they reconcile with
+  the panels: 22 − 5 = 18 − 1 = 17 assigned), one way back. Nothing wrong
+  enough to change. It does not stay on screen when the board scrolls, so the
+  counts and the way back leave with it.
+- **Table header row.** Muted micro caps, as the console does everywhere.
+  Not sticky: after five rows the dispatcher no longer sees which column is
+  "Currently" and which is the picker, which matters because both show a
+  driver's name.
+- **Truck column.** Bold tabular numbers, the right identity. 92px for a
+  three-digit number is about 60px more than it needs, taken from the driver
+  column.
+- **Driver column.** The column the job happens in is the narrowest one at a
+  narrow window (about 130px). Names fit today, but a long one truncates in
+  the input with nothing to show the rest. An empty truck's input says
+  "Unassigned" in grey, the same weight as every other cell, so the gaps the
+  screen exists for do not stand out. §12.37's table says the closed input is
+  tagged No ELD; it is not: the row's tag comes from the Currently column.
+- **Currently.** On every unchanged row (every row in the screenshot) it
+  repeats the picker's name, so each assigned row says one name twice, 18
+  times down the page. It carries information only on a changed row (what the
+  truck had before). On an empty truck it says "Unassigned" a second time,
+  which §12.18 ruled out on the console ("said once").
+- **Driver's phone.** The number reads well. Edit and Add are 10.5px muted
+  caps with no padding: a hit area of roughly 30 by 11 px. In the screenshot
+  trucks 128 and 135 show the same number (a question, below).
+- **"Drivers with no truck".** Readable. The list item carries `truncate`,
+  whose `white-space: nowrap` is inherited by the phone editor inside it, so
+  "Blank clears the number." and a refusal message cannot wrap in the 236px
+  panel and are cut (from the code; not seen in the screenshot, unverified in
+  a browser).
+- **"Trucks with no driver".** Five numbers stacked one per line in a
+  260px box: the answer to the screen's question, set as the quietest block
+  on it, and it does nothing when clicked.
+- **The picker list** (the known defect). As wide as the input (about 130px):
+  names wrap onto two or three lines, "on truck N" and NO ELD are clipped, a
+  horizontal scrollbar appears, and "Unassigned — clear this truck" wraps.
+  Every driver already on a truck is in muted grey, which at day one is
+  nearly the whole list; the free driver the dispatcher is looking for is not
+  first. Its first row uses `text-status-neutral-fg`, a status colour, for an
+  action that is not a status.
+- **Footer (not in the screenshot).** `main` is `min-h-dvh`, not `h-dvh`, so
+  the middle region never scrolls on its own: the page scrolls, and the
+  footer with Save, Discard and "N rows changed" sits below the last of 22
+  rows. While editing, the dispatcher cannot see the count of changes or
+  why Save is disabled ("a driver is on two trucks", which does not say
+  which).
+
+#### The three changes that would help most
+
+1. **The picker list sized to its content**, not its input.
+2. **The driver column given the width**, the fixed columns narrowed, and
+   Currently quiet on unchanged rows.
+3. **Save kept in view**: header and footer fixed, the board scrolling
+   between them, its header row sticky.
+
+#### The full ordered list
+
+Each uses existing tokens only. Widths are Tailwind arbitrary values (layout
+constants, not colours).
+
+1. **Picker list.** `DriverSelect.tsx`. The `ul` keeps `left-0 top-[38px]`
+   and drops `right-0` for `min-w-full w-max max-w-[min(420px,calc(100vw-2rem))]`.
+   Each option `whitespace-nowrap`; the name `min-w-0 truncate` with a `title`;
+   NO ELD and the truck tag `shrink-0`; the truck tag right-aligned. No
+   horizontal scroll. "Unassigned — clear this truck" (text unchanged, e2e
+   clicks it by name) in `text-text-secondary` instead of
+   `text-status-neutral-fg`. Risk: the same list in the edit modal; there it
+   starts about 140px into a 928px body and a 420px list ends inside it
+   (arithmetic, to check in step 2). Low.
+2. **Columns.** `AssignmentBoard.tsx`, both grid rows:
+   `grid-cols-[64px_minmax(240px,1.5fr)_minmax(140px,1fr)_minmax(180px,220px)]`
+   (proposed values, to settle on screen). A truck shown by its Samsara name
+   (no number) truncates with a `title`. Risk: low; a layout change only.
+3. **Currently on changed rows only** (needs Alex, question 1). Unchanged:
+   empty. Changed: "was" and the saved driver, struck through, as §9.10
+   writes the losing side. The row's NO ELD tag moves beside the picker
+   input, which §12.37's table already asks for. `AssignmentBoard.tsx`,
+   `DriverSelect.tsx` (a tag after the input, inside the same box), existing
+   `NoEldTag`. Risk: medium; `AssignmentBoard.test.tsx` counts tags (2) and
+   must still count 2.
+4. **Save in view.** `AssignmentBoard.tsx`: `main` from `min-h-dvh` to
+   `h-dvh`, so the existing `min-h-0 flex-1 overflow-auto` region scrolls
+   between header and footer; the table's header row `sticky top-0
+   bg-surface-base z-10`; the aside `sticky top-0 self-start`. The double-booked
+   message names the trucks ("a driver is on trucks 124 and 130"). Risk: low
+   to medium; the below-768px message lives in the same `main` (check it still
+   centres), and e2e clicks Save (Playwright scrolls; it is now always in view).
+5. **Empty trucks look empty.** Rows with no driver in the draft take
+   `bg-row-unassigned` (the console's own "marginally sunken, inert, not
+   urgent" ground, design 4a); changed (`bg-row-selected`) and conflicted
+   (`bg-status-late-bg`) still win. Currently shows an em dash, not
+   "Unassigned" (§12.18). Risk: low.
+6. **"Trucks with no driver" as a row.** The numbers wrap in one line
+   (`flex flex-wrap gap-x-3 gap-y-1`, tabular). If Alex wants it (question
+   3), each is a button that scrolls to and focuses that truck's picker:
+   programmatic focus, so the list stays shut by the existing rule. Risk: low;
+   medium with the jump.
+7. **Panel truncation.** `Panel`'s `li` drops `truncate`; the name alone
+   truncates. Risk: low.
+8. **Edit / Add / Retire targets.** Same type tokens; `inline-flex h-7
+   items-center px-1.5` for a hit area about 28px tall. `DriverPhone.tsx`,
+   `AssignmentBoard.tsx`. Risk: low; the row height may grow by a few px.
+9. **Narrow desktop** (needs Alex, question 5). Below about 1100px the two
+   panels sit above the table as one row instead of beside it, giving the
+   table the full width. Risk: medium; a layout change at one breakpoint.
+10. **Picker order** (needs Alex, question 2). Drivers with no truck first,
+    then the rest; the 40-match cap counts after the sort. Risk: medium; it
+    changes what the arrow keys reach first.
+
+#### Tokens
+
+None of the above needs a new token or changes a shared one. The skill would
+change two shared things, which are questions, not part of the plan:
+`text-micro` is 10.5px and `text-body` 12.5px, under the skill's 11px floor
+and 13–16px body (question 4); and the skill gives what floats (the picker
+list) a shadow, which would be a new `boxShadow` token beside `modal`
+(question 6).
+
+#### Behaviour that must survive unchanged, and what guards it
+
+- The picker opens on click, typing, arrows and Tab keyup, never on
+  programmatic focus: `DriverSelect.test.tsx` (4 tests), `e2e/driver-picker.spec.ts`.
+- Enter picks, arrows move, Escape closes without clearing, Backspace on an
+  empty search clears the truck: `DriverSelect.tsx` handlers. Escape is
+  pressed once inside the ArrowDown test, to close between steps; no test
+  found for Backspace-to-clear.
+- "Unassigned — clear this truck" (`e2e/dispatch.spec.ts` clicks it by that
+  name); "+ Add … as a new driver" and AddDriverInline (`DriverSelect.test.tsx`
+  4, `AddDriverFlow.test.tsx` 5); the 40-match cap (`slice(0, 40)`; no test
+  found, unverified).
+- The merge prompt (`MergePrompt.test.tsx` 7); phone edit and add
+  (`DriverPhone.test.tsx` 7, `e2e/driver-phone.spec.ts`); Retire, admin only,
+  confirmed (`AssignmentBoard.test.tsx` 2).
+- Below 768px, "Assignments are on the desktop console." (§12.106;
+  `e2e/driver-phone.spec.ts`).
+- The reassignment confirm (§9.10) is the edit modal's: only
+  `EditStopModal.tsx` calls `/api/assignments/preview`. On the board a move
+  is both sides in one save, Save refused while a driver is on two trucks
+  (`e2e/dispatch.spec.ts`). The board's comment at `AssignmentBoard.tsx`
+  313–319 says the two-sided confirm "takes over on Save"; the board calls no
+  preview (question 7).
+- Also: the draft rebase (§12.38), the beforeunload guard, Cmd/Ctrl+Enter.
+
+#### Tests
+
+Unit: `AssignmentBoard.test.tsx` (5), `DriverSelect.test.tsx` (9),
+`DriverPhone.test.tsx` (7), `MergePrompt.test.tsx` (7), `AddDriverFlow.test.tsx`
+(5): 33. E2e: `dispatch.spec.ts` (the board: combobox "Driver for truck N",
+options by role, the clear button by name, "Save assignments", "Saved"),
+`driver-phone.spec.ts` (`/assignments` at 1440×900, viewer, phone width; its
+`shot()` files are run output, not compared baselines), `driver-picker.spec.ts`
+(the modal's picker). **No screenshot baseline shows `/assignments`, and none
+shows the picker list open.** The edit-modal baselines show the closed picker:
+`7-edit-stop-*` (6 widths), `7b`, `7c` (2), `7d`, `7e`, `7f`: 12 files. They
+change only if the closed input changes (change 3's tag, and only for an
+ELD-less driver in the fixture: unverified which). Re-saving them is Alex's
+run. Step 2 would add tests for what has none: Backspace-to-clear, the 40
+cap, and the list's width.
+
+#### Skill conflicts (the project wins in each)
+
+1. The inspector cannot sign in, so there is no measured "before" or "after";
+   the screenshot and e2e runs stand in.
+2. Tracked uppercase labels (table header, buttons, tags) are the console's
+   type (§2); the skill allows one per screen and bans uppercase table
+   headers. Kept.
+3. Type sizes: `micro` 10.5 and `body` 12.5 against the skill's 11 floor and
+   13–16 body; the header is 15px tracked caps against an 18–32px h1. Kept.
+4. Radius 0 against the skill's 4–8; the accent-filled Save against its
+   near-black primary; no product mark in a shell (this is a console page).
+   Kept.
+5. The lint's em-dash WARN: the dashes are in comments and in UI copy that
+   e2e matches by name. Kept.
+6. `draw.mjs` not run: with palette and type kept and the console's grid
+   fixed, a dealt app style has nothing left to deal that the review needs.
+
+**Unverified:** the 125% scaling and the 1000px window; the panel's clipped
+help text and the overflow below 880px (both from the code); the 420px list
+fitting the modal; which fixture driver would put a tag in the 12 modal
+baselines.
+
+**Questions for Alex:**
+
+1. Currently: keep it on every row, show it only on a changed row as "was …"
+   (with the NO ELD tag moved beside the picker), or drop it?
+2. The picker: list drivers with no truck first?
+3. "Trucks with no driver": should a number jump to its row?
+4. Raise `text-micro` and `text-body` across the console to the skill's
+   floors? It changes every screen; not proposed here.
+5. Below about 1100px, the panels above the table instead of beside it?
+6. A shadow on the open picker list (a new `boxShadow` token)?
+7. The board has no §9.10 confirm (a move is both sides in one save), while
+   its comment says the confirm takes over on Save. Is the comment wrong, or
+   should the board confirm too?
+8. In the screenshot trucks 128 and 135 show the same phone number: two
+   drivers sharing one, or a typo?
+9. Which window width should step 2 hold at (about 1000 at 125%?), and should
+   step 2 add an `/assignments` baseline (a new baseline is your run)?
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
