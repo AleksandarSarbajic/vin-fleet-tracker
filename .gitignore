@@ -40,3 +40,7 @@ e2e/.fake-reader.json
 # before every build and dev server by scripts/copy-ocr-assets.mts. Never
 # committed: they come from the npm packages at the locked versions.
 public/ocr/
+
+# The design-taste-frontend skill's working files (inspector screenshots, drawn
+# directions), written when its scripts run from the project root. Local only.
+.taste-skill/
