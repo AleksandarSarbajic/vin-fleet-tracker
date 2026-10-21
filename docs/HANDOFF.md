@@ -7227,6 +7227,59 @@ npm run e2e -- desktop-baseline history-baseline history-phone-baseline --update
 - Not shown by any baseline: Save's solid accent (no shot has a valid,
   savable change). Alex to check it live after deploy.
 
+### Phase 3an, reverted: the assignment page back to the 3am look (2026-10-21)
+
+Alex, 2026-10-21, after seeing Night desk live: "I don't like it because
+it's not looking the same as the rest of the app, we go back to old style."
+
+**NOT pushed, NOT deployed.**
+
+Night desk was live in production from 19:10 UTC (`bf9c647`) until this
+revert is deployed. The code and the baselines go back; the record stays.
+The docs commits `7021ede` (step 1), `f5dd5d0` (step 2) and `bf9c647` (step
+2's answers and e2e) are kept, and design-spec §12.136 stays with a
+"Reverted" note under its heading.
+
+**Commits:**
+
+- `387a051`: `git revert --no-commit 37d21fa 3c38517 8ee6493 1762660 63fa1e2
+  b0673a9` (newest first), one commit. It reverts the baselines (`37d21fa`),
+  the 1100–1279 padding (`3c38517`), the footer and Save (`8ee6493`), the
+  board, rows and panels (`1762660`), the `look` prop and its scope test
+  (`63fa1e2`), and the tokens and fonts (`b0673a9`). No conflicts; nothing
+  resolved by hand.
+- one docs commit: this section and the §12.136 note.
+
+**Proof** that src/, e2e/ (specs and baselines) and the config equal
+`011872b`, the 3am look. Both print nothing (the second, 0 bytes):
+
+```
+$ git diff 011872b -- src e2e tailwind.config.ts package.json package-lock.json
+$ git diff --cached 011872b -- src e2e tailwind.config.ts package.json package-lock.json | wc -c
+       0
+```
+
+`npm run check` after the revert: 203 files / 3,682 tests, the counts at
+`011872b`.
+
+The stale `.next-e2e/types` (generated 20:59 local with Night desk's
+layout) blocked the check and was deleted; it is rebuilt by the next e2e run.
+
+**The mockups** stay local in `.taste-skill/3an/` (git-ignored) for
+reference: the three directions, and the local render of the built board in
+`.taste-skill/3an/render/`.
+
+**Cancelled:** step 2's follow-up, MergePrompt and the picker's "Add a
+driver" form in Night desk (step 2's answer 1).
+
+**Still stands:**
+
+- The Barlow check: the console's Tailwind family is the literal 'Barlow',
+  while next/font self-hosts it under a renamed family. What the console
+  actually renders is unverified; it gets its own small phase, later (step
+  2's answer 5).
+- Backlog: the confirm's "To" driver No ELD tag (3am step 1, answer 7).
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

@@ -10018,6 +10018,8 @@ double-booking at 1440).
 
 ## 12.136 The assignment page has its own look, Night desk
 
+**Reverted 2026-10-21** (HANDOFF "Phase 3an, reverted"): Alex rejected a page-only look that differs from the rest of the console; the page is as §12.129–§12.135 describe.
+
 **What.** `/assignments` is drawn in "Night desk" (HANDOFF 3an), and only
 `/assignments`. Alex asked for the page to look and feel premium. Of three
 mockups, he chose the dark one built for long shifts (2026-10-21).
