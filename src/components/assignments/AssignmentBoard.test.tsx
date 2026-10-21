@@ -330,3 +330,31 @@ describe('the board’s rows and fields (§12.134)', () => {
     }
   });
 });
+
+describe('the footer’s count, and a free driver’s entry', () => {
+  const status = () => container!.querySelector('footer span')!;
+
+  it('puts the count in primary ink while rows are changed, secondary at rest', async () => {
+    await render();
+    expect(status().className).toContain('text-text-secondary');
+    await pickFor(143, 'Unassigned Hal');
+    expect(status().textContent).toContain('1 row changed');
+    expect(status().className).toContain('text-text');
+    expect(status().className).not.toContain('text-text-secondary');
+  });
+
+  it('lays a free driver out as one line below 1100px and two from 1100 up', async () => {
+    await act(async () => {
+      root!.render(createElement(AssignmentBoard, { board: board(), role: 'admin' }));
+    });
+    const entry = container!.querySelector('[data-free-driver]')!;
+    // One grid row of name, phone, Retire; from 1100 up, name and Retire over the phone.
+    expect(entry.className).toContain('grid-cols-[minmax(0,1fr)_auto_auto]');
+    expect(entry.className).toContain('min-[1100px]:grid-cols-[minmax(0,1fr)_auto]');
+    const [name, phone, retire] = [...entry.children];
+    expect(name!.textContent).toContain('Unassigned Hal');
+    expect(phone!.querySelector('[data-driver-phone]')).not.toBeNull();
+    expect(phone!.className).toContain('min-[1100px]:row-start-2');
+    expect(retire!.textContent).toBe('Retire');
+  });
+});

@@ -461,39 +461,50 @@ export function AssignmentBoard({ board, role }: Props) {
             items={driversWithoutTruck.map((d) => ({
               key: d.id,
               node: (
-                <span className="flex flex-col gap-1">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <DriverName
-                      name={d.name}
-                      source={d.source}
-                      samsaraDriverId={d.samsaraDriverId}
-                      className="min-w-0"
-                    />
-                    {/**
-                     * §12.37: ADMIN only — it takes someone off the board.
-                     * Offered only for a driver with no truck, because retiring
-                     * one that is assigned is refused server-side anyway and a
-                     * control that always errors is worse than no control.
-                     */}
-                    {canRetire ? (
-                      <button
-                        type="button"
-                        onClick={() => void retire(d.id, d.name)}
-                        title={`Retire ${d.name} — keeps their history, removes them from the board.`}
-                        className="-mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
-                      >
-                        Retire
-                      </button>
-                    ) : null}
-                  </span>
-                  <DriverPhone
-                    driverId={d.id}
-                    driverName={d.name}
-                    phone={d.phone}
-                    mayEdit={mayEdit}
-                    lockedReason={phoneLockedReason}
-                    onSaved={() => router.refresh()}
+                /**
+                 * §12.132. Below 1100px the panel is about 480px wide, so the
+                 * entry is one line: name, phone, Retire. It was two lines
+                 * there too, which made this panel the taller of the two and
+                 * left a 50px hole under the trucks panel stretched beside it.
+                 * From 1100 up, in the 260px column: name and Retire, then the
+                 * phone under them, as before.
+                 */
+                <span
+                  data-free-driver=""
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto] min-[1100px]:gap-y-1"
+                >
+                  <DriverName
+                    name={d.name}
+                    source={d.source}
+                    samsaraDriverId={d.samsaraDriverId}
+                    className="col-start-1 row-start-1 min-w-0"
                   />
+                  <span className="col-start-2 row-start-1 min-w-0 min-[1100px]:col-span-2 min-[1100px]:col-start-1 min-[1100px]:row-start-2">
+                    <DriverPhone
+                      driverId={d.id}
+                      driverName={d.name}
+                      phone={d.phone}
+                      mayEdit={mayEdit}
+                      lockedReason={phoneLockedReason}
+                      onSaved={() => router.refresh()}
+                    />
+                  </span>
+                  {/**
+                   * §12.37: ADMIN only — it takes someone off the board.
+                   * Offered only for a driver with no truck, because retiring
+                   * one that is assigned is refused server-side anyway and a
+                   * control that always errors is worse than no control.
+                   */}
+                  {canRetire ? (
+                    <button
+                      type="button"
+                      onClick={() => void retire(d.id, d.name)}
+                      title={`Retire ${d.name} — keeps their history, removes them from the board.`}
+                      className="col-start-3 row-start-1 -mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg min-[1100px]:col-start-2"
+                    >
+                      Retire
+                    </button>
+                  ) : null}
                 </span>
               ),
             }))}
@@ -530,7 +541,8 @@ export function AssignmentBoard({ board, role }: Props) {
         ) : null}
 
         <div className="flex items-center justify-between">
-          <span className="text-body text-text-secondary">
+          {/* While rows are changed, this is the sentence that matters: primary ink. */}
+          <span className={`text-body ${dirty ? 'text-text' : 'text-text-secondary'}`}>
             {dirty
               ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${doubleBookedGroups
                   .map((trucks) => ` · a driver is on trucks ${listed(trucks.map(label))}`)
