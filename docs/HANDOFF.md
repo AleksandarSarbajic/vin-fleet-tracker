@@ -6448,7 +6448,8 @@ Also item 7 (the changed-rows count in primary ink while dirty), as listed.
 ### Phase 3am, step 2: the assignment page, second pass built (2026-10-21)
 
 From the advisor's brief: items 1–9 of 3am step 1's list, as answered above,
-and the confirm's footer copy. NOT pushed, NOT deployed. No migration, no
+and the confirm's footer copy. NOT pushed, NOT deployed; e2e verified
+2026-10-21 (see below), ready to push. No migration, no
 server code, no new token.
 
 Commits (each passed `npm run check` in the pre-commit hook):
@@ -6578,6 +6579,31 @@ run; `desktop-baseline` and `history-*` unchanged; Alex's window (about
    it right after the name (it would need the name's width measured)?
 2. Below 1100px a free driver's entry reads name, phone, Retire. Keep that
    order (recommended), or Retire before the phone?
+
+**Alex's answers (2026-10-21):**
+
+1. Keep the No ELD tag at the quiet field's right end. Noted by the advisor:
+   with the phone now beside the driver, the tag sits about 20px from the
+   phone number and can read as the phone's. Cosmetic; revisit only if Alex
+   finds it confusing on the live page.
+2. Keep a free driver's narrow-panel entry as name, phone, Retire.
+
+**e2e (Alex, 2026-10-21):**
+
+- `assignments-baseline --update-snapshots=none` (run
+  2026-10-21T17-00-02-607Z): 7 differed as expected, 1 missing. The advisor
+  reviewed the actual images (768, 1024, 1920, picker-open-1024, and the
+  changed-rows state) before any was saved.
+- `--update-snapshots=changed` (run 2026-10-21T17-07-53-911Z): 9 passed; the
+  7 re-saved and the new one written. The advisor confirmed the 7 saved files
+  are byte-identical to the reviewed actual images. Committed as written in
+  `ad3ee3b` (each opened first: only the spec's invented seed).
+- `--repeat-each=3 --update-snapshots=none` (run 2026-10-21T17-08-18-025Z):
+  25 passed.
+- `dispatch driver-phone driver-picker assignments-baseline` (run
+  2026-10-21T17-08-45-964Z): 15 passed.
+- `desktop-baseline --update-snapshots=none` (run 2026-10-21T17-09-18-597Z):
+  13 passed. Every existing console baseline is unchanged.
 
 ## Next
 
