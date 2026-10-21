@@ -33,22 +33,21 @@ const label = (t: Board['trucks'][number]) =>
   t.truckNumber === null ? t.samsaraName : String(t.truckNumber);
 
 /**
- * The table's columns, shared by its header and every row (§12.131).
+ * The table's columns, shared by its header and every row (§12.131, §12.135).
  *
- * Truck, driver, Currently, phone. The driver column was the only flexible
- * one (`92px 1fr 200px 220px`), so a narrow window took its width from the
- * picker the job happens in: about 120px at 1000. Now the truck number gets
- * what three digits need, the picker 240px at least, and the phone the 220px
- * its inline editor (field, Save, Cancel) needs.
+ * Truck, driver, the driver's phone, Currently. The phone sits beside the
+ * driver it belongs to (§12.106: the number is the picker's driver's): with
+ * Currently between them, empty on every row at rest (§12.130), the eye
+ * crossed 240px of nothing from a name to its number. Currently is last and
+ * takes the slack. Minimums unchanged: 64 + 240 + 220 + 150 + 3 gaps = 722,
+ * which closes at 768. The phone keeps 220px for its inline editor (field,
+ * Save, Cancel).
  *
- * Settled on screen, not by arithmetic: with the picker flexible it ran
- * 845px wide at 1920, and with Currently flexible a 900px empty band sat
- * between each name and its phone. So the picker and Currently are capped
- * (360, 240) and the phone column takes the slack: the empty space falls at
- * the row's end. Minimums 64 + 240 + 150 + 220 + 3 gaps = 722, which closes
- * at 768 (728 inside the padding).
+ * 3al settled the widths on screen: a flexible picker ran 845px wide at
+ * 1920, so it is capped at 360; and from 1100px up the whole table is capped
+ * at 1000px (the section's `max-w`) so its rows stop where their content does.
  */
-const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(150px,240px)_minmax(220px,1fr)]';
+const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(220px,260px)_minmax(150px,1fr)]';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
@@ -315,7 +314,13 @@ export function AssignmentBoard({ board, role }: Props) {
         panels) is kept, so the keyboard reaches the pickers first.
       */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
-        <section className="min-w-0 min-[1100px]:flex-1">
+        {/*
+          §12.135. From 1100px up the table stops at 1000px and the panels
+          follow it: a four-column table stretched to 1600px at 1920 ran its
+          rules 900px past its last value, and put the gaps panel 900px from
+          the phone column. The ground beyond the panels is left empty.
+        */}
+        <section className="min-w-0 min-[1100px]:max-w-[1000px] min-[1100px]:flex-1">
           {/* §12.37: above the board, where a dispatcher is already thinking
               about who is on what. Renders nothing when there is nothing to
               ask. */}
@@ -328,8 +333,8 @@ export function AssignmentBoard({ board, role }: Props) {
           >
             <span>Truck</span>
             <span>Driver</span>
-            <span>Currently</span>
             <span>Driver&rsquo;s phone</span>
+            <span>Currently</span>
           </div>
 
           {board.trucks.map((truck) => {
@@ -394,6 +399,19 @@ export function AssignmentBoard({ board, role }: Props) {
                     router.refresh();
                   }}
                 />
+                {driver ? (
+                  <DriverPhone
+                    key={driver.id}
+                    driverId={driver.id}
+                    driverName={driver.name}
+                    phone={driver.phone}
+                    mayEdit={mayEdit}
+                    lockedReason={phoneLockedReason}
+                    onSaved={() => router.refresh()}
+                  />
+                ) : (
+                  <span />
+                )}
                 {/**
                  * §12.130. Only on a row changed in the draft: what the truck
                  * had before, struck through, as §9.10 writes the losing side
@@ -420,19 +438,6 @@ export function AssignmentBoard({ board, role }: Props) {
                       />
                     </span>
                   </span>
-                ) : (
-                  <span />
-                )}
-                {driver ? (
-                  <DriverPhone
-                    key={driver.id}
-                    driverId={driver.id}
-                    driverName={driver.name}
-                    phone={driver.phone}
-                    mayEdit={mayEdit}
-                    lockedReason={phoneLockedReason}
-                    onSaved={() => router.refresh()}
-                  />
                 ) : (
                   <span />
                 )}

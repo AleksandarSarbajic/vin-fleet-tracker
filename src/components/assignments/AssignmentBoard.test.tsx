@@ -285,3 +285,29 @@ describe('empty trucks and the two panels', () => {
     for (const li of container!.querySelectorAll('aside li')) expect(li.className).not.toContain('truncate');
   });
 });
+
+describe('the column order (§12.135)', () => {
+  it('heads the columns Truck, Driver, Driver’s phone, Currently', async () => {
+    await render();
+    const header = container!.querySelector('[class*="sticky"][class*="grid-cols"]')!;
+    expect([...header.children].map((c) => c.textContent)).toEqual([
+      'Truck',
+      'Driver',
+      'Driver’s phone',
+      'Currently',
+    ]);
+  });
+
+  it('puts a row’s phone before its "was", beside the driver it belongs to', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    const row = container!
+      .querySelector('input[aria-label="Driver for truck 143"]')!
+      .closest('[class*="grid-cols"]')!;
+    const cells = [...row.children];
+    const phone = cells.findIndex((c) => c.matches('[data-driver-phone]'));
+    const wasCell = cells.findIndex((c) => c.matches('[data-was]'));
+    expect(phone).toBe(2);
+    expect(wasCell).toBe(3);
+  });
+});
