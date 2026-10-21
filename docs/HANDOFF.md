@@ -6006,6 +6006,199 @@ baselines.
 9. Which window width should step 2 hold at (about 1000 at 125%?), and should
    step 2 add an `/assignments` baseline (a new baseline is your run)?
 
+**Alex's answers (2026-10-21):**
+
+1. Currently is shown only on rows changed in the draft, as "was" and the
+   saved driver, struck through as §9.10 writes the losing side. Unchanged
+   rows: empty. The row's NO ELD tag moves beside the picker input (§12.37's
+   table).
+2. Picker order: drivers with no truck first, then the rest. The 40-match
+   cap applies after the sort.
+3. "Trucks with no driver": no jump to the row; only item 6's one-line wrap.
+4. No change to `text-micro`, `text-body` or any shared type token.
+5. Narrow desktop: yes. Below about 1100px the two panels sit above the
+   table as one row; step 2 settles the breakpoint and says why.
+6. No shadow on the picker list. No new tokens of any kind.
+7. Already decided in 3ai: the board's batch save stays, "the board is its
+   own confirmation". The comment at `AssignmentBoard.tsx` 313–319 is wrong;
+   correct the comment only, no behaviour change.
+8. Trucks 128 and 135 sharing a phone: open, Alex's to check. Data, not
+   code: nothing changes for it.
+9. The page must look right at Alex's usual window (about 1000 CSS px,
+   unverified) and at full desktop widths. Step 2 adds an `/assignments`
+   screenshot baseline spec.
+
+### Phase 3al, step 2: the assignment page built (2026-10-21)
+
+From the advisor's brief: items 1–10 of step 1's ordered list, as answered
+above. NOT pushed, NOT deployed. No migration, no server code, no new token.
+
+Commits:
+
+- `1e00be6`: the picker list as wide as its names (item 1);
+- `71e3987`: the board's columns and Save kept in view (items 2 and 4);
+- `66dbf01`: below 1100px the panels above the table (item 9);
+- `b1c2655`: Currently only on a changed row; the No ELD tag in the picker
+  (item 3);
+- `cf5736d`: empty trucks on their own ground, the panels, the small
+  buttons (items 5–8);
+- `e6856f5`: drivers with no truck first, the cap after the sort (item 10);
+- `7708500`: three comments that said the board had a reassignment confirm;
+- `1f604f1`: `e2e/assignments-baseline.spec.ts` (written, not run);
+- one docs commit: this section, step 1's answers, design-spec §12.129–§12.132.
+
+Each commit passed `npm run check` in the pre-commit hook. Between `71e3987`
+and `66dbf01` a window under about 1050px scrolled the table sideways; the
+next commit closed it.
+
+**How the layout was checked.** Not with the skill's inspector, which cannot
+sign in. A local render, kept out of the repo: the real `AssignmentBoard` and
+`LoadStrip` bundled with esbuild (`next/navigation` and `next/link` stubbed),
+the app's own Tailwind build and its self-hosted fonts from the last `.next`
+build, an invented board (22 trucks, 18 drivers, 555-01xx phones), shot in
+Playwright's cached Chromium on `file://` with every other request aborted.
+Before and after at 768, 1000, 1024, 1099, 1100, 1280, 1440 and 1920; the
+picker open; the board scrolled; two changed rows; the phone editor with a
+refusal; the modal's picker open. It is not the app (no Next runtime, no
+server data), so the baseline spec below is the real check.
+
+**What was built, per item.**
+
+1. **Picker list** (`DriverSelect.tsx`). `min-w-full w-max max-w-[420px]`,
+   capped before paint by `listMaxWidth`: the nearest clipping ancestor's
+   right edge and the viewport less 16px, from the input's left edge.
+   Options `whitespace-nowrap`, names truncate with a title, tags whole.
+   "Unassigned — clear this truck" in `text-text-secondary`, not
+   `status-neutral`. At 1000 the list went from 120px with three-line names
+   to one line per driver with both tags.
+2. **Columns** (`AssignmentBoard.tsx`, one `COLUMNS` constant):
+   `64px minmax(240px,360px) minmax(150px,240px) minmax(220px,1fr)`. Settled
+   on screen against two others: picker `2fr` ran 845px wide at 1920;
+   Currently `1fr` left a 900px empty band between each name and its phone.
+   Capped picker and Currently, phone taking the slack, puts the space at the
+   row's end. Minimums sum to 722 with gaps, closing at 768 (it was 732 with
+   Currently at 160, 4px over). A Samsara-name truck truncates with a title.
+3. **Currently** only on a changed row: "was" and the saved driver struck
+   through, "was —" for a truck that had nobody (the confirm's own
+   fallback). The strike is on `DriverName`'s box; a wrapper's
+   `line-through` did not render through its inline-flex in the local
+   render. The row's tag is now in the picker's field, at its right end
+   (`pr-16`), hidden while open, a click on it opens the list.
+4. **Save in view.** `main` `h-dvh`; the column-header row and the panel
+   column sticky. The scroll region lost its top padding (a scrolled row
+   showed through above the sticky headers in the local render); the sticky
+   elements carry `pt-5`, and the merge prompt keeps its 20px in an
+   `empty:hidden` wrapper. The footer names the trucks: "a driver is on
+   trucks 137 and 143".
+5. **Empty trucks** take `bg-row-unassigned` (changed and conflicted grounds
+   win). With answer 1, an unchanged empty truck's Currently is empty; the
+   em dash appears as "was —" on a changed row whose truck had nobody, so
+   "Unassigned" is said once, by the picker (§12.18). (Reconciling item 5
+   with answer 1; question 1.)
+6. **No-driver numbers** on one wrapping line, tabular, no click.
+7. **Panel items** lose `truncate`; the driver's name truncates on its own.
+   A refusal in the panel's phone editor now wraps (seen at 1440 in 236px).
+8. **Targets.** Edit / Add (`DriverPhone.tsx`) and Retire are
+   `inline-flex h-7 px-1.5`; the phone line's gap 8 → 2 and Retire's
+   `-mr-1.5` keep the words where they were.
+9. **Narrow desktop.** Below 1100px the panels are `order-first`, a 2-column
+   grid stretched to one bottom edge, above the table; from 1100 beside it,
+   260px, sticky. Why 1100: side by side needs 1042px with the picker at its
+   minimum; 1100 gives it about 270. At 1000 the picker is 360. DOM order
+   kept (table first) for the keyboard.
+10. **Picker order.** No-truck drivers first (`claimedBy` has no entry), then
+    the rest, each in its own order; `slice(0, 40)` after.
+
+**The comment fix.** `AssignmentBoard.tsx`'s comment on `assignToTruckId` now
+says the change goes out with the board's batch Save, its own confirmation
+(3ai), and that §9.10's confirm is the modal's. `AddDriverInline.tsx` and
+`DriverSelect.tsx` said the same of the same prop; corrected. Comments only.
+
+**In the edit modal** (the shared `DriverSelect`), exactly: the open list's
+width rule (at 1008 and up its options already fit the 313px column, so it
+looks the same; at 768 it stays inside the body, ending at x=727 of 743);
+options on one line; the clear row's colour; no-truck drivers first by the
+saved assignments; `No ELD` in the closed field for a driver with no ELD.
+Nothing else in the modal changed.
+
+**Tests.** 3,634 → 3,657, 201 files. `DriverSelect.test.tsx` +14: the width
+rule against hand-placed rectangles (the modal body at 768, the floor, the
+420 ceiling, the viewport gutter, no layout) and the one-line classes; the
+closed field's tag, hidden while open, opening the list; the order and the
+cap after it; step 1's gaps, Backspace on an empty search clears, Backspace
+in a search does not, Escape closes and keeps the driver.
+`AssignmentBoard.test.tsx` +9: the footer naming 137 and 143 with Save
+refused; Currently empty, "was" with the struck driver, "was —", gone when
+undone; the tag in the ELD-less driver's picker only (the board still counts
+exactly 2); the unassigned ground and a changed row's winning; the wrapped
+no-driver line and no truncated panel item. Run against step 1's source
+(`7404595`) of the four components, 17 of the 23 fail (one of them, the
+unfiltered cap, only because it reads names through a span the new markup
+adds); the other 6 pin behaviour that already held (Backspace twice,
+Escape, "was" gone when undone, the field's tag hidden while open, a changed
+row's ground winning).
+
+**What the test DOM cannot prove** (happy-dom, no layout): any width, wrap
+or truncation; that the list stays inside the modal or the viewport (the
+test feeds `listMaxWidth` rectangles by hand); sticky headers and panels;
+`h-dvh`; the 1100 breakpoint; the strike-through actually drawing; the
+stretched panels. The local render showed each; the baseline spec is the
+check in the app.
+
+**Baselines.**
+
+- New: `e2e/assignments-baseline.spec.ts`, 7 shots (`assignments-768` …
+  `-1920`, `assignments-picker-open-1024`), its own invented seed (trucks
+  401–438, three empty; four hand-entered drivers; one on no truck; 555-01xx
+  phones), clock frozen; the page renders no live value. Listed (7 tests),
+  not run, no PNG. Until Alex creates them, a full `npm run e2e` reports
+  these 7 as missing.
+- Existing: none should change. The twelve edit-modal shots (`7-edit-stop-*`
+  ×6, `7b`, `7c` ×2, `7d`, `7e`, `7f`) show the picker closed, and the only
+  closed-field change is the `No ELD` tag for a driver with no ELD. The e2e
+  fixture's drivers are inserted with a name only, so `source` is 'samsara'
+  and `isEldBacked` is true: no tag. No baseline shows the list open.
+  Unverified until run.
+
+**Alex's commands** (each signs in through hosted Supabase Auth):
+
+```
+# (a) create the new baseline, then check it holds still
+npm run e2e -- assignments-baseline --update-snapshots=missing
+npm run e2e -- assignments-baseline --update-snapshots=none --repeat-each=3
+
+# (b) the specs that touch this page and the picker, with the new one
+npm run e2e -- dispatch driver-phone driver-picker assignments-baseline --update-snapshots=none
+
+# (c) existing baselines: expected unchanged; check, and re-save only if a
+#     7-series shot differs and its diff is the change described above
+npm run e2e -- desktop-baseline --update-snapshots=none
+npm run e2e -- desktop-baseline --update-snapshots=changed
+```
+
+**Unverified:** Alex's window (about 1000 CSS px at 125%, from step 1); the
+board in the real app at any width (the local render only); the fonts in the
+render came from the last `.next` build; the twelve modal baselines
+unchanged; `ReassignConfirm`'s struck names (same wrapper the board's did not
+draw through; that component was not rendered).
+
+**Questions for Alex:**
+
+1. Item 5 and answer 1 overlap: an unchanged empty truck's Currently is
+   empty, and the em dash shows as "was —" on a changed row whose truck had
+   nobody. Is that what you meant?
+2. The column is still headed "Currently" while its cells say "was …". Keep
+   the header, or rename it?
+3. `ReassignConfirm` strikes its old driver names with the same wrapper that
+   did not draw on the board; the confirm's names are probably not struck.
+   Fix in a later phase?
+4. `AddDriverInline` tells the board "This truck already has a driver, so
+   the change is confirmed when you save." Saving is the confirmation there,
+   so it is not wrong; keep it?
+5. Below 1100px the panels scroll away with the board (sticky only beside
+   it). Fine?
+6. Trucks 128 and 135's shared phone number: still yours to check.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

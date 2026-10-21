@@ -9830,6 +9830,110 @@ with AI from a scan. `e2e/ratecon-scan.spec.ts` (2): a scan made at test time
 read in a real browser, fields filled and marked, and no request during the
 read to an origin new to the page or to a CDN. Written, not run in 3aj.
 
+## 12.129 The driver picker's open list is as wide as its names
+
+**Before.** The list (§9.9's driver picker, and the assignment board's) was
+`absolute left-0 right-0`: exactly as wide as its input. On the board the
+driver column was what the fixed columns left, about 120px at a 1000px
+window, so names wrapped onto three lines, `No ELD` and "on truck N" were cut
+off, and the list scrolled sideways (Alex's screenshot, 2026-10-21).
+
+**The rule.** At least the input's width; otherwise as wide as its widest
+option; never wider than the smallest of 420px, the right edge of the
+nearest ancestor that clips (the edit modal's scrolling body, the board's
+scroll region) and the viewport less 16px, measured from the input's left
+edge (`listMaxWidth`, before paint). Options stay on one line; a name that
+still does not fit truncates, whole in its title. No horizontal scroll.
+
+Measured rather than fixed because the same picker sits at the right of the
+modal's two-column grid below 1008px: at 768 it starts at x=390 and the body
+ends at 743, so a fixed 420px ran 67px past it.
+
+**Also.** "Unassigned — clear this truck" (text unchanged) is in secondary
+ink, not `status.neutral`: clearing is an action, not a status. Drivers with
+no truck are listed first, then everyone else, each group in its own order;
+the 40-match cap counts after that order (Alex, 2026-10-21). "No truck" is
+the board's draft there, and the saved assignments in the modal. No shadow
+(Alex: no new token).
+
+**The closed input is tagged** (§12.37's table said it was; it never was):
+`No ELD` at the field's right end for a driver with no ELD, hidden while the
+list is open, and a click on it opens the list. This shows in the edit modal
+too.
+
+## 12.130 Currently shows only on a changed row
+
+**Before.** The assignment board's Currently column showed the saved driver
+on every row. With nothing changed (every row, most of the time) it repeated
+the picker's name, so each assigned row said one name twice; an empty truck
+said "Unassigned" twice, which §12.18 ruled out on the console.
+
+**Now** (Alex, 2026-10-21). Empty on an unchanged row. On a row changed in
+the draft: "was" and the saved driver, struck through, as §9.10 writes the
+losing side, including its "—" for a truck that had nobody. The strike is on
+`DriverName`'s own box: a wrapper's `line-through` does not reach into its
+inline-flex (seen in a local render; `ReassignConfirm` wraps it that way).
+
+The row's `No ELD` tag moved into the picker (§12.129), so the board still
+tags every ELD-less driver on screen (§12.37). A truck with nobody in the
+draft takes `row.unassigned` (design 4a); a changed or conflicted row's
+ground wins over it.
+
+## 12.131 The assignment board keeps Save in view
+
+**Before.** The page was `min-h-dvh`, so the page itself scrolled, and Save,
+Discard and the count of changes sat under the last of 22 rows. The column
+headers scrolled away after five rows.
+
+**Now.** The page is the window's height: the header and the footer stay,
+and only the board scrolls between them. The column-header row is sticky,
+and so is the panel column beside the table (§12.132). The scroll region has
+no top padding: a sticky child sticks inside the region's padding, so with
+20px of it a scrolled row showed through above the headers. The sticky
+elements carry the 20px themselves.
+
+**The double-booked message names the trucks**: "a driver is on trucks 137
+and 143", not "a driver is on two trucks". Save is still refused until one
+side is cleared; the board's batch save is its own confirmation, and §9.10's
+confirm stays the edit modal's (HANDOFF 3ai).
+
+**Columns**, one constant for the header and the rows:
+`64px minmax(240px,360px) minmax(150px,240px) minmax(220px,1fr)`. Settled on
+screen: with the picker flexible it ran 845px wide at 1920; with Currently
+flexible a 900px empty band sat between each name and its phone. Capping the
+picker and Currently and letting the phone column take the slack puts the
+empty space at the row's end. The phone keeps 220px for its inline editor
+(field, Save, Cancel). The minimums sum to 722 with the gaps, which closes at
+768.
+
+**Targets.** Edit / Add and Retire are `inline-flex h-7 px-1.5`: a 28px
+target for the same 10.5px word, which stays where it was.
+
+## 12.132 Below 1100px the assignment panels sit above the table
+
+"Drivers with no truck" and "Trucks with no driver" sit above the table as
+one row of two panels, stretched to one bottom edge, instead of in a 260px
+column beside it. From 1100 up they are beside it and sticky.
+
+**Why 1100.** The columns need 722px at their minimums. Beside the panel
+column, its gap and the padding, that is 1042px with nothing spare for the
+picker; at 1100 the picker gets about 270px. At about 1000, the window
+Alex's screenshot suggests, the table has the full width and the picker is
+360px.
+
+**Also.** The no-driver trucks are one wrapping line of numbers, not one per
+line; a click does nothing (Alex: no jump to the row). Panel items no longer
+`truncate`: its `nowrap` reached the phone editor in the drivers panel, so
+"Blank clears the number." and a refusal could not wrap. The DOM order
+(table, then panels) is kept, so the keyboard reaches the pickers first at
+every width.
+
+**Tests.** `DriverSelect.test.tsx` (+14) and `AssignmentBoard.test.tsx`
+(+9), for §12.129–§12.132. They cannot show layout: the DOM there has no
+boxes. `e2e/assignments-baseline.spec.ts` pictures the board at the six
+console widths and with the picker open at 1024; written in 3al, first run
+Alex's.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
