@@ -9934,6 +9934,88 @@ boxes. `e2e/assignments-baseline.spec.ts` pictures the board at the six
 console widths and with the picker open at 1024; written in 3al, first run
 Alex's.
 
+## 12.133 A struck driver name is struck on the name, not on a wrapper
+
+**Before.** §9.10's confirm (`ReassignConfirm`) struck the replaced drivers
+by wrapping `DriverName` in a `line-through` span, for "From" and "Was". A
+wrapper's `line-through` does not reach into `DriverName`'s inline-flex box,
+so the names were never struck, while the plain-text fallbacks
+("Unassigned", "—") were: the reverse of what matters. Seen in a local
+render (Chrome) in 3am; the board's "was" (§12.130) had met the same thing
+in 3al and worked around it with a className.
+
+**The rule.** `DriverName` takes `struck`: `line-through` on the name's own
+element, or on the fallback when there is no driver. The `No ELD` tag
+(§12.37) is never struck: it is provenance, not part of what changed. No
+caller wraps `DriverName` in a strike; the confirm's "From" and "Was" and the
+board's "was" pass `struck`.
+
+**The confirm's footer** for a move that affects another truck now reads
+"You can change it back on the assignment board." (Alex, 2026-10-21),
+replacing "Reversible from truck N's history — history ships in v2." and
+§9.10's "Reversible from truck 1088's history for the rest of the shift.":
+the history page (§12.101) shipped and is not where a move is undone.
+
+**Not done.** The gaining side's "To" driver is a bare name, untagged,
+though §12.37's table lists the confirm's gaining side as tagged: the
+preview carries no source for the incoming driver. A server field; backlog
+(Alex, 2026-10-21).
+
+**Tests.** `DriverName.test.tsx` (3), `ReassignConfirm.test.tsx` (6, the
+first that render the confirm: "From" struck on the name's own leaf element,
+"Was" struck and its tag not, "Unassigned" struck, "To" and "Becomes" not,
+the footer), and the board's "was" with a tagged driver.
+
+## 12.134 The board's picker fields are quiet, on the console's 44px rows
+
+**Quiet fields** (Alex, 2026-10-21; the board only). At rest a picker field
+has no box: a transparent border and ground, so fourteen pickers read as a
+list of names, not a form to fill in. The box (`line.hair` border,
+`surface.sunken` ground) comes back on hover, on focus and while the list is
+open, and the cursor is a text cursor. A viewer's locked field (disabled with
+its reason, §12.14) keeps its box and 45% exactly as before; a field disabled
+for the length of a save stays quiet. The "Driver" header sits 10px in, over
+the names rather than over the absent box's edge. The `No ELD` tag stays at
+the field's right end (§12.129).
+
+**44px rows** (Alex). Each row is at least the console's `row-comfortable`
+(44px, §14.4), with a 32px field (`size="row"`; the list opens 34px under it,
+the tag's box is 32px). A row with the phone editor open grows to fit it. It
+was 53px: at 44 the fleet's 22 trucks are about four rows closer to one
+screen.
+
+The edit modal (§9.9) passes neither: its field stays boxed and 36px.
+
+## 12.135 The phone beside its driver; the table capped at wide windows
+
+**Column order** (Alex, 2026-10-21): Truck, Driver, Driver's phone,
+Currently, as `64px minmax(240px,360px) minmax(220px,260px) minmax(150px,1fr)`.
+The phone is the picker's driver's (§12.106); with Currently between them,
+empty on every row at rest (§12.130), the eye crossed 240px of nothing from
+a name to its number. Currently is last and takes the slack. The minimums
+are §12.131's, 722 in all, closing at 768.
+
+**The cap.** From 1100px up the table is at most 1000px wide and the panel
+column follows it (§12.132); the ground beyond is left empty. At 1920 the
+rows had run 1600px with their content in the first 840, and the gaps panel
+sat 900px from the phone column. Below 1100 nothing changes.
+
+**Also, in the same pass.** The picker list tags a driver with no truck "no
+truck", not "unassigned", which sat one line under "Unassigned — clear this
+truck" (the same word for a driver and a truck), and rules off the first
+driver on a truck after the free ones (§12.129's order); both show in the
+edit modal's list too. While rows are changed, the footer's count is in
+primary ink. Below 1100px a free driver's entry in its panel is one line
+(name, phone, Retire), so the two panels side by side end level.
+
+**Tests.** `AssignmentBoard.test.tsx` and `DriverSelect.test.tsx` cover the
+order, the quiet classes and their states, the row height class, the tag
+text and the rule, the footer's ink and the entry's two layouts. They read
+classes and order; the test DOM draws nothing, so the widths, the cap, the
+box on hover and the 44px pitch were seen in a local render and are held by
+`e2e/assignments-baseline.spec.ts` (eight shots, one new: changed rows and a
+double-booking at 1440).
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

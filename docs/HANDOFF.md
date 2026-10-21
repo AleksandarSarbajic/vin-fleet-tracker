@@ -6419,6 +6419,166 @@ board, the panels scrolling away below 1100.
 10. Below 1100px, a free driver's entry on one line in its panel?
     Recommended: yes.
 
+**Alex's answers (2026-10-21):**
+
+1. Quiet picker fields on the board: yes (item 4), board only. The field
+   must still read as editable: a visible border and ground on hover and
+   focus, a text cursor, and a viewer's disabled state unchanged. The edit
+   modal's fields are unchanged.
+2. Column order Truck, Driver, Driver's phone, Currently: yes (item 2).
+3. Rows at the console's 44px (`row-comfortable`): yes (item 5), board only
+   via a size prop; the modal keeps h-9.
+4. Table capped at about 1000px from 1100px up: yes (item 3).
+5. Picker: "no truck" tag for a free driver, and a rule after the free
+   drivers: yes (item 6).
+6. `DriverName` `struck` prop, used by ReassignConfirm ("From", "Was") and
+   the board's "was": yes (item 1). The strike on the name and the fallback,
+   not on the No ELD tag. Render tests for both.
+7. The "To" driver's No ELD tag in ReassignConfirm: not now (needs a server
+   field). Backlog.
+8. ReassignConfirm's footer "Reversible from truck …'s history — history
+   ships in v2." becomes "You can change it back on the assignment board."
+   Copy only.
+9. A changed-rows baseline: yes (item 9), one shot at 1440 with a "was" row,
+   a "was —" row and a double-booking, invented seed only.
+10. Below 1100px, a free driver's panel entry on one line: yes (item 8).
+
+Also item 7 (the changed-rows count in primary ink while dirty), as listed.
+
+### Phase 3am, step 2: the assignment page, second pass built (2026-10-21)
+
+From the advisor's brief: items 1–9 of 3am step 1's list, as answered above,
+and the confirm's footer copy. NOT pushed, NOT deployed. No migration, no
+server code, no new token.
+
+Commits (each passed `npm run check` in the pre-commit hook):
+
+- `db8de4b`: `DriverName` `struck`; the confirm's names struck (item 1);
+- `a6d6fce`: the confirm's footer copy (answer 8);
+- `d0e6d98`: the phone beside its driver; the table capped at 1000px
+  (items 2, 3);
+- `aa32eec`: quiet picker fields and 44px rows (items 4, 5);
+- `c00677e`: "no truck" and the rule after the free drivers (item 6);
+- `4df607e`: the count in primary ink; a free driver on one line below
+  1100px (items 7, 8);
+- `a88f287`: the changed-rows baseline shot, written, not run (item 9);
+- one docs commit: this section, step 1's answers, design-spec
+  §12.133–§12.135.
+
+**Checked how.** As in 3al: a local render of the real components (esbuild,
+the app's Tailwind build and fonts, invented data, Playwright's Chromium on
+`file://`, every other request aborted, no sign-in). Seen there: the
+confirm's names struck and the tag not; the board at 768, 1024, 1099, 1100,
+1280, 1440 and 1920 with no sideways scroll (the picker 243–360px); the
+table stopping at 1000px at 1920; the quiet fields at rest, a hovered field
+boxed, a viewer's board boxed at 45% as before; the 44px pitch and the text
+cursor (measured); the list's "no truck" and its rule; both narrow panels
+73px tall; and item 9's clicks reaching the same states and footer text.
+
+**Per item.**
+
+1. **Struck names.** `DriverName.tsx`: `struck` puts `line-through` on the
+   name's element (or wraps the fallback in one), never on the tag.
+   `ReassignConfirm.tsx` drops both wrappers and passes `struck`;
+   `AssignmentBoard.tsx`'s "was" passes it instead of a className, so its tag
+   is no longer struck.
+2. **Column order.** `COLUMNS` =
+   `64px minmax(240px,360px) minmax(220px,260px) minmax(150px,1fr)`; header
+   and cells reordered. Minimums unchanged (722, closing at 768).
+3. **The cap.** `section` `min-[1100px]:max-w-[1000px]`; the panels follow.
+4. **Quiet fields.** `DriverSelect` `quiet`: at rest `border-transparent
+   bg-transparent cursor-text`; `hover:`/`focus:` `border-line-hair
+   bg-surface-sunken`; boxed while open; a viewer's locked field (disabled
+   with a reason) boxed as before; disabled during a save, still quiet. The
+   "Driver" header `pl-2.5`, over the names. (Least surprising choices:
+   quiet during a save, so the column does not flash boxes on every Save;
+   the header over the names.)
+5. **44px rows.** `DriverSelect` `size="row"`: field `h-8`, list
+   `top-[34px]`, tag box `h-8`; rows `min-h-row-comfortable py-1`. 44px
+   measured (was 53).
+6. **List.** A free driver's tag "no truck"; `border-t border-line-soft` on
+   the first driver on a truck after the free ones (`data-first-on-a-truck`).
+7. **Footer.** The status in `text-text` while dirty, `text-text-secondary`
+   at rest.
+8. **Free driver's entry.** A grid: one row of name, phone, Retire below
+   1100px; from 1100 up, name and Retire over the phone, as before. (The
+   one-line order, name then phone then Retire, is my choice; question 2.)
+9. **Baseline.** `assignments-changed-1440`: 410 takes the free driver
+   ("was —"), 404 takes 401's driver (struck "was" with its tag), 401 and 404
+   conflicted, the footer naming both, asserted before the shot.
+
+**The confirm's copy.** "You can change it back on the assignment board."
+for a move that affects another truck; the one-truck line is unchanged. No
+test or e2e spec matched the old text.
+
+**In the edit modal**, exactly: the reassignment confirm's "From" and "Was"
+names now struck (tags not), and its footer copy; the picker list's "no
+truck" tag and the rule after the free drivers. The modal's closed field is
+unchanged (boxed, 36px; neither `quiet` nor `size` is passed).
+
+**Tests.** 3,657 → 3,682, 201 → 203 files (`DriverName.test.tsx` and
+`ReassignConfirm.test.tsx` are new). +8 struck (DriverName 3, the confirm 4,
+the board's "was" 1), +2 the confirm's footer, +2 column order, +8 quiet
+fields and rows, +3 the list's tag and rule, +2 the footer's ink and the
+free driver's entry. Each commit's new tests were run against its old
+source: 17 of the 25 fail there (5, 1, 2, 5, 2, 2 by commit); the other 8
+pin behaviour that already held
+(a viewer's boxed field, the modal's defaults, "To" and "Becomes" unstruck,
+the one-truck footer line, and the like).
+
+**What the test DOM cannot prove** (happy-dom draws nothing): that a strike
+draws through the name and not the tag (the tests check which element
+carries the class; the browser's behaviour with a wrapper is why); that the
+box appears on hover; the 44px pitch; the column widths and the 1000px cap;
+the one-line entry fitting; the list's rule showing. The local render showed
+each; the baselines hold them in the app.
+
+**Baselines** (none run, none created or changed here):
+
+| PNG | Changes? | Why |
+|---|---|---|
+| `assignments-768` | yes | column order, quiet fields, 44px rows (more rows), "Driver" indent, the one-line free-driver entry (panels 73px) |
+| `assignments-1024` | yes | the same |
+| `assignments-1280` | yes | column order, quiet fields, 44px rows, "Driver" indent (the cap does not bite: the table is 960) |
+| `assignments-1440` | yes | the same, and the 1000px cap with the panels after it |
+| `assignments-1680` | yes | the same as 1440 |
+| `assignments-1920` | yes | the same as 1440 |
+| `assignments-picker-open-1024` | yes | all of 1024's, plus "no truck" and the rule in the list |
+| `assignments-changed-1440` | new | item 9 |
+| `desktop-baseline` (all) | no, expected | the modal's closed picker renders the same classes (boxed, 36px); no shot shows the list open or the confirm; `DriverName` unstruck renders as before. Unverified until run |
+| `history-*` | no, expected | nothing on the history page changed |
+
+**Alex's commands** (hosted sign-in; after the advisor has looked at the
+diffs of the seven):
+
+```
+# 1. see the diffs (7 differ, 1 missing): the report's actual/expected/diff images
+npm run e2e -- assignments-baseline --update-snapshots=none
+# 2. once approved, re-save the seven and write the new one, then check they hold
+npm run e2e -- assignments-baseline --update-snapshots=changed
+npm run e2e -- assignments-baseline --update-snapshots=none --repeat-each=3
+# 3. the specs that touch the page and the picker; the console's baselines, expected unchanged
+npm run e2e -- dispatch driver-phone driver-picker assignments-baseline --update-snapshots=none
+npm run e2e -- desktop-baseline --update-snapshots=none
+```
+
+**Backlog.** The confirm's "To" driver No ELD tag: the preview needs the
+incoming driver's source (a server field, `reassign.ts`), then `DriverName`
+on the "To" line (Alex, answer 7).
+
+**Unverified:** every picture above outside the local render, until Alex's
+run; `desktop-baseline` and `history-*` unchanged; Alex's window (about
+1000 CSS px).
+
+**Questions for Alex:**
+
+1. On a quiet field, the No ELD tag sits at the field's right end, so on the
+   board the tags line up as a column about 300px from short names. Keep it
+   there (recommended: it marks the field's edge when the box shows), or put
+   it right after the name (it would need the name's width measured)?
+2. Below 1100px a free driver's entry reads name, phone, Retire. Keep that
+   order (recommended), or Retire before the phone?
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
