@@ -6031,7 +6031,8 @@ baselines.
 ### Phase 3al, step 2: the assignment page built (2026-10-21)
 
 From the advisor's brief: items 1–10 of step 1's ordered list, as answered
-above. NOT pushed, NOT deployed. No migration, no server code, no new token.
+above. NOT pushed, NOT deployed; e2e verified 2026-10-21 (see below), ready
+to push. No migration, no server code, no new token.
 
 Commits:
 
@@ -6198,6 +6199,38 @@ draw through; that component was not rendered).
 5. Below 1100px the panels scroll away with the board (sticky only beside
    it). Fine?
 6. Trucks 128 and 135's shared phone number: still yours to check.
+
+**Alex's answers (2026-10-21):**
+
+1. Agreed: an unchanged empty truck's Currently stays blank; "was —" only on
+   a changed row.
+2. Keep the header "Currently".
+3. Yes, a small follow-up phase AFTER this is live: `ReassignConfirm`'s
+   struck names (a wrapper's `line-through` does not reach into an
+   inline-flex). Check it in a browser first.
+4. Keep `AddDriverInline`'s "…the change is confirmed when you save."
+5. Fine: below 1100px the panels scroll away with the board.
+6. Trucks 128 and 135 sharing a phone: still open, Alex's to check. Data, not
+   code.
+
+**e2e (Alex, 2026-10-21):**
+
+- `assignments-baseline --update-snapshots=missing` (run
+  2026-10-21T15-09-45-415Z) wrote the 7 PNGs. Playwright marks a missing
+  snapshot as failed while writing it. Committed as written in `9f40488`
+  (each opened first: only the spec's invented seed).
+- `--repeat-each=3 --update-snapshots=none` (run 2026-10-21T15-15-10-616Z):
+  22 passed.
+- `dispatch driver-phone driver-picker assignments-baseline` (run
+  2026-10-21T15-15-50-926Z): 14 passed.
+- `desktop-baseline --update-snapshots=none` (run 2026-10-21T15-16-31-292Z):
+  12 of 13 passed. "a stop the truck has left, at 1440px" timed out waiting
+  for the console header: the trace shows GET / answered 307 to /login after
+  2.9 s, i.e. the middleware's hosted-Auth getUser returned no user once. The
+  same stored session worked for the 12 other tests, including the next one
+  (a hosted-Auth stall, as in 3ae).
+- That one test alone (run 2026-10-21T15-22-55-667Z): passed. Every existing
+  baseline is unchanged.
 
 ## Next
 
