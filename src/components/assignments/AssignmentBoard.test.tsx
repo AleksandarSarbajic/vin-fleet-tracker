@@ -151,3 +151,28 @@ describe('the retire control is admin-only', () => {
     expect((await render('admin')).innerHTML).toContain('Retire');
   });
 });
+
+/** Opens truck `n`'s picker and picks the option whose text includes `name`. */
+async function pickFor(n: number, name: string) {
+  const input = container!.querySelector<HTMLInputElement>(`input[aria-label="Driver for truck ${n}"]`)!;
+  await act(async () => input.click());
+  const option = [...container!.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((o) =>
+    o.textContent?.includes(name),
+  )!;
+  await act(async () => option.click());
+}
+
+const footerText = () => container!.querySelector('footer')!.textContent ?? '';
+
+describe('a driver on two trucks (§12.131)', () => {
+  it('names the trucks, and Save stays refused', async () => {
+    await render();
+    // Hal is on 137; putting him on 143 too is the clash the server refuses.
+    await pickFor(143, 'Hand Entered Hal');
+    expect(footerText()).toContain('a driver is on trucks 137 and 143');
+    const save = [...container!.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Save assignments'),
+    );
+    expect(save?.disabled).toBe(true);
+  });
+});

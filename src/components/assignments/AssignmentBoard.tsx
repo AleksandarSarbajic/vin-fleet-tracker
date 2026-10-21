@@ -32,6 +32,24 @@ interface Props {
 const label = (t: Board['trucks'][number]) =>
   t.truckNumber === null ? t.samsaraName : String(t.truckNumber);
 
+/**
+ * The table's columns, shared by its header and every row (§12.131).
+ *
+ * Truck, driver, Currently, phone. The driver column was the only flexible
+ * one (`92px 1fr 200px 220px`), so a narrow window took its width from the
+ * picker the job happens in: about 120px at 1000. Now the truck number gets
+ * what three digits need, the picker 240px at least, and the phone the 220px
+ * its inline editor (field, Save, Cancel) needs.
+ */
+const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(160px,240px)_minmax(220px,1fr)]';
+
+/** "124 and 130", "124, 130 and 138". */
+function listed(labels: string[]): string {
+  return labels.length < 2
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 export function AssignmentBoard({ board, role }: Props) {
   const router = useRouter();
   const mayEdit = can(role, 'dispatcher');
@@ -119,18 +137,24 @@ export function AssignmentBoard({ board, role }: Props) {
     return map;
   }, [board.trucks, draft]);
 
-  /** The same rule the server enforces, run early so Save can refuse first. */
-  const doubleBooked = useMemo(() => {
-    const byDriver = new Map<string, string[]>();
+  /**
+   * The same rule the server enforces, run early so Save can refuse first.
+   * Grouped by driver, so the footer can say WHICH trucks share one: "a
+   * driver is on two trucks" sent the dispatcher hunting down 22 rows.
+   */
+  const doubleBookedGroups = useMemo(() => {
+    const byDriver = new Map<string, Board['trucks']>();
     for (const truck of board.trucks) {
       const driverId = draft.get(truck.id) ?? null;
       if (!driverId) continue;
-      byDriver.set(driverId, [...(byDriver.get(driverId) ?? []), truck.id]);
+      byDriver.set(driverId, [...(byDriver.get(driverId) ?? []), truck]);
     }
-    return new Set(
-      [...byDriver.values()].filter((ids) => ids.length > 1).flat(),
-    );
+    return [...byDriver.values()].filter((trucks) => trucks.length > 1);
   }, [board.trucks, draft]);
+  const doubleBooked = useMemo(
+    () => new Set(doubleBookedGroups.flat().map((t) => t.id)),
+    [doubleBookedGroups],
+  );
 
   const conflictedTrucks = useMemo(
     () => new Set([...doubleBooked, ...conflicts.flatMap((c) => c.truckIds)]),
@@ -230,7 +254,13 @@ export function AssignmentBoard({ board, role }: Props) {
   const trucksWithoutDriver = board.trucks.filter((t) => !(draft.get(t.id) ?? null));
 
   return (
-    <main className="flex min-h-dvh flex-col bg-surface-base">
+    /**
+     * §12.131. The window's height, not at least it: the header and the
+     * footer stay put and only the board between them scrolls. It was
+     * `min-h-dvh`, so the page itself scrolled and Save, Discard and the
+     * count of changes sat under the last of 22 rows.
+     */
+    <main className="flex h-dvh flex-col bg-surface-base">
       {/*
         §12.106. Assignments are a desktop job (§12.94), and this page has no
         phone layout: nothing on the phone view links here, and an address
@@ -266,13 +296,23 @@ export function AssignmentBoard({ board, role }: Props) {
         </Link>
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-5 overflow-auto p-5 max-md:hidden">
+      {/*
+        No top padding here: a sticky child sticks inside the scroll region's
+        padding, so with `p-5` a scrolled row showed through the 20px above
+        the column headers. The 20px is the sticky things' own `pt-5` instead.
+      */}
+      <div className="flex min-h-0 flex-1 gap-5 overflow-auto px-5 pb-5 max-md:hidden">
         <section className="min-w-0 flex-1">
           {/* §12.37: above the board, where a dispatcher is already thinking
               about who is on what. Renders nothing when there is nothing to
               ask. */}
-          <MergePrompt role={role} />
-          <div className="grid grid-cols-[92px_1fr_200px_220px] items-center gap-x-4 border-b border-line-hair pb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+          <div className="pt-5 empty:hidden">
+            <MergePrompt role={role} />
+          </div>
+          {/* Sticky, so a dispatcher 15 rows down still knows which name is the picker's. */}
+          <div
+            className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-line-hair bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
+          >
             <span>Truck</span>
             <span>Driver</span>
             <span>Currently</span>
@@ -288,11 +328,15 @@ export function AssignmentBoard({ board, role }: Props) {
             return (
               <div
                 key={truck.id}
-                className={`grid grid-cols-[92px_1fr_200px_220px] items-center gap-x-4 border-b border-line-soft py-2 ${
+                className={`grid ${COLUMNS} items-center gap-x-4 border-b border-line-soft py-2 ${
                   isConflicted ? 'bg-status-late-bg' : isChanged ? 'bg-row-selected' : ''
                 }`}
               >
-                <span className="font-sans text-data font-bold tabular-nums text-text">
+                {/* A truck with no number shows its Samsara name, which can be long. */}
+                <span
+                  title={label(truck)}
+                  className="truncate font-sans text-data font-bold tabular-nums text-text"
+                >
                   {label(truck)}
                 </span>
                 <DriverSelect
@@ -352,7 +396,8 @@ export function AssignmentBoard({ board, role }: Props) {
           })}
         </section>
 
-        <aside className="w-[260px] shrink-0 space-y-5">
+        {/* Sticky: the gaps stay in view while the board scrolls past them. */}
+        <aside className="sticky top-0 w-[260px] shrink-0 space-y-5 self-start pt-5">
           <Panel
             title={`Drivers with no truck (${driversWithoutTruck.length})`}
             empty="Every active driver has a truck."
@@ -428,9 +473,9 @@ export function AssignmentBoard({ board, role }: Props) {
         <div className="flex items-center justify-between">
           <span className="text-body text-text-secondary">
             {dirty
-              ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${
-                  doubleBooked.size > 0 ? ' · a driver is on two trucks' : ''
-                }`
+              ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${doubleBookedGroups
+                  .map((trucks) => ` · a driver is on trucks ${listed(trucks.map(label))}`)
+                  .join('')}`
               : (saved ?? 'No changes.')}
           </span>
           <div className="flex items-center gap-2.5">
