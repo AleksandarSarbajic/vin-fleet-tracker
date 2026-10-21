@@ -40,8 +40,15 @@ const label = (t: Board['trucks'][number]) =>
  * picker the job happens in: about 120px at 1000. Now the truck number gets
  * what three digits need, the picker 240px at least, and the phone the 220px
  * its inline editor (field, Save, Cancel) needs.
+ *
+ * Settled on screen, not by arithmetic: with the picker flexible it ran
+ * 845px wide at 1920, and with Currently flexible a 900px empty band sat
+ * between each name and its phone. So the picker and Currently are capped
+ * (360, 240) and the phone column takes the slack: the empty space falls at
+ * the row's end. Minimums 64 + 240 + 150 + 220 + 3 gaps = 722, which closes
+ * at 768 (728 inside the padding).
  */
-const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(160px,240px)_minmax(220px,1fr)]';
+const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(150px,240px)_minmax(220px,1fr)]';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
@@ -300,9 +307,15 @@ export function AssignmentBoard({ board, role }: Props) {
         No top padding here: a sticky child sticks inside the scroll region's
         padding, so with `p-5` a scrolled row showed through the 20px above
         the column headers. The 20px is the sticky things' own `pt-5` instead.
+
+        §12.132. Below 1100px the two panels sit above the table, side by side,
+        instead of beside it. The four columns need 722px at their minimums,
+        and beside the 260px aside that leaves nothing for the picker under
+        about 1042px; at 1100 it gets about 270px. The DOM order (table, then
+        panels) is kept, so the keyboard reaches the pickers first.
       */}
-      <div className="flex min-h-0 flex-1 gap-5 overflow-auto px-5 pb-5 max-md:hidden">
-        <section className="min-w-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
+        <section className="min-w-0 min-[1100px]:flex-1">
           {/* §12.37: above the board, where a dispatcher is already thinking
               about who is on what. Renders nothing when there is nothing to
               ask. */}
@@ -396,8 +409,8 @@ export function AssignmentBoard({ board, role }: Props) {
           })}
         </section>
 
-        {/* Sticky: the gaps stay in view while the board scrolls past them. */}
-        <aside className="sticky top-0 w-[260px] shrink-0 space-y-5 self-start pt-5">
+        {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}
+        <aside className="order-first grid grid-cols-2 items-start gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
           <Panel
             title={`Drivers with no truck (${driversWithoutTruck.length})`}
             empty="Every active driver has a truck."
