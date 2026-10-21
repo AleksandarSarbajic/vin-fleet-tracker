@@ -109,3 +109,16 @@ describe('the confirm strikes the drivers being replaced (§9.10, §12.133)', ()
     expect(line('Becomes').querySelector('.line-through')).toBeNull();
   });
 });
+
+describe('the confirm says where a move is undone', () => {
+  it('points at the assignment board, not at a history that "ships in v2"', () => {
+    render({});
+    expect(container!.textContent).toContain('You can change it back on the assignment board.');
+    expect(container!.textContent).not.toContain('ships in v2');
+  });
+
+  it('keeps its own line when no other truck is affected', () => {
+    render({ losing: null });
+    expect(container!.textContent).toContain('Reversible by clearing the driver again.');
+  });
+});

@@ -112,7 +112,9 @@ export function ReassignConfirm({
         <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
           <span className="text-small text-text-mutedOnOverlay">
             {losing
-              ? `Reversible from truck ${losing.truckLabel}'s history — history ships in v2.`
+              ? // Alex, 2026-10-21: the history page shipped (§12.101) and is
+                // not where a move is undone; the board is.
+                'You can change it back on the assignment board.'
               : 'Reversible by clearing the driver again.'}
           </span>
           <div className="flex gap-2.5">
