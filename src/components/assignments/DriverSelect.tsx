@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BoardDriver } from '@/server/assignments';
 import { isEldBacked } from '@/lib/driver';
 import { NoEldTag } from '@/components/DriverName';
@@ -17,6 +17,36 @@ import { AddDriverInline } from './AddDriverInline';
  * Correction 1 applies here as everywhere: no HOS, no duty status. The only
  * availability signal is `drivers.active`.
  */
+
+/** The open list's widest, in px. The class below says the same for a first paint. */
+const LIST_MAX = 420;
+/** Kept clear of the viewport's right edge, as the modal keeps 1.5rem. */
+const VIEWPORT_GUTTER = 16;
+
+/**
+ * How wide the open list may be: from the picker's left edge to the nearest
+ * right edge that would clip it — any ancestor that scrolls or hides overflow
+ * (the edit modal's body, the board's scroll region) and the viewport — but
+ * never narrower than the picker itself, and never wider than LIST_MAX.
+ *
+ * Measured, not set in CSS, because the same picker sits at the LEFT of the
+ * board and at the RIGHT of the modal's two-column grid below 1008px, where a
+ * fixed 420px ran 67px past the modal's body at 768. Null when there is no
+ * layout to measure (a test DOM), and the class's own cap applies.
+ */
+export function listMaxWidth(box: HTMLElement): number | null {
+  const own = box.getBoundingClientRect();
+  if (own.width === 0) return null;
+  let right = window.innerWidth - VIEWPORT_GUTTER;
+  for (let el = box.parentElement; el; el = el.parentElement) {
+    const style = window.getComputedStyle(el);
+    if (style.overflowX !== 'visible' || style.overflow !== 'visible') {
+      const edge = el.getBoundingClientRect().left + el.clientLeft + el.clientWidth;
+      if (el.clientWidth > 0) right = Math.min(right, edge);
+    }
+  }
+  return Math.min(LIST_MAX, Math.max(own.width, Math.floor(right - own.left)));
+}
 
 interface Props {
   drivers: BoardDriver[];
@@ -80,6 +110,12 @@ export function DriverSelect({
   const [justCreated, setJustCreated] = useState<BoardDriver | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const [maxWidth, setMaxWidth] = useState<number | null>(null);
+
+  // Before paint, so the list never shows at one width and jumps to another.
+  useLayoutEffect(() => {
+    if (open && box.current) setMaxWidth(listMaxWidth(box.current));
+  }, [open]);
 
   const known = useMemo(
     () =>
@@ -185,16 +221,27 @@ export function DriverSelect({
       />
 
       {open ? (
+        /**
+         * As wide as its widest option, not as its input (§12.37's picker at
+         * board scale). It was `left-0 right-0`: on the board the driver
+         * column is what the fixed columns leave, about 120px at a 1000px
+         * window, so names wrapped onto three lines, the tags were cut off
+         * and the list scrolled sideways. Now at least the input's width, at
+         * most what `listMaxWidth` measures, and a name that still does not
+         * fit truncates on one line with its whole self in the title.
+         */
         <ul
           id={listId}
           role="listbox"
-          className="absolute left-0 right-0 top-[38px] z-20 max-h-[264px] overflow-auto border border-line-hair bg-surface-raised py-1"
+          style={maxWidth === null ? undefined : { maxWidth }}
+          className="absolute left-0 top-[38px] z-20 max-h-[264px] w-max min-w-full max-w-[420px] overflow-y-auto overflow-x-hidden border border-line-hair bg-surface-raised py-1"
         >
           <li>
+            {/* Secondary ink, not `status.neutral`: clearing is an action, not a status. */}
             <button
               type="button"
               onClick={() => pick(null)}
-              className="flex w-full items-center px-2.5 py-1.5 text-left text-body text-status-neutral-fg hover:bg-row-hover"
+              className="flex w-full items-center whitespace-nowrap px-2.5 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover"
             >
               Unassigned — clear this truck
             </button>
@@ -210,12 +257,14 @@ export function DriverSelect({
                   aria-selected={driver.id === value}
                   onMouseEnter={() => setCursor(index)}
                   onClick={() => pick(driver.id)}
-                  className={`flex w-full items-baseline justify-between gap-3 px-2.5 py-1.5 text-left text-body ${
+                  className={`flex w-full items-baseline justify-between gap-3 whitespace-nowrap px-2.5 py-1.5 text-left text-body ${
                     index === cursor ? 'bg-row-hover' : ''
                   } ${takenElsewhere ? 'text-text-muted' : 'text-text'}`}
                 >
-                  <span className="flex items-baseline gap-1.5">
-                    {driver.name}
+                  <span className="flex min-w-0 items-baseline gap-1.5">
+                    <span className="truncate" title={driver.name}>
+                      {driver.name}
+                    </span>
                     {/**
                      * §12.35: provenance, not status — so it borrows no status
                      * colour and no icon. A dispatcher needs it because only

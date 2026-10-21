@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DriverSelect } from './DriverSelect';
+import { DriverSelect, listMaxWidth } from './DriverSelect';
 import type { BoardDriver } from '@/server/assignments';
 
 /**
@@ -133,6 +133,68 @@ describe('the picker shows which drivers have an ELD', () => {
     expect(tags.length).toBe(1);
     expect(container!.innerHTML).toContain('Hand Entered Hal');
     expect(container!.innerHTML).toContain('Samsara Sam');
+  });
+});
+
+/**
+ * The open list's width rule (§12.129). The DOM here has no layout, so the
+ * rectangles are given by hand: this proves the arithmetic and which edges it
+ * reads, not that a browser lays the list out that way (the harness and the
+ * /assignments baseline do that).
+ */
+describe('how wide the open list may be', () => {
+  function placed(el: HTMLElement, left: number, width: number) {
+    el.getBoundingClientRect = () =>
+      ({ left, width, right: left + width, top: 0, bottom: 36, height: 36, x: left, y: 0 }) as DOMRect;
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: width });
+  }
+
+  function layout(scroller: { left: number; width: number } | null, picker: { left: number; width: number }) {
+    const outer = document.createElement('div');
+    if (scroller) {
+      outer.style.overflow = 'auto';
+      placed(outer, scroller.left, scroller.width);
+    }
+    const box = document.createElement('div');
+    placed(box, picker.left, picker.width);
+    outer.appendChild(box);
+    container!.appendChild(outer);
+    return box;
+  }
+
+  it('stops at a scrolling ancestor’s right edge: the modal’s body at 768', () => {
+    // The measured case: picker at 390, 338 wide; the modal body ends at 743.
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 768 });
+    expect(listMaxWidth(layout({ left: 25, width: 718 }, { left: 390, width: 338 }))).toBe(353);
+  });
+
+  it('is never narrower than the picker, and never over 420', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 });
+    expect(listMaxWidth(layout(null, { left: 100, width: 240 }))).toBe(420);
+    expect(listMaxWidth(layout({ left: 0, width: 300 }, { left: 100, width: 240 }))).toBe(240);
+  });
+
+  it('keeps 16px clear of the viewport when nothing else clips it', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 });
+    expect(listMaxWidth(layout(null, { left: 200, width: 100 }))).toBe(284);
+  });
+
+  it('says nothing when there is no layout to measure', () => {
+    expect(listMaxWidth(layout(null, { left: 0, width: 0 }))).toBeNull();
+  });
+
+  it('keeps names on one line and the clear action out of the status colours', () => {
+    render();
+    act(() => input().click());
+    expect(list()!.className).toContain('min-w-full');
+    expect(list()!.className).not.toContain('right-0');
+    const clear = [...container!.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Unassigned — clear this truck'),
+    );
+    expect(clear?.className).not.toContain('status-');
+    for (const option of container!.querySelectorAll('[role="option"]')) {
+      expect(option.className).toContain('whitespace-nowrap');
+    }
   });
 });
 
