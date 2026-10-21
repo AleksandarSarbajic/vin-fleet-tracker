@@ -58,14 +58,13 @@ export function ReassignConfirm({
                 gains a driver
               </p>
               <Line label="From">
-                <span className="line-through">
-                  <DriverName
-                    name={gaining.driverName}
-                    source={gaining.driverSource}
-                    samsaraDriverId={gaining.driverSamsaraId}
-                    fallback="Unassigned"
-                  />
-                </span>
+                <DriverName
+                  name={gaining.driverName}
+                  source={gaining.driverSource}
+                  samsaraDriverId={gaining.driverSamsaraId}
+                  fallback="Unassigned"
+                  struck
+                />
               </Line>
               <Line label="To">{gaining.toDriverName ?? 'Unassigned'}</Line>
               <Line label="Next appt">
@@ -83,14 +82,13 @@ export function ReassignConfirm({
                     loses its driver
                   </p>
                   <Line label="Was">
-                    <span className="line-through">
-                      <DriverName
-                        name={losing.driverName}
-                        source={losing.driverSource}
-                        samsaraDriverId={losing.driverSamsaraId}
-                        fallback="—"
-                      />
-                    </span>
+                    <DriverName
+                      name={losing.driverName}
+                      source={losing.driverSource}
+                      samsaraDriverId={losing.driverSamsaraId}
+                      fallback="—"
+                      struck
+                    />
                   </Line>
                   <Line label="Becomes">
                     <span className="text-status-neutral-fg">Unassigned</span>

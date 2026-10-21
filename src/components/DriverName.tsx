@@ -20,6 +20,7 @@ export function DriverName({
   samsaraDriverId,
   fallback = null,
   className,
+  struck = false,
 }: {
   name: string | null;
   source: DriverSource | null;
@@ -27,8 +28,20 @@ export function DriverName({
   /** What to render instead when there is no driver at all. */
   fallback?: React.ReactNode;
   className?: string;
+  /**
+   * §12.133. The name (or the fallback) struck through, as §9.10 writes a
+   * driver being replaced; the `No ELD` tag is NOT, because it is provenance,
+   * not part of what changed.
+   *
+   * A prop, not a caller's wrapper: `line-through` on a wrapper does not
+   * reach into this component's inline-flex box, so the confirm's "From" and
+   * "Was" names were never struck while their plain-text fallbacks were.
+   */
+  struck?: boolean;
 }) {
-  if (name === null) return <>{fallback}</>;
+  if (name === null) {
+    return struck ? <span className="line-through">{fallback}</span> : <>{fallback}</>;
+  }
 
   // No driver row to judge means nothing to say — an absent source is not the
   // same as a driver without an ELD.
@@ -36,7 +49,7 @@ export function DriverName({
 
   return (
     <span className={`inline-flex items-baseline gap-1.5 ${className ?? ''}`}>
-      <span className="truncate">{name}</span>
+      <span className={struck ? 'truncate line-through' : 'truncate'}>{name}</span>
       {tagged ? <NoEldTag /> : null}
     </span>
   );

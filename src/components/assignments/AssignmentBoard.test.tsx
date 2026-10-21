@@ -222,6 +222,17 @@ describe('Currently shows only on a changed row (§12.130)', () => {
     expect(was()[0]!.textContent).toMatch(/^was\s*—$/);
   });
 
+  it('strikes the saved driver’s name, and not their No ELD tag (§12.133)', async () => {
+    await render();
+    // 137's saved driver is the hand-entered one, so the "was" carries a tag.
+    await pickFor(137, 'Samsara Sam');
+    const row = was()[0]!;
+    expect(row.querySelector('.line-through')?.textContent).toBe('Hand Entered Hal');
+    const tag = row.querySelector('[title*="not in Samsara"]');
+    expect(tag).not.toBeNull();
+    expect(tag!.closest('.line-through')).toBeNull();
+  });
+
   it('goes again when the change is undone', async () => {
     await render();
     await pickFor(143, 'Unassigned Hal');

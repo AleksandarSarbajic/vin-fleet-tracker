@@ -409,17 +409,14 @@ export function AssignmentBoard({ board, role }: Props) {
                     className="flex min-w-0 items-baseline gap-1.5 text-body text-text-muted"
                   >
                     <span className="shrink-0">was</span>
-                    {/*
-                      The strike goes on DriverName's own box: a wrapper's
-                      `line-through` does not reach into its inline-flex.
-                    */}
+                    {/* §12.133: the name struck, not its No ELD tag. */}
                     <span className="min-w-0 truncate">
                       <DriverName
                         name={truck.driverName}
                         source={truck.driverSource}
                         samsaraDriverId={truck.driverSamsaraId}
-                        fallback={<span className="line-through">—</span>}
-                        className="line-through"
+                        fallback="—"
+                        struck
                       />
                     </span>
                   </span>
