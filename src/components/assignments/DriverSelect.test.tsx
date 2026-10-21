@@ -241,3 +241,27 @@ describe('"+ Add driver" appears when the search runs out', () => {
     expect(container!.innerHTML).toContain('No ELD');
   });
 });
+
+describe('the closed input carries the No ELD tag (§12.37)', () => {
+  const tag = () => container!.querySelector('[title*="not in Samsara"]');
+
+  it('for a driver with no ELD, and not for a Samsara driver', () => {
+    render({ value: 'd-2' });
+    expect(tag()).not.toBeNull();
+    render({ value: 'd-1' });
+    expect(tag()).toBeNull();
+  });
+
+  it('goes while the list is open, where the field holds a search', () => {
+    render({ value: 'd-2' });
+    act(() => input().click());
+    // The open list tags Hal's option; the field's own tag is gone.
+    expect(input().parentElement!.querySelector(':scope > span [title*="not in Samsara"]')).toBeNull();
+  });
+
+  it('opens the list when clicked, as the field would', () => {
+    render({ value: 'd-2' });
+    act(() => (tag()!.parentElement as HTMLElement).click());
+    expect(list()).not.toBeNull();
+  });
+});

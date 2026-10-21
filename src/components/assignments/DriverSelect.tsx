@@ -126,6 +126,13 @@ export function DriverSelect({
   );
 
   const selected = known.find((d) => d.id === value) ?? null;
+  /**
+   * §12.37's table: the closed input is tagged. It never was — on the board
+   * the row's tag came from the Currently column, which now shows only on a
+   * changed row (§12.130). Hidden while open: the field then holds a search.
+   */
+  const tagged = selected !== null && !open && !isEldBacked(selected);
+  const field = useRef<HTMLInputElement>(null);
 
   const matches = useMemo(() => {
     const needle = typed.trim().toLowerCase();
@@ -161,6 +168,7 @@ export function DriverSelect({
   return (
     <div ref={box} className="relative">
       <input
+        ref={field}
         type="text"
         role="combobox"
         aria-expanded={open}
@@ -217,8 +225,25 @@ export function DriverSelect({
         }}
         className={`h-9 w-full border bg-surface-sunken px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
           selected ? 'border-line-hair text-text' : 'border-line-soft text-text-muted'
-        }`}
+        } ${tagged ? 'pr-16' : ''}`}
       />
+      {tagged ? (
+        /**
+         * Inside the field's right end, so the inputs down the board keep one
+         * right edge. A click on it is a click on the field: it opens the
+         * list, as the field would.
+         */
+        <span
+          className="absolute right-2 top-0 flex h-9 items-center"
+          onClick={() => {
+            if (disabled) return;
+            field.current?.focus();
+            setOpen(true);
+          }}
+        >
+          <NoEldTag />
+        </span>
+      ) : null}
 
       {open ? (
         /**

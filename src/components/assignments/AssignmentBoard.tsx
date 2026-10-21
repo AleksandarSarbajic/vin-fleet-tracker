@@ -383,14 +383,38 @@ export function AssignmentBoard({ board, role }: Props) {
                     router.refresh();
                   }}
                 />
-                <span className="truncate text-body text-text-muted">
-                  <DriverName
-                    name={truck.driverName}
-                    source={truck.driverSource}
-                    samsaraDriverId={truck.driverSamsaraId}
-                    fallback="Unassigned"
-                  />
-                </span>
+                {/**
+                 * §12.130. Only on a row changed in the draft: what the truck
+                 * had before, struck through, as §9.10 writes the losing side
+                 * — including its "—" for a truck that had nobody. On an
+                 * unchanged row this repeated the picker's name, so every
+                 * assigned row said one name twice, and an empty truck said
+                 * "Unassigned" twice (§12.18). The row's No ELD tag is beside
+                 * the picker now (§12.37's table), so nothing is lost.
+                 */}
+                {isChanged ? (
+                  <span
+                    data-was=""
+                    className="flex min-w-0 items-baseline gap-1.5 text-body text-text-muted"
+                  >
+                    <span className="shrink-0">was</span>
+                    {/*
+                      The strike goes on DriverName's own box: a wrapper's
+                      `line-through` does not reach into its inline-flex.
+                    */}
+                    <span className="min-w-0 truncate">
+                      <DriverName
+                        name={truck.driverName}
+                        source={truck.driverSource}
+                        samsaraDriverId={truck.driverSamsaraId}
+                        fallback={<span className="line-through">—</span>}
+                        className="line-through"
+                      />
+                    </span>
+                  </span>
+                ) : (
+                  <span />
+                )}
                 {driver ? (
                   <DriverPhone
                     key={driver.id}

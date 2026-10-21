@@ -176,3 +176,67 @@ describe('a driver on two trucks (§12.131)', () => {
     expect(save?.disabled).toBe(true);
   });
 });
+
+async function renderBoard(b: Board) {
+  await act(async () => {
+    root!.render(createElement(AssignmentBoard, { board: b, role: 'dispatcher' }));
+  });
+  return container!;
+}
+
+const EMPTY_TRUCK: Board['trucks'][number] = {
+  id: 't-3',
+  truckNumber: 150,
+  samsaraName: 'Truck 150',
+  driverId: null,
+  driverName: null,
+  driverSource: null,
+  driverSamsaraId: null,
+  since: null,
+};
+
+const was = () => [...container!.querySelectorAll('[data-was]')];
+
+describe('Currently shows only on a changed row (§12.130)', () => {
+  it('is empty on every unchanged row', async () => {
+    const html = (await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }))).innerHTML;
+    expect(was()).toHaveLength(0);
+    // §12.18: the empty truck says "Unassigned" once, in its picker, and nowhere as text.
+    // (The fixture's "Unassigned Hal" is a name, not the word.)
+    expect(container!.textContent!.replaceAll('Unassigned Hal', '')).not.toContain('Unassigned');
+    expect(html).toContain('placeholder="Unassigned"');
+  });
+
+  it('says "was" and the saved driver, struck through, once the row changes', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    expect(was()).toHaveLength(1);
+    expect(was()[0]!.textContent).toMatch(/^was\s*Samsara Sam$/);
+    expect(was()[0]!.querySelector('.line-through')?.textContent).toContain('Samsara Sam');
+  });
+
+  it('writes a truck that had nobody as "was —", as the confirm does', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    await pickFor(150, 'Unassigned Hal');
+    expect(was()).toHaveLength(1);
+    expect(was()[0]!.textContent).toMatch(/^was\s*—$/);
+  });
+
+  it('goes again when the change is undone', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    await pickFor(143, 'Samsara Sam');
+    expect(was()).toHaveLength(0);
+  });
+});
+
+describe('the row’s No ELD tag is beside the picker (§12.37)', () => {
+  const pickerBox = (n: number) =>
+    container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.parentElement!;
+
+  it('tags the hand-entered driver’s picker and not the Samsara one’s', async () => {
+    await render();
+    expect(pickerBox(137).querySelector('[title*="not in Samsara"]')).not.toBeNull();
+    expect(pickerBox(143).querySelector('[title*="not in Samsara"]')).toBeNull();
+  });
+});
