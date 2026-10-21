@@ -28,8 +28,9 @@ export function AddDriverInline({
   /**
    * §12.38. Present when the truck is EMPTY, so the driver can be created and
    * assigned in one transaction. Absent when it already has a driver: that is
-   * a reassignment and belongs to the confirm path, so the button says what it
-   * can actually do instead.
+   * a reassignment and goes out with its caller's save (the board's batch,
+   * or the edit modal's §9.10 confirm), so the button says what it can
+   * actually do instead.
    */
   assignToTruckId: string | null;
   onCreated: (driverId: string, name: string, assignedTruckId: string | null) => void;

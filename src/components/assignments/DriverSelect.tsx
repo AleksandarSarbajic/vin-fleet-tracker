@@ -77,7 +77,8 @@ interface Props {
   /**
    * §12.38: the truck this picker assigns to, when it is EMPTY. Null when it
    * already has a driver, which makes the create a create-only and leaves the
-   * move to the existing reassignment confirm.
+   * move to the caller's save: the board's batch (its own confirmation, HANDOFF
+   * 3ai), or the edit modal's §9.10 confirm.
    */
   assignToTruckId?: string | null;
 }

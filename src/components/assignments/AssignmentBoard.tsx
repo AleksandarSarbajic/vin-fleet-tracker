@@ -376,11 +376,14 @@ export function AssignmentBoard({ board, role }: Props) {
                    * would look broken.
                    */
                   /**
-                   * §12.38: only when the truck is EMPTY. An occupied truck
-                   * makes this a reassignment, which has a two-sided confirm
-                   * and a preview token — so the driver is created, selected
-                   * here, and the existing confirm takes over on Save. The
-                   * dispatcher learns no new path.
+                   * §12.38: only when the truck is EMPTY. On an occupied
+                   * truck the driver is only created and selected here; the
+                   * change of driver is then a row in this board's draft like
+                   * any other, and goes out with Save in the batch. There is
+                   * no two-sided confirm on this screen: the board's batch
+                   * save is its own confirmation (HANDOFF 3ai, answered
+                   * 2026-10-19). §9.10's confirm and its preview token are
+                   * the edit modal's.
                    */
                   assignToTruckId={truck.driverId === null ? truck.id : null}
                   onDriverCreated={(_driverId, _name, assignedTruckId) => {
