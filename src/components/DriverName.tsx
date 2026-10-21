@@ -1,5 +1,4 @@
 import { NO_ELD_LABEL, isEldBacked, type DriverSource } from '@/lib/driver';
-import type { Look } from '@/components/assignments/nightDesk';
 
 /**
  * A driver's name, with the `No ELD` tag when there is no ELD behind them
@@ -22,7 +21,6 @@ export function DriverName({
   fallback = null,
   className,
   struck = false,
-  look = 'console',
 }: {
   name: string | null;
   source: DriverSource | null;
@@ -40,12 +38,6 @@ export function DriverName({
    * "Was" names were never struck while their plain-text fallbacks were.
    */
   struck?: boolean;
-  /**
-   * §12.136. `'nightDesk'` is the assignment page's look, and only that page
-   * passes it. There the name can shrink (`min-w-0`) so a long one truncates
-   * before its tag does, with the whole name in its title.
-   */
-  look?: Look;
 }) {
   if (name === null) {
     return struck ? <span className="line-through">{fallback}</span> : <>{fallback}</>;
@@ -55,17 +47,6 @@ export function DriverName({
   // same as a driver without an ELD.
   const tagged = source !== null && !isEldBacked({ source, samsaraDriverId });
 
-  if (look === 'nightDesk') {
-    return (
-      <span className={`inline-flex min-w-0 items-center gap-1.5 ${className ?? ''}`}>
-        <span title={name} className={struck ? 'min-w-0 truncate line-through' : 'min-w-0 truncate'}>
-          {name}
-        </span>
-        {tagged ? <NoEldTag look="nightDesk" /> : null}
-      </span>
-    );
-  }
-
   return (
     <span className={`inline-flex items-baseline gap-1.5 ${className ?? ''}`}>
       <span className={struck ? 'truncate line-through' : 'truncate'}>{name}</span>
@@ -74,21 +55,12 @@ export function DriverName({
   );
 }
 
-/**
- * The tag alone, for the few places that lay the name out themselves.
- *
- * §12.136: on the assignment page (`look="nightDesk"`) it is the same word in
- * sentence case, Night desk's face, a 4px box. Everywhere else, as before.
- */
-export function NoEldTag({ look = 'console' }: { look?: Look }) {
+/** The tag alone, for the few places that lay the name out themselves. */
+export function NoEldTag() {
   return (
     <span
       title="Added here, not in Samsara — there is no ELD behind this driver, so the truck's position comes from the vehicle only."
-      className={
-        look === 'nightDesk'
-          ? 'inline-flex h-5 shrink-0 items-center rounded-md border border-nightDesk-control px-1.5 font-nightDesk text-nightDesk-tag font-medium text-nightDesk-tagInk'
-          : 'shrink-0 border border-line-hair px-1 font-cond text-micro uppercase leading-[1.4] tracking-[.08em] text-text-muted'
-      }
+      className="shrink-0 border border-line-hair px-1 font-cond text-micro uppercase leading-[1.4] tracking-[.08em] text-text-muted"
     >
       {NO_ELD_LABEL}
     </span>

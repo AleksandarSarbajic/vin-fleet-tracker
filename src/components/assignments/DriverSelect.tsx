@@ -5,7 +5,6 @@ import type { BoardDriver } from '@/server/assignments';
 import { isEldBacked } from '@/lib/driver';
 import { NoEldTag } from '@/components/DriverName';
 import { AddDriverInline } from './AddDriverInline';
-import { ND_FOCUS, ND_FOCUS_INSET, type Look } from './nightDesk';
 
 /**
  * Searchable driver picker (design-spec §9.9's assignment group, at board
@@ -96,11 +95,6 @@ interface Props {
    * 44px `row-comfortable`. The modal keeps the 36px default.
    */
   size?: 'default' | 'row';
-  /**
-   * §12.136. `'nightDesk'` is the assignment page's look (the board passes
-   * it); the edit modal passes nothing and renders exactly as before 3an.
-   */
-  look?: Look;
 }
 
 /** Field height, the list's offset under it, and the tag's box, per size. */
@@ -122,7 +116,6 @@ export function DriverSelect({
   assignToTruckId = null,
   quiet = false,
   size = 'default',
-  look = 'console',
 }: Props) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
@@ -165,7 +158,6 @@ export function DriverSelect({
   const field = useRef<HTMLInputElement>(null);
   /** Quiet, unless open (the box shows where the search is) or locked for a viewer. */
   const boxless = quiet && !open && !(disabled && disabledReason !== undefined);
-  const nd = look === 'nightDesk';
 
   const matches = useMemo(() => {
     const needle = typed.trim().toLowerCase();
@@ -266,23 +258,13 @@ export function DriverSelect({
             pick(null);
           }
         }}
-        className={
-          nd
-            ? nightDeskField(size, {
-                selected: selected !== null,
-                open,
-                boxless,
-                locked: disabled && disabledReason !== undefined,
-                tagged,
-              })
-            : `${SIZE[size].field} w-full border px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
-                selected ? 'text-text' : 'text-text-muted'
-              } ${
-                boxless
-                  ? 'cursor-text border-transparent bg-transparent hover:border-line-hair hover:bg-surface-sunken focus:border-line-hair focus:bg-surface-sunken'
-                  : `bg-surface-sunken ${selected ? 'border-line-hair' : 'border-line-soft'}`
-              } ${tagged ? 'pr-16' : ''}`
-        }
+        className={`${SIZE[size].field} w-full border px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
+          selected ? 'text-text' : 'text-text-muted'
+        } ${
+          boxless
+            ? 'cursor-text border-transparent bg-transparent hover:border-line-hair hover:bg-surface-sunken focus:border-line-hair focus:bg-surface-sunken'
+            : `bg-surface-sunken ${selected ? 'border-line-hair' : 'border-line-soft'}`
+        } ${tagged ? 'pr-16' : ''}`}
       />
       {tagged ? (
         /**
@@ -298,7 +280,7 @@ export function DriverSelect({
             setOpen(true);
           }}
         >
-          <NoEldTag look={look} />
+          <NoEldTag />
         </span>
       ) : null}
 
@@ -316,22 +298,14 @@ export function DriverSelect({
           id={listId}
           role="listbox"
           style={maxWidth === null ? undefined : { maxWidth }}
-          className={`absolute left-0 ${SIZE[size].list} z-20 max-h-[264px] w-max min-w-full max-w-[420px] overflow-y-auto overflow-x-hidden ${
-            nd
-              ? 'rounded-nightDesk border border-nightDesk-control bg-nightDesk-raised py-1'
-              : 'border border-line-hair bg-surface-raised py-1'
-          }`}
+          className={`absolute left-0 ${SIZE[size].list} z-20 max-h-[264px] w-max min-w-full max-w-[420px] overflow-y-auto overflow-x-hidden border border-line-hair bg-surface-raised py-1`}
         >
           <li>
             {/* Secondary ink, not `status.neutral`: clearing is an action, not a status. */}
             <button
               type="button"
               onClick={() => pick(null)}
-              className={
-                nd
-                  ? `flex w-full items-center whitespace-nowrap px-3 py-1.5 text-left text-nightDesk-body text-nightDesk-muted hover:bg-nightDesk-raisedHigh ${ND_FOCUS_INSET}`
-                  : 'flex w-full items-center whitespace-nowrap px-2.5 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover'
-              }
+              className="flex w-full items-center whitespace-nowrap px-2.5 py-1.5 text-left text-body text-text-secondary hover:bg-row-hover"
             >
               Unassigned — clear this truck
             </button>
@@ -350,13 +324,7 @@ export function DriverSelect({
               <li
                 key={driver.id}
                 data-first-on-a-truck={firstOnATruck ? '' : undefined}
-                className={
-                  firstOnATruck
-                    ? nd
-                      ? 'mt-1 border-t border-nightDesk-border pt-1'
-                      : 'border-t border-line-soft'
-                    : undefined
-                }
+                className={firstOnATruck ? 'border-t border-line-soft' : undefined}
               >
                 <button
                   type="button"
@@ -364,24 +332,11 @@ export function DriverSelect({
                   aria-selected={driver.id === value}
                   onMouseEnter={() => setCursor(index)}
                   onClick={() => pick(driver.id)}
-                  className={
-                    nd
-                      ? /**
-                         * Night desk marks the cursor the way it marks every
-                         * selection: a 1px accent line, here on the row's left
-                         * edge, over one step of lightness.
-                         */
-                        `relative flex w-full items-center justify-between gap-3 whitespace-nowrap px-3 py-1.5 text-left text-nightDesk-body ${ND_FOCUS_INSET} ${
-                          index === cursor
-                            ? 'bg-nightDesk-raisedHigh before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-nightDesk-accent'
-                            : ''
-                        } ${takenElsewhere ? 'text-nightDesk-inkSecondary' : 'text-nightDesk-ink'}`
-                      : `flex w-full items-baseline justify-between gap-3 whitespace-nowrap px-2.5 py-1.5 text-left text-body ${
-                          index === cursor ? 'bg-row-hover' : ''
-                        } ${takenElsewhere ? 'text-text-muted' : 'text-text'}`
-                  }
+                  className={`flex w-full items-baseline justify-between gap-3 whitespace-nowrap px-2.5 py-1.5 text-left text-body ${
+                    index === cursor ? 'bg-row-hover' : ''
+                  } ${takenElsewhere ? 'text-text-muted' : 'text-text'}`}
                 >
-                  <span className={`flex min-w-0 ${nd ? 'items-center' : 'items-baseline'} gap-1.5`}>
+                  <span className="flex min-w-0 items-baseline gap-1.5">
                     <span className="truncate" title={driver.name}>
                       {driver.name}
                     </span>
@@ -392,15 +347,9 @@ export function DriverSelect({
                      * and that decides whether a truck with no position is
                      * expected or broken.
                      */}
-                    {isEldBacked(driver) ? null : <NoEldTag look={look} />}
+                    {isEldBacked(driver) ? null : <NoEldTag />}
                   </span>
-                  <span
-                    className={
-                      nd
-                        ? `shrink-0 text-nightDesk-small ${takenElsewhere ? 'text-nightDesk-muted' : 'text-nightDesk-inkSecondary'}`
-                        : 'shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted'
-                    }
-                  >
+                  <span className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted">
                     {takenElsewhere
                       ? `on truck ${claim}`
                       : driver.truckLabel
@@ -415,13 +364,7 @@ export function DriverSelect({
             );
           })}
           {matches.length === 0 && !adding ? (
-            <li
-              className={
-                nd
-                  ? 'px-3 py-2 text-nightDesk-body text-nightDesk-muted'
-                  : 'px-2.5 py-2 text-body text-text-muted'
-              }
-            >
+            <li className="px-2.5 py-2 text-body text-text-muted">
               No driver matches “{typed}”.
             </li>
           ) : null}
@@ -435,11 +378,7 @@ export function DriverSelect({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className={
-                  nd
-                    ? `w-full border-t border-nightDesk-border px-3 py-2 text-left text-nightDesk-body text-nightDesk-inkSecondary hover:bg-nightDesk-raisedHigh ${ND_FOCUS_INSET}`
-                    : 'w-full border-t border-line-hair px-2.5 py-2 text-left text-body text-text-secondary hover:bg-row-hover'
-                }
+                className="w-full border-t border-line-hair px-2.5 py-2 text-left text-body text-text-secondary hover:bg-row-hover"
               >
                 + Add “{typed.trim()}” as a new driver
               </button>
@@ -485,37 +424,4 @@ export function DriverSelect({
       ) : null}
     </div>
   );
-}
-
-/**
- * §12.136. The board's field in Night desk: no box at rest, as §12.134's
- * quiet field; a 1px line under it on hover, the accent line when focused or
- * open (Night desk marks every selection with that one line). An empty truck
- * is an empty slot: a dashed box, so the gaps read at a glance. A viewer's
- * locked field keeps a box (§12.134), in the quieter edge and muted ink,
- * with a not-allowed cursor; its reason stays the field's title (§12.14).
- */
-function nightDeskField(
-  size: keyof typeof SIZE,
-  state: { selected: boolean; open: boolean; boxless: boolean; locked: boolean; tagged: boolean },
-): string {
-  const { selected, open, boxless, locked, tagged } = state;
-  const look = locked
-    ? `cursor-not-allowed bg-transparent text-nightDesk-muted ${
-        selected ? 'border-nightDesk-border' : 'border-dashed border-nightDesk-border'
-      }`
-    : open
-      ? 'border-transparent border-b-nightDesk-accent bg-nightDesk-raisedHigh text-nightDesk-ink'
-      : boxless
-        ? `cursor-text bg-transparent disabled:opacity-45 ${
-            selected
-              ? 'border-transparent text-nightDesk-ink hover:border-b-nightDesk-control'
-              : 'border-dashed border-nightDesk-control text-nightDesk-muted'
-          } focus:border-solid focus:border-transparent focus:border-b-nightDesk-accent focus:bg-nightDesk-raisedHigh`
-        : `bg-nightDesk-raised disabled:opacity-45 ${
-            selected ? 'border-nightDesk-control text-nightDesk-ink' : 'border-nightDesk-border text-nightDesk-muted'
-          }`;
-  return `${SIZE[size].field} w-full border px-2 text-nightDesk-body placeholder:text-nightDesk-muted ${ND_FOCUS} ${look} ${
-    tagged ? 'pr-16' : ''
-  }`;
 }

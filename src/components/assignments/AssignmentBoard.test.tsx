@@ -256,18 +256,13 @@ describe('empty trucks and the two panels', () => {
   const row = (n: number) =>
     container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.closest('[class*="grid-cols"]')!;
 
-  // §12.136: Night desk marks an empty truck by its field, the dashed empty
-  // slot, not by a row ground (3al's `bg-row-unassigned`).
-  const field = (n: number) =>
-    container!.querySelector<HTMLInputElement>(`input[aria-label="Driver for truck ${n}"]`)!;
-
-  it('marks a truck with nobody as an empty slot, and only that truck', async () => {
+  it('puts a truck with nobody on the unassigned ground, and only that truck', async () => {
     await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
-    expect(field(150).className).toContain('border-dashed');
-    expect(field(137).className).not.toContain('border-dashed');
+    expect(row(150).className).toContain('bg-row-unassigned');
+    expect(row(137).className).not.toContain('bg-row-unassigned');
   });
 
-  it('puts a changed row on its own ground, with the accent line, over the empty slot', async () => {
+  it('lets a changed row’s ground win over the empty one', async () => {
     await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
     await act(async () =>
       container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 137"]')!.click(),
@@ -276,9 +271,8 @@ describe('empty trucks and the two panels', () => {
       b.textContent?.includes('Unassigned — clear this truck'),
     )!;
     await act(async () => clear.click());
-    expect(row(137).className).toContain('bg-nightDesk-raised');
-    expect(row(137).className).toContain('before:bg-nightDesk-accent');
-    expect(row(137).className).not.toContain('hover:bg-nightDesk-rowHover');
+    expect(row(137).className).toContain('bg-row-selected');
+    expect(row(137).className).not.toContain('bg-row-unassigned');
   });
 
   it('sets the no-driver trucks on one wrapping line, and truncates nothing whole', async () => {
@@ -319,10 +313,10 @@ describe('the column order (§12.135)', () => {
 });
 
 describe('the board’s rows and fields (§12.134)', () => {
-  it('sits each row on Night desk’s 42px row, with quiet 32px pickers', async () => {
+  it('sits each row on the console’s 44px row, with quiet 32px pickers', async () => {
     await render();
     const input = container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 137"]')!;
-    expect(input.closest('[class*="grid-cols"]')!.className).toContain('min-h-row-nightDesk');
+    expect(input.closest('[class*="grid-cols"]')!.className).toContain('min-h-row-comfortable');
     expect(input.className).toContain('h-8');
     expect(input.className).toContain('border-transparent');
   });
@@ -342,11 +336,11 @@ describe('the footer’s count, and a free driver’s entry', () => {
 
   it('puts the count in primary ink while rows are changed, secondary at rest', async () => {
     await render();
-    expect(status().className).toContain('text-nightDesk-muted');
+    expect(status().className).toContain('text-text-secondary');
     await pickFor(143, 'Unassigned Hal');
     expect(status().textContent).toContain('1 row changed');
-    expect(status().className).toContain('text-nightDesk-ink');
-    expect(status().className).not.toContain('text-nightDesk-muted');
+    expect(status().className).toContain('text-text');
+    expect(status().className).not.toContain('text-text-secondary');
   });
 
   it('lays a free driver out as one line below 1100px and two from 1100 up', async () => {
@@ -362,104 +356,5 @@ describe('the footer’s count, and a free driver’s entry', () => {
     expect(phone!.querySelector('[data-driver-phone]')).not.toBeNull();
     expect(phone!.className).toContain('min-[1100px]:row-start-2');
     expect(retire!.textContent).toBe('Retire');
-  });
-});
-
-/**
- * §12.136. The board in Night desk, its own look. Classes only: the test DOM
- * draws nothing, so the faces really loading, the widths, the 940px cap and
- * the centred column are the /assignments baselines' to show.
- */
-describe('the board in Night desk (§12.136)', () => {
-  const rowOf = (n: number) =>
-    container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.closest('[class*="grid-cols"]')!;
-
-  it('draws the page on its own ground, in its own face', async () => {
-    await render();
-    const main = container!.querySelector('main')!;
-    expect(main.className).toContain('bg-nightDesk-ground');
-    expect(main.className).toContain('font-nightDesk');
-  });
-
-  it('sets truck numbers and phone numbers in IBM Plex Mono, and "No phone" in the text face', async () => {
-    const withPhone = board();
-    withPhone.drivers = withPhone.drivers.map((d) => (d.id === 'd-samsara' ? { ...d, phone: '7085550100' } : d));
-    await renderBoard(withPhone);
-    expect(rowOf(137).firstElementChild!.className).toContain('font-nightDesk-mono');
-    const values = [...rowOf(143).querySelectorAll('[data-driver-phone-value]'), ...rowOf(137).querySelectorAll('[data-driver-phone-value]')];
-    const [number, none] = values;
-    expect(number!.textContent).toBe('708-555-0100');
-    expect(number!.className).toContain('font-nightDesk-mono');
-    expect(none!.textContent).toBe('No phone');
-    expect(none!.className).not.toContain('font-nightDesk-mono');
-  });
-
-  it('passes Night desk to every picker on the board', async () => {
-    await render();
-    const pickers = [...container!.querySelectorAll('input[role="combobox"]')];
-    expect(pickers.length).toBeGreaterThan(0);
-    for (const input of pickers) expect(input.className).toContain('text-nightDesk-body');
-  });
-
-  it('puts a double-booked row on the negative ground, its truck number in the negative', async () => {
-    await render();
-    await pickFor(143, 'Hand Entered Hal');
-    for (const n of [137, 143]) {
-      expect(rowOf(n).className).toContain('bg-nightDesk-negativeBg');
-      expect(rowOf(n).firstElementChild!.className).toContain('text-nightDesk-negative');
-    }
-  });
-
-  it('gives a free driver’s name the whole first line from 1100px, Retire beside the phone', async () => {
-    await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: board(), role: 'admin' }));
-    });
-    const entry = container!.querySelector('[data-free-driver]')!;
-    const [name, , retire] = [...entry.children];
-    expect(name!.className).toContain('min-[1100px]:col-span-2');
-    expect(retire!.className).toContain('min-[1100px]:row-start-2');
-    // A truly long name truncates; its whole self is in the title.
-    expect(name!.querySelector('[title="Unassigned Hal"]')!.className).toContain('truncate');
-  });
-});
-
-/**
- * §12.136 (Alex, 2026-10-21). Save is a solid accent fill whenever there is
- * something valid to save; disabled (and readable) at rest and while a
- * double-booking refuses it. Discard stays the outlined, quieter one.
- */
-describe('Save and Discard in Night desk (§12.136)', () => {
-  const button = (text: string) =>
-    [...container!.querySelectorAll('button')].find((b) => b.textContent?.includes(text))!;
-
-  it('fills Save with the accent, and is disabled at rest with a readable label', async () => {
-    await render();
-    const save = button('Save assignments');
-    expect(save.disabled).toBe(true);
-    expect(save.className).toContain('bg-nightDesk-accent');
-    expect(save.className).toContain('disabled:bg-nightDesk-raised');
-    expect(save.className).toContain('disabled:text-nightDesk-muted');
-    expect(save.className).not.toContain('opacity-45');
-  });
-
-  it('enables the solid Save when a valid change is made', async () => {
-    await render();
-    await pickFor(143, 'Unassigned Hal');
-    expect(button('Save assignments').disabled).toBe(false);
-  });
-
-  it('refuses Save while a driver is on two trucks', async () => {
-    await render();
-    await pickFor(143, 'Hand Entered Hal');
-    expect(button('Save assignments').disabled).toBe(true);
-  });
-
-  it('keeps Discard an outline, never a fill', async () => {
-    await render();
-    await pickFor(143, 'Unassigned Hal');
-    const discard = button('Discard');
-    expect(discard.disabled).toBe(false);
-    expect(discard.className).toContain('border-nightDesk-control');
-    expect(discard.className).not.toMatch(/(^| )bg-/);
   });
 });
