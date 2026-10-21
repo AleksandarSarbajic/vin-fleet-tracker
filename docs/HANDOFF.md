@@ -6605,6 +6605,271 @@ run; `desktop-baseline` and `history-*` unchanged; Alex's window (about
 - `desktop-baseline --update-snapshots=none` (run 2026-10-21T17-09-18-597Z):
   13 passed. Every existing console baseline is unchanged.
 
+### Phase 3an, step 1: three design directions for the assignment page (2026-10-21)
+
+From the advisor's brief, after Alex (2026-10-21): "Redesign this whole page
+to look better and feel better: premium, as much as possible." Three
+directions as static mockups with the design-taste-frontend skill. No app
+code changed; nothing under `src/`, `e2e/`, the Tailwind config or a baseline
+was touched. One docs commit: this section. Building waits for Alex's choice.
+
+**How.** `app-screens.md` read whole this session. For this phase only, NOT
+bound to the console's palette, type or tokens (no `--keep`). Styles were
+dealt with `draw.mjs --app --screens list --options 3`: kind `markets` dealt
+two dark styles (`data-terminal`, `true-black-flat`), and kinds `support`
+and `commerce` dealt the same two light ones (`achromatic-ledger`,
+`framed-sheet`). Three were chosen and dealt in full. One generator
+(`.taste-skill/3an/build.mjs`) writes all fifteen pages, so the three share
+the same data and copy; `shared/layout.css` holds the structure (no look),
+and each direction has its own `style.css`.
+
+**Data.** Invented only: `e2e/assignments-baseline.spec.ts`'s seed (trucks
+401–438, 14 trucks, 12 drivers, four with no ELD, 708-555-01xx phones,
+every third driver with no phone). The copy is the app's own, word for word
+("Unassigned — clear this truck", "no truck", "on truck N", "was —", "Blank
+clears the number." and its refusal, the viewer's lock reason). The user is an
+admin in four states (so Retire shows) and a viewer in the fifth.
+
+**The screen's question** (3al step 1): which trucks have no driver, and who
+is free to put on them? Most frequent job: pick a driver, then Save.
+
+**Departures from the dealt sheets, with reasons.**
+
+- **Shell.** All three keep the page's own header bar (title, counts, Back to
+  console). Each dealt shell (an icon rail, a ruled T-frame sidebar, an
+  open-plane sidebar) adds navigation the page does not have, and the brief
+  invents nothing. `framed-sheet` was not chosen for the same reason: its move
+  is the tinted frame around a sidebar.
+- **No shadow on the open list**, in any direction. The first inspection
+  failed it (`heavy-shadow`, all three), and Alex ruled it out in 3al (Q6).
+  The list floats on a tone step and a 1px edge.
+- **The board is capped at 940px, not §12.135's 1000px, and centred with its
+  panels** from 1100px up. At 1000, Currently (empty on every unchanged row,
+  §12.130) left a band about 270px wide, and the inspector warned
+  `hero-void`. At 940 the band is about 174px. Centring gives equal outer
+  margins instead of all the spare ground on the right. Below 1100 nothing
+  changes. This is question 5.
+- **Lamp black's rows are 52px**, not the sheet's 80. The sheet's 80 is for
+  two-line rows with media; the board's rows are one line (app-screens §7.1:
+  36–53).
+
+#### The three directions
+
+**1. Night desk** (`data-terminal`, seed 319739052, dark). The board as a
+terminal for long shifts. Every selection is the same 1px blue line, every
+figure is in a monospace so truck numbers and phones stack, and an empty
+truck is an empty slot (a dashed box).
+
+- **Palette.** Ground #171719, with cards darker than the ground (#131217).
+  Raised #212023, rules #1f1e23, text #fff and #c9cacd, muted #8a8c92.
+  Negative #e5566f on #2c1a20. The accent #4a8ad6 appears as 1px lines only:
+  focus, the open field, the list's cursor, a changed row's left edge and
+  Save's outline.
+- **Type.** Public Sans 400–700 for text, and IBM Plex Mono 400/500 for truck
+  numbers, phones and counts. Both are SIL OFL 1.1 and on Google Fonts, so
+  `next/font/google` can self-host them at build, as it does Barlow today.
+  Sizes: 11/12/13/14/20/22.
+- **Density.** Dense. Rows 42px (measured), 13px body, 30px fields. About 17
+  of the fleet's 22 rows fit on a 900px-tall window (arithmetic from the
+  measured pitch).
+- **Why it feels premium.** One thin line means "this" everywhere, figures
+  line up like a timetable, and nothing is coloured except that line and a
+  conflict.
+- **Risks.** Monospace phones read as technical (lint `mono` WARN, the style's
+  own choice). A 1px left edge is a light mark for a changed row. The 13px
+  body and 11px tags are small for all-day use, though both are larger than
+  the console's 12.5 and 10.5. The outlined Save is quieter than today's
+  filled one.
+- **Inspector.** All five pages, 1440 and 1024: 0 FAIL, 0 WARN. Fonts
+  loaded: Public Sans and IBM Plex Mono. Tabular figures on every number
+  (share 1.0). Coloured pixels about 0%. One panel radius (6).
+
+**2. Lamp black** (`true-black-flat`, seed 1681495852, dark). The yard at
+night. A cool near-black ground, surfaces lifted by lightness alone, soft
+20px cards and pill controls. One sodium-lamp amber falls only on the empty
+trucks: their numbers on the board, the panel's numbers and "no truck" in
+the list.
+
+- **Palette.** Ground #0c0d0f, card #15171a, raised #24272c and #2f3339,
+  rule #1f2226, text #fff, greys #b4b4b4 and #949494. The hue #f2b33d is on
+  data only. Negative #e5566f on #2c1a20. Save is a white pill with black
+  text (primary by inversion), and Discard a grey pill.
+- **Type.** Inter 400/500/600: SIL OFL 1.1, on Google Fonts, self-hostable
+  with next/font. Sizes 12 to 21.
+- **Density.** Medium. Rows 52px (measured), 14px body, 36px pill fields.
+  About 13 of 22 rows fit on 900px.
+- **Why it feels premium.** The softest of the three. Depth comes from
+  lightness, nothing is outlined, and the gaps are the only warm thing on the
+  screen.
+- **Risks.** Fewest rows per screen: 13 of 14 at 1440×900 and 8 at 1024×768
+  (measured). The amber sits near the console's warning and late colours, so
+  console-wide it would need care. Inter is the skill's own "kit" face. The
+  large radius and pills are the furthest from the console's square,
+  condensed look.
+- **Inspector.** All five pages: 0 FAIL, 0 WARN. Font loaded: Inter.
+
+**3. Day ledger** (`achromatic-ledger`, seed 375706953, light). A printed
+fleet ledger: white sheets on a blue-grey ground, everything in ink, a
+near-black Save, and one blue that marks only the gaps.
+
+- **Palette.** Ground #f2f4f7, sheets #fff, rules #eff0f2, edges #e3e5e8,
+  text #0a0a0a and #3d3d3d, muted #646464. The hue #1d5fbf on #eef3fb marks
+  the gaps only. Negative #831c1e on #ffedea. Save #141414; secondary grey
+  #e5e5e5. A changed row carries a 6px ink dot by its number (app-screens
+  §7.4).
+- **Type.** Geist 400–700: SIL OFL 1.1, on Google Fonts, self-hostable with
+  next/font. Sizes 12/13/14/16/21/24.
+- **Density.** Sparse to medium. Rows 44px (the console's `row-comfortable`),
+  14px body, 32px fields. About 16 of 22 rows fit on 900px.
+- **Why it feels premium.** The calm of paper, and the clearest hierarchy of
+  the three.
+- **Risks.** It is a light page inside a dark console, so Back to console
+  jumps from white to black, and it would be the only light screen used all
+  day. The open list is white on a white table, held apart by its 1px edge
+  alone. The changed ground (#f5f6f8) and the empty ground (#f7f8fa) are
+  close, so the dot and the blue number carry the difference.
+- **Inspector.** 0 FAIL on all five pages. One WARN, on the viewer page at
+  1440: `hero-void`, 660×540 at x 780. That block is the empty Currently
+  column plus the ground under the short panel column. Kept: Currently is
+  empty at rest by Alex's decision (3al Q1), and app-screens §4.2 rules out
+  stretching a card over space it cannot fill. Font loaded: Geist.
+
+**Checks on all fifteen pages.**
+
+- **Inspector.** `inspect.mjs --app --widths 1440,1024`: 0 FAIL on every
+  page, and the one WARN above. The first run had 8 FAILs: the list's shadow
+  (all three), and Day ledger's Back to console edge drawn as a shadow
+  (`button-fx`, on all five of its pages). It also had 4 WARNs: disabled
+  Edit at 3.7 and 4.3:1, a list tag at 4.3:1, and the void. All fixed except
+  the void kept above.
+- **Margins.** Measured canvas margins differ by about 17px (Night desk at
+  1440: 108 left, 125 right). That is the scroll region's classic scrollbar
+  in headless Chrome; the layout's margins are equal.
+- **Layout.** No sideways scroll at 1440 or 1024, and the picker field is
+  360px in all three at both widths (measured on the at-rest pages).
+- **Lint.** `lint.mjs --app` on the sources: 0 FAIL. Its WARNs are `mono`
+  (Night desk's face), `shadow` (the viewer's tooltip, which floats, and Lamp
+  black's inset input edges) and `em-dash` (the app's own copy that e2e
+  matches).
+- **Focus.** A Playwright script tabbed through each direction's at-rest and
+  phone-editor pages (28 and 30 controls). Every control showed an outline;
+  the screenshots were looked at.
+- **Fixed after looking at the screenshots.** A long free-driver name
+  truncated its No ELD tag away in the 260px panel, and the Currently cell
+  clipped its tag. In both, the name now truncates and the tag stays whole.
+
+**Behaviour.** The mockups are static, so behaviour is not in them; they
+show its copy and its states. Every direction keeps the lists in 3al step 1
+("Behaviour that must survive unchanged, and what guards it") and 3am step 1
+("Behaviour that must survive unchanged"), as written there. A build changes
+classes, tokens and fonts, not handlers, the save payload or the tests'
+selectors. The structure the mockups keep: the window-height page with
+header and footer fixed, the sticky header row and panel column, the panels
+above the table below 1100px, table first in the DOM, the column order and
+minimums, the list's width rule and order, the closed field's No ELD tag,
+"was" struck with its tag not, the footer naming double-booked trucks, and
+the below-768 sentence.
+
+**Found while doing this (not changed).** The viewer's lock reason
+("Your role is viewer. Assignments need dispatcher.") is only a `title`, so
+it appears on hover and never for a keyboard user. The mockups draw it as a
+hover tooltip, today's behaviour. 3am's note still holds in all three
+directions: the No ELD tag sits at the field's right end, 16px from the
+phone column.
+
+#### Where they are, and how Alex opens them
+
+Local only: `.taste-skill/` is git-ignored, so nothing here is committed.
+Each direction's folder holds five pages: `index.html` (at rest),
+`picker.html`, `changed.html`, `phone.html` and `viewer.html`.
+
+```
+open /Users/donda/vin-fleet-tracker/.taste-skill/3an/index.html            # all 15, one click each
+open /Users/donda/vin-fleet-tracker/.taste-skill/3an/night-desk/index.html
+open /Users/donda/vin-fleet-tracker/.taste-skill/3an/lamp-black/index.html
+open /Users/donda/vin-fleet-tracker/.taste-skill/3an/day-ledger/index.html
+```
+
+Or in a browser: `file:///Users/donda/vin-fleet-tracker/.taste-skill/3an/index.html`.
+Look at a desktop width (1000–1440px), and press Tab to see focus. The
+pages fetch their fonts from Google Fonts; offline they fall back to system
+fonts. To rebuild: `node .taste-skill/3an/build.mjs`.
+
+#### What adopting one would change
+
+All sizes below are estimates (unverified).
+
+**A. This page only.**
+
+- New colours as tokens (no hex in components): a page-scoped set in
+  `src/design/tokens.ts` and the Tailwind config, or a class on the page's
+  `main` that redefines CSS variables.
+- The font loaded with `next/font/google` in the `/assignments` route only.
+- Components: `AssignmentBoard` and `DriverPhone`. `DriverSelect`,
+  `DriverName` and the No ELD tag are shared with the edit modal, the console
+  rows, the map popup and the phone sheet. The board's look must be a prop or
+  a scope; otherwise those change too, and so do the console baselines.
+- Baselines: the 8 assignments PNGs are re-saved. The other 72 (desktop 60,
+  history 6, history-phone 6) stay unchanged if the shared parts are scoped.
+- Size: one phase, about 5–7 commits, roughly 400–800 changed lines.
+- Cost: the page stops looking like the console it belongs to. Least for
+  Night desk (dark, square, close to today's layout); most for Day ledger
+  (light inside dark).
+
+**B. The whole console.**
+
+- The palette in `src/design/tokens.ts`, which is also read outside Tailwind:
+  map layers and markers, toasts, the chip flip, the row flash, the history
+  page, the manifest and `trail.ts`.
+- Tailwind's font families, its six sizes (§2), the radius (0 today) and
+  every component's classes.
+- design-spec §2, §3 and §14.4 rewritten, and the status colours remapped
+  with their contrast checked again.
+- Every baseline: 80 PNGs.
+- Size: several phases (tokens and type; the console list and map; modals;
+  history and phone; baselines), weeks rather than days.
+- A light console is larger still: the map style and every status ground
+  were designed dark.
+
+#### Recommendation
+
+**Night desk, on this page first.**
+
+- It is dark, which suits a console used all day.
+- It is the densest: about 17 of 22 trucks on one screen.
+- Each of its devices serves the job rather than decoration: the empty slot
+  answers the screen's question at a glance, stacked figures make numbers
+  easy to scan, and one line marks what is selected.
+- It adds no new colour to the console: the accent is only a 1px line.
+- It is the closest to the console's square, dark character, so a page-only
+  build clashes least and a later console-wide move is the smallest.
+
+Lamp black looks the most luxurious, at the cost of four fewer rows and an
+amber that would fight the console's status colours. Day ledger is the
+calmest, but it is light.
+
+**Questions for Alex** (one decision each; the recommendation first):
+
+1. Which direction: Night desk, Lamp black, Day ledger, or none (keep
+   today's)? Recommended: Night desk.
+2. This page only (scoped, so the edit modal and the other screens do not
+   change), or the whole console? Recommended: this page only; decide the
+   console after a week of using it.
+3. Dark or light? Recommended: dark.
+4. If Night desk: truck numbers and phones in IBM Plex Mono (its face), or in
+   the text face's tabular figures? Recommended: Plex Mono.
+5. From 1100px up, the board capped at 940px and centred with its panels,
+   instead of §12.135's 1000px on the left? Recommended: yes.
+6. If Night desk: Save as an accent-outlined pill instead of today's filled
+   accent? Recommended: yes. It is the only primary on the screen, and the
+   footer is always in view.
+7. The open list stays without a shadow (your 3al answer 6) in the chosen
+   direction? Recommended: yes.
+8. The viewer's lock reason stays a hover-only `title`, as today? A visible
+   line would be new interface, so it is outside this redesign. Recommended:
+   keep it for now, and raise it as its own small item if keyboard users
+   matter.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
