@@ -6232,6 +6232,193 @@ draw through; that component was not rendered).
 - That one test alone (run 2026-10-21T15-22-55-667Z): passed. Every existing
   baseline is unchanged.
 
+### Phase 3am, step 1: the assignment page, second pass (2026-10-21)
+
+From the advisor's brief: a second review of `/assignments` now that 3al is
+live (production since 2026-10-21 15:50 UTC), with the design-taste-frontend
+skill (`app-screens.md` and `critique.md`, both read whole this session and
+unchanged since). Review and plan only; no app code changed. One docs
+commit: this section. Step 2 waits for Alex's approval.
+
+**Alex's points.** None this time: no screenshot or notes came with the brief.
+
+**The "before".** The seven committed baselines
+(`e2e/__screenshots__/assignments-baseline.spec.ts/`, invented seed), each
+opened. They show no changed row, no conflict and no open phone editor, so
+those states were looked at in the local render 3al used (the real
+components, the app's CSS and fonts, invented data, `file://` with every
+other request aborted, no sign-in). Measured there at 1440: rows on a 53px
+pitch; the truck number's text box centred 1px above the field's. The
+skill's `lint.mjs --app` on the six source files: 0 FAIL, 1 WARN (11 em
+dashes, in comments and UI copy).
+
+```
+ROUND 2 (after 3al: the seven baselines, plus the local render for states they do not show)
+Seen in one second: a column of fourteen boxed names, and a wide empty band to their right.
+Idea / live thing: n/a (app screen; app-screens §2.7).
+Layout words: header=bar / panels=two boxes / table=ruled list / footer=bar.
+Scores: design 6.5 · usability 7 · creativity 5 · content 7 -> overall 6.4
+Caps applied: none (nothing clipped; Save in view).
+Top three: 1. every row is a bordered box, so the column reads as a form, not a list;
+2. the Currently column is empty on every row at rest, so a 240px dead band sits
+between each driver and their phone; 3. at 1440 and up the rows stretch across the
+canvas with their content in the left half.
+```
+
+#### Critique, by area
+
+- **Header** (all widths). Clear: title, counts, one way back. Nothing to
+  change.
+- **Panels.** Beside the table (1280–1920) they read well. Below 1100 (768,
+  1024, picker-open-1024) the two panels stretch to one bottom edge and the
+  trucks panel has about 50px empty under its one line of numbers: the
+  drivers panel is tall because each entry is two lines (name; phone and Add
+  on a 28px target), in a panel about 480px wide that could hold both on one.
+- **Table header.** "Currently" heads a column that is empty on every row
+  at rest (all seven pictures), and it sits between Driver and Driver's
+  phone. A dispatcher's eye goes from a name to its phone across 240px of
+  nothing.
+- **Rows.** 53px pitch, the top of the skill's 36–53 range; 14 rows on a
+  900px screen. The console has its own 44px row (`spacing.row-comfortable`,
+  §14.4); at 44 the real fleet of 22 trucks is about 4 rows closer to one
+  screen. The truck number's alignment with the field text is within 1px:
+  nothing worth changing.
+- **Picker field.** Every row is a bordered, sunken box (fourteen stacked in
+  every picture), so the board reads as a form to fill in rather than a list
+  to scan. The No ELD tag inside the field's right end works.
+- **Picker list** (picker-open-1024). Fixed in 3al. Two rough edges: the
+  free driver's tag says "UNASSIGNED" one line under "Unassigned — clear this
+  truck", the same word for a driver with no truck and a truck with no
+  driver; and nothing marks where the free drivers end and the drivers on a
+  truck begin.
+- **Currently "was" rows** (local render only). "was" and the struck name
+  read right, but the strike also runs through the No ELD tag, which is
+  provenance, not part of what changed.
+- **Phone column.** Number and Edit/Add read well. At 1920 the phone sits at
+  x≈732 and its row's rule runs on for another 900px.
+- **Footer.** Always in view now. At rest Discard (45% of a hairline border
+  and secondary ink) is barely there, which is right for a control with
+  nothing to do. When rows change, the count ("2 rows changed · a driver is
+  on trucks…") stays in secondary ink: the one sentence that matters while
+  editing is no louder than "No changes.".
+- **Empty rows.** The unassigned ground marks them at every width. Nothing
+  to change.
+- **768.** Fits (minimums 722 of 728). 12 rows visible under the panels.
+  The trucks panel's empty band is the visible flaw.
+- **1920.** Rows run 1600px wide with their content in the first 840; the
+  gaps panel sits about 900px from the phone column. The skill's §4.2:
+  "Narrow blocks do not span the canvas", and a table of four columns is one.
+
+#### The ReassignConfirm finding (§9.10, the edit modal's confirm)
+
+**Broken, confirmed in the local render** (invented preview, Chrome): "From"
+and "Was" show the old drivers' names unstruck. `ReassignConfirm.tsx` lines
+61 and 86 wrap `DriverName` in `<span className="line-through">`, and the
+strike does not reach into `DriverName`'s inline-flex box: 3al's finding,
+same markup. Only the fallbacks ("Unassigned", "—"), which `DriverName`
+renders as plain text, are struck: the opposite of what matters.
+
+Also found: the gaining side's "To" line is a bare name (`toDriverName`), so
+a driver with no ELD is not tagged there, though §12.37's table says
+ReassignConfirm's gaining side is tagged; the preview carries no source for
+the incoming driver (a server field). And the footer still says "Reversible
+from truck N's history — history ships in v2." while the driver history page
+has shipped (§12.101); whether a reassignment can be reversed from it is
+unverified. No unit test, e2e spec or baseline renders ReassignConfirm, which
+is how the strike went unseen.
+
+**The fix (item 1 below):** a `struck` prop on `DriverName` that strikes the
+name and the fallback and leaves the No ELD tag unstruck. ReassignConfirm
+drops its two wrappers and passes `struck`; the board's "was" uses it too
+(so its tag stops being struck). Closing it at `DriverName` rather than at
+each caller, so a third site cannot repeat it. A render test for
+ReassignConfirm (both sides struck, the tag not).
+
+#### The three changes that would help most
+
+1. **Quiet picker fields on the board** (question 1): the name as text, the
+   box appearing on hover and focus.
+2. **Phone beside its driver** (question 2): Truck | Driver | Driver's phone
+   | Currently.
+3. **The table no wider than its content at wide windows** (question 4).
+
+#### The full ordered list
+
+| # | Change | Files; classes or tokens | Risk | Baselines that change |
+|---|---|---|---|---|
+| 1 | `DriverName` `struck` prop; ReassignConfirm and the board's "was" use it | `DriverName.tsx` (`line-through` on the name span and the fallback), `ReassignConfirm.tsx`, `AssignmentBoard.tsx`; tests for both | Low | None (no baseline shows a changed row or the confirm) |
+| 2 | Column order Truck, Driver, Driver's phone, Currently | `AssignmentBoard.tsx` `COLUMNS` → `64px minmax(240px,360px) minmax(220px,260px) minmax(150px,1fr)`, header and cell order; minimums unchanged (722) | Low; e2e finds cells by role and data attribute | All 7 |
+| 3 | Cap the table at wide windows | `section` `min-[1100px]:max-w-[1000px]`; the panel column follows it | Low; empty ground to the right at 1440 and up | `-1440`, `-1680`, `-1920` |
+| 4 | Quiet picker fields on the board | `DriverSelect.tsx` a `quiet` prop: `border-transparent bg-transparent hover:border-line-hair focus:border-line-hair focus:bg-surface-sunken`; the modal unchanged | Medium: the field must still read as editable (header, hover, cursor; a viewer's disabled state kept) | All 7 |
+| 5 | Rows at the console's 44px | Row `min-h-row-comfortable py-1`; field `h-8` on the board via a `size` prop (list `top-[34px]`, tag box `h-8`); the modal keeps `h-9` | Medium: a shared component's prop; the phone editor is already `h-8` | All 7 |
+| 6 | Picker list: "no truck" for a free driver; a rule after the free drivers | `DriverSelect.tsx`: the option tag text; `border-t border-line-soft` on the first option on a truck when free ones come before it | Low; the modal shows it too | `picker-open-1024` |
+| 7 | The count in primary ink while rows are changed | `AssignmentBoard.tsx` footer status `text-text` when dirty, `text-text-secondary` at rest | Low | None (no baseline is dirty) |
+| 8 | Below 1100, a free driver's entry on one line | `AssignmentBoard.tsx` drivers panel entry `min-[1100px]:flex-col` / one row below | Low | `-768`, `-1024`, `picker-open-1024` |
+| 9 | A baseline with changed rows | `e2e/assignments-baseline.spec.ts`: one shot at 1440 with a "was" row, a "was —" row and a double-booking (conflicted ground, footer naming the trucks) | Low; a new PNG, Alex's run | New: one PNG |
+
+Every item uses existing tokens only. Items 2–5 and 8 change the board only;
+items 1 and 6 also show in the edit modal (the confirm's strike; the list's
+tag text and rule).
+
+#### Behaviour that must survive unchanged
+
+From 3al step 1: the picker opens on click, typing, arrows and Tab keyup,
+never on programmatic focus; Enter, arrows, Escape, Backspace-to-clear;
+"Unassigned — clear this truck" (text unchanged, e2e clicks it); "+ Add … as
+a new driver" and AddDriverInline; the 40-match cap; the merge prompt; phone
+edit and add; Retire (admin only, confirmed); the below-768px message
+(§12.106); the edit modal's §9.10 confirm; the draft rebase (§12.38), the
+beforeunload guard, Cmd/Ctrl+Enter. From 3al step 2: the list's width rule
+(§12.129) and its order (free first, cap after); the closed field's No ELD
+tag, hidden while open, opening the list; Currently only on a changed row,
+"was" struck, "was —"; Save in view, sticky headers and panel column; the
+footer naming double-booked trucks; the unassigned ground; the 1100px
+layout; the 28px targets; the board's save request, same rows and payload.
+
+#### Skill conflicts (the project wins)
+
+1. The inspector cannot sign in: the "before" is the baselines and the local
+   render, not `inspect.mjs`.
+2. Tracked uppercase labels, the 10.5px micro and 12.5px body, square
+   corners, the accent-filled Save: the console's spec. Kept (Alex, 3al Q4).
+3. The skill gives what floats (the open list) a shadow; that would be a new
+   token (Alex, 3al Q6: none). Kept without.
+4. Item 4 goes against the skill's own §8.1 ("inputs stay … with a 1px
+   border") and with its §7 ("tables are rules and alignment"). The board is
+   an editable table, so §7 is the one followed; it is a judgement, hence
+   question 1.
+5. The lint's em-dash WARN: comments and UI copy e2e matches. Kept.
+
+**Unverified:** every state outside the seven baselines was seen only in the
+local render, not the app; the confirm's footer claim about reversing from
+history; Alex's window (about 1000 CSS px). Not re-proposed: type tokens, a
+list shadow, jump-to-row, Currently's place and header, a confirm on the
+board, the panels scrolling away below 1100.
+
+**Questions for Alex** (one decision each; the recommendation first):
+
+1. Picker fields on the board quiet (the name as text; the box on hover and
+   focus), the edit modal unchanged? Recommended: yes.
+2. Columns Truck, Driver, Driver's phone, Currently (phone beside its
+   driver; "was" last)? Recommended: yes.
+3. Rows at the console's 44px (`row-comfortable`) instead of 53? Recommended:
+   yes.
+4. The table capped at about 1000px from 1100 up, the panels right after it,
+   empty ground beyond at 1440 and up? Recommended: yes.
+5. In the picker list, a free driver tagged "no truck" instead of
+   "unassigned", and a rule after the free drivers? Recommended: yes.
+6. Fix ReassignConfirm's strike with a `struck` prop on `DriverName` (name
+   struck, No ELD tag not), used by the board's "was" too? Recommended: yes,
+   in step 2.
+7. Tag the confirm's "To" driver No ELD (needs the preview to carry that
+   driver's source: a server field)? Recommended: yes, but as its own small
+   phase, since it touches server code.
+8. The confirm's footer "history ships in v2": reword it? Recommended: yes,
+   once you confirm what a dispatcher can actually do from the history page.
+9. Add a changed-rows baseline (new PNG; your run)? Recommended: yes.
+10. Below 1100px, a free driver's entry on one line in its panel?
+    Recommended: yes.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
