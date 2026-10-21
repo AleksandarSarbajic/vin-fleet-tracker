@@ -567,59 +567,69 @@ export function AssignmentBoard({ board, role }: Props) {
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-line-hair bg-surface-bar px-5 py-3 max-md:hidden">
-        {conflicts.length > 0 ? (
-          <ul className="mb-3 border border-status-late-bd bg-status-late-bg px-3 py-2">
-            <li className="mb-1 font-cond text-micro uppercase tracking-[.11em] text-status-late-fg">
-              Nothing was saved — {conflicts.length} conflict
-              {conflicts.length === 1 ? '' : 's'}
-            </li>
-            {conflicts.map((conflict, i) => (
-              <li key={i} className="text-body text-text">
-                <span className="font-semibold">{CONFLICT_HEADLINE[conflict.reason]}:</span>{' '}
-                {conflict.message}
+      <footer className="shrink-0 border-t border-nightDesk-border bg-nightDesk-surface max-md:hidden">
+        <div className={`${FRAME} py-3`}>
+          {conflicts.length > 0 ? (
+            <ul className="mb-3 rounded-nightDesk bg-nightDesk-negativeBg px-3 py-2">
+              <li className="mb-1 text-nightDesk-small font-semibold text-nightDesk-negative">
+                Nothing was saved — {conflicts.length} conflict
+                {conflicts.length === 1 ? '' : 's'}
               </li>
-            ))}
-          </ul>
-        ) : null}
+              {conflicts.map((conflict, i) => (
+                <li key={i} className="text-nightDesk-body text-nightDesk-ink">
+                  <span className="font-semibold">{CONFLICT_HEADLINE[conflict.reason]}:</span>{' '}
+                  {conflict.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
-        {failure ? (
-          <p className="mb-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg">
-            {failure}
-          </p>
-        ) : null}
+          {failure ? (
+            <p className="mb-3 rounded-nightDesk bg-nightDesk-negativeBg px-3 py-2 text-nightDesk-body text-nightDesk-negative">
+              {failure}
+            </p>
+          ) : null}
 
-        <div className="flex items-center justify-between">
-          {/* While rows are changed, this is the sentence that matters: primary ink. */}
-          <span className={`text-body ${dirty ? 'text-text' : 'text-text-secondary'}`}>
-            {dirty
-              ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${doubleBookedGroups
-                  .map((trucks) => ` · a driver is on trucks ${listed(trucks.map(label))}`)
-                  .join('')}`
-              : (saved ?? 'No changes.')}
-          </span>
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              disabled={!dirty || saving}
-              onClick={() => {
-                clearEdits();
-                setDraft(initial);
-                setConflicts([]);
-              }}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary disabled:opacity-45"
-            >
-              Discard
-            </button>
-            <button
-              type="button"
-              disabled={!mayEdit || !dirty || saving || doubleBooked.size > 0}
-              title={mayEdit ? undefined : lockedReason}
-              onClick={() => void save()}
-              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
-            >
-              {saving ? 'Saving…' : 'Save assignments'}
-            </button>
+          <div className="flex min-h-10 items-center justify-between gap-6">
+            {/* While rows are changed, this is the sentence that matters: primary ink. */}
+            <span className={`text-nightDesk-body ${dirty ? 'text-nightDesk-ink' : 'text-nightDesk-muted'}`}>
+              {dirty
+                ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${doubleBookedGroups
+                    .map((trucks) => ` · a driver is on trucks ${listed(trucks.map(label))}`)
+                    .join('')}`
+                : (saved ?? 'No changes.')}
+            </span>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                disabled={!dirty || saving}
+                onClick={() => {
+                  clearEdits();
+                  setDraft(initial);
+                  setConflicts([]);
+                }}
+                // The quieter of the two: an outline, never a fill.
+                className={`h-[34px] rounded-full border border-nightDesk-control px-4 font-medium text-nightDesk-inkSecondary hover:enabled:border-nightDesk-controlHover hover:enabled:text-nightDesk-ink disabled:cursor-not-allowed disabled:border-nightDesk-border disabled:text-nightDesk-muted ${ND_FOCUS}`}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                disabled={!mayEdit || !dirty || saving || doubleBooked.size > 0}
+                title={mayEdit ? undefined : lockedReason}
+                onClick={() => void save()}
+                /**
+                 * §12.136 (Alex, 2026-10-21): a SOLID fill in Night desk's
+                 * accent whenever there is something valid to save. At rest,
+                 * for a viewer and while a double-booking refuses it, visibly
+                 * disabled but readable: no fill, its outline, muted ink at
+                 * 5.62:1 on `raised`, not 45% opacity.
+                 */
+                className={`h-[34px] rounded-full border border-nightDesk-accent bg-nightDesk-accent px-4 font-semibold text-nightDesk-onAccent hover:enabled:border-nightDesk-accentHover hover:enabled:bg-nightDesk-accentHover disabled:cursor-not-allowed disabled:border-nightDesk-control disabled:bg-nightDesk-raised disabled:text-nightDesk-muted ${ND_FOCUS}`}
+              >
+                {saving ? 'Saving…' : 'Save assignments'}
+              </button>
+            </div>
           </div>
         </div>
       </footer>

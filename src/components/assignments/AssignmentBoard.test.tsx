@@ -342,11 +342,11 @@ describe('the footer’s count, and a free driver’s entry', () => {
 
   it('puts the count in primary ink while rows are changed, secondary at rest', async () => {
     await render();
-    expect(status().className).toContain('text-text-secondary');
+    expect(status().className).toContain('text-nightDesk-muted');
     await pickFor(143, 'Unassigned Hal');
     expect(status().textContent).toContain('1 row changed');
-    expect(status().className).toContain('text-text');
-    expect(status().className).not.toContain('text-text-secondary');
+    expect(status().className).toContain('text-nightDesk-ink');
+    expect(status().className).not.toContain('text-nightDesk-muted');
   });
 
   it('lays a free driver out as one line below 1100px and two from 1100 up', async () => {
@@ -420,5 +420,46 @@ describe('the board in Night desk (§12.136)', () => {
     expect(retire!.className).toContain('min-[1100px]:row-start-2');
     // A truly long name truncates; its whole self is in the title.
     expect(name!.querySelector('[title="Unassigned Hal"]')!.className).toContain('truncate');
+  });
+});
+
+/**
+ * §12.136 (Alex, 2026-10-21). Save is a solid accent fill whenever there is
+ * something valid to save; disabled (and readable) at rest and while a
+ * double-booking refuses it. Discard stays the outlined, quieter one.
+ */
+describe('Save and Discard in Night desk (§12.136)', () => {
+  const button = (text: string) =>
+    [...container!.querySelectorAll('button')].find((b) => b.textContent?.includes(text))!;
+
+  it('fills Save with the accent, and is disabled at rest with a readable label', async () => {
+    await render();
+    const save = button('Save assignments');
+    expect(save.disabled).toBe(true);
+    expect(save.className).toContain('bg-nightDesk-accent');
+    expect(save.className).toContain('disabled:bg-nightDesk-raised');
+    expect(save.className).toContain('disabled:text-nightDesk-muted');
+    expect(save.className).not.toContain('opacity-45');
+  });
+
+  it('enables the solid Save when a valid change is made', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    expect(button('Save assignments').disabled).toBe(false);
+  });
+
+  it('refuses Save while a driver is on two trucks', async () => {
+    await render();
+    await pickFor(143, 'Hand Entered Hal');
+    expect(button('Save assignments').disabled).toBe(true);
+  });
+
+  it('keeps Discard an outline, never a fill', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    const discard = button('Discard');
+    expect(discard.disabled).toBe(false);
+    expect(discard.className).toContain('border-nightDesk-control');
+    expect(discard.className).not.toMatch(/(^| )bg-/);
   });
 });
