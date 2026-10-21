@@ -11,6 +11,7 @@ import { DriverSelect } from './DriverSelect';
 import { DriverName } from '@/components/DriverName';
 import { MergePrompt } from './MergePrompt';
 import { DriverPhone } from './DriverPhone';
+import { ND_FOCUS } from './nightDesk';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -39,15 +40,33 @@ const label = (t: Board['trucks'][number]) =>
  * driver it belongs to (§12.106: the number is the picker's driver's): with
  * Currently between them, empty on every row at rest (§12.130), the eye
  * crossed 240px of nothing from a name to its number. Currently is last and
- * takes the slack. Minimums unchanged: 64 + 240 + 220 + 150 + 3 gaps = 722,
- * which closes at 768. The phone keeps 220px for its inline editor (field,
- * Save, Cancel).
+ * takes the slack. Minimums unchanged: 64 + 240 + 220 + 150 = 674. The phone
+ * keeps 220px for its inline editor (field, Save, Cancel).
  *
  * 3al settled the widths on screen: a flexible picker ran 845px wide at
  * 1920, so it is capped at 360; and from 1100px up the whole table is capped
- * at 1000px (the section's `max-w`) so its rows stop where their content does.
+ * (the section's `max-w`, §12.136: 940px) so its rows stop where their
+ * content does.
  */
 const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(220px,260px)_minmax(150px,1fr)]';
+
+/**
+ * §12.136. The gaps and the side padding inside the rows' card, shared by the
+ * header row (which sits outside the card, so 1px more) and every row.
+ *
+ * Tighter below 1024px so the board still closes at 768: 674 + 3 × 12 gaps +
+ * 2 × 6 padding + 2 × 1 border = 724, inside 768 − 2 × 20 = 728. From 1024
+ * up, 16px gaps and 16px padding, as the mockup.
+ */
+const ROW_GAPS = 'gap-x-3 px-1.5 lg:gap-x-4 lg:px-4';
+const HEAD_GAPS = 'gap-x-3 px-[7px] lg:gap-x-4 lg:px-[17px]';
+
+/**
+ * §12.136. One column for the header, the board and the footer, so they share
+ * one left and one right edge, centred from 1100px up: the 940px board, a
+ * 24px gap, the 260px panels and 32px each side = 1288.
+ */
+const FRAME = 'mx-auto w-full max-w-[1288px] px-5 lg:px-8';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
@@ -266,7 +285,12 @@ export function AssignmentBoard({ board, role }: Props) {
      * `min-h-dvh`, so the page itself scrolled and Save, Discard and the
      * count of changes sat under the last of 22 rows.
      */
-    <main className="flex h-dvh flex-col bg-surface-base">
+    /**
+     * §12.136. The page's own look, Night desk (HANDOFF 3an): its ground, its
+     * face (Public Sans, loaded by this route's layout), its ink. Nothing
+     * outside this page uses these tokens.
+     */
+    <main className="flex h-dvh flex-col bg-nightDesk-ground font-nightDesk text-nightDesk-body text-nightDesk-ink">
       {/*
         §12.106. Assignments are a desktop job (§12.94), and this page has no
         phone layout: nothing on the phone view links here, and an address
@@ -277,29 +301,29 @@ export function AssignmentBoard({ board, role }: Props) {
         data-assignments-desktop-only=""
         className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center md:hidden"
       >
-        <p className="text-body text-text">Assignments are on the desktop console.</p>
+        <p className="text-nightDesk-body text-nightDesk-ink">Assignments are on the desktop console.</p>
         <Link
           href="/"
-          className="inline-flex h-11 items-center border border-line-rule px-4 font-cond text-[13px] font-semibold uppercase leading-none tracking-[.08em] text-text"
+          className={`inline-flex h-11 items-center rounded-full border border-nightDesk-control px-5 font-medium text-nightDesk-ink ${ND_FOCUS}`}
         >
           Back to the board
         </Link>
       </div>
-      <header className="flex h-14 shrink-0 max-md:hidden items-center justify-between border-b border-line-hair bg-surface-raised px-[18px]">
-        <div className="flex items-baseline gap-4">
-          <h1 className="font-cond text-header font-semibold uppercase tracking-[.14em] text-text">
-            Assignments
-          </h1>
-          <span className="text-body text-text-secondary">
-            {board.trucks.length} active trucks · {board.drivers.length} active drivers
-          </span>
+      <header className="shrink-0 border-b border-nightDesk-border max-md:hidden">
+        <div className={`${FRAME} flex min-h-16 items-center justify-between gap-6`}>
+          <div className="flex min-w-0 items-baseline gap-4">
+            <h1 className="text-nightDesk-title font-semibold text-nightDesk-ink">Assignments</h1>
+            <span className="text-nightDesk-body text-nightDesk-muted">
+              {board.trucks.length} active trucks · {board.drivers.length} active drivers
+            </span>
+          </div>
+          <Link
+            href="/"
+            className={`inline-flex h-8 shrink-0 items-center rounded-full border border-nightDesk-control px-4 font-medium text-nightDesk-inkSecondary hover:border-nightDesk-controlHover hover:text-nightDesk-ink ${ND_FOCUS}`}
+          >
+            Back to console
+          </Link>
         </div>
-        <Link
-          href="/"
-          className="border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
-        >
-          Back to console
-        </Link>
       </header>
 
       {/*
@@ -312,210 +336,235 @@ export function AssignmentBoard({ board, role }: Props) {
         and beside the 260px aside that leaves nothing for the picker under
         about 1042px; at 1100 it gets about 270px. The DOM order (table, then
         panels) is kept, so the keyboard reaches the pickers first.
-      */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
-        {/*
-          §12.135. From 1100px up the table stops at 1000px and the panels
-          follow it: a four-column table stretched to 1600px at 1920 ran its
-          rules 900px past its last value, and put the gaps panel 900px from
-          the phone column. The ground beyond the panels is left empty.
-        */}
-        <section className="min-w-0 min-[1100px]:max-w-[1000px] min-[1100px]:flex-1">
-          {/* §12.37: above the board, where a dispatcher is already thinking
-              about who is on what. Renders nothing when there is nothing to
-              ask. */}
-          <div className="pt-5 empty:hidden">
-            <MergePrompt role={role} />
-          </div>
-          {/* Sticky, so a dispatcher 15 rows down still knows which name is the picker's. */}
-          <div
-            className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-line-hair bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
-          >
-            <span>Truck</span>
-            {/* Over the name, not the field's edge: at rest the field has no box (§12.134). */}
-            <span className="pl-2.5">Driver</span>
-            <span>Driver&rsquo;s phone</span>
-            <span>Currently</span>
-          </div>
 
-          {board.trucks.map((truck) => {
-            const value = draft.get(truck.id) ?? null;
-            const isChanged = value !== truck.driverId;
-            const isConflicted = conflictedTrucks.has(truck.id);
-            /** §12.106. The phone of the driver in the picker — the number is theirs, not the truck's. */
-            const driver = value === null ? null : (driversById.get(value) ?? null);
-            return (
-              <div
-                key={truck.id}
-                /**
-                 * §12.134. The console's 44px row (`row-comfortable`, §14.4),
-                 * at least: a row with the phone editor open grows to fit it.
-                 */
-                className={`grid ${COLUMNS} min-h-row-comfortable items-center gap-x-4 border-b border-line-soft py-1 ${
-                  isConflicted
-                    ? 'bg-status-late-bg'
-                    : isChanged
-                      ? 'bg-row-selected'
-                      : // The console's own ground for a truck with nobody on it
-                        // (design 4a): marginally sunken, inert, not urgent.
-                        value === null
-                        ? 'bg-row-unassigned'
-                        : ''
-                }`}
-              >
-                {/* A truck with no number shows its Samsara name, which can be long. */}
-                <span
-                  title={label(truck)}
-                  className="truncate font-sans text-data font-bold tabular-nums text-text"
-                >
-                  {label(truck)}
-                </span>
-                <DriverSelect
-                  drivers={board.drivers}
-                  value={value}
-                  claimedBy={claimedBy}
-                  truckLabel={label(truck)}
-                  disabled={!mayEdit || saving}
-                  disabledReason={mayEdit ? undefined : lockedReason}
-                  onChange={(driverId) => editDraft(truck.id, driverId)}
-                  quiet
-                  size="row"
-                  /**
-                   * §12.37: the board refreshes BEFORE the select points at
-                   * the new driver, so `board.drivers` already contains them.
-                   * Only passed where a refresh is possible — a picker that
-                   * offered "+ Add driver" and then could not show the result
-                   * would look broken.
-                   */
-                  /**
-                   * §12.38: only when the truck is EMPTY. On an occupied
-                   * truck the driver is only created and selected here; the
-                   * change of driver is then a row in this board's draft like
-                   * any other, and goes out with Save in the batch. There is
-                   * no two-sided confirm on this screen: the board's batch
-                   * save is its own confirmation (HANDOFF 3ai, answered
-                   * 2026-10-19). §9.10's confirm and its preview token are
-                   * the edit modal's.
-                   */
-                  assignToTruckId={truck.driverId === null ? truck.id : null}
-                  onDriverCreated={(_driverId, _name, assignedTruckId) => {
-                    // Assigned server-side, so pull the new truth in. The
-                    // draft rebases rather than resetting, so the selection
-                    // and every other pending edit survive.
-                    if (assignedTruckId !== null) clearEdits();
-                    router.refresh();
-                  }}
-                />
-                {driver ? (
-                  <DriverPhone
-                    key={driver.id}
-                    driverId={driver.id}
-                    driverName={driver.name}
-                    phone={driver.phone}
-                    mayEdit={mayEdit}
-                    lockedReason={phoneLockedReason}
-                    onSaved={() => router.refresh()}
-                  />
-                ) : (
-                  <span />
-                )}
-                {/**
-                 * §12.130. Only on a row changed in the draft: what the truck
-                 * had before, struck through, as §9.10 writes the losing side
-                 * — including its "—" for a truck that had nobody. On an
-                 * unchanged row this repeated the picker's name, so every
-                 * assigned row said one name twice, and an empty truck said
-                 * "Unassigned" twice (§12.18). The row's No ELD tag is beside
-                 * the picker now (§12.37's table), so nothing is lost.
-                 */}
-                {isChanged ? (
-                  <span
-                    data-was=""
-                    className="flex min-w-0 items-baseline gap-1.5 text-body text-text-muted"
+        The region scrolls at the window's full width (its scrollbar at the
+        window's edge); its content is the centred FRAME (§12.136).
+      */}
+      <div className="min-h-0 flex-1 overflow-auto max-md:hidden">
+        <div
+          className={`${FRAME} flex flex-col pb-8 min-[1100px]:flex-row min-[1100px]:items-start min-[1100px]:gap-6`}
+        >
+          {/*
+            §12.135, §12.136. From 1100px up the table stops at 940px and the
+            panels follow it, the two centred together. At 1000px Currently,
+            empty on every unchanged row (§12.130), left a band about 270px wide;
+            at 940 it is about 174.
+          */}
+          <section className="min-w-0 min-[1100px]:max-w-[940px] min-[1100px]:flex-1">
+            {/* §12.37: above the board, where a dispatcher is already thinking
+                about who is on what. Renders nothing when there is nothing to
+                ask. */}
+            <div className="pt-6 empty:hidden">
+              <MergePrompt role={role} />
+            </div>
+            {/* Sticky, so a dispatcher 15 rows down still knows which name is the picker's. */}
+            <div
+              className={`sticky top-0 z-10 grid ${COLUMNS} ${HEAD_GAPS} items-center bg-nightDesk-ground pb-2 pt-6 text-nightDesk-small text-nightDesk-muted`}
+            >
+              <span>Truck</span>
+              {/* Over the name, not the field's edge: at rest the field has no box (§12.134). */}
+              <span className="pl-[9px]">Driver</span>
+              <span>Driver&rsquo;s phone</span>
+              <span>Currently</span>
+            </div>
+
+            {/* §12.136. The rows on one card, darker than the ground. */}
+            <div className="rounded-nightDesk border border-nightDesk-border bg-nightDesk-surface">
+              {board.trucks.map((truck) => {
+                const value = draft.get(truck.id) ?? null;
+                const isChanged = value !== truck.driverId;
+                const isConflicted = conflictedTrucks.has(truck.id);
+                /** §12.106. The phone of the driver in the picker — the number is theirs, not the truck's. */
+                const driver = value === null ? null : (driversById.get(value) ?? null);
+                return (
+                  <div
+                    key={truck.id}
+                    /**
+                     * §12.136. Night desk's 42px row, at least: a row with the
+                     * phone editor open grows to fit it.
+                     *
+                     * A changed row is one step lighter with a 1px accent line on
+                     * its left edge (Night desk marks every selection with that
+                     * line); a double-booked one is on the negative ground with the
+                     * line in the negative. An empty truck needs no ground of its
+                     * own: its field is the dashed empty slot.
+                     */
+                    className={`relative grid ${COLUMNS} ${ROW_GAPS} min-h-row-nightDesk items-center border-t border-nightDesk-rule py-1 first:rounded-t-nightDesk first:border-t-0 last:rounded-b-nightDesk ${
+                      isConflicted
+                        ? 'bg-nightDesk-negativeBg before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-nightDesk-negative'
+                        : isChanged
+                          ? 'bg-nightDesk-raised before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-nightDesk-accent'
+                          : 'hover:bg-nightDesk-rowHover'
+                    }`}
                   >
-                    <span className="shrink-0">was</span>
-                    {/* §12.133: the name struck, not its No ELD tag. */}
-                    <span className="min-w-0 truncate">
-                      <DriverName
-                        name={truck.driverName}
-                        source={truck.driverSource}
-                        samsaraDriverId={truck.driverSamsaraId}
-                        fallback="—"
-                        struck
+                    {/* A truck with no number shows its Samsara name, which can be long. */}
+                    <span
+                      title={label(truck)}
+                      className={`truncate font-nightDesk-mono text-nightDesk-data font-medium ${
+                        isConflicted
+                          ? 'text-nightDesk-negative'
+                          : value === null
+                            ? 'text-nightDesk-muted'
+                            : 'text-nightDesk-ink'
+                      }`}
+                    >
+                      {label(truck)}
+                    </span>
+                    <DriverSelect
+                      drivers={board.drivers}
+                      value={value}
+                      claimedBy={claimedBy}
+                      truckLabel={label(truck)}
+                      disabled={!mayEdit || saving}
+                      disabledReason={mayEdit ? undefined : lockedReason}
+                      onChange={(driverId) => editDraft(truck.id, driverId)}
+                      quiet
+                      size="row"
+                      look="nightDesk"
+                      /**
+                       * §12.37: the board refreshes BEFORE the select points at
+                       * the new driver, so `board.drivers` already contains them.
+                       * Only passed where a refresh is possible — a picker that
+                       * offered "+ Add driver" and then could not show the result
+                       * would look broken.
+                       */
+                      /**
+                       * §12.38: only when the truck is EMPTY. On an occupied
+                       * truck the driver is only created and selected here; the
+                       * change of driver is then a row in this board's draft like
+                       * any other, and goes out with Save in the batch. There is
+                       * no two-sided confirm on this screen: the board's batch
+                       * save is its own confirmation (HANDOFF 3ai, answered
+                       * 2026-10-19). §9.10's confirm and its preview token are
+                       * the edit modal's.
+                       */
+                      assignToTruckId={truck.driverId === null ? truck.id : null}
+                      onDriverCreated={(_driverId, _name, assignedTruckId) => {
+                        // Assigned server-side, so pull the new truth in. The
+                        // draft rebases rather than resetting, so the selection
+                        // and every other pending edit survive.
+                        if (assignedTruckId !== null) clearEdits();
+                        router.refresh();
+                      }}
+                    />
+                    {driver ? (
+                      <DriverPhone
+                        key={driver.id}
+                        driverId={driver.id}
+                        driverName={driver.name}
+                        phone={driver.phone}
+                        mayEdit={mayEdit}
+                        lockedReason={phoneLockedReason}
+                        onSaved={() => router.refresh()}
+                      />
+                    ) : (
+                      <span />
+                    )}
+                    {/**
+                     * §12.130. Only on a row changed in the draft: what the truck
+                     * had before, struck through, as §9.10 writes the losing side
+                     * — including its "—" for a truck that had nobody. On an
+                     * unchanged row this repeated the picker's name, so every
+                     * assigned row said one name twice, and an empty truck said
+                     * "Unassigned" twice (§12.18). The row's No ELD tag is beside
+                     * the picker now (§12.37's table), so nothing is lost.
+                     */}
+                    {isChanged ? (
+                      <span
+                        data-was=""
+                        className="flex min-w-0 items-center gap-1.5 text-nightDesk-muted"
+                      >
+                        <span className="shrink-0">was</span>
+                        {/* §12.133: the name struck, not its No ELD tag. The name
+                            truncates first, so the tag is never the part cut off. */}
+                        <DriverName
+                          name={truck.driverName}
+                          source={truck.driverSource}
+                          samsaraDriverId={truck.driverSamsaraId}
+                          fallback="—"
+                          struck
+                          look="nightDesk"
+                          className="text-nightDesk-inkSecondary"
+                        />
+                      </span>
+                    ) : (
+                      <span />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}
+          <aside className="order-first grid grid-cols-2 gap-6 pt-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-6 min-[1100px]:self-start">
+            <Panel
+              title={`Drivers with no truck (${driversWithoutTruck.length})`}
+              empty="Every active driver has a truck."
+              items={driversWithoutTruck.map((d) => ({
+                key: d.id,
+                node: (
+                  /**
+                   * §12.132. Below 1100px the panel is about 480px wide, so the
+                   * entry is one line: name, phone, Retire. It was two lines
+                   * there too, which made this panel the taller of the two and
+                   * left a 50px hole under the trucks panel stretched beside it.
+                   *
+                   * From 1100 up, in the 260px column, the name has the whole
+                   * first line and Retire sits beside the phone under it
+                   * (§12.136, Alex 2026-10-21): beside Retire, a name of normal
+                   * length and its tag did not fit and the name was cut off. A
+                   * truly long one still truncates, whole in its title.
+                   */
+                  <span
+                    data-free-driver=""
+                    className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto] min-[1100px]:gap-y-0.5"
+                  >
+                    <DriverName
+                      name={d.name}
+                      source={d.source}
+                      samsaraDriverId={d.samsaraDriverId}
+                      look="nightDesk"
+                      className="col-start-1 row-start-1 font-medium text-nightDesk-ink min-[1100px]:col-span-2"
+                    />
+                    <span className="col-start-2 row-start-1 min-w-0 min-[1100px]:col-start-1 min-[1100px]:row-start-2">
+                      <DriverPhone
+                        driverId={d.id}
+                        driverName={d.name}
+                        phone={d.phone}
+                        mayEdit={mayEdit}
+                        lockedReason={phoneLockedReason}
+                        onSaved={() => router.refresh()}
                       />
                     </span>
+                    {/**
+                     * §12.37: ADMIN only — it takes someone off the board.
+                     * Offered only for a driver with no truck, because retiring
+                     * one that is assigned is refused server-side anyway and a
+                     * control that always errors is worse than no control.
+                     */}
+                    {canRetire ? (
+                      <button
+                        type="button"
+                        onClick={() => void retire(d.id, d.name)}
+                        title={`Retire ${d.name} — keeps their history, removes them from the board.`}
+                        className={`col-start-3 row-start-1 -mr-1.5 inline-flex h-7 shrink-0 items-center rounded-md px-1.5 text-nightDesk-small text-nightDesk-muted hover:text-nightDesk-negative min-[1100px]:col-start-2 min-[1100px]:row-start-2 ${ND_FOCUS}`}
+                      >
+                        Retire
+                      </button>
+                    ) : null}
                   </span>
-                ) : (
-                  <span />
-                )}
-              </div>
-            );
-          })}
-        </section>
-
-        {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}
-        <aside className="order-first grid grid-cols-2 gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
-          <Panel
-            title={`Drivers with no truck (${driversWithoutTruck.length})`}
-            empty="Every active driver has a truck."
-            items={driversWithoutTruck.map((d) => ({
-              key: d.id,
-              node: (
-                /**
-                 * §12.132. Below 1100px the panel is about 480px wide, so the
-                 * entry is one line: name, phone, Retire. It was two lines
-                 * there too, which made this panel the taller of the two and
-                 * left a 50px hole under the trucks panel stretched beside it.
-                 * From 1100 up, in the 260px column: name and Retire, then the
-                 * phone under them, as before.
-                 */
-                <span
-                  data-free-driver=""
-                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto] min-[1100px]:gap-y-1"
-                >
-                  <DriverName
-                    name={d.name}
-                    source={d.source}
-                    samsaraDriverId={d.samsaraDriverId}
-                    className="col-start-1 row-start-1 min-w-0"
-                  />
-                  <span className="col-start-2 row-start-1 min-w-0 min-[1100px]:col-span-2 min-[1100px]:col-start-1 min-[1100px]:row-start-2">
-                    <DriverPhone
-                      driverId={d.id}
-                      driverName={d.name}
-                      phone={d.phone}
-                      mayEdit={mayEdit}
-                      lockedReason={phoneLockedReason}
-                      onSaved={() => router.refresh()}
-                    />
-                  </span>
-                  {/**
-                   * §12.37: ADMIN only — it takes someone off the board.
-                   * Offered only for a driver with no truck, because retiring
-                   * one that is assigned is refused server-side anyway and a
-                   * control that always errors is worse than no control.
-                   */}
-                  {canRetire ? (
-                    <button
-                      type="button"
-                      onClick={() => void retire(d.id, d.name)}
-                      title={`Retire ${d.name} — keeps their history, removes them from the board.`}
-                      className="col-start-3 row-start-1 -mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg min-[1100px]:col-start-2"
-                    >
-                      Retire
-                    </button>
-                  ) : null}
-                </span>
-              ),
-            }))}
-          />
-          <Panel
-            title={`Trucks with no driver (${trucksWithoutDriver.length})`}
-            empty="Every active truck has a driver."
-            items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
-            inline
-          />
-        </aside>
+                ),
+              }))}
+            />
+            <Panel
+              title={`Trucks with no driver (${trucksWithoutDriver.length})`}
+              empty="Every active truck has a driver."
+              items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
+              inline
+            />
+          </aside>
+        </div>
       </div>
 
       <footer className="shrink-0 border-t border-line-hair bg-surface-bar px-5 py-3 max-md:hidden">
@@ -598,14 +647,12 @@ function Panel({
   inline?: boolean;
 }) {
   return (
-    <div className="border border-line-hair bg-surface-raised p-3">
-      <h2 className="mb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
-        {title}
-      </h2>
+    <div className="rounded-nightDesk border border-nightDesk-border bg-nightDesk-surface p-4">
+      <h2 className="mb-2.5 text-nightDesk-data font-semibold text-nightDesk-ink">{title}</h2>
       {items.length === 0 ? (
-        <p className="text-body text-text-muted">{empty}</p>
+        <p className="text-nightDesk-body text-nightDesk-muted">{empty}</p>
       ) : (
-        <ul className={inline ? 'flex flex-wrap gap-x-3 gap-y-1 tabular-nums' : 'space-y-1'}>
+        <ul className={inline ? 'flex flex-wrap gap-x-4 gap-y-1' : 'space-y-1.5'}>
           {items.map((item) => (
             /**
              * Not `truncate`: its `nowrap` reached the phone editor inside the
@@ -614,7 +661,15 @@ function Panel({
              */
             <li
               key={item.key}
-              className={`text-body text-text-secondary ${inline ? 'whitespace-nowrap' : 'min-w-0'}`}
+              /**
+               * §12.136. The no-driver trucks are truck numbers, so Plex Mono,
+               * at the size that makes them the panel's answer.
+               */
+              className={
+                inline
+                  ? 'whitespace-nowrap font-nightDesk-mono text-nightDesk-gap font-medium text-nightDesk-ink'
+                  : 'min-w-0 text-nightDesk-body text-nightDesk-inkSecondary'
+              }
             >
               {item.node}
             </li>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useEditingAllowed } from '@/hooks/useEditingAllowed';
 import { formatPhone, normalizePhone } from '@/lib/dial';
+import { ND_FOCUS } from './nightDesk';
 
 /**
  * §12.106. A driver's phone on the assignment board: read, and for a
@@ -14,6 +15,9 @@ import { formatPhone, normalizePhone } from '@/lib/dial';
  * - Checked here with the same rule the server applies (`normalizePhone`), so
  *   a refusal is said before the request, in the same words.
  * - Nothing is sent to the driver. Saving a number stores it; that is all.
+ * - §12.136. Drawn in Night desk, the assignment page's look: only that page
+ *   renders this component, so its classes change here directly, with no
+ *   `look` prop. The number is in IBM Plex Mono.
  */
 export function DriverPhone({
   driverId,
@@ -43,7 +47,9 @@ export function DriverPhone({
       <span className="flex min-w-0 items-center gap-0.5" data-driver-phone={driverId}>
         <span
           data-driver-phone-value=""
-          className={`truncate text-body tabular-nums ${shown ? 'text-text-secondary' : 'text-text-muted'}`}
+          className={`truncate text-nightDesk-body ${
+            shown ? 'font-nightDesk-mono text-nightDesk-inkSecondary' : 'text-nightDesk-muted'
+          }`}
         >
           {shown ?? 'No phone'}
         </span>
@@ -58,8 +64,9 @@ export function DriverPhone({
               setError(null);
               setEditing(true);
             }}
-            // A 28px-tall target for a 10.5px word; the type is unchanged.
-            className="inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted"
+            // A 28px-tall target. Disabled (a viewer) stays readable: muted
+            // ink at 6.46:1, the not-allowed cursor and the title say why.
+            className={`inline-flex h-7 shrink-0 items-center rounded-md px-1.5 text-nightDesk-small text-nightDesk-muted hover:enabled:text-nightDesk-ink disabled:cursor-not-allowed ${ND_FOCUS}`}
           >
             {shown ? 'Edit' : 'Add'}
           </button>
@@ -122,13 +129,15 @@ export function DriverPhone({
           placeholder="708-555-0123"
           aria-label={`Phone for ${driverName}`}
           aria-invalid={error !== null}
-          className="h-8 min-w-0 flex-1 border border-line-hair bg-surface-raised px-2 text-body tabular-nums text-text"
+          className={`h-8 min-w-0 flex-1 rounded-md border bg-nightDesk-ground px-2 font-nightDesk-mono text-nightDesk-body text-nightDesk-ink ${
+            error === null ? 'border-nightDesk-control' : 'border-nightDesk-negative'
+          } ${ND_FOCUS}`}
         />
         <button
           type="button"
           disabled={saving}
           onClick={() => void save()}
-          className="h-8 shrink-0 bg-accent px-2.5 font-cond text-micro font-semibold uppercase tracking-[.08em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+          className={`h-8 shrink-0 rounded-full bg-nightDesk-accent px-3 text-nightDesk-small font-semibold text-nightDesk-onAccent hover:enabled:bg-nightDesk-accentHover disabled:opacity-45 ${ND_FOCUS}`}
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -136,17 +145,17 @@ export function DriverPhone({
           type="button"
           disabled={saving}
           onClick={() => setEditing(false)}
-          className="h-8 shrink-0 border border-line-hair px-2.5 font-cond text-micro uppercase tracking-[.08em] text-text-secondary"
+          className={`h-8 shrink-0 rounded-full border border-nightDesk-control px-3 text-nightDesk-small text-nightDesk-inkSecondary hover:text-nightDesk-ink ${ND_FOCUS}`}
         >
           Cancel
         </button>
       </span>
       {error ? (
-        <span role="alert" className="text-small text-status-late-fg">
+        <span role="alert" className="text-nightDesk-small text-nightDesk-negative">
           {error}
         </span>
       ) : (
-        <span className="text-small text-text-muted">Blank clears the number.</span>
+        <span className="text-nightDesk-small text-nightDesk-muted">Blank clears the number.</span>
       )}
     </span>
   );

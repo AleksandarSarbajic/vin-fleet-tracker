@@ -2,6 +2,8 @@
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { act } from 'react';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { DriverSelect } from './DriverSelect';
 import { DriverName, NoEldTag } from '@/components/DriverName';
@@ -170,5 +172,37 @@ describe('look="nightDesk" (the assignment page)', () => {
     expect(html).toContain('border-nightDesk-border');
     expect(html).toContain('text-nightDesk-muted');
     expect(html).toContain('title="Your role is viewer."');
+  });
+});
+
+describe('only the assignment board asks for Night desk', () => {
+  const ROOT = join(process.cwd(), 'src');
+  const sources = (dir: string): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : [];
+    });
+
+  it('finds look="nightDesk" in AssignmentBoard and DriverName only', () => {
+    const asking = sources(ROOT)
+      .filter((file) => /look="nightDesk"/.test(readFileSync(file, 'utf8')))
+      .map((file) => file.replace(`${ROOT}/`, ''))
+      .sort();
+    // DriverName passes it on to its own tag, inside its Night desk branch.
+    expect(asking).toEqual(['components/DriverName.tsx', 'components/assignments/AssignmentBoard.tsx']);
+  });
+
+  it('finds the Night desk faces loaded by the assignments route only', () => {
+    const loading = sources(ROOT)
+      .filter((file) => /--font-nightdesk-/.test(readFileSync(file, 'utf8')))
+      .map((file) => file.replace(`${ROOT}/`, ''));
+    expect(loading).toEqual(['app/assignments/layout.tsx']);
+  });
+
+  it('finds the edit modal’s picker passing no look', () => {
+    const strip = readFileSync(join(ROOT, 'components/edit/LoadStrip.tsx'), 'utf8');
+    expect(strip).toContain('<DriverSelect');
+    expect(strip).not.toMatch(/look=/);
   });
 });
