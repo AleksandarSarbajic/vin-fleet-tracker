@@ -240,3 +240,37 @@ describe('the row’s No ELD tag is beside the picker (§12.37)', () => {
     expect(pickerBox(143).querySelector('[title*="not in Samsara"]')).toBeNull();
   });
 });
+
+describe('empty trucks and the two panels', () => {
+  const row = (n: number) =>
+    container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.closest('[class*="grid-cols"]')!;
+
+  it('puts a truck with nobody on the unassigned ground, and only that truck', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    expect(row(150).className).toContain('bg-row-unassigned');
+    expect(row(137).className).not.toContain('bg-row-unassigned');
+  });
+
+  it('lets a changed row’s ground win over the empty one', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    await act(async () =>
+      container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 137"]')!.click(),
+    );
+    const clear = [...container!.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Unassigned — clear this truck'),
+    )!;
+    await act(async () => clear.click());
+    expect(row(137).className).toContain('bg-row-selected');
+    expect(row(137).className).not.toContain('bg-row-unassigned');
+  });
+
+  it('sets the no-driver trucks on one wrapping line, and truncates nothing whole', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    const lists = [...container!.querySelectorAll('aside ul')];
+    expect(lists).toHaveLength(2);
+    expect(lists[1]!.className).toContain('flex-wrap');
+    expect(lists[1]!.textContent).toBe('150');
+    // `truncate` on an item cut the phone editor's help text in the drivers panel.
+    for (const li of container!.querySelectorAll('aside li')) expect(li.className).not.toContain('truncate');
+  });
+});

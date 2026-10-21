@@ -40,7 +40,7 @@ export function DriverPhone({
 
   if (!editing || !editingAllowed) {
     return (
-      <span className="flex min-w-0 items-center gap-2" data-driver-phone={driverId}>
+      <span className="flex min-w-0 items-center gap-0.5" data-driver-phone={driverId}>
         <span
           data-driver-phone-value=""
           className={`truncate text-body tabular-nums ${shown ? 'text-text-secondary' : 'text-text-muted'}`}
@@ -58,7 +58,8 @@ export function DriverPhone({
               setError(null);
               setEditing(true);
             }}
-            className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted"
+            // A 28px-tall target for a 10.5px word; the type is unchanged.
+            className="inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted"
           >
             {shown ? 'Edit' : 'Add'}
           </button>

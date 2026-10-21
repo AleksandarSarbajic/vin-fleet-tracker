@@ -342,7 +342,15 @@ export function AssignmentBoard({ board, role }: Props) {
               <div
                 key={truck.id}
                 className={`grid ${COLUMNS} items-center gap-x-4 border-b border-line-soft py-2 ${
-                  isConflicted ? 'bg-status-late-bg' : isChanged ? 'bg-row-selected' : ''
+                  isConflicted
+                    ? 'bg-status-late-bg'
+                    : isChanged
+                      ? 'bg-row-selected'
+                      : // The console's own ground for a truck with nobody on it
+                        // (design 4a): marginally sunken, inert, not urgent.
+                        value === null
+                        ? 'bg-row-unassigned'
+                        : ''
                 }`}
               >
                 {/* A truck with no number shows its Samsara name, which can be long. */}
@@ -434,7 +442,7 @@ export function AssignmentBoard({ board, role }: Props) {
         </section>
 
         {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}
-        <aside className="order-first grid grid-cols-2 items-start gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
+        <aside className="order-first grid grid-cols-2 gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
           <Panel
             title={`Drivers with no truck (${driversWithoutTruck.length})`}
             empty="Every active driver has a truck."
@@ -447,6 +455,7 @@ export function AssignmentBoard({ board, role }: Props) {
                       name={d.name}
                       source={d.source}
                       samsaraDriverId={d.samsaraDriverId}
+                      className="min-w-0"
                     />
                     {/**
                      * §12.37: ADMIN only — it takes someone off the board.
@@ -459,7 +468,7 @@ export function AssignmentBoard({ board, role }: Props) {
                         type="button"
                         onClick={() => void retire(d.id, d.name)}
                         title={`Retire ${d.name} — keeps their history, removes them from the board.`}
-                        className="shrink-0 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
+                        className="-mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
                       >
                         Retire
                       </button>
@@ -481,6 +490,7 @@ export function AssignmentBoard({ board, role }: Props) {
             title={`Trucks with no driver (${trucksWithoutDriver.length})`}
             empty="Every active truck has a driver."
             items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
+            inline
           />
         </aside>
       </div>
@@ -548,6 +558,7 @@ function Panel({
   title,
   items,
   empty,
+  inline = false,
 }: {
   title: string;
   /**
@@ -556,6 +567,11 @@ function Panel({
    */
   items: { key: string; node: React.ReactNode }[];
   empty: string;
+  /**
+   * One wrapping line instead of one item per line: the truck numbers, which
+   * stacked five tall in a 260px box (§12.132).
+   */
+  inline?: boolean;
 }) {
   return (
     <div className="border border-line-hair bg-surface-raised p-3">
@@ -565,9 +581,17 @@ function Panel({
       {items.length === 0 ? (
         <p className="text-body text-text-muted">{empty}</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className={inline ? 'flex flex-wrap gap-x-3 gap-y-1 tabular-nums' : 'space-y-1'}>
           {items.map((item) => (
-            <li key={item.key} className="truncate text-body text-text-secondary">
+            /**
+             * Not `truncate`: its `nowrap` reached the phone editor inside the
+             * drivers panel, so "Blank clears the number." and a refusal could
+             * not wrap in 236px and were cut. The name truncates on its own.
+             */
+            <li
+              key={item.key}
+              className={`text-body text-text-secondary ${inline ? 'whitespace-nowrap' : 'min-w-0'}`}
+            >
               {item.node}
             </li>
           ))}
