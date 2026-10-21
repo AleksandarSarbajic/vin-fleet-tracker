@@ -331,3 +331,57 @@ describe('the keys that clear and close', () => {
     expect(input().value).toBe('Samsara Sam');
   });
 });
+
+/**
+ * §12.134. The board's quiet, 32px field. Classes only: the test DOM draws
+ * nothing, so whether the box SHOWS on hover is a browser's to prove (the
+ * local render and the /assignments baselines).
+ */
+describe('the quiet field and its size', () => {
+  it('has no box at rest, a text cursor, and its box on hover and focus', () => {
+    render({ value: 'd-1', quiet: true, size: 'row' });
+    const c = input().className;
+    expect(c).toContain('border-transparent');
+    expect(c).toContain('bg-transparent');
+    expect(c).toContain('cursor-text');
+    expect(c).toContain('hover:border-line-hair');
+    expect(c).toContain('hover:bg-surface-sunken');
+    expect(c).toContain('focus:border-line-hair');
+    expect(c).toContain('focus:bg-surface-sunken');
+    expect(c).toContain('h-8');
+  });
+
+  it('shows its box while the list is open, and opens the list under a 32px field', () => {
+    render({ value: 'd-1', quiet: true, size: 'row' });
+    act(() => input().click());
+    expect(input().className).not.toContain('border-transparent');
+    expect(input().className).toContain('bg-surface-sunken');
+    expect(list()!.className).toContain('top-[34px]');
+  });
+
+  it('keeps a viewer’s locked field boxed, as before', () => {
+    render({ value: 'd-1', quiet: true, size: 'row', disabled: true, disabledReason: 'Your role is viewer.' });
+    expect(input().className).not.toContain('border-transparent');
+    expect(input().className).toContain('bg-surface-sunken');
+    expect(input().className).toContain('disabled:opacity-45');
+  });
+
+  it('stays quiet while a save has the field disabled with no reason', () => {
+    render({ value: 'd-1', quiet: true, size: 'row', disabled: true });
+    expect(input().className).toContain('border-transparent');
+  });
+
+  it('is the modal’s boxed 36px field when neither is asked for', () => {
+    render({ value: 'd-1' });
+    expect(input().className).toContain('h-9');
+    expect(input().className).toContain('bg-surface-sunken');
+    expect(input().className).not.toContain('border-transparent');
+    act(() => input().click());
+    expect(list()!.className).toContain('top-[38px]');
+  });
+
+  it('sizes the No ELD tag’s box with the field', () => {
+    render({ value: 'd-2', quiet: true, size: 'row' });
+    expect(container!.querySelector('[title*="not in Samsara"]')!.parentElement!.className).toContain('h-8');
+  });
+});

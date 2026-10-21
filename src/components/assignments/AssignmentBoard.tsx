@@ -332,7 +332,8 @@ export function AssignmentBoard({ board, role }: Props) {
             className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-line-hair bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
           >
             <span>Truck</span>
-            <span>Driver</span>
+            {/* Over the name, not the field's edge: at rest the field has no box (§12.134). */}
+            <span className="pl-2.5">Driver</span>
             <span>Driver&rsquo;s phone</span>
             <span>Currently</span>
           </div>
@@ -346,7 +347,11 @@ export function AssignmentBoard({ board, role }: Props) {
             return (
               <div
                 key={truck.id}
-                className={`grid ${COLUMNS} items-center gap-x-4 border-b border-line-soft py-2 ${
+                /**
+                 * §12.134. The console's 44px row (`row-comfortable`, §14.4),
+                 * at least: a row with the phone editor open grows to fit it.
+                 */
+                className={`grid ${COLUMNS} min-h-row-comfortable items-center gap-x-4 border-b border-line-soft py-1 ${
                   isConflicted
                     ? 'bg-status-late-bg'
                     : isChanged
@@ -373,6 +378,8 @@ export function AssignmentBoard({ board, role }: Props) {
                   disabled={!mayEdit || saving}
                   disabledReason={mayEdit ? undefined : lockedReason}
                   onChange={(driverId) => editDraft(truck.id, driverId)}
+                  quiet
+                  size="row"
                   /**
                    * §12.37: the board refreshes BEFORE the select points at
                    * the new driver, so `board.drivers` already contains them.

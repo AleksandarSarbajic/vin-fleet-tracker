@@ -81,7 +81,27 @@ interface Props {
    * 3ai), or the edit modal's §9.10 confirm.
    */
   assignToTruckId?: string | null;
+  /**
+   * §12.134. The board's field: no box at rest, so a column of fourteen
+   * pickers reads as a list of names, not a form. The box (border and sunken
+   * ground) comes back on hover, on focus and while the list is open, and
+   * the cursor is a text cursor. A viewer's locked field (disabled WITH a
+   * reason) keeps the box and its 45% as before. The edit modal does not
+   * pass it.
+   */
+  quiet?: boolean;
+  /**
+   * §12.134. `row` is the board's 32px field, so a row fits the console's
+   * 44px `row-comfortable`. The modal keeps the 36px default.
+   */
+  size?: 'default' | 'row';
 }
+
+/** Field height, the list's offset under it, and the tag's box, per size. */
+const SIZE = {
+  default: { field: 'h-9', list: 'top-[38px]', tag: 'h-9' },
+  row: { field: 'h-8', list: 'top-[34px]', tag: 'h-8' },
+} as const;
 
 export function DriverSelect({
   drivers,
@@ -94,6 +114,8 @@ export function DriverSelect({
   onChange,
   onDriverCreated,
   assignToTruckId = null,
+  quiet = false,
+  size = 'default',
 }: Props) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
@@ -134,6 +156,8 @@ export function DriverSelect({
    */
   const tagged = selected !== null && !open && !isEldBacked(selected);
   const field = useRef<HTMLInputElement>(null);
+  /** Quiet, unless open (the box shows where the search is) or locked for a viewer. */
+  const boxless = quiet && !open && !(disabled && disabledReason !== undefined);
 
   const matches = useMemo(() => {
     const needle = typed.trim().toLowerCase();
@@ -234,8 +258,12 @@ export function DriverSelect({
             pick(null);
           }
         }}
-        className={`h-9 w-full border bg-surface-sunken px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
-          selected ? 'border-line-hair text-text' : 'border-line-soft text-text-muted'
+        className={`${SIZE[size].field} w-full border px-2.5 text-body outline-offset-[-2px] disabled:opacity-45 ${
+          selected ? 'text-text' : 'text-text-muted'
+        } ${
+          boxless
+            ? 'cursor-text border-transparent bg-transparent hover:border-line-hair hover:bg-surface-sunken focus:border-line-hair focus:bg-surface-sunken'
+            : `bg-surface-sunken ${selected ? 'border-line-hair' : 'border-line-soft'}`
         } ${tagged ? 'pr-16' : ''}`}
       />
       {tagged ? (
@@ -245,7 +273,7 @@ export function DriverSelect({
          * list, as the field would.
          */
         <span
-          className="absolute right-2 top-0 flex h-9 items-center"
+          className={`absolute right-2 top-0 flex ${SIZE[size].tag} items-center`}
           onClick={() => {
             if (disabled) return;
             field.current?.focus();
@@ -270,7 +298,7 @@ export function DriverSelect({
           id={listId}
           role="listbox"
           style={maxWidth === null ? undefined : { maxWidth }}
-          className="absolute left-0 top-[38px] z-20 max-h-[264px] w-max min-w-full max-w-[420px] overflow-y-auto overflow-x-hidden border border-line-hair bg-surface-raised py-1"
+          className={`absolute left-0 ${SIZE[size].list} z-20 max-h-[264px] w-max min-w-full max-w-[420px] overflow-y-auto overflow-x-hidden border border-line-hair bg-surface-raised py-1`}
         >
           <li>
             {/* Secondary ink, not `status.neutral`: clearing is an action, not a status. */}

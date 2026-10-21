@@ -311,3 +311,22 @@ describe('the column order (§12.135)', () => {
     expect(wasCell).toBe(3);
   });
 });
+
+describe('the board’s rows and fields (§12.134)', () => {
+  it('sits each row on the console’s 44px row, with quiet 32px pickers', async () => {
+    await render();
+    const input = container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 137"]')!;
+    expect(input.closest('[class*="grid-cols"]')!.className).toContain('min-h-row-comfortable');
+    expect(input.className).toContain('h-8');
+    expect(input.className).toContain('border-transparent');
+  });
+
+  it('keeps every picker boxed for a viewer', async () => {
+    await act(async () => {
+      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+    });
+    for (const input of container!.querySelectorAll('input[role="combobox"]')) {
+      expect(input.className).not.toContain('border-transparent');
+    }
+  });
+});
