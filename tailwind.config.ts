@@ -16,14 +16,28 @@ const config: Config = {
   theme: {
     extend: {
       colors: palette,
-      borderRadius: { DEFAULT: '0px', sm: '2px', md: '4px' },
+      // `nightDesk` is the assignment page's card radius (§12.136) and nothing else's.
+      borderRadius: { DEFAULT: '0px', sm: '2px', md: '4px', nightDesk: '6px' },
       // §9.9's modal shadow. A component may not spell this out itself.
       boxShadow: { modal: '0 16px 48px rgba(0,0,0,.55)' },
       fontFamily: {
         sans: ['Barlow', 'system-ui', 'sans-serif'],
         cond: ['Barlow Condensed', 'system-ui', 'sans-serif'],
+        /**
+         * §12.136. The assignment page's faces, Public Sans and IBM Plex Mono.
+         * The variables are set by `next/font` in `src/app/assignments/layout.tsx`
+         * and nowhere else, so on any other page these fall back and nothing
+         * uses them there anyway. Read through the variable because next/font
+         * renames the family it self-hosts ('__Public_Sans_…').
+         */
+        nightDesk: ['var(--font-nightdesk-sans)', 'system-ui', 'sans-serif'],
+        'nightDesk-mono': ['var(--font-nightdesk-mono)', 'ui-monospace', 'monospace'],
       },
-      // Spec §2. Six sizes, nothing else.
+      /**
+       * Spec §2. Six sizes, nothing else — for the console. The `nightDesk-`
+       * sizes are the assignment page's own (§12.136) and are used nowhere
+       * else.
+       */
       fontSize: {
         display: ['22px', { lineHeight: '1.1', letterSpacing: '.04em' }],
         header: ['15px', { lineHeight: '1', letterSpacing: '.14em' }],
@@ -31,6 +45,12 @@ const config: Config = {
         body: ['12.5px', { lineHeight: '1.45' }],
         small: ['11.5px', { lineHeight: '1.5' }],
         micro: ['10.5px', { lineHeight: '1', letterSpacing: '.11em' }],
+        'nightDesk-title': ['22px', { lineHeight: '1.2', letterSpacing: '-0.01em' }],
+        'nightDesk-gap': ['20px', { lineHeight: '1.2' }],
+        'nightDesk-data': ['14px', { lineHeight: '1.3' }],
+        'nightDesk-body': ['13px', { lineHeight: '1.45' }],
+        'nightDesk-small': ['12px', { lineHeight: '1.4' }],
+        'nightDesk-tag': ['11px', { lineHeight: '1' }],
       },
       /**
        * §14.4's motion budget, in full. Every duration the fifteen features
@@ -105,6 +125,8 @@ const config: Config = {
       spacing: {
         'row-comfortable': '44px',
         'row-compact': '32px',
+        /** §12.136. The assignment page's row, and only its. */
+        'row-nightDesk': '42px',
         'chip-comfortable': '21px',
         'chip-compact': '18px',
       },

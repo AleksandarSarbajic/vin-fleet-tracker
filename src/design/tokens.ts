@@ -192,6 +192,46 @@ export const palette = {
    * a tidy-up.
    */
   scrimOverlay: 'rgba(9,11,13,.72)',
+  /**
+   * §12.136. The assignment page's own look, "Night desk" (HANDOFF 3an),
+   * and nothing else's: only `/assignments` uses these, through a `look`
+   * prop on the shared parts (DriverSelect, DriverName). The console keeps
+   * every value above; whether it follows is decided after a week of use.
+   *
+   * Cards sit DARKER than the ground (`surface` under `ground`). The accent is
+   * a 1px line everywhere except Save's fill. Ratios are measured in
+   * contrast.test.ts:
+   *
+   *     muted on raisedHigh   5.01   the list's cursor row, the worst ground
+   *     onAccent on accent    5.23   Save's label
+   *     negative on negativeBg 4.62  a double-booked truck's number
+   *
+   * `muted` is not the mockup's #8a8c92: that measured 4.30 on `raisedHigh`.
+   */
+  nightDesk: {
+    ground: '#171719',
+    surface: '#131217',
+    raised: '#212023',
+    /** The open field, and the list's cursor row. */
+    raisedHigh: '#2a292d',
+    rowHover: '#18171c',
+    border: '#26252a',
+    rule: '#1f1e23',
+    /** Control edges, the empty truck's dashed slot, a field's hover line. */
+    control: '#3a3a3e',
+    controlHover: '#55555b',
+    ink: '#ffffff',
+    inkSecondary: '#c9cacd',
+    muted: '#96989e',
+    /** The No ELD tag's word. */
+    tagInk: '#a3a5aa',
+    accent: '#4a8ad6',
+    accentHover: '#6ea2e0',
+    /** Text on an accent fill: white on the accent is 3.56. */
+    onAccent: '#131217',
+    negative: '#e5566f',
+    negativeBg: '#2c1a20',
+  },
 } as const;
 
 /**

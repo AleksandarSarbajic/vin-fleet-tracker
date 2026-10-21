@@ -224,3 +224,40 @@ describe('the driver history page clears the floor (§12.101)', () => {
     });
   }
 });
+
+/**
+ * §12.136. The assignment page's own look, Night desk: every pair of words
+ * and ground it draws. The worst is a disabled-looking `muted` on the list's
+ * cursor row (`raisedHigh`) at 5.01 — the mockup's #8a8c92 measured 4.30
+ * there, which is why `muted` is lighter than the mockup. The accent is a
+ * 1px line on `surface` (5.23, over the 3:1 a line needs) and Save's fill,
+ * whose label is `onAccent`: white on it measured 3.56.
+ */
+describe('the assignment page’s Night desk pairs clear the floor (§12.136)', () => {
+  const nd = palette.nightDesk;
+  const measured: [string, string, string, number][] = [
+    ['ink on a row', nd.ink, nd.surface, 18.64],
+    ['secondary on a row (phone)', nd.inkSecondary, nd.surface, 11.37],
+    ['secondary in the list (a driver on a truck)', nd.inkSecondary, nd.raised, 9.89],
+    ['muted on the ground (column headers)', nd.muted, nd.ground, 6.21],
+    ['muted on a row (Unassigned, Edit, was)', nd.muted, nd.surface, 6.46],
+    ['muted on raised (disabled Save, "on truck N")', nd.muted, nd.raised, 5.62],
+    ['muted on the list’s cursor row', nd.muted, nd.raisedHigh, 5.01],
+    ['muted on a double-booked row', nd.muted, nd.negativeBg, 5.71],
+    ['No ELD on a row', nd.tagInk, nd.surface, 7.56],
+    ['No ELD in the list', nd.tagInk, nd.raised, 6.58],
+    ['No ELD on the cursor row', nd.tagInk, nd.raisedHigh, 5.86],
+    ['No ELD on a double-booked row', nd.tagInk, nd.negativeBg, 6.68],
+    ['Save’s label', nd.onAccent, nd.accent, 5.23],
+    ['Save’s label on hover', nd.onAccent, nd.accentHover, 7.02],
+    ['a double-booked truck’s number', nd.negative, nd.negativeBg, 4.62],
+    ['a refusal under the phone field', nd.negative, nd.surface, 5.23],
+    ['the accent line and focus ring on a row', nd.accent, nd.surface, 5.23],
+  ];
+  for (const [what, fg, bg, expected] of measured) {
+    it(`${what}: ${expected}`, () => {
+      expect(contrast(fg, bg)).toBe(expected);
+      expect(contrast(fg, bg)).toBeGreaterThanOrEqual(FLOOR);
+    });
+  }
+});
