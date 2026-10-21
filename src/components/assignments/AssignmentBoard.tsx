@@ -65,8 +65,13 @@ const HEAD_GAPS = 'gap-x-3 px-[7px] lg:gap-x-4 lg:px-[17px]';
  * §12.136. One column for the header, the board and the footer, so they share
  * one left and one right edge, centred from 1100px up: the 940px board, a
  * 24px gap, the 260px panels and 32px each side = 1288.
+ *
+ * 20px each side from 1100 to 1279: beside the panels the rows need 722 + 34
+ * (their padding and the card's border) + 24 + 260 = 1040px, so 32px sides
+ * ran them up to 4px past their card at 1100–1103 (measured in a local
+ * render); 20px leaves the picker about 260 at 1100.
  */
-const FRAME = 'mx-auto w-full max-w-[1288px] px-5 lg:px-8';
+const FRAME = 'mx-auto w-full max-w-[1288px] px-5 lg:max-[1099px]:px-8 xl:px-8';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
