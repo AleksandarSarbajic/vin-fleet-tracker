@@ -380,11 +380,17 @@ export function AssignmentBoard({ board, role }: Props) {
         </Link>
       </div>
       <header className="flex h-14 shrink-0 max-md:hidden items-center justify-between border-b border-line-hair bg-surface-raised px-[18px]">
-        <div className="flex items-baseline gap-4">
-          <h1 className="font-cond text-header font-semibold uppercase tracking-[.14em] text-text">
+        {/*
+          At 768 the header is about full: title and counts ~330px, the
+          search and Back ~300. So below 1100 the search is 160px (the
+          console's own narrow box, §12.91) without its "/" cap, and the
+          counts truncate rather than wrap, which a viewer's badge needs.
+        */}
+        <div className="flex min-w-0 items-baseline gap-4">
+          <h1 className="shrink-0 font-cond text-header font-semibold uppercase tracking-[.14em] text-text">
             Assignments
           </h1>
-          <span className="text-body text-text-secondary">
+          <span className="truncate text-body text-text-secondary">
             {board.trucks.length} active trucks · {board.drivers.length} active drivers
           </span>
           {/**
@@ -397,16 +403,16 @@ export function AssignmentBoard({ board, role }: Props) {
             <span
               data-view-only=""
               title={lockedReason}
-              className="inline-flex h-[22px] items-center gap-[5px] self-center border border-status-neutral-bd px-2 font-cond text-micro font-semibold uppercase tracking-[.08em] text-status-neutral-fg"
+              className="inline-flex h-[22px] shrink-0 items-center gap-[5px] self-center border border-status-neutral-bd px-2 font-cond text-micro font-semibold uppercase tracking-[.08em] text-status-neutral-fg"
             >
               <LockIcon />
               View only
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {/* The console's search field (§12.91), at the console's 260px. */}
-          <label className="flex h-8 w-[260px] items-center gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
+          <label className="flex h-8 w-[160px] items-center min-[1100px]:w-[260px] gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
             <SearchIcon className="shrink-0 text-text-mutedOnOverlay" />
             <input
               ref={searchField}
@@ -435,7 +441,7 @@ export function AssignmentBoard({ board, role }: Props) {
                 ×
               </button>
             ) : (
-              <span className="shrink-0 whitespace-nowrap border border-line-control px-[5px] py-px font-mono text-[11px] font-medium text-text-secondary">
+              <span className="shrink-0 whitespace-nowrap border border-line-control px-[5px] py-px font-mono text-[11px] font-medium text-text-secondary max-[1099px]:hidden">
                 /
               </span>
             )}

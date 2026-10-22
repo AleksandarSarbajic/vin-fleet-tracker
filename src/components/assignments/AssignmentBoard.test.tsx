@@ -819,3 +819,19 @@ describe('Save is the primary action only when there is something valid to save 
     expect(solid()).toBe(false);
   });
 });
+
+describe('the header at narrow widths', () => {
+  it('narrows the search below 1100px and lets the counts truncate rather than wrap', async () => {
+    await act(async () => {
+      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+    });
+    const field = searchBox().closest('label')!;
+    expect(field.className).toContain('w-[160px]');
+    expect(field.className).toContain('min-[1100px]:w-[260px]');
+    const counts = [...container!.querySelectorAll('header span')].find((s) =>
+      s.textContent?.includes('active trucks'),
+    )!;
+    expect(counts.className).toContain('truncate');
+    expect(container!.querySelector('[data-view-only]')!.className).toContain('shrink-0');
+  });
+});
