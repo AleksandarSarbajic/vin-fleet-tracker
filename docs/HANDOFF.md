@@ -7612,7 +7612,18 @@ at `f8d31b1`, reported that "No phone" and "Add" do not sit on one line.
   are not measured.
 - **Baselines.** All 8 assignments PNGs will change (each has a "No phone"
   and Add); the others will not. No e2e run, no PNG touched.
-- NOT pushed, NOT deployed.
+- NOT pushed, NOT deployed; e2e verified 2026-10-22, ready to push.
+- **e2e (Alex, 2026-10-22):**
+  - `--update-snapshots=none` (run 2026-10-22T14-11-29-528Z): 8 differed,
+    by about 550 pixels each (only the Add words). The advisor compared
+    enlarged crops of the table row and the panel, before and after, and
+    confirmed Add now stands on "No phone"'s baseline.
+  - `--update-snapshots=changed` (run 2026-10-22T14-13-15-069Z): 9 passed,
+    8 re-saved, byte-identical to the reviewed images (the advisor).
+    Committed as written in `ca316f3` (each opened first: only the spec's
+    invented seed).
+  - `--repeat-each=3 --update-snapshots=none` (run
+    2026-10-22T14-13-38-898Z): 25 passed, no server errors.
 
 ## Next
 
