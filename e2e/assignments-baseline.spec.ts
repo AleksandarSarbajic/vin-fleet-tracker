@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { connect, seedUser, truncateAll } from './fixtures';
 
 /**
- * §12.129–§12.132 — the assignment board, pixel for pixel, at the six desktop
+ * §12.129–§12.132, §12.137–§12.141 — the assignment board, pixel for pixel, at the six desktop
  * widths the console's baselines use, once with the driver picker open at
  * 1024 (the narrow-desktop layout, the width the list was too narrow at), and
  * once at 1440 with changed rows and a double-booking (3am).
@@ -44,10 +44,16 @@ const BOARD: [number, string | null][] = [
   [436, 'Juno Castellanos Reyes'],
   [438, 'Kai Thorvaldsen'],
 ];
-/** On no truck: the "Drivers with no truck" panel, and first in the picker. */
+/** On no truck: the "Drivers without a truck" panel, and first in the picker. */
 const FREE = 'Lior Mbeki-Saarinen';
 /** Hand-entered drivers, so the No ELD tag is in the picture. */
 const NO_ELD = new Set(['Bram Tessaro', 'Elif Marchetti', 'Hana Petrosyan', FREE]);
+/**
+ * 3ao: two DIFFERENT drivers with one (invented) number, so every picture has
+ * the shared-phone warning on 425 and 436 and its panel (§12.138). Juno is
+ * given Gus's number.
+ */
+const SHARES_PHONE_WITH: Record<string, string> = { 'Juno Castellanos Reyes': 'Gus Halvorsen' };
 
 async function seedBoard(): Promise<void> {
   const sql = connect();
@@ -56,10 +62,14 @@ async function seedBoard(): Promise<void> {
     await seedUser(sql, process.env.E2E_USER_ID!, process.env.E2E_EMAIL!);
     const names = [...BOARD.map(([, name]) => name).filter((n): n is string => n !== null), FREE];
     const driverIds = new Map<string, string>();
+    const phones = new Map<string, string | null>();
     for (const [i, name] of names.entries()) {
       const app = NO_ELD.has(name);
+      const sharer = SHARES_PHONE_WITH[name];
       // Every third driver has no phone, so "No phone" and Add are in the picture.
-      const phone = i % 3 === 2 ? null : `70855501${String(i).padStart(2, '0')}`;
+      const phone =
+        sharer !== undefined ? phones.get(sharer)! : i % 3 === 2 ? null : `70855501${String(i).padStart(2, '0')}`;
+      phones.set(name, phone);
       const [d] = await sql<{ id: string }[]>`
         insert into drivers (name, source, samsara_driver_id, phone)
         values (${name}, ${app ? 'app' : 'samsara'}, ${app ? null : `sd-a${i}`}, ${phone})
