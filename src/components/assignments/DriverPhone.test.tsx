@@ -49,6 +49,7 @@ function render(props: {
   mayEdit?: boolean;
   onSaved?: () => void;
   truckLabel?: string;
+  shared?: { also: string; title: string };
 }) {
   act(() => {
     root.render(
@@ -60,6 +61,7 @@ function render(props: {
         lockedReason="Your role is viewer. Phone numbers need dispatcher."
         onSaved={props.onSaved ?? (() => {})}
         {...(props.truckLabel === undefined ? {} : { truckLabel: props.truckLabel })}
+        shared={props.shared}
       />,
     );
   });
@@ -94,6 +96,20 @@ describe('the driver phone control', () => {
     expect(pencil.textContent).toBe('');
     act(() => pencil.click());
     expect(input()).not.toBeNull();
+  });
+
+  it('warns after the number when another driver has it, naming who (§12.138)', () => {
+    const shared = { also: 'also 433', title: 'The same number as Ivo Example (truck 433)' };
+    render({ phone: '7085550123', shared });
+    const warning = container.querySelector('[data-shared-phone]')!;
+    expect(warning.textContent).toBe('also 433');
+    expect(warning.getAttribute('title')).toBe(shared.title);
+    expect(warning.className).toContain('text-status-risk-fg');
+    // After the number, before the pencil.
+    const kids = [...container.querySelector('[data-driver-phone]')!.children];
+    expect(kids.map((k) => k.tagName)).toEqual(['SPAN', 'SPAN', 'BUTTON']);
+    render({ phone: '7085550123' });
+    expect(container.querySelector('[data-shared-phone]')).toBeNull();
   });
 
   it('says "No phone" and offers Add when there is none', () => {

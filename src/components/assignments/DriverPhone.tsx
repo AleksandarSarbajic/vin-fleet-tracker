@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useEditingAllowed } from '@/hooks/useEditingAllowed';
 import { formatPhone, normalizePhone } from '@/lib/dial';
-import { PencilIcon } from './icons';
+import { PencilIcon, WarningIcon } from './icons';
 
 /**
  * §12.106. A driver's phone on the assignment board: read, and for a
@@ -24,6 +24,7 @@ export function DriverPhone({
   lockedReason,
   onSaved,
   truckLabel,
+  shared,
 }: {
   driverId: string;
   driverName: string;
@@ -37,6 +38,11 @@ export function DriverPhone({
    * pencil is named for them.
    */
   truckLabel?: string;
+  /**
+   * §12.138. Set when another driver has the same number: `also` is what the
+   * row says after it ("also 433"), `title` names who.
+   */
+  shared?: { also: string; title: string } | undefined;
 }) {
   const editingAllowed = useEditingAllowed();
   const [editing, setEditing] = useState(false);
@@ -55,6 +61,17 @@ export function DriverPhone({
         >
           {shown ?? 'No phone'}
         </span>
+        {shown && shared ? (
+          /* The risk ink and its icon: a thing to check, not a failure. */
+          <span
+            data-shared-phone=""
+            title={shared.title}
+            className="ml-1.5 inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-cond text-micro font-semibold uppercase tracking-[.08em] text-status-risk-fg"
+          >
+            <WarningIcon />
+            {shared.also}
+          </span>
+        ) : null}
         {editingAllowed ? (
           <button
             type="button"

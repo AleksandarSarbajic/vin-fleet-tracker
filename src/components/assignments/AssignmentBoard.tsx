@@ -22,7 +22,8 @@ import {
   type BoardFilter,
   type BoardRow,
 } from './boardView';
-import { SearchIcon } from './icons';
+import { SearchIcon, WarningIcon } from './icons';
+import { formatPhone } from '@/lib/dial';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -276,10 +277,39 @@ export function AssignmentBoard({ board, role }: Props) {
       }),
     [board.trucks, draft, driversById],
   );
+  /** §12.138: by DRIVER. A double-booked driver is one person with one phone. */
+  const sharedGroups = useMemo(() => sharedPhones(board.drivers), [board.drivers]);
   const sharedDriverIds = useMemo(
-    () => new Set([...sharedPhones(board.drivers).values()].flat().map((d) => d.id)),
-    [board.drivers],
+    () => new Set([...sharedGroups.values()].flat().map((d) => d.id)),
+    [sharedGroups],
   );
+  /** Every truck a driver is on in the draft (a double-booked one is on two). */
+  const trucksOf = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const truck of board.trucks) {
+      const driverId = draft.get(truck.id) ?? null;
+      if (driverId) map.set(driverId, [...(map.get(driverId) ?? []), label(truck)]);
+    }
+    return map;
+  }, [board.trucks, draft]);
+  /**
+   * What a driver's phone says when another driver has the same number: the
+   * other drivers' trucks ("also 433"), or the name of one on no truck.
+   */
+  const sharedNote = (driverId: string) => {
+    const group = [...sharedGroups.values()].find((g) => g.some((d) => d.id === driverId));
+    if (group === undefined) return undefined;
+    const others = group.filter((d) => d.id !== driverId);
+    return {
+      also: `also ${listed(others.flatMap((d) => trucksOf.get(d.id) ?? [d.name]))}`,
+      title: `The same number as ${listed(
+        others.map((d) => {
+          const trucks = trucksOf.get(d.id);
+          return `${d.name} (${trucks ? `truck ${listed(trucks)}` : 'no truck'})`;
+        }),
+      )}`,
+    };
+  };
   const counts = useMemo(() => filterCounts(rows, sharedDriverIds), [rows, sharedDriverIds]);
   const visible = rows.filter(
     (row) => inFilter(row, filter, sharedDriverIds) && matchesSearch(row, query),
@@ -618,6 +648,7 @@ export function AssignmentBoard({ board, role }: Props) {
                     lockedReason={phoneLockedReason}
                     onSaved={() => router.refresh()}
                     truckLabel={label(truck)}
+                    shared={sharedNote(driver.id)}
                   />
                 ) : (
                   <span />
@@ -630,8 +661,13 @@ export function AssignmentBoard({ board, role }: Props) {
           ) : null}
         </section>
 
-        {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}
-        <aside className="order-first grid grid-cols-2 gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
+        {/*
+          Beside the table, sticky: the gaps stay in view while the board
+          scrolls past them. Below 1100px, every panel in one row above the
+          table, as many equal columns as there are panels (two, or three
+          with a shared phone, §12.140).
+        */}
+        <aside className="order-first grid auto-cols-fr grid-flow-col gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
           <Panel
             title={`Drivers with no truck (${driversWithoutTruck.length})`}
             empty="Every active driver has a truck."
@@ -664,6 +700,7 @@ export function AssignmentBoard({ board, role }: Props) {
                       mayEdit={mayEdit}
                       lockedReason={phoneLockedReason}
                       onSaved={() => router.refresh()}
+                      shared={sharedNote(d.id)}
                     />
                   </span>
                   {/**
@@ -692,6 +729,46 @@ export function AssignmentBoard({ board, role }: Props) {
             items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
             inline
           />
+          {/**
+           * §12.138. Only when two different drivers have one number: each
+           * number, and under it every driver who has it, with their truck.
+           */}
+          {sharedGroups.size > 0 ? (
+            <Panel
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  <WarningIcon className="shrink-0 text-status-risk-fg" />
+                  Shared phone number
+                </span>
+              }
+              empty=""
+              items={[...sharedGroups].map(([digits, drivers]) => ({
+                key: digits,
+                node: (
+                  <span data-shared-group="" className="flex flex-col gap-0.5">
+                    <span className="tabular-nums text-status-risk-fg">
+                      {formatPhone(drivers[0]!.phone!)}
+                    </span>
+                    {drivers.map((d) => {
+                      const trucks = trucksOf.get(d.id);
+                      return (
+                        <span key={d.id} className="flex min-w-0 items-baseline gap-2.5">
+                          <span
+                            className={`shrink-0 tabular-nums ${trucks ? 'font-semibold text-text' : 'text-text-muted'}`}
+                          >
+                            {trucks ? listed(trucks) : 'no truck'}
+                          </span>
+                          <span className="min-w-0 truncate" title={d.name}>
+                            {d.name}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </span>
+                ),
+              }))}
+            />
+          ) : null}
         </aside>
       </div>
 
@@ -761,7 +838,7 @@ function Panel({
   empty,
   inline = false,
 }: {
-  title: string;
+  title: React.ReactNode;
   /**
    * Nodes, not strings — the drivers panel renders a name plus its `No ELD`
    * tag (§12.37), and a string list could only have shown the name.

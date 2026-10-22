@@ -582,3 +582,83 @@ describe('"+ Assign driver" on an empty truck (§12.139)', () => {
     expect(bodies).toEqual([{ changes: [{ truckId: 't-3', driverId: 'd-app-free' }] }]);
   });
 });
+
+describe('a shared phone, by driver (§12.138)', () => {
+  const phoneOf = (n: number) =>
+    container!
+      .querySelector(`input[aria-label="Driver for truck ${n}"]`)!
+      .closest('[class*="grid-cols"]')!
+      .querySelector('[data-driver-phone]')!;
+  const warning = (n: number) => phoneOf(n).querySelector('[data-shared-phone]');
+  const sharedPanel = () => container!.querySelector('aside [data-shared-group]');
+
+  /** Hal on 137 and Sam on 143, one number typed two ways. */
+  const sharing = () =>
+    board({
+      drivers: board().drivers.map((d) =>
+        d.id === 'd-app' ? { ...d, phone: '7085550101' } : d.id === 'd-samsara' ? { ...d, phone: '708-555-0101' } : d,
+      ),
+    });
+
+  it('warns on both drivers’ rows, each naming the other’s truck', async () => {
+    await renderBoard(sharing());
+    expect(warning(137)!.textContent).toBe('also 143');
+    expect(warning(137)!.getAttribute('title')).toBe('The same number as Samsara Sam (truck 143)');
+    expect(warning(143)!.textContent).toBe('also 137');
+    expect(warning(137)!.querySelector('svg')).not.toBeNull();
+    expect(tabCount('Shared phone')).toBe(2);
+  });
+
+  it('lists the number and each driver with their truck in its own panel', async () => {
+    await renderBoard(sharing());
+    const lines = [...sharedPanel()!.children].map((c) => c.textContent);
+    expect(lines).toEqual(['708-555-0101', '137Hand Entered Hal', '143Samsara Sam']);
+  });
+
+  it('does not call one driver on two trucks a shared phone', async () => {
+    await renderBoard(
+      board({ drivers: board().drivers.map((d) => (d.id === 'd-app' ? { ...d, phone: '7085550101' } : d)) }),
+    );
+    // Hal onto 143 as well: a double-booking, one driver, one phone.
+    await pickFor(143, 'Hand Entered Hal');
+    expect(footerText()).toContain('a driver is on trucks 137 and 143');
+    expect(warning(137)).toBeNull();
+    expect(warning(143)).toBeNull();
+    expect(sharedPanel()).toBeNull();
+    expect(tabCount('Shared phone')).toBe(0);
+  });
+
+  it('names a driver with no truck, who still shares the number', async () => {
+    await renderBoard(
+      board({
+        drivers: board().drivers.map((d) =>
+          d.id === 'd-app' ? { ...d, phone: '7085550101' } : d.id === 'd-free' ? { ...d, phone: '7085550101' } : d,
+        ),
+      }),
+    );
+    expect(warning(137)!.textContent).toBe('also Free Agent');
+    expect(warning(137)!.getAttribute('title')).toBe('The same number as Free Agent (no truck)');
+    // Free Agent's own entry in the drivers panel names Hal's truck.
+    const free = container!.querySelector('aside [data-driver-phone="d-free"] [data-shared-phone]')!;
+    expect(free.textContent).toBe('also 137');
+    expect([...sharedPanel()!.children].map((c) => c.textContent)).toEqual([
+      '708-555-0101',
+      '137Hand Entered Hal',
+      'no truckFree Agent',
+    ]);
+  });
+
+  it('follows the draft: the warning names the truck the other driver is moving to', async () => {
+    await renderBoard(
+      board({
+        trucks: [...board().trucks, EMPTY_TRUCK],
+        drivers: board().drivers.map((d) =>
+          d.id === 'd-app' ? { ...d, phone: '7085550101' } : d.id === 'd-free' ? { ...d, phone: '7085550101' } : d,
+        ),
+      }),
+    );
+    await pickFor(150, 'Free Agent');
+    expect(warning(137)!.textContent).toBe('also 150');
+    expect(warning(150)!.textContent).toBe('also 137');
+  });
+});
