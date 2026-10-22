@@ -359,19 +359,25 @@ describe('the footer’s count, and a free driver’s entry', () => {
     expect(status().className).not.toContain('text-text-secondary');
   });
 
-  it('lays a free driver out as one line below 1100px and two from 1100 up', async () => {
+  it('lays a free driver out as name and Retire, then the phone on its own line, at every width (3ao polish)', async () => {
     await act(async () => {
       root!.render(createElement(AssignmentBoard, { board: board(), role: 'admin' }));
     });
     const entry = container!.querySelector('[data-free-driver]')!;
-    // One grid row of name, phone, Retire; from 1100 up, name and Retire over the phone.
-    expect(entry.className).toContain('grid-cols-[minmax(0,1fr)_auto_auto]');
-    expect(entry.className).toContain('min-[1100px]:grid-cols-[minmax(0,1fr)_auto]');
+    expect(entry.className).toContain('grid-cols-[minmax(0,1fr)_auto]');
+    // No one-line layout below 1100 any more: no third column, no breakpoint switch.
+    expect(entry.className).not.toContain('_auto_auto]');
+    expect(entry.className).not.toContain('min-[1100px]');
     const [name, phone, retire] = [...entry.children];
     expect(name!.textContent).toContain('Unassigned Hal');
+    // A truly long name truncates; the whole of it is the title.
+    expect(name!.getAttribute('title')).toBe('Unassigned Hal');
+    expect(name!.className).toContain('row-start-1');
     expect(phone!.querySelector('[data-driver-phone]')).not.toBeNull();
-    expect(phone!.className).toContain('min-[1100px]:row-start-2');
+    expect(phone!.className).toContain('row-start-2');
+    expect(phone!.className).toContain('col-span-2');
     expect(retire!.textContent).toBe('Retire');
+    expect(retire!.className).toContain('row-start-1');
   });
 });
 
@@ -385,7 +391,7 @@ async function typeInto(input: HTMLInputElement, text: string) {
 }
 
 const searchBox = () =>
-  container!.querySelector<HTMLInputElement>('input[aria-label="Search trucks, drivers and phones"]')!;
+  container!.querySelector<HTMLInputElement>('input[aria-label="Search trucks, drivers or phones"]')!;
 const tab = (name: string) =>
   [...container!.querySelectorAll<HTMLButtonElement>('[aria-label="Filter the trucks"] button')].find((b) =>
     b.textContent?.startsWith(name),
@@ -796,11 +802,12 @@ describe('a viewer’s board (§12.141)', () => {
 describe('Save is the primary action only when there is something valid to save (§12.140)', () => {
   const solid = () => saveButton().className.includes('bg-accent');
 
-  it('is outlined and disabled at rest, solid once a row changes, outlined again on a double-booking', async () => {
+  it('is disabled at rest, solid once a row changes, disabled again on a double-booking', async () => {
     await render();
     expect(saveButton().disabled).toBe(true);
     expect(solid()).toBe(false);
-    expect(saveButton().className).toContain('text-text-muted');
+    // Drawn as a disabled Discard (3ao polish).
+    expect(saveButton().className).toContain('disabled:opacity-45');
 
     await pickFor(143, 'Unassigned Hal');
     expect(saveButton().disabled).toBe(false);
@@ -916,5 +923,71 @@ describe('the Shared phone tab always shows (Alex 2026-10-22)', () => {
     expect(container!.querySelector('[data-shared-group]')).toBeNull();
     expect(tab('Shared phone').textContent).toBe('Shared phone0');
     expect(tabCount('Shared phone')).toBe(0);
+  });
+});
+
+describe('3ao polish', () => {
+  const discardButton = () =>
+    [...container!.querySelectorAll<HTMLButtonElement>('footer button')].find((b) => b.textContent === 'Discard')!;
+
+  it('draws a disabled Save as a disabled Discard, with the real disabled attribute, at rest and when refused', async () => {
+    await render();
+    const disabledLook = (b: HTMLButtonElement) => {
+      expect(b.disabled).toBe(true);
+      expect(b.hasAttribute('disabled')).toBe(true);
+      for (const c of ['border-line-hair', 'text-text-secondary', 'disabled:opacity-45']) {
+        expect(b.className.split(/\s+/)).toContain(c);
+      }
+      expect(b.className).not.toContain('bg-accent');
+    };
+    // At rest: "No changes."
+    expect(footerText()).toContain('No changes.');
+    disabledLook(saveButton());
+    disabledLook(discardButton());
+
+    // Refused: a double-booking. Discard is live; Save is not.
+    await pickFor(143, 'Hand Entered Hal');
+    expect(footerText()).toContain('a driver is on trucks 137 and 143');
+    disabledLook(saveButton());
+    expect(discardButton().disabled).toBe(false);
+
+    // Something valid: the solid primary, enabled.
+    await pickFor(143, 'Unassigned Hal');
+    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().className).toContain('bg-accent');
+  });
+
+  it('says "Search" below 1100px and the full hint from 1100 up, never as a cut placeholder', async () => {
+    await render();
+    expect(searchBox().getAttribute('aria-label')).toBe('Search trucks, drivers or phones');
+    // The real placeholder is a space, so `:placeholder-shown` holds while the field is empty.
+    expect(searchBox().getAttribute('placeholder')).toBe(' ');
+    const short = container!.querySelector('[data-search-hint="short"]')!;
+    const long = container!.querySelector('[data-search-hint="long"]')!;
+    expect(short.textContent).toBe('Search');
+    expect(short.className).toContain('peer-placeholder-shown:inline');
+    expect(short.className).toContain('min-[1100px]:peer-placeholder-shown:hidden');
+    expect(long.textContent).toBe('Truck, driver or phone');
+    expect(long.className).toContain('min-[1100px]:peer-placeholder-shown:inline');
+    for (const hint of [short, long]) {
+      expect(hint.getAttribute('aria-hidden')).toBe('true');
+      expect(hint.className.split(/\s+/)).toContain('hidden');
+      expect(hint.className).toContain('whitespace-nowrap');
+    }
+    expect(searchBox().className).toContain('peer');
+  });
+
+  it('keeps every truck number 8px clear of the left edge, marked or not, and the header over them', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    await pickFor(143, 'Unassigned Hal');
+    for (const n of [137, 143, 150]) {
+      const row = container!
+        .querySelector(`input[aria-label="Driver for truck ${n}"]`)!
+        .closest('[class*="grid-cols"]')!;
+      expect(row.children[0]!.className).toContain('pl-2');
+    }
+    const header = container!.querySelector('[class*="sticky"][class*="grid-cols"]')!;
+    expect(header.children[0]!.textContent).toBe('Truck');
+    expect(header.children[0]!.className).toContain('pl-2');
   });
 });

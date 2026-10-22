@@ -429,7 +429,7 @@ export function AssignmentBoard({ board, role }: Props) {
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {/* The console's search field (§12.91), at the console's 260px. */}
-          <label className="flex h-8 w-[160px] items-center min-[1100px]:w-[260px] gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
+          <label className="relative flex h-8 w-[160px] items-center min-[1100px]:w-[260px] gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
             <SearchIcon className="shrink-0 text-text-mutedOnOverlay" />
             <input
               ref={searchField}
@@ -441,10 +441,32 @@ export function AssignmentBoard({ board, role }: Props) {
                   setQuery('');
                 }
               }}
-              placeholder="Truck, driver or phone"
-              aria-label="Search trucks, drivers and phones"
-              className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay"
+              /*
+               * The placeholder is drawn by the two spans after the field,
+               * so it can be "Search" in the 160px box below 1100 and the
+               * full hint in the 260px one, by CSS alone: "Truck, driver or
+               * phone" was cut to "…phon" at 1024 and 768. The real
+               * placeholder is a space, which keeps `:placeholder-shown`
+               * true while the field is empty.
+               */
+              placeholder=" "
+              aria-label="Search trucks, drivers or phones"
+              className="peer min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none"
             />
+            <span
+              aria-hidden="true"
+              data-search-hint="short"
+              className="pointer-events-none absolute left-[32px] hidden whitespace-nowrap font-sans text-[13px] text-text-mutedOnOverlay peer-placeholder-shown:inline min-[1100px]:peer-placeholder-shown:hidden"
+            >
+              Search
+            </span>
+            <span
+              aria-hidden="true"
+              data-search-hint="long"
+              className="pointer-events-none absolute left-[32px] hidden whitespace-nowrap font-sans text-[13px] text-text-mutedOnOverlay min-[1100px]:peer-placeholder-shown:inline"
+            >
+              Truck, driver or phone
+            </span>
             {query !== '' ? (
               <button
                 type="button"
@@ -534,7 +556,8 @@ export function AssignmentBoard({ board, role }: Props) {
           <div
             className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-l-[3px] border-line-hair border-l-transparent bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
           >
-            <span>Truck</span>
+            {/* 8px clear of the rows' 3px left edge, on every row, so the numbers line up. */}
+            <span className="pl-2">Truck</span>
             {/* Over the name, not the field's edge: at rest the field has no box (§12.134). */}
             <span className="pl-2.5">Driver</span>
             <span>ELD</span>
@@ -575,7 +598,7 @@ export function AssignmentBoard({ board, role }: Props) {
                 {/* A truck with no number shows its Samsara name, which can be long. */}
                 <span
                   title={label(truck)}
-                  className="truncate font-sans text-data font-bold tabular-nums text-text"
+                  className="truncate pl-2 font-sans text-data font-bold tabular-nums text-text"
                 >
                   {label(truck)}
                 </span>
@@ -716,24 +739,26 @@ export function AssignmentBoard({ board, role }: Props) {
               key: d.id,
               node: (
                 /**
-                 * §12.132. Below 1100px the panel is about 480px wide, so the
-                 * entry is one line: name, phone, Retire. It was two lines
-                 * there too, which made this panel the taller of the two and
-                 * left a 50px hole under the trucks panel stretched beside it.
-                 * From 1100 up, in the 260px column: name and Retire, then the
-                 * phone under them, as before.
+                 * At every width: name and Retire, the phone under them, then
+                 * "Assign to". Below 1100px it was one line (name, phone,
+                 * Retire, §12.135), which with three panels in the row (about
+                 * 230px each at 768, §12.140) cut a normal name to "Lior
+                 * Mb…" (3ao polish).
                  */
                 <span
                   data-free-driver=""
-                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto] min-[1100px]:gap-y-1"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1"
                 >
-                  <DriverName
-                    name={d.name}
-                    source={d.source}
-                    samsaraDriverId={d.samsaraDriverId}
-                    className="col-start-1 row-start-1 min-w-0"
-                  />
-                  <span className="col-start-2 row-start-1 min-w-0 min-[1100px]:col-span-2 min-[1100px]:col-start-1 min-[1100px]:row-start-2">
+                  {/* Only a truly long name truncates; the whole of it is the title. */}
+                  <span title={d.name} className="col-start-1 row-start-1 flex min-w-0">
+                    <DriverName
+                      name={d.name}
+                      source={d.source}
+                      samsaraDriverId={d.samsaraDriverId}
+                      className="min-w-0"
+                    />
+                  </span>
+                  <span className="col-span-2 col-start-1 row-start-2 min-w-0">
                     <DriverPhone
                       driverId={d.id}
                       driverName={d.name}
@@ -754,7 +779,7 @@ export function AssignmentBoard({ board, role }: Props) {
                       type="button"
                       onClick={() => void retire(d.id, d.name)}
                       title={`Retire ${d.name} — keeps their history, removes them from the board.`}
-                      className="col-start-3 row-start-1 -mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg min-[1100px]:col-start-2"
+                      className="col-start-2 row-start-1 -mr-1.5 inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-status-late-fg"
                     >
                       Retire
                     </button>
@@ -769,7 +794,7 @@ export function AssignmentBoard({ board, role }: Props) {
                   {mayEdit && trucksWithoutDriver.length > 0 ? (
                     <span
                       data-assign-to=""
-                      className="col-span-3 col-start-1 row-start-2 mt-1 flex flex-wrap items-center gap-1.5 min-[1100px]:col-span-2 min-[1100px]:row-start-3"
+                      className="col-span-2 col-start-1 row-start-3 mt-1 flex flex-wrap items-center gap-1.5"
                     >
                       <span className="mr-0.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
                         Assign to
@@ -914,7 +939,7 @@ export function AssignmentBoard({ board, role }: Props) {
             </button>
             {/**
              * §12.140. The solid accent only when there is something valid to
-             * save; otherwise an outlined, muted button. At 45% the accent
+             * save; otherwise disabled, and drawn exactly as a disabled Discard. At 45% the accent
              * still read as the thing to press on a board with nothing to
              * save, or with a double-booking it would refuse.
              */}
@@ -926,7 +951,8 @@ export function AssignmentBoard({ board, role }: Props) {
               className={`h-10 border px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] ${
                 savable
                   ? 'border-accent bg-accent text-text-inverse hover:border-accent-hover hover:bg-accent-hover'
-                  : 'border-line-control text-text-muted'
+                  : // Discard's own disabled look, so the two read alike (3ao polish).
+                    'border-line-hair text-text-secondary disabled:opacity-45'
               }`}
             >
               {saving ? 'Saving…' : 'Save assignments'}
