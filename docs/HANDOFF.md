@@ -7477,6 +7477,53 @@ above); `desktop-baseline` and `history-*` unchanged; Alex's window (about
 7. Trucks 128 and 135's shared number (3al question 6) will now show as a
    warning if it is still in the data. Still yours to check.
 
+**Alex's answers (2026-10-22):**
+
+1. The truck chips in "Trucks without a driver" become CLICKABLE. A click
+   opens that truck's row picker exactly as its "+ Assign driver" does:
+   scroll the row into view, focus the field, open the list. If a filter or
+   the search hides the row, the filter goes back to All and the search is
+   cleared first. A viewer's chips stay non-interactive. The accessible name
+   is "Assign a driver to truck N". This replaces 3al question 3's "no jump
+   to the row" for these chips: Alex's decision, 2026-10-22.
+2. Keep view only as built: no edit controls, and the "View only" badge with
+   the reason. This departs from §12.14 on this page only, by Alex's
+   decision. The advisor's 3ao prompt asked for hidden controls without
+   noting §12.14; the build flagged it (question 2) and Alex confirmed it.
+3. "also" plus the other driver's name, when that driver has no truck: keep.
+4. Drivers with no truck count toward a shared phone: keep.
+5. Three panels in one row below 1100px when a phone is shared: keep.
+6. The "Shared phone" filter tab ALWAYS shows, with its count, even at 0.
+7. Trucks 128 and 135 sharing a phone: data, Alex's to check. No code.
+
+**The follow-up** (`51dc177`, code and tests; one docs commit):
+
+- **Answer 1.** `AssignmentBoard.tsx`: the chips are buttons for whoever may
+  assign, and inert spans for a viewer, as before. A click calls
+  `openPickerFor`, which, when the row is hidden, sets the tab to All and
+  clears the search in a `flushSync`, so the row and its picker exist, then
+  calls the same `open()` as "+ Assign driver". `DriverSelect.tsx`'s
+  `open()` now also scrolls the field into view, centred so the sticky
+  column headers do not cover it. The edit modal does not use the handle.
+- **Answer 6.** No code change: 3ao already rendered all five tabs. A test
+  now pins Shared phone at 0.
+- **Tests** 3,727 → 3,732, 204 files. `AssignmentBoard.test.tsx` +5:
+  - a chip scrolls, focuses and opens, reaching the same `open()` and list
+    as "+ Assign driver";
+  - a hidden row is brought back (All, search cleared) and opened;
+  - a visible row's tab is left alone;
+  - a viewer's chips have no button role and open nothing;
+  - the Shared phone tab reads 0.
+
+  "Chips that do nothing" now checks the chip's ground and text.
+- **Not verifiable here** (happy-dom has no layout): the scroll itself (the
+  test checks `scrollIntoView` is called on the field) and the chip's hover
+  border.
+- **Baselines.** The 8 assignments PNGs are still expected to change; the
+  others are not. In the pictures the chips look as before at rest (same
+  classes, plus hover and disabled states). Still NOT pushed, NOT deployed;
+  e2e not run.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

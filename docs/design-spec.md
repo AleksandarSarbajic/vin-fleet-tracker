@@ -10073,6 +10073,8 @@ stand.
 
 ## 12.137 The assignment board's search and filter tabs
 
+**Changed 2026-10-22** (Alex): the Shared phone tab always shows, with its count, even at 0 (as built).
+
 From Alex's approved Claude Design (HANDOFF 3ao). **View only**: neither
 touches the draft or the save request.
 
@@ -10135,6 +10137,8 @@ failure, and the board cannot tell a shared family phone from a typing
 mistake. Nothing is sent to anyone.
 
 ## 12.139 Assigning from the board: "+ Assign driver" and "Assign to"
+
+**Changed 2026-10-22** (Alex): the chips open that truck's picker; viewers' chips stay inert.
 
 Both change the **draft only**. Nothing is sent until Save, and the save
 request is the same as for a pick in the row's picker.
