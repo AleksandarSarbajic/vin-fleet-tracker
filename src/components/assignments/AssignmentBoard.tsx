@@ -6,11 +6,22 @@ import { useRouter } from 'next/navigation';
 import type { Role } from '@/lib/roles';
 import { can } from '@/lib/roles';
 import { CONFLICT_HEADLINE, type AssignmentConflict } from '@/lib/assignments';
+import { isTypingTarget } from '@/lib/keymap';
 import type { AssignmentBoard as Board } from '@/server/assignments';
 import { DriverSelect } from './DriverSelect';
 import { DriverName } from '@/components/DriverName';
 import { MergePrompt } from './MergePrompt';
 import { DriverPhone } from './DriverPhone';
+import {
+  BOARD_FILTERS,
+  filterCounts,
+  inFilter,
+  matchesSearch,
+  sharedPhones,
+  type BoardFilter,
+  type BoardRow,
+} from './boardView';
+import { SearchIcon } from './icons';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -119,6 +130,11 @@ export function AssignmentBoard({ board, role }: Props) {
     edited.current = new Set();
   }, []);
 
+  /**
+   * Every truck, in the draft. The save below reads `board.trucks` and never
+   * this list's filtered view: a changed row the search or a tab hides is
+   * still counted in the footer and still saved (§12.137).
+   */
   const changed = useMemo(
     () => board.trucks.filter((t) => (draft.get(t.id) ?? null) !== t.driverId),
     [board.trucks, draft],
@@ -235,6 +251,49 @@ export function AssignmentBoard({ board, role }: Props) {
     () => new Map(board.drivers.map((d) => [d.id, d])),
     [board.drivers],
   );
+
+  /**
+   * §12.137. The search and the tabs only choose which rows are on screen.
+   * They are worked out from the draft (what the dispatcher sees), and
+   * neither touches the draft or the save.
+   */
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<BoardFilter>('all');
+  const searchField = useRef<HTMLInputElement>(null);
+  const rows = useMemo<BoardRow[]>(
+    () =>
+      board.trucks.map((truck) => {
+        const driverId = draft.get(truck.id) ?? null;
+        return {
+          truck,
+          label: label(truck),
+          driverId,
+          driver: driverId === null ? null : (driversById.get(driverId) ?? null),
+        };
+      }),
+    [board.trucks, draft, driversById],
+  );
+  const sharedDriverIds = useMemo(
+    () => new Set([...sharedPhones(board.drivers).values()].flat().map((d) => d.id)),
+    [board.drivers],
+  );
+  const counts = useMemo(() => filterCounts(rows, sharedDriverIds), [rows, sharedDriverIds]);
+  const visible = rows.filter(
+    (row) => inFilter(row, filter, sharedDriverIds) && matchesSearch(row, query),
+  );
+  const narrowed = filter !== 'all' || query.trim() !== '';
+
+  /** "/" focuses the search, as on the console (§8.1), unless typing elsewhere. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === '/' && !isTypingTarget(event.target)) {
+        event.preventDefault();
+        searchField.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const phoneLockedReason = `Your role is ${role}. Phone numbers need dispatcher.`;
   const canRetire = can(role, 'admin');
 
@@ -294,13 +353,82 @@ export function AssignmentBoard({ board, role }: Props) {
             {board.trucks.length} active trucks · {board.drivers.length} active drivers
           </span>
         </div>
-        <Link
-          href="/"
-          className="border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
-        >
-          Back to console
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* The console's search field (§12.91), at the console's 260px. */}
+          <label className="flex h-8 w-[260px] items-center gap-2 border border-line-rule bg-surface-base px-[10px] focus-within:border-accent">
+            <SearchIcon className="shrink-0 text-text-mutedOnOverlay" />
+            <input
+              ref={searchField}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && query !== '') {
+                  e.stopPropagation();
+                  setQuery('');
+                }
+              }}
+              placeholder="Truck, driver or phone"
+              aria-label="Search trucks, drivers and phones"
+              className="min-w-0 flex-1 bg-transparent font-sans text-[13px] text-text outline-none placeholder:text-text-mutedOnOverlay"
+            />
+            {query !== '' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  searchField.current?.focus();
+                }}
+                aria-label="Clear search"
+                className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center border border-line-hair text-text-secondary"
+              >
+                ×
+              </button>
+            ) : (
+              <span className="shrink-0 whitespace-nowrap border border-line-control px-[5px] py-px font-mono text-[11px] font-medium text-text-secondary">
+                /
+              </span>
+            )}
+          </label>
+          <Link
+            href="/"
+            className="border border-line-hair px-3 py-1.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+          >
+            Back to console
+          </Link>
+        </div>
       </header>
+
+      {/*
+        §12.137. The tabs, each with its count in the draft, in the console's
+        chip style (§12.91). One tab at a time; the search narrows within it.
+      */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line-hair px-5 py-2.5 max-md:hidden">
+        <div role="group" aria-label="Filter the trucks" className="flex flex-wrap items-center gap-[6px]">
+          {BOARD_FILTERS.map(({ key, label: name }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={filter === key}
+              onClick={() => setFilter(key)}
+              className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${
+                filter === key
+                  ? 'border-accent bg-surface-overlay text-text'
+                  : 'border-line-control text-text-secondary hover:bg-row-hover'
+              }`}
+            >
+              {name}
+              <span className="font-sans text-[12px] font-semibold leading-none tabular-nums">
+                {counts[key]}
+              </span>
+            </button>
+          ))}
+        </div>
+        {narrowed ? (
+          <span data-shown-count="" className="text-small tabular-nums text-text-muted">
+            {visible.length} of {rows.length} trucks
+          </span>
+        ) : null}
+      </div>
 
       {/*
         No top padding here: a sticky child sticks inside the scroll region's
@@ -338,12 +466,10 @@ export function AssignmentBoard({ board, role }: Props) {
             <span>Currently</span>
           </div>
 
-          {board.trucks.map((truck) => {
-            const value = draft.get(truck.id) ?? null;
+          {/* §12.106: a row's `driver` is the picker's, so the phone shown is theirs, not the truck's. */}
+          {visible.map(({ truck, driverId: value, driver }) => {
             const isChanged = value !== truck.driverId;
             const isConflicted = conflictedTrucks.has(truck.id);
-            /** §12.106. The phone of the driver in the picker — the number is theirs, not the truck's. */
-            const driver = value === null ? null : (driversById.get(value) ?? null);
             return (
               <div
                 key={truck.id}
@@ -451,6 +577,9 @@ export function AssignmentBoard({ board, role }: Props) {
               </div>
             );
           })}
+          {visible.length === 0 ? (
+            <p className="px-2.5 py-6 text-body text-text-muted">No trucks match.</p>
+          ) : null}
         </section>
 
         {/* Beside the table, sticky: the gaps stay in view while the board scrolls past them. */}

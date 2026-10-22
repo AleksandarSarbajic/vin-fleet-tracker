@@ -358,3 +358,143 @@ describe('the footer’s count, and a free driver’s entry', () => {
     expect(retire!.textContent).toBe('Retire');
   });
 });
+
+/** Types into a React-controlled input the way a keyboard would. */
+async function typeInto(input: HTMLInputElement, text: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+const searchBox = () =>
+  container!.querySelector<HTMLInputElement>('input[aria-label="Search trucks, drivers and phones"]')!;
+const tab = (name: string) =>
+  [...container!.querySelectorAll<HTMLButtonElement>('[aria-label="Filter the trucks"] button')].find((b) =>
+    b.textContent?.startsWith(name),
+  )!;
+const tabCount = (name: string) => Number(tab(name).textContent!.slice(name.length));
+const shownTrucks = () =>
+  [...container!.querySelectorAll<HTMLInputElement>('input[role="combobox"]')].map((i) =>
+    i.getAttribute('aria-label')!.replace('Driver for truck ', ''),
+  );
+const saveButton = () =>
+  [...container!.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+    b.textContent?.includes('Save assignments'),
+  )!;
+
+/** Answers the board's save with a success, and keeps every request body it was sent. */
+function captureSaves(): unknown[] {
+  const bodies: unknown[] = [];
+  globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url) === '/api/assignments') {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ assigned: 1, cleared: 0, unchanged: 0 }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ candidates: [] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  return bodies;
+}
+
+describe('the search (§12.137)', () => {
+  const withEmpty = () => board({ trucks: [...board().trucks, EMPTY_TRUCK] });
+
+  it('narrows the rows by truck number, driver name or phone digits', async () => {
+    await renderBoard(
+      board({
+        drivers: [
+          { ...APP_DRIVER, phone: '7085550101' },
+          ...board().drivers.slice(1),
+        ],
+      }),
+    );
+    await typeInto(searchBox(), '143');
+    expect(shownTrucks()).toEqual(['143']);
+    await typeInto(searchBox(), 'samsara s');
+    expect(shownTrucks()).toEqual(['143']);
+    await typeInto(searchBox(), '(708) 555-0101');
+    expect(shownTrucks()).toEqual(['137']);
+    expect(container!.querySelector('[data-shown-count]')!.textContent).toBe('1 of 2 trucks');
+  });
+
+  it('says so when nothing matches, and Escape brings every row back', async () => {
+    await renderBoard(withEmpty());
+    await typeInto(searchBox(), 'nobody by this name');
+    expect(shownTrucks()).toEqual([]);
+    expect(container!.textContent).toContain('No trucks match.');
+    await act(async () => {
+      searchBox().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(shownTrucks()).toEqual(['137', '143', '150']);
+  });
+
+  it('is focused by "/", unless the dispatcher is typing in another field', async () => {
+    await render();
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(searchBox());
+
+    const picker = container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 137"]')!;
+    await act(async () => picker.focus());
+    await act(async () => {
+      picker.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(picker);
+  });
+});
+
+describe('the filter tabs (§12.137)', () => {
+  const withEmpty = () => board({ trucks: [...board().trucks, EMPTY_TRUCK] });
+
+  it('counts each tab from the draft, and follows an edit', async () => {
+    await renderBoard(withEmpty());
+    expect(['All', 'No driver', 'No phone', 'No ELD', 'Shared phone'].map(tabCount)).toEqual([3, 1, 2, 1, 0]);
+    await pickFor(150, 'Unassigned Hal');
+    // 150 now has a driver with no phone and no ELD.
+    expect(['All', 'No driver', 'No phone', 'No ELD', 'Shared phone'].map(tabCount)).toEqual([3, 0, 3, 2, 0]);
+  });
+
+  it('shows only its rows, one tab at a time', async () => {
+    await renderBoard(withEmpty());
+    await act(async () => tab('No driver').click());
+    expect(tab('No driver').getAttribute('aria-pressed')).toBe('true');
+    expect(tab('All').getAttribute('aria-pressed')).toBe('false');
+    expect(shownTrucks()).toEqual(['150']);
+    await act(async () => tab('No ELD').click());
+    expect(shownTrucks()).toEqual(['137']);
+    await act(async () => tab('All').click());
+    expect(shownTrucks()).toEqual(['137', '143', '150']);
+  });
+
+  it('combines with the search', async () => {
+    await renderBoard(withEmpty());
+    await act(async () => tab('No phone').click());
+    expect(shownTrucks()).toEqual(['137', '143']);
+    await typeInto(searchBox(), 'hal');
+    expect(shownTrucks()).toEqual(['137']);
+    await typeInto(searchBox(), '150');
+    expect(shownTrucks()).toEqual([]);
+  });
+
+  it('still counts and saves a changed row it hides, and sends what it would have sent anyway', async () => {
+    const bodies = captureSaves();
+    await renderBoard(withEmpty());
+    await pickFor(143, 'Unassigned Hal');
+    await act(async () => saveButton().click());
+
+    await renderBoard({ ...withEmpty(), drivers: [...withEmpty().drivers] });
+    await pickFor(143, 'Unassigned Hal');
+    // 143 is hidden by both the tab and the search; the footer still has it.
+    await act(async () => tab('No driver').click());
+    await typeInto(searchBox(), '150');
+    expect(shownTrucks()).toEqual(['150']);
+    expect(footerText()).toContain('1 row changed');
+    await act(async () => saveButton().click());
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[1]).toEqual({ changes: [{ truckId: 't-2', driverId: 'd-app-free' }] });
+  });
+});
