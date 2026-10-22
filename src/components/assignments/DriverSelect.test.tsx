@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { createElement } from 'react';
+import { createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DriverSelect, listMaxWidth } from './DriverSelect';
+import { DriverSelect, listMaxWidth, type DriverSelectHandle } from './DriverSelect';
 import type { BoardDriver } from '@/server/assignments';
 
 /**
@@ -263,6 +263,34 @@ describe('the closed input carries the No ELD tag (§12.37)', () => {
     render({ value: 'd-2' });
     act(() => (tag()!.parentElement as HTMLElement).click());
     expect(list()).not.toBeNull();
+  });
+});
+
+describe('the board’s two props; the modal passes neither (§12.139, §12.140)', () => {
+  const tag = () => container!.querySelector('[title*="not in Samsara"]');
+
+  it('leaves the field’s tag out with fieldTag={false}, and keeps it in the open list', () => {
+    render({ value: 'd-2', fieldTag: false });
+    expect(tag()).toBeNull();
+    act(() => input().click());
+    expect(list()!.querySelector('[title*="not in Samsara"]')).not.toBeNull();
+  });
+
+  it('opens and focuses through its handle, as a click on the field does', () => {
+    const handle = createRef<DriverSelectHandle>();
+    render({ ref: handle });
+    expect(list()).toBeNull();
+    act(() => handle.current!.open());
+    expect(document.activeElement).toBe(input());
+    expect(list()).not.toBeNull();
+  });
+
+  it('does nothing through its handle while disabled', () => {
+    const handle = createRef<DriverSelectHandle>();
+    render({ ref: handle, disabled: true, disabledReason: 'Your role is viewer.' });
+    act(() => handle.current!.open());
+    expect(list()).toBeNull();
+    expect(document.activeElement).not.toBe(input());
   });
 });
 

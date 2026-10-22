@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useEditingAllowed } from '@/hooks/useEditingAllowed';
 import { formatPhone, normalizePhone } from '@/lib/dial';
+import { PencilIcon } from './icons';
 
 /**
  * §12.106. A driver's phone on the assignment board: read, and for a
@@ -22,6 +23,7 @@ export function DriverPhone({
   mayEdit,
   lockedReason,
   onSaved,
+  truckLabel,
 }: {
   driverId: string;
   driverName: string;
@@ -29,6 +31,12 @@ export function DriverPhone({
   mayEdit: boolean;
   lockedReason: string;
   onSaved: () => void;
+  /**
+   * §12.140. The row's truck, which names the pencil: "Edit phone for truck
+   * 412". Absent in the drivers panel, where the driver has no truck and the
+   * pencil is named for them.
+   */
+  truckLabel?: string;
 }) {
   const editingAllowed = useEditingAllowed();
   const [editing, setEditing] = useState(false);
@@ -52,16 +60,25 @@ export function DriverPhone({
             type="button"
             disabled={!mayEdit}
             title={mayEdit ? undefined : lockedReason}
-            aria-label={`${shown ? 'Change' : 'Add'} the phone for ${driverName}`}
+            aria-label={
+              shown
+                ? `Edit phone for ${truckLabel === undefined ? driverName : `truck ${truckLabel}`}`
+                : `Add the phone for ${driverName}`
+            }
             onClick={() => {
               setTyped(shown ?? '');
               setError(null);
               setEditing(true);
             }}
-            // A 28px-tall target for a 10.5px word; the type is unchanged.
-            className="inline-flex h-7 shrink-0 items-center px-1.5 font-cond text-micro uppercase tracking-[.08em] text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted"
+            /*
+             * §12.140. A number is edited with a pencil, as in the design; a
+             * missing one keeps its word, Add. Either is a 28px-tall target.
+             */
+            className={`inline-flex h-7 shrink-0 items-center justify-center text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted ${
+              shown ? 'w-7 hover:bg-row-hover' : 'px-1.5 font-cond text-micro uppercase tracking-[.08em]'
+            }`}
           >
-            {shown ? 'Edit' : 'Add'}
+            {shown ? <PencilIcon /> : 'Add'}
           </button>
         ) : null}
       </span>

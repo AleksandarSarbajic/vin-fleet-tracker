@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { maskPhone } from '../src/lib/dial';
-import { DRIVER_NAMES, IDS, connect, resetWorld } from './fixtures';
+import { DRIVER_NAMES, IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 
 /**
@@ -34,6 +34,8 @@ async function stored(): Promise<{ phone: string | null; audits: { before: unkno
 }
 
 const anaPhone = (page: Page) => page.locator(`[data-driver-phone="${IDS.driverAna}"]`);
+/** §12.140: Ana is on the Chicago truck, so her row's pencil is named for it. */
+const EDIT_ANA = `Edit phone for truck ${TRUCK_NUMBERS.chicago}`;
 /** Every place a whole number can be on screen: a shown number, and the field it is typed in. */
 const numbers = (page: Page) => [
   page.locator('[data-driver-phone-value]').filter({ hasText: /\d/ }),
@@ -65,7 +67,7 @@ test('a dispatcher adds, changes and clears a number; refusals say why and save 
   await shot(page, info, '3-saved');
 
   // Refused: too short, and not a US number. Nothing is written.
-  await anaPhone(page).getByRole('button', { name: `Change the phone for ${DRIVER_NAMES.ana}` }).click();
+  await anaPhone(page).getByRole('button', { name: EDIT_ANA }).click();
   const field = anaPhone(page).getByLabel(`Phone for ${DRIVER_NAMES.ana}`);
   await field.fill('555-0199');
   await anaPhone(page).getByRole('button', { name: 'Save' }).click();
@@ -83,8 +85,8 @@ test('a dispatcher adds, changes and clears a number; refusals say why and save 
   // Changed, then cleared with an empty value.
   await field.fill('+1 708 555 0456');
   await anaPhone(page).getByRole('button', { name: 'Save' }).click();
-  await expect(anaPhone(page).getByRole('button', { name: /^Change the phone/ })).toBeVisible();
-  await anaPhone(page).getByRole('button', { name: `Change the phone for ${DRIVER_NAMES.ana}` }).click();
+  await expect(anaPhone(page).getByRole('button', { name: EDIT_ANA })).toBeVisible();
+  await anaPhone(page).getByRole('button', { name: EDIT_ANA }).click();
   await anaPhone(page).getByLabel(`Phone for ${DRIVER_NAMES.ana}`).fill('');
   await anaPhone(page).getByRole('button', { name: 'Save' }).click();
   await expect(anaPhone(page)).toContainText('No phone');

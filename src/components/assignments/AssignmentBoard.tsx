@@ -8,8 +8,9 @@ import { can } from '@/lib/roles';
 import { CONFLICT_HEADLINE, type AssignmentConflict } from '@/lib/assignments';
 import { isTypingTarget } from '@/lib/keymap';
 import type { AssignmentBoard as Board } from '@/server/assignments';
-import { DriverSelect } from './DriverSelect';
-import { DriverName } from '@/components/DriverName';
+import { DriverSelect, type DriverSelectHandle } from './DriverSelect';
+import { DriverName, NoEldTag } from '@/components/DriverName';
+import { isEldBacked } from '@/lib/driver';
 import { MergePrompt } from './MergePrompt';
 import { DriverPhone } from './DriverPhone';
 import {
@@ -44,21 +45,21 @@ const label = (t: Board['trucks'][number]) =>
   t.truckNumber === null ? t.samsaraName : String(t.truckNumber);
 
 /**
- * The table's columns, shared by its header and every row (§12.131, §12.135).
+ * The table's columns, shared by its header and every row (§12.131, §12.135,
+ * §12.140).
  *
- * Truck, driver, the driver's phone, Currently. The phone sits beside the
- * driver it belongs to (§12.106: the number is the picker's driver's): with
- * Currently between them, empty on every row at rest (§12.130), the eye
- * crossed 240px of nothing from a name to its number. Currently is last and
- * takes the slack. Minimums unchanged: 64 + 240 + 220 + 150 + 3 gaps = 722,
- * which closes at 768. The phone keeps 220px for its inline editor (field,
- * Save, Cancel).
+ * Truck, driver, ELD, the driver's phone. The ELD column holds the `No ELD`
+ * tag that sat inside the picker's field (§12.129); "was" moved under the
+ * driver's name, so Currently is gone until it shows live status (3ap). The
+ * phone takes the slack, which its "also 433" warning (§12.138) can use.
+ * Minimums: 64 + 240 + 64 + 220 + 3 gaps = 636, plus the rows' 3px edge;
+ * the phone keeps 220px for its inline editor (field, Save, Cancel).
  *
- * 3al settled the widths on screen: a flexible picker ran 845px wide at
- * 1920, so it is capped at 360; and from 1100px up the whole table is capped
- * at 1000px (the section's `max-w`) so its rows stop where their content does.
+ * 3al settled the picker on screen: flexible, it ran 845px wide at 1920, so
+ * it is capped at 360; and from 1100px up the whole table is capped at
+ * 1000px (the section's `max-w`) so its rows stop where their content does.
  */
-const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_minmax(220px,260px)_minmax(150px,1fr)]';
+const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,1fr)]';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
@@ -260,6 +261,8 @@ export function AssignmentBoard({ board, role }: Props) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<BoardFilter>('all');
   const searchField = useRef<HTMLInputElement>(null);
+  /** Each row's picker, so its "+ Assign driver" can open it (§12.139). */
+  const pickers = useRef(new Map<string, DriverSelectHandle>());
   const rows = useMemo<BoardRow[]>(
     () =>
       board.trucks.map((truck) => {
@@ -436,10 +439,11 @@ export function AssignmentBoard({ board, role }: Props) {
         the column headers. The 20px is the sticky things' own `pt-5` instead.
 
         §12.132. Below 1100px the two panels sit above the table, side by side,
-        instead of beside it. The four columns need 722px at their minimums,
-        and beside the 260px aside that leaves nothing for the picker under
-        about 1042px; at 1100 it gets about 270px. The DOM order (table, then
-        panels) is kept, so the keyboard reaches the pickers first.
+        instead of beside it. The four columns needed 722px at their minimums
+        when 1100 was chosen, which beside the 260px aside left nothing for
+        the picker under about 1042px. Since §12.140 they need 639, so at 1100
+        the picker is at its 360 cap. The DOM order (table, then panels) is
+        kept, so the keyboard reaches the pickers first.
       */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
         {/*
@@ -457,36 +461,44 @@ export function AssignmentBoard({ board, role }: Props) {
           </div>
           {/* Sticky, so a dispatcher 15 rows down still knows which name is the picker's. */}
           <div
-            className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-line-hair bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
+            className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-l-[3px] border-line-hair border-l-transparent bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
           >
             <span>Truck</span>
             {/* Over the name, not the field's edge: at rest the field has no box (§12.134). */}
             <span className="pl-2.5">Driver</span>
+            <span>ELD</span>
             <span>Driver&rsquo;s phone</span>
-            <span>Currently</span>
           </div>
 
           {/* §12.106: a row's `driver` is the picker's, so the phone shown is theirs, not the truck's. */}
           {visible.map(({ truck, driverId: value, driver }) => {
             const isChanged = value !== truck.driverId;
             const isConflicted = conflictedTrucks.has(truck.id);
+            /** §12.139: an empty truck offers "+ Assign driver", to whoever may assign. */
+            const assignable = value === null && mayEdit;
             return (
               <div
                 key={truck.id}
                 /**
                  * §12.134. The console's 44px row (`row-comfortable`, §14.4),
-                 * at least: a row with the phone editor open grows to fit it.
+                 * at least: a row with the phone editor open, or a "was"
+                 * under its driver, grows to fit.
+                 *
+                 * §12.140. A 3px left edge says the row's state before its
+                 * ground does: conflict (the late ink), changed (the accent,
+                 * the selection's colour), empty (muted ink). The conflict
+                 * wins, then the change, as the grounds do.
                  */
-                className={`grid ${COLUMNS} min-h-row-comfortable items-center gap-x-4 border-b border-line-soft py-1 ${
+                className={`grid ${COLUMNS} min-h-row-comfortable items-center gap-x-4 border-b border-l-[3px] border-line-soft py-1 ${
                   isConflicted
-                    ? 'bg-status-late-bg'
+                    ? 'border-l-status-late-fg bg-status-late-bg'
                     : isChanged
-                      ? 'bg-row-selected'
+                      ? 'border-l-accent bg-row-selected'
                       : // The console's own ground for a truck with nobody on it
                         // (design 4a): marginally sunken, inert, not urgent.
                         value === null
-                        ? 'bg-row-unassigned'
-                        : ''
+                        ? 'border-l-text-muted bg-row-unassigned'
+                        : 'border-l-transparent'
                 }`}
               >
                 {/* A truck with no number shows its Samsara name, which can be long. */}
@@ -496,42 +508,106 @@ export function AssignmentBoard({ board, role }: Props) {
                 >
                   {label(truck)}
                 </span>
-                <DriverSelect
-                  drivers={board.drivers}
-                  value={value}
-                  claimedBy={claimedBy}
-                  truckLabel={label(truck)}
-                  disabled={!mayEdit || saving}
-                  disabledReason={mayEdit ? undefined : lockedReason}
-                  onChange={(driverId) => editDraft(truck.id, driverId)}
-                  quiet
-                  size="row"
-                  /**
-                   * §12.37: the board refreshes BEFORE the select points at
-                   * the new driver, so `board.drivers` already contains them.
-                   * Only passed where a refresh is possible — a picker that
-                   * offered "+ Add driver" and then could not show the result
-                   * would look broken.
-                   */
-                  /**
-                   * §12.38: only when the truck is EMPTY. On an occupied
-                   * truck the driver is only created and selected here; the
-                   * change of driver is then a row in this board's draft like
-                   * any other, and goes out with Save in the batch. There is
-                   * no two-sided confirm on this screen: the board's batch
-                   * save is its own confirmation (HANDOFF 3ai, answered
-                   * 2026-10-19). §9.10's confirm and its preview token are
-                   * the edit modal's.
-                   */
-                  assignToTruckId={truck.driverId === null ? truck.id : null}
-                  onDriverCreated={(_driverId, _name, assignedTruckId) => {
-                    // Assigned server-side, so pull the new truth in. The
-                    // draft rebases rather than resetting, so the selection
-                    // and every other pending edit survive.
-                    if (assignedTruckId !== null) clearEdits();
-                    router.refresh();
-                  }}
-                />
+                <div className="flex min-w-0 flex-col justify-center">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {/*
+                      An empty truck's field is as wide as "Unassigned", with
+                      its button beside it; while the field has focus (open,
+                      or being typed in) it takes the column and the button
+                      steps aside. CSS only, so the picker keeps every rule.
+                    */}
+                    <div
+                      className={
+                        assignable
+                          ? 'peer w-[104px] shrink-0 focus-within:w-auto focus-within:min-w-0 focus-within:flex-1'
+                          : 'min-w-0 flex-1'
+                      }
+                    >
+                      <DriverSelect
+                        ref={(handle) => {
+                          if (handle) pickers.current.set(truck.id, handle);
+                          else pickers.current.delete(truck.id);
+                        }}
+                        drivers={board.drivers}
+                        value={value}
+                        claimedBy={claimedBy}
+                        truckLabel={label(truck)}
+                        disabled={!mayEdit || saving}
+                        disabledReason={mayEdit ? undefined : lockedReason}
+                        onChange={(driverId) => editDraft(truck.id, driverId)}
+                        quiet
+                        size="row"
+                        // §12.140: the tag has its own column on the board.
+                        fieldTag={false}
+                        /**
+                         * §12.37: the board refreshes BEFORE the select points at
+                         * the new driver, so `board.drivers` already contains them.
+                         * Only passed where a refresh is possible — a picker that
+                         * offered "+ Add driver" and then could not show the result
+                         * would look broken.
+                         */
+                        /**
+                         * §12.38: only when the truck is EMPTY. On an occupied
+                         * truck the driver is only created and selected here; the
+                         * change of driver is then a row in this board's draft like
+                         * any other, and goes out with Save in the batch. There is
+                         * no two-sided confirm on this screen: the board's batch
+                         * save is its own confirmation (HANDOFF 3ai, answered
+                         * 2026-10-19). §9.10's confirm and its preview token are
+                         * the edit modal's.
+                         */
+                        assignToTruckId={truck.driverId === null ? truck.id : null}
+                        onDriverCreated={(_driverId, _name, assignedTruckId) => {
+                          // Assigned server-side, so pull the new truth in. The
+                          // draft rebases rather than resetting, so the selection
+                          // and every other pending edit survive.
+                          if (assignedTruckId !== null) clearEdits();
+                          router.refresh();
+                        }}
+                      />
+                    </div>
+                    {assignable ? (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        // §12.139: this row's picker, opened as a click on its field opens it.
+                        onClick={() => pickers.current.get(truck.id)?.open()}
+                        className="inline-flex h-7 shrink-0 items-center whitespace-nowrap border border-line-control px-2 font-cond text-micro font-semibold uppercase tracking-[.08em] text-accent hover:border-accent hover:bg-row-hover disabled:opacity-45 peer-focus-within:hidden"
+                      >
+                        + Assign driver
+                      </button>
+                    ) : null}
+                  </div>
+                  {/**
+                   * §12.130, moved under the name (§12.140). Only on a row
+                   * changed in the draft: what the truck had before, struck
+                   * through, as §9.10 writes the losing side — including its
+                   * "—" for a truck that had nobody. In line with the name
+                   * above it, which sits 10px into its field.
+                   */}
+                  {isChanged ? (
+                    <span
+                      data-was=""
+                      className="flex min-w-0 items-baseline gap-1.5 pl-2.5 text-small text-text-muted"
+                    >
+                      <span className="shrink-0">was</span>
+                      {/* §12.133: the name struck, not its No ELD tag. */}
+                      <span className="min-w-0 truncate">
+                        <DriverName
+                          name={truck.driverName}
+                          source={truck.driverSource}
+                          samsaraDriverId={truck.driverSamsaraId}
+                          fallback="—"
+                          struck
+                        />
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+                {/* §12.140: the tag the picker's field carried (§12.129), in a column of its own. */}
+                <span data-eld="" className="flex">
+                  {driver !== null && !isEldBacked(driver) ? <NoEldTag /> : null}
+                </span>
                 {driver ? (
                   <DriverPhone
                     key={driver.id}
@@ -541,36 +617,8 @@ export function AssignmentBoard({ board, role }: Props) {
                     mayEdit={mayEdit}
                     lockedReason={phoneLockedReason}
                     onSaved={() => router.refresh()}
+                    truckLabel={label(truck)}
                   />
-                ) : (
-                  <span />
-                )}
-                {/**
-                 * §12.130. Only on a row changed in the draft: what the truck
-                 * had before, struck through, as §9.10 writes the losing side
-                 * — including its "—" for a truck that had nobody. On an
-                 * unchanged row this repeated the picker's name, so every
-                 * assigned row said one name twice, and an empty truck said
-                 * "Unassigned" twice (§12.18). The row's No ELD tag is beside
-                 * the picker now (§12.37's table), so nothing is lost.
-                 */}
-                {isChanged ? (
-                  <span
-                    data-was=""
-                    className="flex min-w-0 items-baseline gap-1.5 text-body text-text-muted"
-                  >
-                    <span className="shrink-0">was</span>
-                    {/* §12.133: the name struck, not its No ELD tag. */}
-                    <span className="min-w-0 truncate">
-                      <DriverName
-                        name={truck.driverName}
-                        source={truck.driverSource}
-                        samsaraDriverId={truck.driverSamsaraId}
-                        fallback="—"
-                        struck
-                      />
-                    </span>
-                  </span>
                 ) : (
                   <span />
                 )}

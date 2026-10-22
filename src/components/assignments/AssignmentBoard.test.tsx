@@ -241,14 +241,27 @@ describe('Currently shows only on a changed row (§12.130)', () => {
   });
 });
 
-describe('the row’s No ELD tag is beside the picker (§12.37)', () => {
+describe('the row’s No ELD tag is in its own column, not the field (§12.140)', () => {
+  const rowOf = (n: number) =>
+    container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.closest('[class*="grid-cols"]')!;
   const pickerBox = (n: number) =>
     container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.parentElement!;
 
-  it('tags the hand-entered driver’s picker and not the Samsara one’s', async () => {
+  it('tags the hand-entered driver in the ELD column and not the Samsara one', async () => {
     await render();
-    expect(pickerBox(137).querySelector('[title*="not in Samsara"]')).not.toBeNull();
-    expect(pickerBox(143).querySelector('[title*="not in Samsara"]')).toBeNull();
+    expect(rowOf(137).querySelector('[data-eld] [title*="not in Samsara"]')).not.toBeNull();
+    expect(rowOf(143).querySelector('[data-eld] [title*="not in Samsara"]')).toBeNull();
+  });
+
+  it('no longer puts the tag inside the picker’s field', async () => {
+    await render();
+    expect(pickerBox(137).querySelector('[title*="not in Samsara"]')).toBeNull();
+  });
+
+  it('follows the draft: the tag moves with the driver', async () => {
+    await render();
+    await pickFor(143, 'Unassigned Hal');
+    expect(rowOf(143).querySelector('[data-eld] [title*="not in Samsara"]')).not.toBeNull();
   });
 });
 
@@ -286,29 +299,32 @@ describe('empty trucks and the two panels', () => {
   });
 });
 
-describe('the column order (§12.135)', () => {
-  it('heads the columns Truck, Driver, Driver’s phone, Currently', async () => {
+describe('the column order (§12.135, §12.140)', () => {
+  it('heads the columns Truck, Driver, ELD, Driver’s phone', async () => {
     await render();
     const header = container!.querySelector('[class*="sticky"][class*="grid-cols"]')!;
     expect([...header.children].map((c) => c.textContent)).toEqual([
       'Truck',
       'Driver',
+      'ELD',
       'Driver’s phone',
-      'Currently',
     ]);
   });
 
-  it('puts a row’s phone before its "was", beside the driver it belongs to', async () => {
+  it('puts a row’s "was" under its driver’s name, and the phone after the ELD column', async () => {
     await render();
     await pickFor(143, 'Unassigned Hal');
     const row = container!
       .querySelector('input[aria-label="Driver for truck 143"]')!
       .closest('[class*="grid-cols"]')!;
     const cells = [...row.children];
-    const phone = cells.findIndex((c) => c.matches('[data-driver-phone]'));
-    const wasCell = cells.findIndex((c) => c.matches('[data-was]'));
-    expect(phone).toBe(2);
-    expect(wasCell).toBe(3);
+    const driverCell = cells[1]!;
+    expect(driverCell.querySelector('input[role="combobox"]')).not.toBeNull();
+    // Under the field, not beside it: the field's own line comes first.
+    expect(driverCell.lastElementChild!.matches('[data-was]')).toBe(true);
+    expect(cells[2]!.matches('[data-eld]')).toBe(true);
+    expect(cells[3]!.matches('[data-driver-phone]')).toBe(true);
+    expect(cells).toHaveLength(4);
   });
 });
 
@@ -496,5 +512,73 @@ describe('the filter tabs (§12.137)', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(bodies[0]);
     expect(bodies[1]).toEqual({ changes: [{ truckId: 't-2', driverId: 'd-app-free' }] });
+  });
+});
+
+describe('a row’s state on its left edge (§12.140)', () => {
+  const rowOf = (n: number) =>
+    container!.querySelector(`input[aria-label="Driver for truck ${n}"]`)!.closest('[class*="grid-cols"]')!;
+
+  it('marks an empty truck muted, a changed row in the accent, a conflict in the late ink', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    expect(rowOf(150).className).toContain('border-l-text-muted');
+    expect(rowOf(137).className).toContain('border-l-transparent');
+    await pickFor(150, 'Unassigned Hal');
+    expect(rowOf(150).className).toContain('border-l-accent');
+    // Hal onto 143 too: 137 and 143 are double-booked, and the conflict wins over the change.
+    await pickFor(143, 'Hand Entered Hal');
+    expect(rowOf(143).className).toContain('border-l-status-late-fg');
+    expect(rowOf(143).className).not.toContain('border-l-accent');
+    expect(rowOf(137).className).toContain('border-l-status-late-fg');
+  });
+});
+
+describe('"+ Assign driver" on an empty truck (§12.139)', () => {
+  const assignButtons = () =>
+    [...container!.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (b) => b.textContent === '+ Assign driver',
+    );
+  const optionNames = () =>
+    [...container!.querySelectorAll('[role="option"]')].map((o) => o.textContent);
+
+  it('is offered on the empty truck only, beside "Unassigned"', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    expect(assignButtons()).toHaveLength(1);
+    const row = assignButtons()[0]!.closest('[class*="grid-cols"]')!;
+    expect(row.querySelector('input[aria-label="Driver for truck 150"]')!.getAttribute('placeholder')).toBe(
+      'Unassigned',
+    );
+  });
+
+  it('opens that row’s picker, focused, with the list a click on the field shows', async () => {
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    const field = container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 150"]')!;
+    await act(async () => field.click());
+    const byClick = optionNames();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(container!.querySelector('[role="listbox"]')).toBeNull();
+
+    await act(async () => assignButtons()[0]!.click());
+    expect(document.activeElement).toBe(field);
+    expect(field.getAttribute('aria-expanded')).toBe('true');
+    expect(container!.querySelectorAll('[role="listbox"]')).toHaveLength(1);
+    expect(optionNames()).toEqual(byClick);
+    expect(optionNames()[0]).toContain('no truck');
+  });
+
+  it('puts the picked driver in the draft only, as a pick in the field does', async () => {
+    const bodies = captureSaves();
+    await renderBoard(board({ trucks: [...board().trucks, EMPTY_TRUCK] }));
+    await act(async () => assignButtons()[0]!.click());
+    const option = [...container!.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((o) =>
+      o.textContent?.includes('Unassigned Hal'),
+    )!;
+    await act(async () => option.click());
+    expect(bodies).toHaveLength(0);
+    expect(footerText()).toContain('1 row changed');
+    await act(async () => saveButton().click());
+    expect(bodies).toEqual([{ changes: [{ truckId: 't-3', driverId: 'd-app-free' }] }]);
   });
 });

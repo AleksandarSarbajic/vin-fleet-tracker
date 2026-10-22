@@ -14,6 +14,14 @@ const STROKE = {
   'aria-hidden': true,
 } as const;
 
+export function PencilIcon({ className }: { className?: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" {...STROKE} className={className}>
+      <path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ className }: { className?: string }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" {...STROKE} className={className}>

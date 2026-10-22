@@ -44,7 +44,12 @@ afterEach(() => {
   window.matchMedia = realMatchMedia;
 });
 
-function render(props: { phone: string | null; mayEdit?: boolean; onSaved?: () => void }) {
+function render(props: {
+  phone: string | null;
+  mayEdit?: boolean;
+  onSaved?: () => void;
+  truckLabel?: string;
+}) {
   act(() => {
     root.render(
       <DriverPhone
@@ -54,6 +59,7 @@ function render(props: { phone: string | null; mayEdit?: boolean; onSaved?: () =
         mayEdit={props.mayEdit ?? true}
         lockedReason="Your role is viewer. Phone numbers need dispatcher."
         onSaved={props.onSaved ?? (() => {})}
+        {...(props.truckLabel === undefined ? {} : { truckLabel: props.truckLabel })}
       />,
     );
   });
@@ -78,7 +84,16 @@ describe('the driver phone control', () => {
     render({ phone: '7085550123' });
     const shown = container.querySelector('[data-driver-phone-value]')!.textContent;
     expect(shown === '708-555-0123').toBe(true);
-    expect(button(/Change the phone/)).toBeDefined();
+    expect(button(/^Edit phone for Ana Petrovic$/)).toBeDefined();
+  });
+
+  it('edits a number with a pencil named for the row’s truck (§12.140)', () => {
+    render({ phone: '7085550123', truckLabel: '412' });
+    const pencil = button(/^Edit phone for truck 412$/)!;
+    expect(pencil.querySelector('svg')).not.toBeNull();
+    expect(pencil.textContent).toBe('');
+    act(() => pencil.click());
+    expect(input()).not.toBeNull();
   });
 
   it('says "No phone" and offers Add when there is none', () => {
@@ -127,7 +142,7 @@ describe('the driver phone control', () => {
 
   it('a blank value is sent as a clear', async () => {
     render({ phone: '7085550123' });
-    act(() => button(/Change the phone/)!.click());
+    act(() => button(/^Edit phone for/)!.click());
     type('');
     await act(async () => button(/^Save$/)!.click());
     const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)) as {

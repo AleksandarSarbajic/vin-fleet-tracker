@@ -1,6 +1,15 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import type { BoardDriver } from '@/server/assignments';
 import { isEldBacked } from '@/lib/driver';
 import { NoEldTag } from '@/components/DriverName';
@@ -95,6 +104,22 @@ interface Props {
    * 44px `row-comfortable`. The modal keeps the 36px default.
    */
   size?: 'default' | 'row';
+  /**
+   * §12.140. Whether the closed field carries the driver's `No ELD` tag at
+   * its right end (§12.129). The board passes false: it has an ELD column
+   * for the tag. The edit modal does not pass it.
+   */
+  fieldTag?: boolean;
+  /**
+   * §12.139. The board's "+ Assign driver" opens this picker through it,
+   * exactly as a click on the field would.
+   */
+  ref?: Ref<DriverSelectHandle>;
+}
+
+export interface DriverSelectHandle {
+  /** Focuses the field and opens the list; nothing when the field is disabled. */
+  open: () => void;
 }
 
 /** Field height, the list's offset under it, and the tag's box, per size. */
@@ -116,6 +141,8 @@ export function DriverSelect({
   assignToTruckId = null,
   quiet = false,
   size = 'default',
+  fieldTag = true,
+  ref,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
@@ -154,8 +181,19 @@ export function DriverSelect({
    * the row's tag came from the Currently column, which now shows only on a
    * changed row (§12.130). Hidden while open: the field then holds a search.
    */
-  const tagged = selected !== null && !open && !isEldBacked(selected);
+  const tagged = fieldTag && selected !== null && !open && !isEldBacked(selected);
   const field = useRef<HTMLInputElement>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      open: () => {
+        if (disabled) return;
+        field.current?.focus();
+        setOpen(true);
+      },
+    }),
+    [disabled],
+  );
   /** Quiet, unless open (the box shows where the search is) or locked for a viewer. */
   const boxless = quiet && !open && !(disabled && disabledReason !== undefined);
 
