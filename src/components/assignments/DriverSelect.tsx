@@ -188,6 +188,8 @@ export function DriverSelect({
     () => ({
       open: () => {
         if (disabled) return;
+        // Centred, so a row reached from the panels is clear of the sticky column headers.
+        field.current?.scrollIntoView?.({ block: 'center' });
         field.current?.focus();
         setOpen(true);
       },

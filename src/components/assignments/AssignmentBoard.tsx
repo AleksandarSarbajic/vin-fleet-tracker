@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Role } from '@/lib/roles';
@@ -318,6 +319,22 @@ export function AssignmentBoard({ board, role }: Props) {
     (row) => inFilter(row, filter, sharedDriverIds) && matchesSearch(row, query),
   );
   const narrowed = filter !== 'all' || query.trim() !== '';
+
+  /**
+   * A truck's picker, opened from outside its row (the no-driver chips,
+   * §12.139). A row the tab or search hides is not rendered and has no
+   * picker, so the view goes back to All with no search first, rendered at
+   * once, and then the same `open()` "+ Assign driver" calls.
+   */
+  const openPickerFor = (truckId: string) => {
+    if (!visible.some((row) => row.truck.id === truckId)) {
+      flushSync(() => {
+        setFilter('all');
+        setQuery('');
+      });
+    }
+    pickers.current.get(truckId)?.open();
+  };
 
   /** "/" focuses the search, as on the console (§8.1), unless typing elsewhere. */
   useEffect(() => {
@@ -783,13 +800,27 @@ export function AssignmentBoard({ board, role }: Props) {
               key: t.id,
               node: (
                 /**
-                 * A chip, on the empty rows' own ground, and not a button: a
-                 * click does nothing (Alex, 3al question 3: no jump to the
-                 * row). "+ Assign driver" on the row is the way in.
+                 * A chip, on the empty rows' own ground. §12.139, changed by
+                 * Alex on 2026-10-22 (it replaces 3al question 3's "no jump
+                 * to the row" for these chips): a click opens that truck's
+                 * picker as its "+ Assign driver" does. A viewer has no
+                 * picker to open, so their chip stays inert.
                  */
-                <span className="inline-flex h-7 min-w-[44px] items-center justify-center border border-line-soft bg-row-unassigned px-2">
-                  {label(t)}
-                </span>
+                mayEdit ? (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    aria-label={`Assign a driver to truck ${label(t)}`}
+                    onClick={() => openPickerFor(t.id)}
+                    className="inline-flex h-7 min-w-[44px] items-center justify-center border border-line-soft bg-row-unassigned px-2 hover:border-accent hover:text-text disabled:opacity-45"
+                  >
+                    {label(t)}
+                  </button>
+                ) : (
+                  <span className="inline-flex h-7 min-w-[44px] items-center justify-center border border-line-soft bg-row-unassigned px-2">
+                    {label(t)}
+                  </span>
+                )
               ),
             }))}
             inline

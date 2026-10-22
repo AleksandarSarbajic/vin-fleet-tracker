@@ -732,11 +732,11 @@ describe('the panels, and "Assign to" (§12.139, §12.140)', () => {
     expect(bodies[0]).toEqual({ changes: [{ truckId: 't-3', driverId: 'd-app-free' }] });
   });
 
-  it('lists the trucks without a driver as chips that do nothing', async () => {
+  it('lists the trucks without a driver as chips on the empty rows’ ground', async () => {
     await renderBoard(withEmpty());
-    const trucks = panels()[1]!;
-    expect(trucks.querySelectorAll('button')).toHaveLength(0);
-    expect(trucks.querySelector('li > span')!.className).toContain('bg-row-unassigned');
+    const chip = panels()[1]!.querySelector('li > *')!;
+    expect(chip.className).toContain('bg-row-unassigned');
+    expect(chip.textContent).toBe('150');
   });
 });
 
@@ -833,5 +833,88 @@ describe('the header at narrow widths', () => {
     )!;
     expect(counts.className).toContain('truncate');
     expect(container!.querySelector('[data-view-only]')!.className).toContain('shrink-0');
+  });
+});
+
+describe('a truck chip opens that truck’s picker (§12.139, Alex 2026-10-22)', () => {
+  const withEmpty = () => board({ trucks: [...board().trucks, EMPTY_TRUCK] });
+  const chip = () =>
+    container!.querySelector<HTMLElement>('aside button[aria-label="Assign a driver to truck 150"]');
+  const field150 = () =>
+    container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 150"]');
+  const scrolled = vi.fn();
+  const realScroll = HTMLElement.prototype.scrollIntoView;
+
+  beforeEach(() => {
+    scrolled.mockReset();
+    HTMLElement.prototype.scrollIntoView = scrolled;
+  });
+  afterEach(() => {
+    HTMLElement.prototype.scrollIntoView = realScroll;
+  });
+
+  it('scrolls the row into view, focuses its field and opens its list, as "+ Assign driver" does', async () => {
+    await renderBoard(withEmpty());
+    await act(async () => chip()!.click());
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(scrolled.mock.contexts[0]).toBe(field150());
+    expect(document.activeElement).toBe(field150());
+    expect(field150()!.getAttribute('aria-expanded')).toBe('true');
+    const byChip = [...container!.querySelectorAll('[role="option"]')].map((o) => o.textContent);
+
+    // The row's own button reaches the same open(): the same scroll, the same list.
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    const assign = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent === '+ Assign driver',
+    )!;
+    await act(async () => assign.click());
+    expect(scrolled).toHaveBeenCalledTimes(2);
+    expect([...container!.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(byChip);
+  });
+
+  it('brings a hidden row back first: the tab to All, the search cleared', async () => {
+    await renderBoard(withEmpty());
+    await act(async () => tab('No phone').click());
+    await typeInto(searchBox(), 'hal');
+    expect(field150()).toBeNull();
+
+    await act(async () => chip()!.click());
+    expect(tab('All').getAttribute('aria-pressed')).toBe('true');
+    expect(searchBox().value).toBe('');
+    expect(shownTrucks()).toEqual(['137', '143', '150']);
+    expect(document.activeElement).toBe(field150());
+    expect(field150()!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('leaves a visible row’s view alone', async () => {
+    await renderBoard(withEmpty());
+    await act(async () => tab('No driver').click());
+    await act(async () => chip()!.click());
+    expect(tab('No driver').getAttribute('aria-pressed')).toBe('true');
+    expect(field150()!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('stays inert for a viewer: no button, and a click opens nothing', async () => {
+    await act(async () => {
+      root!.render(createElement(AssignmentBoard, { board: withEmpty(), role: 'viewer' }));
+    });
+    const trucks = container!.querySelectorAll('aside > div')[1]!;
+    expect(trucks.querySelectorAll('button, [role="button"]')).toHaveLength(0);
+    const inert = trucks.querySelector<HTMLElement>('li > span')!;
+    expect(inert.textContent).toBe('150');
+    await act(async () => inert.click());
+    expect(container!.querySelector('[role="listbox"]')).toBeNull();
+    expect(scrolled).not.toHaveBeenCalled();
+  });
+});
+
+describe('the Shared phone tab always shows (Alex 2026-10-22)', () => {
+  it('renders with 0 when no number is shared', async () => {
+    await render();
+    expect(container!.querySelector('[data-shared-group]')).toBeNull();
+    expect(tab('Shared phone').textContent).toBe('Shared phone0');
+    expect(tabCount('Shared phone')).toBe(0);
   });
 });
