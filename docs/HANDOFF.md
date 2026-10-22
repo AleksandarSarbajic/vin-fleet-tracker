@@ -7592,6 +7592,28 @@ Still NOT pushed, NOT deployed.
 - Not shown by any baseline: Save's solid look on a valid, savable change.
   Alex checks it live after the deploy.
 
+**Fix (2026-10-22): No phone and Add on one line.** Alex, on the live page
+at `f8d31b1`, reported that "No phone" and "Add" do not sit on one line.
+
+- **Cause.** `DriverPhone.tsx`'s phone line was `flex items-center`.
+  Centring a `text-body` span beside a 28px `inline-flex` button with
+  `font-cond text-micro uppercase` puts the two boxes' middles level, not
+  their text, so ADD stood visibly higher. It showed in the table rows and
+  in the "Drivers without a truck" panel (same component).
+- **Fix** (`50efcbd`). With no number the line is `items-baseline`. Add's
+  word, centred inside its unchanged `h-7` target, then stands on "No
+  phone"'s baseline. With a number the line stays `items-center`, so the
+  pencil (an icon, no text baseline) stays centred on the number, and
+  "also N" is as before. Only `DriverPhone.tsx` changed; the panel needed
+  nothing else.
+- **Tests** 3,735 → 3,736: one `DriverPhone.test.tsx` test pins the
+  classes (`items-baseline` without a number, `items-center` with one, the
+  28px targets). happy-dom does not lay out, so the baselines themselves
+  are not measured.
+- **Baselines.** All 8 assignments PNGs will change (each has a "No phone"
+  and Add); the others will not. No e2e run, no PNG touched.
+- NOT pushed, NOT deployed.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
