@@ -7280,6 +7280,203 @@ driver" form in Night desk (step 2's answer 1).
   2's answer 5).
 - Backlog: the confirm's "To" driver No ELD tag (3am step 1, answer 7).
 
+### Phase 3ao: the assignment page from Alex's Claude Design, part 1 (2026-10-22)
+
+From the advisor's brief. Part 1 of 2: everything the page can do with the
+data it already has. Live status and position in "Currently" is part 2
+(3ap) and is not built here. **NOT pushed, NOT deployed.** No server, API,
+migration or worker change. No new dependency, font, colour or token. The
+save request is unchanged.
+
+**The design reference.** Alex's approved Claude Design,
+https://claude.ai/artifact/8EqEuAvNDTYrVHjpGYqUe1. Invented data only
+(trucks 401–438, 555-01xx numbers), in the console's own style. Read as
+data and unpacked locally for its markup; no hex value was copied from it.
+The lesson of 3an applied: existing tokens, type and the console's own
+chip and search styles.
+
+**Commits** (each passed `npm run check` in the pre-commit hook):
+
+- `a660720`: search and filter tabs (`boardView.ts`, pure, with its tests);
+- `a3e4af7`: columns and row states (ELD column, "was" under the name, left
+  edges, "+ Assign driver", the pencil);
+- `35510e7`: a shared phone, by driver (row warning, third panel);
+- `7ddd5a6`: the panels and "Assign to";
+- `c1ebba8`: a viewer's board says VIEW ONLY;
+- `95bd704`: Save is the primary action only when it can save;
+- `2afa90e`: the baseline seed shares one phone (written, not run);
+- `acad7df`: the header fits at 768 (an estimate, below);
+- one docs commit: this section and design-spec §12.137–§12.141.
+
+**What was built, per item** (`src/components/assignments/`; lines as of
+`acad7df`):
+
+1. **Header.** Title and counts as before; on the right the search
+   (`AssignmentBoard.tsx:415`), "Truck, driver or phone" with a `/` cap,
+   in the console's search-field classes. It matches a truck's number, the
+   draft driver's name, or the phone's digits with punctuation ignored
+   (`boardView.ts:90–98`). `/` focuses it unless typing in another field
+   (`:323–332`, the console's `isTypingTarget`); Escape clears. Below 1100px
+   the box is 160px without its cap (commit `acad7df`).
+2. **Tabs** (`:458–488`): All · No driver · No phone · No ELD · Shared
+   phone, counted from the draft (`boardView.ts:50–85`), in the console's
+   chip style. Tab and search combine; "N of M trucks" while either
+   narrows; "No trucks match." (`:683`). The save still reads every truck,
+   so a hidden changed row is counted and saved.
+3. **Columns** (`COLUMNS`, `:63`): Truck · Driver · ELD · Driver's phone.
+   - ELD (`:662`) is the `NoEldTag`. The picker's field no longer carries it
+     on the board: `DriverSelect` `fieldTag` (`DriverSelect.tsx:112`,
+     default true for the modal).
+   - "was" under the name (`:644`), struck via `DriverName` `struck`, or
+     "was —".
+   - Left edge (`:546–556`): late ink on conflict, accent on changed, muted
+     on empty.
+   - "+ Assign driver" (`:623–633`) opens that row's picker through
+     `DriverSelect`'s new handle (`ref`, `open()`, `DriverSelect.tsx:186`).
+     The empty field is 104px beside it and takes the column while focused
+     (`peer-focus-within`).
+   - Pencil "Edit phone for truck N" (`DriverPhone.tsx:75–98`); "No phone"
+     and Add as before.
+   - Shared phone: icon and "also 433" after the number
+     (`DriverPhone.tsx:64–74`).
+   - Conflict as before, plus its edge; the footer names the trucks as
+     before.
+4. **Panels** (`:693–837`): "Drivers without a truck" and "Trucks without a
+   driver" with counts. Under each free driver, "Assign to" and a button
+   per truck empty in the draft (`:752`), which calls `editDraft`, the
+   same call a pick makes. The trucks are non-interactive chips (3al
+   question 3). "Shared phone number" only when there is one (`:801–836`).
+   Below 1100px all panels in one row above the table (`grid-flow-col
+   auto-cols-fr`).
+5. **Footer**: as before, fixed; Save solid accent only when savable
+   (`:184`, `:885–902`), outlined and muted otherwise.
+6. **View only** (`:397–411`): a "View only" badge with the reason as its
+   title. No "+ Assign driver", "Assign to", pencil, Add or Retire; the
+   pickers stay locked; search and tabs work. `DriverPhone` lost its unused
+   `lockedReason`.
+
+**The shared-phone rule, and why** (§12.138). Shared means two or more
+DIFFERENT active drivers have the number, by digits. It is grouped by
+driver (`boardView.ts:40–48`), never by row. One driver on two trucks is a
+double-booking: one person, one phone, already named by the footer. The
+mock counted rows and flagged that case ("also 404/410", tab 2 → 4). Not
+reproduced; a test pins it.
+
+**How the edit modal and other pages are shown unchanged.**
+
+- `git diff 9fd86f7 --stat` touches only `src/components/assignments/*` and
+  two e2e specs.
+- Outside the page, only the modal's `LoadStrip` imports `DriverSelect`. It
+  passes neither new prop: `fieldTag` defaults to true, and
+  `useImperativeHandle` with no ref does nothing, so its markup is the same.
+- `DriverName`, `NoEldTag`, `ReassignConfirm` and every console file are
+  untouched.
+- The save block (`fetch('/api/assignments', … changes: changed.map(…))`)
+  has no diff line.
+- A test pins the modal's defaults (the field's tag kept, no handle
+  needed).
+
+**Tests.** 203 files / 3,682 → 204 / 3,727 (+45):
+
+- `boardView.test.ts`, new, 11: search, tabs and counts, the shared rule
+  including a double-booking.
+- `AssignmentBoard.test.tsx`, 21 → 50: search, "/", tabs from the draft,
+  combined, a hidden changed row counted and saved with the same payload;
+  ELD column, "was" under the name, edges; "+ Assign driver" opens that
+  row's picker with the same list and saves as a pick; shared by driver
+  (both rows, the panel, a free driver, a double-booking with no warning,
+  following the draft); panels, "Assign to" draft only with a payload
+  equal to a pick, chips do nothing; view only; Save's look; header at
+  narrow widths.
+- `DriverSelect.test.tsx`, 32 → 35: `fieldTag={false}`, the handle opens,
+  the handle does nothing while disabled.
+- `DriverPhone.test.tsx`, 7 → 9: the pencil named for the truck, the
+  shared warning; the viewer test now expects no control.
+
+**What the test DOM cannot prove** (happy-dom draws nothing):
+
+- any width, wrap or truncation: the four columns at 768–1920, three panels
+  in one row at 768, the 104px empty field and the list opening from it;
+- the header at 768: the 330 + 300px split is an estimate, not a
+  measurement, so `acad7df` is a guess the 768 baseline checks;
+- the button stepping aside when the field has focus, and that a click on
+  it is not lost to that (the tests call `open()` through a click event,
+  not a real pointer);
+- the 3px edges and the risk ink drawing;
+- sticky headers and panels, and Save's look on screen.
+
+Compiling the app's Tailwind confirmed every new class is generated and
+that the left-edge colours come after `border-line-soft`. No local render
+was made this phase.
+
+**e2e** (written, NOT run; no PNG created or updated):
+
+- `e2e/assignments-baseline.spec.ts`: Juno (436) is seeded with Gus's (425)
+  invented number, so the warning and its panel are in every shot.
+- `e2e/driver-phone.spec.ts`: Ana's row pencil is "Edit phone for truck
+  101" (was "Change the phone for Ana Petrovic"). The viewer test now
+  expects no phone button and the badge with its reason (was: Add disabled
+  with "…Phone numbers need dispatcher.").
+
+**Baselines expected:**
+
+| PNGs | Change? | Why |
+|---|---|---|
+| `assignments-768`, `-1024`, `-1280`, `-1440`, `-1680`, `-1920` | yes | search, tabs, columns, edges, "+ Assign driver", pencils, shared warning, panels with counts, "Assign to", chips, the third panel, Save outlined |
+| `assignments-picker-open-1024` | yes | the same, the empty field 104px wide while closed |
+| `assignments-changed-1440` | yes | "was" under the names, the edges, Save outlined (a double-booking) |
+| `desktop-baseline` (all) | no | the modal's picker renders as before; nothing else on the console changed |
+| `history-*`, `history-phone-*` | no | untouched |
+
+**Alex's commands** (hosted sign-in; the advisor looks at the diffs first):
+
+```
+npm run e2e -- assignments-baseline --update-snapshots=none
+npm run e2e -- assignments-baseline --update-snapshots=changed
+npm run e2e -- assignments-baseline --update-snapshots=none --repeat-each=3
+npm run e2e -- dispatch driver-phone driver-picker assignments-baseline --update-snapshots=none
+npm run e2e -- desktop-baseline history-baseline history-phone-baseline --update-snapshots=none
+```
+
+**Deferred:**
+
+- "Currently" with live status and position: 3ap.
+- Truck chips stay non-interactive per 3al question 3 (question 1 below).
+- Also not built from the mock: retiring as a draft with Undo ("Retires on
+  save"), and a phone change shown as "was <old number>". Today both save
+  at once (MUST NOT CHANGE), so building them would change behaviour.
+
+**Found wrong or left out in the design:**
+
+1. The shared-phone warning on a double-booking (above).
+2. The truck chips as buttons, against 3al question 3.
+3. In view only, the mock drops the footer. Kept as before (Save disabled
+   with its reason), since the brief keeps the footer.
+
+**Unverified:** every picture until Alex's run; the header at 768 (see
+above); `desktop-baseline` and `history-*` unchanged; Alex's window (about
+1000 CSS px).
+
+**Questions for Alex:**
+
+1. The trucks in "Trucks without a driver" are chips that do nothing (3al
+   question 3). A bordered chip can look clickable. Keep them, or have a
+   click open that row's picker, as "+ Assign driver" does?
+2. View only hides the controls (the design) instead of disabling them with
+   a reason (§12.14, still the rule on the console and in the modal). The
+   badge says why once. Confirm for this page?
+3. A driver who shares a number with someone on no truck reads "also"
+   followed by that driver's name, since there is no truck to name. Fine?
+4. Drivers on no truck count toward a shared number (they are on the
+   board). Or only drivers on a truck?
+5. With a shared number, below 1100px three panels share the row, about
+   230px each at 768, and a free driver's name truncates sooner. Fine, or
+   put the shared panel on its own line?
+6. The Shared phone tab shows with 0 when there is none (the design hides
+   it). Keep it always?
+7. Trucks 128 and 135's shared number (3al question 6) will now show as a
+   warning if it is still in the data. Still yours to check.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"

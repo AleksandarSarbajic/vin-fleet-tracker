@@ -10071,6 +10071,137 @@ unchanged. Whether the console follows is decided after a week of use.
 Behaviour is unchanged: every rule of §12.129–§12.135 and the save request
 stand.
 
+## 12.137 The assignment board's search and filter tabs
+
+From Alex's approved Claude Design (HANDOFF 3ao). **View only**: neither
+touches the draft or the save request.
+
+**Search**, in the header at the right ("Truck, driver or phone", with a
+`/` cap). It matches:
+
+- a truck's number (or Samsara name);
+- the draft driver's name, any part, any case;
+- the digits of the draft driver's phone, with the query's punctuation and
+  a leading US 1 ignored.
+
+`/` focuses it unless the dispatcher is typing in another field (the
+console's guard, `isTypingTarget`). Escape clears it. Below 1100px the box
+is 160px without its cap; from 1100 up, 260px, as the console's.
+
+**Tabs**, under the header: All · No driver · No phone · No ELD · Shared
+phone, each with its count. One tab at a time, in the console's chip style
+(§12.91), `aria-pressed`.
+
+- The counts and the filtering use the **draft**, what is on screen: a
+  driver picked into an empty truck leaves No driver at once.
+- No driver is a truck with nobody in the draft. No phone and No ELD are a
+  truck whose draft driver has no number, or no ELD (§12.35). Shared phone
+  is §12.138's.
+- The tab and the search combine. While either narrows the list, "N of M
+  trucks" stands beside the tabs; a list with no match says "No trucks
+  match."
+- **A changed row the tab or search hides is still counted in the footer
+  and still saved.** The save reads every truck, never the filtered view.
+
+Shared phone is always shown, with 0 when there is none (the design hides
+it then); a row of tabs that keeps its shape was the least surprising
+choice (HANDOFF 3ao, question 6).
+
+## 12.138 A shared phone is two different drivers, not two rows
+
+**The rule.** A number is shared when two or more DIFFERENT active drivers
+on the board have it, compared by digits (punctuation and a leading US 1
+ignored). Drivers on no truck count: the board lists them too.
+
+**Why by driver.** One driver on two trucks (a double-booking) is one person
+with one phone. Counting rows would call every double-booking a shared phone
+and raise two warnings for what the footer already names. The design mock
+did exactly that (its "changes" frame showed "also 404/410" for one driver
+on two trucks, the tab going from 2 to 4); it is not reproduced.
+
+**What it shows.**
+
+- On each such driver's phone, after the number: the warning icon and
+  "also" and the other drivers' trucks in the draft ("also 433"), in the
+  risk ink. A driver with no truck is named instead ("also Ivo Example").
+  The title names everyone: "The same number as Ivo Example (truck 433)".
+- The same on a free driver's phone in the drivers panel.
+- A third panel, "Shared phone number", only when there is one: each
+  number, and under it every driver who has it, with their truck in the
+  draft (or "no truck").
+
+The risk ink, not the late ink: a shared number is a thing to check, not a
+failure, and the board cannot tell a shared family phone from a typing
+mistake. Nothing is sent to anyone.
+
+## 12.139 Assigning from the board: "+ Assign driver" and "Assign to"
+
+Both change the **draft only**. Nothing is sent until Save, and the save
+request is the same as for a pick in the row's picker.
+
+- **"+ Assign driver"**, beside "Unassigned" on a truck with nobody in the
+  draft, opens THAT row's picker: focused and open, the same list and rules
+  as a click on the field (free drivers first with "no truck", the 40-match
+  cap, "Unassigned — clear this truck", "+ Add … as a new driver"). The
+  picker exposes `open()` through a handle; the modal does not use it.
+  While the field has focus it takes the column and the button steps aside
+  (CSS, `peer-focus-within`).
+- **"Assign to"**, under each driver in "Drivers without a truck": one
+  button per truck that is empty in the draft. A click is the same
+  `editDraft(truck, driver)` a pick makes. The driver then leaves the panel,
+  and the truck its chip.
+- **The trucks in "Trucks without a driver"** are chips on the empty rows'
+  ground and **do nothing** (Alex, 3al question 3: no jump to the row). The
+  design draws them as buttons that open the row's picker; not built
+  (HANDOFF 3ao, question 1).
+
+## 12.140 The board's columns, row edges and panels (Claude Design, part 1)
+
+**Columns**: Truck · Driver · ELD · Driver's phone, as
+`64px minmax(240px,360px) 64px minmax(220px,1fr)`. Currently is gone until
+it shows live status and position (3ap).
+
+- **ELD**: `NoEldTag` for a driver with no ELD. The picker's field no longer
+  carries the tag on the board (`DriverSelect` `fieldTag={false}`; the edit
+  modal keeps it, §12.129).
+- **Driver**: the quiet picker (§12.134). On a changed row, "was" and the
+  saved driver, struck (§12.133), or "was —", now UNDER the name in small
+  muted type (it was the Currently column, §12.130).
+- **Phone**: the number, then a pencil named "Edit phone for truck N" (in
+  the drivers panel, "Edit phone for" the driver). "No phone" and Add as
+  before.
+- **Left edge**, 3px: the late ink on a conflict, the accent on a changed
+  row, muted ink on an empty truck; the conflict wins, then the change.
+  Grounds unchanged.
+
+**Panels**: "Drivers without a truck" and "Trucks without a driver", each
+with its count at the title's right end, and §12.138's third. From 1100px
+beside the table, sticky, 260px; below it, all of them in one row above the
+table, as many equal columns as there are panels.
+
+**Save** is the solid accent only when there is something valid to save
+(changes, no double-booking, a role that may save); otherwise outlined and
+muted. It was the accent at 45% when disabled, which still read as the
+thing to press.
+
+**Not changed**: the save request, the picker's rules and keyboard, the
+merge prompt, the phone editor and its refusals, Retire, the below-768
+message, the reassignment confirm in the edit modal. Existing tokens and
+type only.
+
+## 12.141 A viewer's board says VIEW ONLY
+
+A viewer sees a "View only" badge (lock icon) beside the counts; its title
+is the reason ("Your role is viewer. Assignments need dispatcher."). The
+board then offers no "+ Assign driver", "Assign to", pencil, Add or Retire.
+The pickers stay locked, boxed, with the reason as before. The search and
+the tabs work.
+
+**This departs from §12.14** ("disabled with a tooltip naming the reason —
+never hidden"), on this page only, as the approved design does. The badge
+says why once, in place of a tooltip on each control. The console and the
+edit modal keep §12.14. The routes refuse a viewer as before.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
