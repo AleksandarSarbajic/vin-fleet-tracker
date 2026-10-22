@@ -7524,6 +7524,47 @@ above); `desktop-baseline` and `history-*` unchanged; Alex's window (about
   classes, plus hover and disabled states). Still NOT pushed, NOT deployed;
   e2e not run.
 
+**Polish (2026-10-22).** Four visual fixes, found in the advisor's review of
+Alex's e2e run 2026-10-22T13-02-42-813Z (the actual images), before the
+baselines are saved. One code commit (`4f2fa4a`) and one docs commit:
+
+1. **Save's disabled look.** At rest and when refused (a double-booking),
+   Save is drawn as a disabled Discard: `line.hair` border, secondary ink,
+   45% (`AssignmentBoard.tsx:954`). It looked bright and clickable beside
+   the dimmed Discard. It keeps the real `disabled` attribute. The solid
+   primary when savable is unchanged.
+2. **Search placeholder.** It was cut to "Truck, driver or phon" in the
+   160px box at 1024 and 768. It is now drawn by two `aria-hidden` spans
+   after the field (`:458`, `:465`), shown by `peer-placeholder-shown`:
+   "Search" below 1100, "Truck, driver or phone" from 1100 up. The real
+   placeholder is a space (`:452`). CSS only, so no width read and no
+   server/client mismatch. Accessible name: "Search trucks, drivers or
+   phones".
+3. **Left edge vs truck number.** The number touched a marked row's 3px
+   edge ("|410"). Every truck number, and the "Truck" header, now has
+   `pl-2` (`:560`, `:601`), so the numbers still line up.
+4. **Free driver's name below 1100.** With three panels in the row the name
+   was cut ("Lior Mb…"). The entry is now name and Retire, then the phone
+   on its own line, then "Assign to", at every width (`:750–797`). The
+   name's title is the whole name. This replaces 3am's one-line entry below
+   1100 (§12.135, Alex's answer 2 there), for the room three panels need.
+
+**Tests** 3,732 → 3,735, 204 files. `AssignmentBoard.test.tsx` +3:
+
+- Save `disabled`, with Discard's disabled classes, at rest and on a
+  double-booking;
+- the placeholder spans and the accessible name;
+- `pl-2` on every row's number and on the header.
+
+Two existing tests follow the changes: the free driver's layout, and
+Save's look at rest.
+
+**What happy-dom cannot show:** that "Search" and the long hint fit
+uncut, which one is visible at a given width, the 8px gap, and the name
+showing whole at 230px. The 8 assignments baselines (still expected to
+change; the others not) are where these are seen. No PNG was touched.
+Still NOT pushed, NOT deployed.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
