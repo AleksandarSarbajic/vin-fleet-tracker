@@ -669,7 +669,8 @@ export function AssignmentBoard({ board, role }: Props) {
         */}
         <aside className="order-first grid auto-cols-fr grid-flow-col gap-5 pt-5 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:order-none min-[1100px]:block min-[1100px]:w-[260px] min-[1100px]:shrink-0 min-[1100px]:space-y-5 min-[1100px]:self-start">
           <Panel
-            title={`Drivers with no truck (${driversWithoutTruck.length})`}
+            title="Drivers without a truck"
+            count={driversWithoutTruck.length}
             empty="Every active driver has a truck."
             items={driversWithoutTruck.map((d) => ({
               key: d.id,
@@ -719,14 +720,56 @@ export function AssignmentBoard({ board, role }: Props) {
                       Retire
                     </button>
                   ) : null}
+                  {/**
+                   * §12.139. One button per truck that is empty IN THE DRAFT.
+                   * A click puts this driver on that truck in the draft only,
+                   * exactly as picking them in that row's picker does; nothing
+                   * is sent until Save. The driver then leaves this panel and
+                   * the truck its chip.
+                   */}
+                  {mayEdit && trucksWithoutDriver.length > 0 ? (
+                    <span
+                      data-assign-to=""
+                      className="col-span-3 col-start-1 row-start-2 mt-1 flex flex-wrap items-center gap-1.5 min-[1100px]:col-span-2 min-[1100px]:row-start-3"
+                    >
+                      <span className="mr-0.5 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+                        Assign to
+                      </span>
+                      {trucksWithoutDriver.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={saving}
+                          aria-label={`Assign ${d.name} to truck ${label(t)}`}
+                          onClick={() => editDraft(t.id, d.id)}
+                          className="inline-flex h-7 min-w-[44px] items-center justify-center border border-line-control px-2 font-sans text-body font-semibold tabular-nums text-text hover:border-accent hover:bg-row-hover disabled:opacity-45"
+                        >
+                          {label(t)}
+                        </button>
+                      ))}
+                    </span>
+                  ) : null}
                 </span>
               ),
             }))}
           />
           <Panel
-            title={`Trucks with no driver (${trucksWithoutDriver.length})`}
+            title="Trucks without a driver"
+            count={trucksWithoutDriver.length}
             empty="Every active truck has a driver."
-            items={trucksWithoutDriver.map((t) => ({ key: t.id, node: label(t) }))}
+            items={trucksWithoutDriver.map((t) => ({
+              key: t.id,
+              node: (
+                /**
+                 * A chip, on the empty rows' own ground, and not a button: a
+                 * click does nothing (Alex, 3al question 3: no jump to the
+                 * row). "+ Assign driver" on the row is the way in.
+                 */
+                <span className="inline-flex h-7 min-w-[44px] items-center justify-center border border-line-soft bg-row-unassigned px-2">
+                  {label(t)}
+                </span>
+              ),
+            }))}
             inline
           />
           {/**
@@ -834,11 +877,14 @@ export function AssignmentBoard({ board, role }: Props) {
 
 function Panel({
   title,
+  count,
   items,
   empty,
   inline = false,
 }: {
   title: React.ReactNode;
+  /** Shown at the title's right end, as the design has it; absent for the shared phones. */
+  count?: number;
   /**
    * Nodes, not strings — the drivers panel renders a name plus its `No ELD`
    * tag (§12.37), and a string list could only have shown the name.
@@ -853,13 +899,18 @@ function Panel({
 }) {
   return (
     <div className="border border-line-hair bg-surface-raised p-3">
-      <h2 className="mb-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+      <h2 className="mb-2 flex items-baseline justify-between gap-2 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
         {title}
+        {count === undefined ? null : (
+          <span data-panel-count="" className="font-sans text-small font-semibold tracking-normal tabular-nums text-text">
+            {count}
+          </span>
+        )}
       </h2>
       {items.length === 0 ? (
         <p className="text-body text-text-muted">{empty}</p>
       ) : (
-        <ul className={inline ? 'flex flex-wrap gap-x-3 gap-y-1 tabular-nums' : 'space-y-1'}>
+        <ul className={inline ? 'flex flex-wrap gap-1.5 tabular-nums' : 'space-y-2.5'}>
           {items.map((item) => (
             /**
              * Not `truncate`: its `nowrap` reached the phone editor inside the

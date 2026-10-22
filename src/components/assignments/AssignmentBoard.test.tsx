@@ -662,3 +662,80 @@ describe('a shared phone, by driver (§12.138)', () => {
     expect(warning(150)!.textContent).toBe('also 137');
   });
 });
+
+describe('the panels, and "Assign to" (§12.139, §12.140)', () => {
+  const withEmpty = () => board({ trucks: [...board().trucks, EMPTY_TRUCK] });
+  const panels = () => [...container!.querySelectorAll('aside > div')];
+  const assignTo = (driverName: string) =>
+    [...container!.querySelectorAll<HTMLButtonElement>('[data-assign-to] button')]
+      .filter((b) => b.getAttribute('aria-label')!.startsWith(`Assign ${driverName} to`))
+      .map((b) => b.textContent);
+  const clickAssign = async (driverName: string, truck: string) => {
+    const button = container!.querySelector<HTMLButtonElement>(
+      `[data-assign-to] button[aria-label="Assign ${driverName} to truck ${truck}"]`,
+    )!;
+    await act(async () => button.click());
+  };
+
+  it('titles each panel, with its count at the right', async () => {
+    await renderBoard(withEmpty());
+    expect(panels().map((p) => p.querySelector('h2')!.textContent)).toEqual([
+      'Drivers without a truck2',
+      'Trucks without a driver1',
+    ]);
+    expect(panels()[0]!.querySelector('[data-panel-count]')!.textContent).toBe('2');
+  });
+
+  it('offers each free driver one button per truck empty in the draft', async () => {
+    await renderBoard(withEmpty());
+    expect(assignTo('Unassigned Hal')).toEqual(['150']);
+    expect(assignTo('Free Agent')).toEqual(['150']);
+    // Clearing 143 in the draft makes it a truck to assign to, and frees Sam.
+    await act(async () =>
+      container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 143"]')!.click(),
+    );
+    const clear = [...container!.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Unassigned — clear this truck'),
+    )!;
+    await act(async () => clear.click());
+    expect(assignTo('Free Agent')).toEqual(['143', '150']);
+    expect(assignTo('Samsara Sam')).toEqual(['143', '150']);
+  });
+
+  it('puts the driver on the truck in the draft only: nothing is sent until Save', async () => {
+    const bodies = captureSaves();
+    await renderBoard(withEmpty());
+    await clickAssign('Unassigned Hal', '150');
+    expect(bodies).toHaveLength(0);
+    const field = container!.querySelector<HTMLInputElement>('input[aria-label="Driver for truck 150"]')!;
+    expect(field.value).toBe('Unassigned Hal');
+    expect(footerText()).toContain('1 row changed');
+    expect(was()).toHaveLength(1);
+    // Hal has a truck now, and 150 is no longer empty: both leave the panels.
+    expect(assignTo('Unassigned Hal')).toEqual([]);
+    expect(assignTo('Free Agent')).toEqual([]);
+    expect(panels()[1]!.textContent).toContain('Every active truck has a driver.');
+  });
+
+  it('saves exactly what picking the driver in that row saves', async () => {
+    const bodies = captureSaves();
+    await renderBoard(withEmpty());
+    await pickFor(150, 'Unassigned Hal');
+    await act(async () => saveButton().click());
+
+    await renderBoard({ ...withEmpty() });
+    await clickAssign('Unassigned Hal', '150');
+    await act(async () => saveButton().click());
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[0]).toEqual({ changes: [{ truckId: 't-3', driverId: 'd-app-free' }] });
+  });
+
+  it('lists the trucks without a driver as chips that do nothing', async () => {
+    await renderBoard(withEmpty());
+    const trucks = panels()[1]!;
+    expect(trucks.querySelectorAll('button')).toHaveLength(0);
+    expect(trucks.querySelector('li > span')!.className).toContain('bg-row-unassigned');
+  });
+});
