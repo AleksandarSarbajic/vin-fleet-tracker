@@ -792,3 +792,30 @@ describe('a viewer’s board (§12.141)', () => {
     expect(shownTrucks()).toEqual(['143']);
   });
 });
+
+describe('Save is the primary action only when there is something valid to save (§12.140)', () => {
+  const solid = () => saveButton().className.includes('bg-accent');
+
+  it('is outlined and disabled at rest, solid once a row changes, outlined again on a double-booking', async () => {
+    await render();
+    expect(saveButton().disabled).toBe(true);
+    expect(solid()).toBe(false);
+    expect(saveButton().className).toContain('text-text-muted');
+
+    await pickFor(143, 'Unassigned Hal');
+    expect(saveButton().disabled).toBe(false);
+    expect(solid()).toBe(true);
+
+    await pickFor(143, 'Hand Entered Hal');
+    expect(saveButton().disabled).toBe(true);
+    expect(solid()).toBe(false);
+  });
+
+  it('is never solid for a viewer', async () => {
+    await act(async () => {
+      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+    });
+    expect(saveButton().disabled).toBe(true);
+    expect(solid()).toBe(false);
+  });
+});

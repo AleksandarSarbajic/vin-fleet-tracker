@@ -180,6 +180,9 @@ export function AssignmentBoard({ board, role }: Props) {
     [doubleBookedGroups],
   );
 
+  /** Something to send, that the server's one-driver-one-truck rule will not refuse. */
+  const savable = mayEdit && dirty && !saving && doubleBooked.size === 0;
+
   const conflictedTrucks = useMemo(
     () => new Set([...doubleBooked, ...conflicts.flatMap((c) => c.truckIds)]),
     [doubleBooked, conflicts],
@@ -872,12 +875,22 @@ export function AssignmentBoard({ board, role }: Props) {
             >
               Discard
             </button>
+            {/**
+             * §12.140. The solid accent only when there is something valid to
+             * save; otherwise an outlined, muted button. At 45% the accent
+             * still read as the thing to press on a board with nothing to
+             * save, or with a double-booking it would refuse.
+             */}
             <button
               type="button"
-              disabled={!mayEdit || !dirty || saving || doubleBooked.size > 0}
+              disabled={!savable}
               title={mayEdit ? undefined : lockedReason}
               onClick={() => void save()}
-              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+              className={`h-10 border px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] ${
+                savable
+                  ? 'border-accent bg-accent text-text-inverse hover:border-accent-hover hover:bg-accent-hover'
+                  : 'border-line-control text-text-muted'
+              }`}
             >
               {saving ? 'Saving…' : 'Save assignments'}
             </button>
