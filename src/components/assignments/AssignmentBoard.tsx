@@ -22,7 +22,7 @@ import {
   type BoardFilter,
   type BoardRow,
 } from './boardView';
-import { SearchIcon, WarningIcon } from './icons';
+import { LockIcon, SearchIcon, WarningIcon } from './icons';
 import { formatPhone } from '@/lib/dial';
 
 /**
@@ -327,7 +327,6 @@ export function AssignmentBoard({ board, role }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const phoneLockedReason = `Your role is ${role}. Phone numbers need dispatcher.`;
   const canRetire = can(role, 'admin');
 
   /**
@@ -385,6 +384,22 @@ export function AssignmentBoard({ board, role }: Props) {
           <span className="text-body text-text-secondary">
             {board.trucks.length} active trucks · {board.drivers.length} active drivers
           </span>
+          {/**
+           * §12.141. A viewer's board offers nothing to press: no "+ Assign
+           * driver", "Assign to", pencil, Add or Retire, and the pickers are
+           * locked as before. This says why, once, instead of a tooltip on
+           * each control (§12.14's rule, which this page departs from).
+           */}
+          {mayEdit ? null : (
+            <span
+              data-view-only=""
+              title={lockedReason}
+              className="inline-flex h-[22px] items-center gap-[5px] self-center border border-status-neutral-bd px-2 font-cond text-micro font-semibold uppercase tracking-[.08em] text-status-neutral-fg"
+            >
+              <LockIcon />
+              View only
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {/* The console's search field (§12.91), at the console's 260px. */}
@@ -645,7 +660,6 @@ export function AssignmentBoard({ board, role }: Props) {
                     driverName={driver.name}
                     phone={driver.phone}
                     mayEdit={mayEdit}
-                    lockedReason={phoneLockedReason}
                     onSaved={() => router.refresh()}
                     truckLabel={label(truck)}
                     shared={sharedNote(driver.id)}
@@ -699,7 +713,6 @@ export function AssignmentBoard({ board, role }: Props) {
                       driverName={d.name}
                       phone={d.phone}
                       mayEdit={mayEdit}
-                      lockedReason={phoneLockedReason}
                       onSaved={() => router.refresh()}
                       shared={sharedNote(d.id)}
                     />

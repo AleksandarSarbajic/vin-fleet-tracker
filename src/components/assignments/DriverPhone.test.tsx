@@ -58,7 +58,6 @@ function render(props: {
         driverName="Ana Petrovic"
         phone={props.phone}
         mayEdit={props.mayEdit ?? true}
-        lockedReason="Your role is viewer. Phone numbers need dispatcher."
         onSaved={props.onSaved ?? (() => {})}
         {...(props.truckLabel === undefined ? {} : { truckLabel: props.truckLabel })}
         shared={props.shared}
@@ -118,11 +117,13 @@ describe('the driver phone control', () => {
     expect(button(/Add the phone/)).toBeDefined();
   });
 
-  it('a viewer sees the control disabled with the reason, never hidden', () => {
+  it('a viewer reads the number and gets no control: the board says view only (§12.141)', () => {
     render({ phone: null, mayEdit: false });
-    const add = button(/Add the phone/)!;
-    expect(add.disabled).toBe(true);
-    expect(add.title).toBe('Your role is viewer. Phone numbers need dispatcher.');
+    expect(container.textContent).toBe('No phone');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+    render({ phone: '7085550123', mayEdit: false });
+    expect(container.querySelector('[data-driver-phone-value]')).not.toBeNull();
+    expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('below 768px the number is read-only: no edit control at all', () => {

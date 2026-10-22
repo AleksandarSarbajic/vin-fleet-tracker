@@ -9,8 +9,9 @@ import { PencilIcon, WarningIcon } from './icons';
  * §12.106. A driver's phone on the assignment board: read, and for a
  * dispatcher on a desktop, set, changed or cleared in place.
  *
- * - A viewer sees the control disabled with the reason, never hidden
- *   (§12.14).
+ * - A viewer gets no control at all (§12.141): the board says VIEW ONLY,
+ *   with the reason, once, in its header. It was a disabled control with
+ *   the reason (§12.14); the approved design for this page hides them.
  * - Below 768px the number is read-only (§12.94): editing is a desktop job.
  * - Checked here with the same rule the server applies (`normalizePhone`), so
  *   a refusal is said before the request, in the same words.
@@ -21,7 +22,6 @@ export function DriverPhone({
   driverName,
   phone,
   mayEdit,
-  lockedReason,
   onSaved,
   truckLabel,
   shared,
@@ -29,8 +29,8 @@ export function DriverPhone({
   driverId: string;
   driverName: string;
   phone: string | null;
+  /** False for a viewer: the number is read, with nothing to press. */
   mayEdit: boolean;
-  lockedReason: string;
   onSaved: () => void;
   /**
    * §12.140. The row's truck, which names the pencil: "Edit phone for truck
@@ -52,7 +52,7 @@ export function DriverPhone({
 
   const shown = phone ? formatPhone(phone) : null;
 
-  if (!editing || !editingAllowed) {
+  if (!editing || !editingAllowed || !mayEdit) {
     return (
       <span className="flex min-w-0 items-center gap-0.5" data-driver-phone={driverId}>
         <span
@@ -72,11 +72,9 @@ export function DriverPhone({
             {shared.also}
           </span>
         ) : null}
-        {editingAllowed ? (
+        {editingAllowed && mayEdit ? (
           <button
             type="button"
-            disabled={!mayEdit}
-            title={mayEdit ? undefined : lockedReason}
             aria-label={
               shown
                 ? `Edit phone for ${truckLabel === undefined ? driverName : `truck ${truckLabel}`}`
@@ -91,7 +89,7 @@ export function DriverPhone({
              * §12.140. A number is edited with a pencil, as in the design; a
              * missing one keeps its word, Add. Either is a 28px-tall target.
              */
-            className={`inline-flex h-7 shrink-0 items-center justify-center text-text-muted hover:text-text disabled:opacity-45 disabled:hover:text-text-muted ${
+            className={`inline-flex h-7 shrink-0 items-center justify-center text-text-muted hover:text-text ${
               shown ? 'w-7 hover:bg-row-hover' : 'px-1.5 font-cond text-micro uppercase tracking-[.08em]'
             }`}
           >

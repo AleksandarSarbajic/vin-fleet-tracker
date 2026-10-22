@@ -14,6 +14,15 @@ const STROKE = {
   'aria-hidden': true,
 } as const;
 
+export function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" {...STROKE} className={className}>
+      <rect x="4" y="11" width="16" height="10" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
 export function PencilIcon({ className }: { className?: string }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" {...STROKE} className={className}>

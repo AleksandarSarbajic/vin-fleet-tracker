@@ -739,3 +739,56 @@ describe('the panels, and "Assign to" (§12.139, §12.140)', () => {
     expect(trucks.querySelector('li > span')!.className).toContain('bg-row-unassigned');
   });
 });
+
+describe('a viewer’s board (§12.141)', () => {
+  const asViewer = async () => {
+    await act(async () => {
+      root!.render(
+        createElement(AssignmentBoard, {
+          board: board({
+            trucks: [...board().trucks, EMPTY_TRUCK],
+            drivers: board().drivers.map((d) => (d.id === 'd-app' ? { ...d, phone: '7085550101' } : d)),
+          }),
+          role: 'viewer',
+        }),
+      );
+    });
+  };
+  const buttonsNamed = (pattern: RegExp) =>
+    [...container!.querySelectorAll('button')].filter((b) =>
+      pattern.test(b.getAttribute('aria-label') ?? b.textContent ?? ''),
+    );
+
+  it('says VIEW ONLY beside the counts, with the reason', async () => {
+    await asViewer();
+    const badge = container!.querySelector('header [data-view-only]')!;
+    expect(badge.textContent).toBe('View only');
+    expect(badge.getAttribute('title')).toBe('Your role is viewer. Assignments need dispatcher.');
+    await render('dispatcher');
+    expect(container!.querySelector('[data-view-only]')).toBeNull();
+  });
+
+  it('offers no Assign driver, Assign to, pencil, Add or Retire, and keeps the pickers locked', async () => {
+    await asViewer();
+    expect(buttonsNamed(/^\+ Assign driver$/)).toHaveLength(0);
+    expect(container!.querySelector('[data-assign-to]')).toBeNull();
+    expect(buttonsNamed(/^Edit phone for/)).toHaveLength(0);
+    expect(buttonsNamed(/^Add the phone for/)).toHaveLength(0);
+    expect(buttonsNamed(/^Retire$/)).toHaveLength(0);
+    for (const input of container!.querySelectorAll<HTMLInputElement>('input[role="combobox"]')) {
+      expect(input.disabled).toBe(true);
+      expect(input.title).toBe('Your role is viewer. Assignments need dispatcher.');
+    }
+    // The number is still read.
+    expect(container!.textContent).toContain('708-555-0101');
+  });
+
+  it('still searches and filters', async () => {
+    await asViewer();
+    await act(async () => tab('No driver').click());
+    expect(shownTrucks()).toEqual(['150']);
+    await act(async () => tab('All').click());
+    await typeInto(searchBox(), 'sam');
+    expect(shownTrucks()).toEqual(['143']);
+  });
+});

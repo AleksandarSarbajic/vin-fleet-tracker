@@ -105,16 +105,22 @@ test('a dispatcher adds, changes and clears a number; refusals say why and save 
   }
 });
 
-test('a viewer sees the control disabled with the reason, and the route refuses them', async ({
+/**
+ * §12.141. A viewer's board has no phone control at all (it was one disabled
+ * with the reason, §12.14); the header says VIEW ONLY, with the reason.
+ */
+test('a viewer gets no phone control, the board says view only, and the route refuses them', async ({
   page,
 }, info) => {
   await setRole('viewer');
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/assignments');
-    const add = anaPhone(page).getByRole('button', { name: `Add the phone for ${DRIVER_NAMES.ana}` });
-    await expect(add).toBeDisabled();
-    await expect(add).toHaveAttribute('title', 'Your role is viewer. Phone numbers need dispatcher.');
+    await expect(anaPhone(page)).toContainText('No phone');
+    await expect(anaPhone(page).getByRole('button')).toHaveCount(0);
+    const badge = page.locator('[data-view-only]');
+    await expect(badge).toHaveText('View only');
+    await expect(badge).toHaveAttribute('title', 'Your role is viewer. Assignments need dispatcher.');
     await shot(page, info, '5-viewer');
     const response = await page.request.post('/api/drivers', {
       data: { action: 'phone', driverId: IDS.driverAna, phone: '708-555-0123' },
