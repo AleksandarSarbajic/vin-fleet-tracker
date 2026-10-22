@@ -7284,7 +7284,7 @@ driver" form in Night desk (step 2's answer 1).
 
 From the advisor's brief. Part 1 of 2: everything the page can do with the
 data it already has. Live status and position in "Currently" is part 2
-(3ap) and is not built here. **NOT pushed, NOT deployed.** No server, API,
+(3ap) and is not built here. **NOT pushed, NOT deployed; e2e verified 2026-10-22 (see below), ready to push.** No server, API,
 migration or worker change. No new dependency, font, colour or token. The
 save request is unchanged.
 
@@ -7564,6 +7564,33 @@ uncut, which one is visible at a given width, the 8px gap, and the name
 showing whole at 230px. The 8 assignments baselines (still expected to
 change; the others not) are where these are seen. No PNG was touched.
 Still NOT pushed, NOT deployed.
+
+**e2e (Alex, 2026-10-22):**
+
+- `assignments-baseline --update-snapshots=none` (run
+  2026-10-22T13-02-42-813Z): 8 differed, as expected. The advisor's review
+  of them found the four flaws fixed in "Polish".
+- `desktop-baseline history-baseline history-phone-baseline dispatch
+  driver-phone driver-picker --update-snapshots=none` (run
+  2026-10-22T13-03-13-938Z): 31 passed, including the changed driver-phone
+  viewer test on its first run. Every other baseline is unchanged.
+- After the polish, `assignments-baseline --update-snapshots=none` (run
+  2026-10-22T13-21-07-693Z): 8 differed. The advisor reviewed the actual
+  images (768, 1440, changed-1440, and the others listed) and confirmed all
+  four fixes.
+- `--update-snapshots=changed` (run 2026-10-22T13-23-33-775Z): 9 passed, 8
+  re-saved. The advisor confirmed all 8 saved files are byte-identical to
+  the reviewed images. Committed as written (each opened first: only the
+  spec's invented seed).
+- `--repeat-each=3 --update-snapshots=none` (run 2026-10-22T13-23-58-170Z):
+  25 passed. During it the server logged "DRIVER-GET failed" once
+  (reference DRIVER-GET-500-MVJKOJXV), on the merge-candidates query
+  (`src/app/api/drivers/route.ts`). The test passed. 3ao did not touch that
+  route or MergePrompt's request. Likely a test-DB reset racing an
+  in-flight request between tests; unverified, because the log omits the
+  underlying Postgres error. A watch item, not investigated.
+- Not shown by any baseline: Save's solid look on a valid, savable change.
+  Alex checks it live after the deploy.
 
 ## Next
 
