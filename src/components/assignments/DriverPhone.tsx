@@ -54,7 +54,18 @@ export function DriverPhone({
 
   if (!editing || !editingAllowed || !mayEdit) {
     return (
-      <span className="flex min-w-0 items-center gap-0.5" data-driver-phone={driverId}>
+      /*
+       * With a number: centred, so the pencil (an icon, no text baseline)
+       * sits on the number's middle, and "also N" with it. Without one:
+       * on the text baseline, so the small caps of Add stand on the same
+       * line as "No phone". Centring the two different-size boxes put ADD
+       * visibly higher (Alex, 2026-10-22). Add keeps its 28px target; the
+       * baseline is its text's, centred inside it.
+       */
+      <span
+        className={`flex min-w-0 gap-0.5 ${shown ? 'items-center' : 'items-baseline'}`}
+        data-driver-phone={driverId}
+      >
         <span
           data-driver-phone-value=""
           className={`truncate text-body tabular-nums ${shown ? 'text-text-secondary' : 'text-text-muted'}`}

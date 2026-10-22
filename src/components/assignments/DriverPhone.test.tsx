@@ -111,6 +111,22 @@ describe('the driver phone control', () => {
     expect(container.querySelector('[data-shared-phone]')).toBeNull();
   });
 
+  it('stands Add on "No phone"’s text baseline, and centres the pencil on a number (Alex, 2026-10-22)', () => {
+    // Class-level only: happy-dom lays nothing out, so the baselines themselves are not measured.
+    const box = () => container.querySelector('[data-driver-phone]')!;
+    render({ phone: null });
+    expect(box().className.split(/\s+/)).toContain('items-baseline');
+    expect(box().className.split(/\s+/)).not.toContain('items-center');
+    const add = button(/Add the phone/)!;
+    // Still a 28px target, its word centred inside it, which gives its baseline.
+    expect(add.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-7', 'inline-flex', 'items-center']));
+
+    render({ phone: '7085550123', shared: { also: 'also 433', title: 'The same number as Ivo Example (truck 433)' } });
+    expect(box().className.split(/\s+/)).toContain('items-center');
+    expect(box().className.split(/\s+/)).not.toContain('items-baseline');
+    expect(button(/^Edit phone for/)!.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-7', 'w-7']));
+  });
+
   it('says "No phone" and offers Add when there is none', () => {
     render({ phone: null });
     expect(container.textContent).toContain('No phone');
