@@ -32,6 +32,9 @@ on origin: its master is `ad04eb9`.
 master was `86084fd`. Whether Vercel has deployed them is not checked here.
 **3as: NOT pushed, worker NOT deployed** (2026-10-28): the worker sends no
 error text to Sentry. See "Phase 3as" below.
+**3as LIVE (2026-10-28):** pushed (`86084fd..17865af`), and the worker
+deployed at `17865af` at 15:14 UTC, verified (see "Phase 3as", "Deployed").
+3as changed no app behaviour. Its Vercel deploy is not checked here.
 
 | Commit | What | § |
 |---|---|---|
@@ -8259,6 +8262,67 @@ is 37 files (type-only imports left out); computed from the sources, with
    roster failure's message (possibly SQL and bound values) in the hosted
    database, read by nothing. Leave it, or store only the type and
    SQLSTATE?
+
+#### 3as, step 2: the silent catch fixed, pushed, the worker deployed (2026-10-28)
+
+Alex authorised, for this step only, one `git push` and one worker deploy.
+Questions 1 and 3 above are answered by it; 2 and 4 stay open.
+
+**Code** (`17865af`). `flushWorkerSentry`'s silent `catch {}` now writes
+one journald line, `sentry flush failed { errorName }`: the error's type,
+never its text. It still never blocks the exit.
+`src/worker/sentry-flush.test.ts` (1): a rejecting flush resolves, the line
+holds the type, and the sentinel is in no console call. It fails with the
+message put back on the line, and with the catch silent. `npm run check`:
+212 files / 3,825 tests. Forbidden-files grep: nothing.
+
+**Pre-flight on the droplet** (read-only, one ssh call):
+- **ROLLBACK_SHA** `918af63c9dd93a16c311b7103f2402bb27734857`, a docs commit
+  of 2026-10-15 23:04 UTC. It includes 3ad, which settles the deployed
+  commit that 3as could not find recorded.
+- Worker `active`.
+- Disk on `/`, which holds `/opt`: 24G, 4.9G used, 19G free (21%).
+- Memory: 961 MB total, 552 available; swap 1,023 MB, 76 MB used. The stop
+  rule (no swap and under 600 MB available) did not apply.
+
+**Push:** `86084fd..17865af`; local master equal to origin afterwards.
+
+**Deploy** (`scripts/deploy.sh`, HEAD `17865af`), first run, exit 0. No
+rerun and no rollback were needed.
+- Gate 1, `npm run check`: 212 files / 3,825 tests passed.
+- Gate 2, `npm run preflight`: passed (6 ok, 1 note: "prepared statements
+  stall under concurrency, as expected"). The singleton lock was refused to
+  the preflight while the old worker held it.
+- Gate 3, `npm run db:verify`: "OK — schema, RLS and grants are as
+  specified" (anon/authenticated grants 0, feed_health singleton 1).
+- Gate 4, `npm run e2e`: **260 passed** in 19.1 min (run
+  2026-10-28T14-54-04-253Z); the machine stayed awake.
+- Stopped (`inactive`), then checked out `17865af`. `npm ci --omit=dev`
+  added 185 packages in 56 s.
+  - npm reported 6 vulnerabilities (5 high, 1 critical), not examined here.
+  - It also warned that `tesseract.js` and `esbuild` have install scripts
+    "not yet covered by allowScripts". The worker runs regardless: tsx ran in
+    the verify.
+- `SENTRY_RELEASE` was set by the script's own sed. Started: `active`.
+
+**Verify** (the script's own output):
+- running commit `17865afc85d8eb901a8731d91dc76b8ba2c6ffa4`, restarts since
+  start 0;
+- the singleton guard refused a second instance ("another worker is already
+  running — this one will not start"; the holder connected since 15:14:21
+  UTC);
+- most recent poll at 15:14:24 UTC: `poll: ingested`, vehicles 8, readings
+  91, inserted 91, route calls this month 978 of 5,000.
+
+**Feed check** (hosted DB, read-only: the session's first statement `set
+session characteristics as transaction read only;`, then
+`transaction_read_only` printed `on`). At 15:16:53 UTC, 2.5 min after the
+start: **0.5 min since the last poll, 0.5 min since the newest position**.
+OK.
+
+**Not checked here:** Vercel's deploy of the pushed app commits; whether
+the deployed worker's next real error reaches the worker's Sentry project
+in its new shape (no error has happened, and none was provoked).
 
 ## Next
 
