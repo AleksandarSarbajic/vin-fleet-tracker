@@ -8471,6 +8471,18 @@ collections): report only.**
   2026-10-28T15-40-52-391Z, `.last-run.json` "passed". No stall, no rerun,
   no baseline image differed. The machine stayed awake.
 
+**Commits:** `408b2df` (the dependencies) and `e815dc5` (this section).
+Each passed `npm run check` in the pre-commit hook (212 / 3,825).
+
+**Push:** `17865af..e815dc5` at 16:01:51 UTC. It carried `feb7968`, 3as's
+deploy note, as well. Local master equalled origin afterwards.
+
+**Vercel deploy** (GitHub deployments API, filtered by the full sha):
+deployment `7390624178`, environment Production, sha `e815dc5…`, state
+**success** at 16:04:53 UTC, 3 min after the push. The record appeared on
+the fourth poll. The live site was not opened. This note is a later docs
+commit and is not pushed.
+
 **Found wrong in the brief:**
 - "postcss … non-major fixes": true for our own postcss, which is already
   fixed at 8.5.28. Not true for the flagged copy, which next pins, so its
