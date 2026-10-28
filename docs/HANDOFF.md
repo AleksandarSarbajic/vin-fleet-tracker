@@ -8791,6 +8791,345 @@ as wide as its widest entry, never narrower than the field.
 **Commits:** `c829e86` (the cap), `bc158b7` (the PNGs), and one docs commit
 (this section and §12.145). NOT pushed.
 
+### Phase 3au: a stop allowance, measured — report only (2026-10-28)
+
+From the advisor's brief. Alex (2026-10-28) relies on the ETA at every
+distance, and approved modelling stops from our own positions for this
+report. REPORT ONLY: no engine, worker, migration, env, dependency or UI
+change, and no design-spec change (nothing is built into the board). Built
+on `3778153` (= origin), clean.
+
+**The boundary** (CLAUDE.md, "Never build"): nothing from Samsara but the
+positions the worker already stores; no rule constants in code or docs; the
+thing is a "stop allowance". The stopped rule is the scorer's, the bins are
+the data's quantiles, and the allowance is what the windows say.
+
+**Why** (the advisor's read-only `eta:score`, 2026-10-28): far out the
+as-seen error is stops, and the 52 mph cap partly cancels them, so removing
+the cap alone makes the far-out ETA more optimistic. This measures HERE's
+uncapped duration plus a stop allowance, never the cap removed alone.
+
+**What was built:**
+- `scripts/eta-trips.mts`: `eta:score`'s database read and its trip
+  selection (log, then positions, then the first recompute), moved
+  unchanged out of `eta-score.mts`, which now imports them. So the report
+  replays exactly the scorer's rows; a copy of "which prediction counts at
+  100 miles" could drift from the scorer without either failing.
+  - Proof: the original and the refactored `eta:score` run back to back on
+    the same data printed identical output, apart from the read-time line
+    (277 lines). A first comparison differed: a new arrival was detected
+    between the two runs (45 → 46 detected).
+  - In the final run below, the report's `current` and `here-raw` lines are
+    character for character `eta:score`'s as-seen `shown` and `here-raw`
+    lines at 200, 100, 50 and 25 mi (`eta:score` run right after it).
+- `scripts/eta-stops.mts`: the pure parts. `src/test/eta-stops.test.ts`: 22
+  tests, invented tracks only.
+- `scripts/eta-stops-report.mts`, `npm run eta:stops`: the read and the print.
+  - One `begin read only` transaction; the first line printed is the
+    database's own `transaction_read_only` (`on`). `DIRECT_URL` never
+    printed.
+  - Counts and truck numbers only. Checked: the output grepped against every
+    city, address line and driver name in the database (154 strings, sent
+    only to a scratch file): 0 matches. The same check finds 144 in
+    `eta:score`'s output, so it works.
+  - No network but the database; no HERE call. The command files are
+    typechecked ad hoc (a scratch tsconfig, `allowImportingTsExtensions`):
+    clean.
+
+**How the allowance was fitted:**
+1. **Stops.** The scorer's rule by construction: each interval between two
+   fixes is asked of `stoppedMinutes` alone (`stationary`), and a run of
+   stationary intervals of 10+ min is a stop. A test holds the stops' total
+   equal to `stoppedMinutes` over a whole track. Stops cut by the window's
+   ends are counted but left out of every figure.
+2. **Positions.** Every truck, every fix from `now()` minus
+   `POSITION_RETENTION_DAYS`. The prune keeps each truck's newest fix
+   regardless of age, so a truck that reports again after months has one
+   old fix that would make one interval of months; the window keeps it out.
+   It also leaves out the fixes between the last prune and the cutoff (at
+   most one prune interval).
+3. **Legs.** Each track is cut at every stop that starts within 0.35 mi
+   (`ARRIVAL_DEFAULTS.radiusMiles`) of a known stop point (any real stop with
+   coordinates, DEMO and E2E excluded as in `eta:score`), and at cut stops.
+   A trip the board projects ends at a stop, so a window never runs through
+   one.
+4. **Windows.** Along each leg's driving clock (time not in a stop), a start
+   every 15 min of driving. For each R on the same 15-min grid, up to the
+   longest HERE remaining duration among the scored rows (7.5 h), the
+   minutes stopped in [start, start + R). A stop at the first instant counts,
+   one at the last does not (that is the arrival). A window that would run
+   past its leg's end is not counted.
+5. **The allowance at R** is the median over all windows, then a running
+   maximum (a longer drive cannot expect fewer stopped minutes), linear
+   between grid points from 0 at 0. Past the curve's end it is held and
+   flagged (0 rows were).
+6. **Leave-one-truck-out.** One fit per truck with a scored row (16), each
+   without any window of that truck. The all-trucks fit is printed for
+   reading only.
+7. **Replay.** For each row `eta:score` scores (400 mi added, as the log
+   keeps it): the ETA shown, HERE raw, and HERE raw plus the allowance at
+   HERE's remaining duration from the fit without the row's truck. All three
+   on the same rows (every row has HERE's duration).
+
+**Choices made here** (any can be changed):
+- **Median, not mean.** The mean at R = 4 h is 335 min against a median of
+  41: multi-day parks. Both are printed.
+- **Legs cut at known stops**, as in 3 above.
+- **"Long", for the relation,** is the upper quartile of complete stops (151
+  min in this run). The driving bins are the quartiles of the driving.
+- **Both 60-minute tails are printed.** The brief asked for "the share of
+  trips where the new ETA is later than the arrival by 60+ min (the
+  dangerous direction: it hides LATE)". By `eta:score`'s sign the direction
+  that hides LATE is the other one: the ETA 60+ min BEFORE the arrival
+  (error +60 or more). The report prints both, named by what they do: "60+
+  late" (hides LATE) and "60+ early" (a LATE that is not).
+- **400 mi** is printed with its n (16).
+
+**The run.** It was run four times while being built: the first stopped on
+a stack overflow (`Math.min` over 631,000 fixes) before printing a figure;
+between the three full runs, figures moved by 1 or 2 as the 7-day window
+rolled. This is the last, read 2026-10-28T20:25:08Z, unedited:
+
+```
+ETA stop allowance — descriptive, not a verdict. Read 2026-10-28T20:25:08.590Z.
+transaction_read_only: on
+error = actual − predicted, minutes; + means the truck arrived AFTER the ETA (hides LATE). "within" is ±5 min. Counts and truck numbers only.
+
+## 1. Stop episodes from positions
+
+Stopped = the scorer's rule: reported speed ≤ 3 mph (and, across a gap, a displacement that agrees) for 10+ min. Shorter stationary runs are driving.
+Positions: 631251 fixes, 24 trucks with a track, 2026-10-21 20:24 to 2026-10-28 20:24 UTC (read from 2026-10-21 20:24, the 7-day retention).
+Known stop points: 64 (every real stop with coordinates); a stop starting within 0.35 mi of one is AT a known stop.
+Stops: 501 complete on 20 trucks; 28 more cut by the window's ends (length unknown, not in the figures). Driving 924 h, stopped 2008 h (complete stops).
+
+Stop minutes, complete stops:
+  all             n= 501  p10   12 / p25   17 / median   39 / p75  151 / p90  613 / max  4614
+  at a known stop n=  81  p10   13 / p25   21 / median   39 / p75   73 / p90  278 / max   621
+  elsewhere       n= 420  p10   12 / p25   17 / median   39 / p75  191 / p90  640 / max  4614
+  doubling from 10 min (the definition's floor, not a rule):
+    10–20: 154   20–40: 101   40–80: 85   80–160: 38   160–320: 24   320–640: 57   640–1280: 18   1280–2560: 17   2560–: 7
+
+152 stops begin within 10 min of driving after the previous one: often one park the rule reads as two, sometimes two stops close together. The rule is not changed here.
+3 gaps of 10+ min, 9.8 h in all, are counted as DRIVING by the rule although the displacement is under 3 mph: an end fix reads above 3 mph. Not reclassified.
+
+Per truck:
+  truck   fixes  stops  at known  cut  driving h  stopped h  legs
+    113   50004     34         9    1       72.2       94.2    10
+    116   23761     16         6    2       33.1      106.5     7
+    122     721      1         0    1        1.4       25.5     1
+    124   10058      8         2    1       14.0      136.6     3
+    125      12      0         0    1        0.0        0.0     0
+    128   58386     37        12    1       82.8       85.0    13
+    130      53      0         0    1        0.0        0.0     0
+    132   17035     20         3    1       27.4       99.5     4
+    133   49137     38         7    1       72.3       94.8     8
+    134     874      0         0    2        0.0        0.0     1
+    135   44871     38         6    2       67.7       90.6     7
+    136   28588     28         0    0       46.2       92.1     1
+    137   45457     29        10    1       71.8       95.9    11
+    138   36066     37         0    1       53.1      114.4     1
+    139   55727     31         4    1       76.5       91.3     5
+    141   13424     14         0    2       16.4      105.1     1
+    142    3595      8         0    2        4.5       92.3     1
+    143   25649     17         4    1       35.3      129.2     5
+    144   45138     34         0    0       69.1       98.9     1
+    145   22900     21         3    1       35.3      105.4     4
+    146   36485     31         0    2       51.0      109.9     1
+    147   13203     29         6    1       21.9      144.5     7
+    246     347      0         0    2        0.0        0.0     1
+    247   49760     30         9    0       72.0       96.0    10
+
+Driving since the last long stop, and the next stop:
+  "long" = the upper quartile of complete stops: 151+ min. Bins = quartiles of the driving. 461 stops with a long stop before them on the same track; 40 with none seen (not binned).
+  driving since (h)   n   next stop min: median   p75   p90   next is long   at a known stop
+    0.0 –   1.0    116                    54   161   613            26%               21
+    1.0 –   3.0    115                    34    76   165            10%               13
+    3.0 –   7.9    115                    28    53   257            11%               25
+    7.9 –  29.8    115                   116   515   641            49%               17
+
+## 2. The stop allowance
+
+Legs: each track cut at its stops AT a known stop and at the window's ends (103 legs). A window starts every 15 min of driving; for R of driving still to do it counts the minutes stopped before R is driven. The allowance is the median over all windows, made non-decreasing in R. R runs to 7.5 h, the longest HERE duration among the scored rows.
+Leave-one-truck-out: 16 fits, one per truck with a scored row; each leaves all of that truck's windows out.
+
+All trucks in (for reading; no trip is scored with this one), at each whole hour of R:
+   R h  windows  trucks  allowance  median   mean   p75   p90  no stop  from the 11 trucks with no known stop   folds: allowance min–max
+   1.0     3431      20          0       0    101    16   178      71%                                         27%      0 –    0
+   2.0     3170      19          0       0    180    62   601      51%                                         29%      0 –    0
+   3.0     2948      19         21      21    256   244   653      36%                                         30%     20 –   25
+   4.0     2738      19         41      41    335   520   770      24%                                         32%     37 –   43
+   5.0     2547      18         80      80    415   619   847      16%                                         33%     77 –  103
+   6.0     2372      18        235     235    502   646   980       9%                                         35%    184 –  263
+   7.0     2210      17        465     465    596   693  1539       5%                                         36%    436 –  478
+
+## 3. Replay on the trips eta:score scores
+
+46 detected arrivals; 14 never observed beyond 25 mi. Rows without HERE's duration: 0; rows whose fold has no data: 0. The three ETAs are compared on the same rows.
+  current = what the board showed (52 mph cap, no stops). here-raw = HERE's duration, no cap. + allowance = here-raw plus the allowance at HERE's remaining duration, fitted without the trip's truck.
+  "60+ late" = the ETA was 60+ min BEFORE the arrival (hides LATE); "60+ early" = 60+ min AFTER it (a LATE that is not).
+
+400 mi  (10 log, 0 pos, 6 rec)
+  HERE's remaining driving: median 6.9 h (5.4–7.4); allowance added: median 443 min (126–504); past the curve's end: 0
+  minutes actually stopped, where known (n=10): median 141; stopped − allowance median -315
+  current          n=16  median   +306  med|e|    306  worst10%    859  late/within/early 11/0/5   [12 pl, top-2  38%, eff  9.1]   60+ late 11/16  60+ early 3/16
+  here-raw         n=16  median   +421  med|e|    421  worst10%    951  late/within/early 16/0/0   [12 pl, top-2  38%, eff  9.1]   60+ late 13/16  60+ early 0/16
+  + allowance      n=16  median     -8  med|e|    309  worst10%    671  late/within/early 8/0/8   [12 pl, top-2  38%, eff  9.1]   60+ late 7/16  60+ early 8/16
+
+200 mi  (10 log, 0 pos, 7 rec)
+  HERE's remaining driving: median 3.6 h (2.7–4.1); allowance added: median 34 min (17–44); past the curve's end: 0
+  minutes actually stopped, where known (n=10): median 43; stopped − allowance median +12
+  current          n=17  median     +6  med|e|     44  worst10%    762  late/within/early 9/2/6   [13 pl, top-2  35%, eff 10.0]   60+ late 6/17  60+ early 0/17
+  here-raw         n=17  median    +63  med|e|     63  worst10%    800  late/within/early 16/1/0   [13 pl, top-2  35%, eff 10.0]   60+ late 10/17  60+ early 0/17
+  + allowance      n=17  median    +39  med|e|     39  worst10%    763  late/within/early 11/0/6   [13 pl, top-2  35%, eff 10.0]   60+ late 7/17  60+ early 0/17
+
+100 mi  (18 log, 0 pos, 9 rec)
+  HERE's remaining driving: median 2.0 h (1.4–2.5); allowance added: median 1 min (0–15); past the curve's end: 0
+  minutes actually stopped, where known (n=18): median 7; stopped − allowance median +5
+  current          n=27  median    +14  med|e|     24  worst10%    612  late/within/early 16/1/10   [21 pl, top-2  26%, eff 15.5]   60+ late 9/27  60+ early 0/27
+  here-raw         n=27  median    +37  med|e|     37  worst10%    633  late/within/early 21/5/1   [21 pl, top-2  26%, eff 15.5]   60+ late 10/27  60+ early 0/27
+  + allowance      n=27  median    +33  med|e|     33  worst10%    632  late/within/early 20/3/4   [21 pl, top-2  26%, eff 15.5]   60+ late 10/27  60+ early 0/27
+
+50 mi  (21 log, 0 pos, 9 rec)
+  HERE's remaining driving: median 0.9 h (0.7–1.4); allowance added: median 0 min (0–0); past the curve's end: 0
+  minutes actually stopped, where known (n=21): median 0; stopped − allowance median 0
+  current          n=30  median     +1  med|e|     10  worst10%    608  late/within/early 14/9/7   [22 pl, top-2  30%, eff 14.1]   60+ late 7/30  60+ early 0/30
+  here-raw         n=30  median     +8  med|e|     10  worst10%    621  late/within/early 20/7/3   [22 pl, top-2  30%, eff 14.1]   60+ late 7/30  60+ early 0/30
+  + allowance      n=30  median     +8  med|e|     10  worst10%    621  late/within/early 20/7/3   [22 pl, top-2  30%, eff 14.1]   60+ late 7/30  60+ early 0/30
+
+25 mi  (22 log, 0 pos, 10 rec)
+  HERE's remaining driving: median 0.5 h (0.3–0.9); allowance added: median 0 min (0–0); past the curve's end: 0
+  minutes actually stopped, where known (n=22): median 0; stopped − allowance median 0
+  current          n=32  median     +6  med|e|      6  worst10%    514  late/within/early 17/14/1   [24 pl, top-2  28%, eff 15.5]   60+ late 7/32  60+ early 0/32
+  here-raw         n=32  median     +7  med|e|      7  worst10%    514  late/within/early 23/9/0   [24 pl, top-2  28%, eff 15.5]   60+ late 7/32  60+ early 0/32
+  + allowance      n=32  median     +7  med|e|      7  worst10%    514  late/within/early 23/9/0   [24 pl, top-2  28%, eff 15.5]   60+ late 7/32  60+ early 0/32
+
+Per truck (each truck’s rows, all marks; allowance from the fit without it):
+  truck  rows  current median  here-raw median  + allowance median   60+ late now → with allowance
+    113    19              +4              +22                  +4              6 → 6
+    116     8              -6               +5                  +5              0 → 0
+    124    10            +105             +173                  +0              5 → 4
+    128    18              +6              +14                 +12              4 → 4
+    132     3             +39              +52                 +52              0 → 0
+    135    12              +2               +7                  -1              2 → 1
+    136     5            +154             +155                +155              5 → 5
+    137     6              +4               +7                  +5              0 → 0
+    138     5              +6              +19                  +7              1 → 1
+    139     5              -2              +11                 +10              0 → 1
+    141     4            +667             +677                +676              3 → 3
+    142     5             +36              +57                 +53              1 → 1
+    143     9              -3               +7                  +5              0 → 0
+    145     5            +484             +514                +503              5 → 4
+    146     5           +1036            +1056               +1056              5 → 5
+    247     3            +608             +622                +622              3 → 3
+
+## 4. What this cannot support
+
+- 32 arrivals on 16 trucks to 24 destinations; n per distance is above.
+  Medians on n < 30 describe these trips, not the fleet; worst-10% under n = 10 is the worst trip.
+- The distances within one trip are not independent: one long stop counts at every distance before it.
+- The fit sees one window of positions (7 days, one weekend at most). A fit on another week could differ.
+- The windows overlap (one every 15 min of driving), so "windows" is not a count of independent drives.
+- Leave-one-truck-out keeps a truck's own windows out of its fit, but not its lanes or customers: other trucks drive them
+  too, and the fit's week overlaps the scored trips' own days.
+- The allowance depends on remaining driving only. It cannot know whether this truck will stop for the night on this trip —
+  the long stops that make the worst 10% — only how much trucks stop over that much driving, typically.
+- The fit's R is a truck's driving time; the replay's R is HERE's duration, which runs short of the truck when it drives.
+- A stop at a pickup or delivery that is not in our stops (another load, a yard) counts as a stop on the road. For the
+  11 trucks with no stop near any known point that is every one of theirs; their share of windows is in section 2.
+- The stopped rule: 3 gaps (9.8 h) are driving to it although nothing moved, and 152 stops
+  begin within 10 min of driving after another. Both are the scorer's rule as it stands, here and in eta:score.
+- "Driving only" in eta:score needs positions; rows here use HERE's duration and need none, so n is eta:score's as-seen n.
+
+```
+
+**What the run shows** (a reading, not a decision):
+- **Close in, nothing changes.** At 50 and 25 mi HERE's remaining driving
+  is at most 1.4 h, and 51–71% of 1–2 h windows have no stop, so the
+  allowance is 0 and "+ allowance" is HERE raw, a little more optimistic
+  than the board (+8 against +1 at 50 mi, +7 against +6 at 25).
+- **100 mi:** the allowance is a median 1 min. Median +33 against the
+  board's +14; med|e| 33 against 24.
+- **200 mi:** a median 34 min. Median +39 against +6; med|e| 39 against
+  44; worst 10% 763 against 762; "60+ late" 7 of 17 against 6.
+- **400 mi:** a median 443 min; the curve climbs from 80 min at 5 h to 465
+  at 7 h. The median goes from +306 to −8, but med|e| stays (309 against
+  306), the worst 10% falls (671 against 859), "60+ late" falls from 11 to
+  7 of 16 and "60+ early" rises from 3 to 8. On trips that drove through,
+  the new ETA is now hours after the arrival; on those that stopped
+  longer, it is still hours before it.
+- So **no distance shows a clear gain** over the board as it is. One
+  number per remaining driving time cannot say which trip will include a
+  long stop, and the worst 10% is those trips. HERE raw alone is more
+  optimistic than the board at every distance, as the advisor's run said.
+- **The relation** (section 1) is the one place the data separates trips:
+  after 7.9 h or more of driving since a long stop, the next stop is long
+  49% of the time; between 1 and 7.9 h, 10–11%. The allowance does not use
+  it.
+
+**Found, not changed** (the scorer's stopped rule, which `eta:score`, the
+prediction log's `stopped_minutes` and this report share):
+- **3 gaps of 10+ min, 9.8 h in all, count as driving although the truck
+  did not move.** `stationaryBetween` (`src/lib/eta-marks.ts`) asks that
+  both end fixes read 3 mph or less before it looks at the displacement,
+  and here one end reads above 3 mph. Whether any scored trip contains one
+  is unverified.
+- **152 of 529 stops start within 10 min of driving after another one**:
+  often one park read as two. Minutes stopped in a window barely move, but
+  the relation's "long stop" can be split.
+- **11 of 24 trucks have no stop near any known stop point**, so each of
+  their pickups and deliveries counts as a stop on the road. They supply
+  27–36% of the windows (section 2). Why they have none (no loads of
+  theirs, or stops away from where they park) is unverified.
+
+**Questions for Alex** (none decided here):
+1. **Leave the board as it is?** On this week's trips, HERE raw plus this
+   allowance is no better than the current ETA at any distance (above).
+2. **A second report, with two inputs** (the driving still to do AND the
+   driving since the last long stop, both from our positions and learned
+   the same way)? It would test whether the board can tell which trips
+   will make a long stop. It models how long a truck has driven without
+   one, which is nearer the CLAUDE.md line than this report, so it needs
+   your explicit yes, and it would be report only again.
+3. **The stopped rule's two findings:** change them in their own phase?
+   That would change `eta:score`'s "driving only" figures and the worker's
+   `stopped_minutes` (a worker change).
+4. **Run `npm run eta:stops` again on a later week** before any decision?
+   It sees only the 7 days the database keeps.
+
+**Unverified:**
+- The fit's sensitivity to the 15-min grid, the 0.35 mi radius and the leg
+  cuts: one setting of each was run.
+- Time of day at the 400 mi crossings (whether the trips that drove
+  through started early in a shift) was not looked at.
+- The three points under "Found, not changed" marked unverified.
+
+**Tests:** 22 in `src/test/eta-stops.test.ts`: stops by the scorer's rule
+and its total over a track, an ignition-off rest, a feed gap on the road,
+cut stops, the parked gap, legs, windows and their ends, the median and
+running maximum, leave-one-truck-out, interpolation, the relation and its
+bins, the replay's arithmetic and the two tails.
+
+**`npm run check`:** 214 files, 3,884 tests (213 / 3,862 before).
+
+**Mutations** of `scripts/eta-stops.mts`, each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| no running maximum | 1 |
+| the left-out truck kept in | 4 |
+| a stop at the window's last instant counted | 1 |
+| a stop at the window's first instant not counted | 1 |
+| windows past the leg's end counted | 3 |
+| a stop of exactly 10 min dropped | 2 |
+| known stops do not cut legs | 1 |
+| the allowance's sign | 1 |
+| short stationary runs not counted as driving | 2 |
+| "past the curve's end" never flagged | 1 |
+
+**Commits:** `9fb2d97` (`eta-trips.mts`, the refactor), `c7d0624` (the
+report, its module, tests and `npm run eta:stops`), and one docs commit
+(this section). NOT pushed. No design-spec change.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
