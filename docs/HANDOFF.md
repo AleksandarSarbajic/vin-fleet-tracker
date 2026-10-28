@@ -7771,6 +7771,18 @@ against the saved file:
   typed. The drivers vitest case above is the same request through the real
   handler.
 - **The fixed spec has not run.**
+- **Second run, after Alex's yes (answer 6):** same command, run
+  2026-10-28T13-52-21-651Z. **3 passed**: setup, route-failure-sentry,
+  sentry-traces. It passed on its first try, so there was no rerun and no
+  spec change. The machine stayed awake.
+  - The server logged `DRIVER-POST failed` with reference
+    `DRIVER-POST-500-MVS6C6OG`.
+  - The sink got exactly one error event from DRIVER-POST. Its tags were
+    exactly `route_prefix` and `reference` (the spec checks with `toEqual`,
+    so the SDK added no tag of its own). Its type was `SyntaxError` and its
+    value the placeholder.
+  - Neither the sentinel nor "is not valid JSON" appeared anywhere the sink
+    received.
 
 **Item 6, report only.**
 
@@ -7852,6 +7864,19 @@ server.
 5. The console line still carries `error.message` into Vercel's logs, as
    before; for a Drizzle error that is SQL and bound values. Drop it, as the
    reader's line does?
+
+**Alex's answers, 2026-10-28:**
+1. Delivery: accept the SDK's own footing. No `after()` phase.
+2. Reader 500s: no. The reader stays frozen.
+3. Uncaught errors: **yes**, scrub every server error event the same way.
+   This is the next phase, **3ar**. The advisor's finding (read-only,
+   counts only): 5 of the 9 Sentry issues from 2026-10-14/15 (Page Server
+   Component `/`) carry "Failed query" and bound parameters in the
+   exception value.
+4. Malformed JSON stays a 500 for now.
+5. **Yes**, the console line drops the error message and keeps only the
+   class name and SQLSTATE, like the reader's line. In 3ar, not now.
+6. One e2e run of the fixed spec: yes. It passed (see "e2e" above).
 
 ## Next
 
