@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
+import { WORKER_BREADCRUMB, scrubWorkerEvent, sqlstateOf, textlessErrors } from '@/lib/sentry-server-errors';
 
 /**
  * Error reporting for the worker process (phase 6, item 4).
@@ -100,9 +101,23 @@ export function initWorkerSentry(options: WorkerSentryOptions): boolean {
      * what lets the process die predictably for systemd to restart. It also
      * satisfies the standing rule that there are no unhandled rejections —
      * a rejection that reaches a default handler is unhandled by definition.
+     *
+     * `textlessErrors` (§12.143, §12.144): the captured cause reaches Sentry
+     * as its types and stack frames, causes included, never its message — a
+     * Drizzle error's message is the SQL and its bound values.
      */
-    integrations: (defaults) =>
-      defaults.filter((i) => i.name !== 'OnUncaughtException' && i.name !== 'OnUnhandledRejection'),
+    integrations: (defaults) => [
+      ...defaults.filter((i) => i.name !== 'OnUncaughtException' && i.name !== 'OnUnhandledRejection'),
+      textlessErrors(),
+    ],
+
+    /**
+     * §12.144. No free text leaves: the `fields` context and the worker's
+     * breadcrumbs keep only numbers, booleans, null, UUIDs, timestamps,
+     * SQLSTATEs and truck numbers; console lines and request URLs lose their
+     * text. The event keeps the logger's literal message, for grouping.
+     */
+    beforeSend: scrubWorkerEvent,
   });
 
   Sentry.setTags({ service: 'worker', runtime: 'node' });
@@ -126,6 +141,9 @@ export function captureWorkerError(
   if (!active) return;
   Sentry.withScope((scope) => {
     if (fields && Object.keys(fields).length > 0) scope.setContext('fields', fields);
+    // What is left of a database error once its message is gone (§12.144).
+    const sqlstate = sqlstateOf(cause);
+    if (sqlstate) scope.setTag('sqlstate', sqlstate);
     if (cause instanceof Error) {
       /**
        * Grouped by OUR message, not by the exception's.
@@ -153,7 +171,7 @@ export function workerBreadcrumb(
   Sentry.addBreadcrumb({
     level,
     message,
-    category: 'worker',
+    category: WORKER_BREADCRUMB,
     // `exactOptionalPropertyTypes` — an absent key, not an explicit undefined.
     ...(fields ? { data: fields } : {}),
   });

@@ -153,3 +153,72 @@ export function textlessErrors(): Integration {
 export function scrubServerEvent(event: ErrorEvent): ErrorEvent {
   return isReaderEvent(event) ? scrubReaderEvent(event) : withoutText(event, REMOVED);
 }
+
+/** The category of the worker's own breadcrumbs (src/worker/sentry.ts). */
+export const WORKER_BREADCRUMB = 'worker';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+/** A truck number as a string, only under a truck key: digits alone are also a ZIP. */
+const TRUCK_KEY = /^truck(?:_?number)?$/i;
+const TRUCK_NUMBER = /^\d{1,6}$/;
+/** A SQLSTATE, only under its own key: five capitals or digits are also a ZIP. */
+const SQLSTATE_KEY = /^(?:sqlstate|code)$/i;
+
+/**
+ * One value of the worker's fields, as it may leave (§12.144): a number, a
+ * boolean, null, a UUID, an ISO-8601 date or timestamp, a SQLSTATE or a truck
+ * number. Anything else — any other string, an object, an array, and the
+ * `error` and `cause` keys whatever they hold — becomes the placeholder.
+ */
+function fieldValue(key: string, value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (key === 'error' || key === 'cause') return REMOVED;
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (
+    typeof value === 'string' &&
+    (UUID.test(value) ||
+      ISO_8601.test(value) ||
+      (SQLSTATE_KEY.test(key) && SQLSTATE.test(value)) ||
+      (TRUCK_KEY.test(key) && TRUCK_NUMBER.test(value)))
+  ) {
+    return value;
+  }
+  return REMOVED;
+}
+
+/** The worker's fields with every value reduced to an allowed shape. */
+export function workerFields(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, fieldValue(key, value)]));
+}
+
+/**
+ * The worker's `beforeSend` (§12.144): `withoutText`, and then three things
+ * put back in a safe form.
+ * - The event's message, which only `captureWorkerError` sets, from the
+ *   logger's first argument: a string literal at every call
+ *   (src/worker/logger-literal-guard.test.ts).
+ * - The `fields` context, value by value through `workerFields`.
+ * - The worker's own breadcrumbs: their literal message, and their data
+ *   through `workerFields`. Every other breadcrumb — the console's JSON lines,
+ *   outgoing requests with their query strings — loses its message and data,
+ *   as `withoutText` leaves it.
+ */
+export function scrubWorkerEvent(event: ErrorEvent): ErrorEvent {
+  const scrubbed = withoutText(event, REMOVED);
+  const fields = event.contexts?.['fields'];
+  return {
+    ...scrubbed,
+    ...(event.message !== undefined ? { message: event.message } : {}),
+    ...(event.contexts ? { contexts: { ...event.contexts, ...(fields ? { fields: workerFields(fields) } : {}) } } : {}),
+    ...(event.breadcrumbs
+      ? {
+          breadcrumbs: event.breadcrumbs.map((crumb, i) =>
+            crumb.category === WORKER_BREADCRUMB
+              ? { ...crumb, ...(crumb.data ? { data: workerFields(crumb.data) } : {}) }
+              : (scrubbed.breadcrumbs?.[i] ?? {}),
+          ),
+        }
+      : {}),
+  };
+}
