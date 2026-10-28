@@ -35,6 +35,10 @@ error text to Sentry. See "Phase 3as" below.
 **3as LIVE (2026-10-28):** pushed (`86084fd..17865af`), and the worker
 deployed at `17865af` at 15:14 UTC, verified (see "Phase 3as", "Deployed").
 3as changed no app behaviour. Its Vercel deploy is not checked here.
+**3at (2026-10-28):** next 15.5.28, sharp 0.35.5 and source-map-js 1.2.2,
+patches only, with no code change. Committed for the phase's one authorised
+push. The push and Vercel's deploy are recorded in "Phase 3at". The worker
+is not redeployed and does not load these packages.
 
 | Commit | What | § |
 |---|---|---|
@@ -8323,6 +8327,169 @@ OK.
 **Not checked here:** Vercel's deploy of the pushed app commits; whether
 the deployed worker's next real error reaches the worker's Sentry project
 in its new shape (no error has happened, and none was provoked).
+
+**Questions 2 and 4 answered** (Alex, via the advisor, 2026-10-28; recorded
+in 3at):
+- 2: the worker's request breadcrumbs stay as they are, a category and a
+  time.
+- 4: `feed_health.last_error` stays as it is. It is our own database, not a
+  third party.
+
+### Phase 3at: dependency security patches, non-major only (2026-10-28)
+
+From the advisor's brief, after `npm audit --omit=dev` of 2026-10-28 found 6
+vulnerabilities (5 high, 1 critical). Built on `feb7968`, 1 ahead of
+origin's `17865af`. Alex authorised one `git push` for this phase only, if
+every gate passed. No worker deploy. No change to code, env, migrations or
+Sentry. drizzle-orm and zod stay on their majors.
+
+**Changed.** `package.json` has one line changed, and the lockfile changed
+38 package versions. Nothing was added or removed.
+- `next`: `^15.5.0` → `^15.5.28`, installed 15.5.25 → 15.5.28. That is the
+  newest 15.5.x (npm's `backport` tag). With it, `@next/env` and the eight
+  `@next/swc-*` binaries went to 15.5.28.
+- `sharp` 0.35.4 → 0.35.5. It is next's optional dependency, whose range is
+  now `^0.34.3 || ^0.35.5`. Its 16 `@img/sharp-*` packages went to 0.35.5
+  and the 10 `@img/sharp-libvips-*` to 1.3.4.
+- `source-map-js` 1.2.1 → 1.2.2 (`npm update source-map-js`).
+- Made with explicit installs, not `npm audit fix`. Its dry run would also
+  have bumped three dev-only packages the brief did not name: `happy-dom`
+  20.14.5 → 20.14.6, `drizzle-kit` 0.31.10 → 0.31.11 and
+  `postcss-selector-parser` 6.1.4 → 6.1.5.
+
+**`npm audit --omit=dev` afterwards:** 4 vulnerabilities (1 moderate, 3
+high, 0 critical).
+- Gone:
+  - next's own four: GHSA-2464-fhr4-w9xw (critical), GHSA-p3m5-59mp-jv5r,
+    GHSA-4jqv-mc3x-m676 and GHSA-mcj8-r9mp-w47p.
+  - sharp: GHSA-wq5f-xc86-pv6w.
+  - source-map-js: GHSA-68fv-2mgg-jv7q.
+- Left: postcss (high) and next (moderate), which are one finding.
+  - The flagged postcss is the copy inside next,
+    `node_modules/next/node_modules/postcss` 8.4.31. next 15.5.28 pins it
+    exactly (`"postcss": "8.4.31"`), so no 15.5 release fixes it. npm's only
+    fix is next 16.4.3, a major. next's own "moderate" is that same postcss,
+    inherited.
+  - Our own postcss (dev, for Tailwind) is 8.5.28, above the affected range
+    (≤ 8.5.22).
+  - Only next's build code loads the pinned copy: the webpack CSS block, the
+    resolve-url loader, next-font's loader and the CSS minimizer, all under
+    `next/dist/build/webpack/`, plus the compiled AMP optimizer, which we do
+    not use. It processes our own CSS at build time.
+  - An `overrides` entry would replace a version that next pins exactly.
+    Not done; question 1.
+- Left: drizzle-orm (high) and zod (high). Their fixes are majors. Report
+  below.
+
+**drizzle-orm < 0.45.2 (GHSA-gpj5-g38j-94v9, SQL identifiers escaped
+wrongly): report only.**
+- `sql.identifier` is not used in `src`, `scripts` or `e2e`.
+- `sql.raw` outside tests: every argument is a module constant or a column
+  expression written in the same file. No caller passes input.
+  - The `ISO` format constant: `src/server/override.ts:77` (constant at
+    `:34`), `src/server/appointment.ts:142`, `:143` and `:231` (constant at
+    `:57`).
+  - `iso(column)`, `src/server/load-read.ts:26`, called with literal columns
+    only (`:50`–`:67`).
+  - `FINISHED`, `src/server/timeline.ts:110` (constant at `:87`).
+  - `epochMs(column)`, `src/worker/eta-marks.ts:44`, with literal columns at
+    `:129`, `:134`, `:137`, `:317`, `:319` and `:358`.
+  - Statement timeouts from constants: `src/worker/eta-marks.ts:114`,
+    `:313`, and `src/worker/status-changes.ts:88`.
+  - `STATUS_IN`, `src/db/schema.ts:809`.
+  - `scripts/test-db-migrate.mts:17` runs a SQL file from the repo.
+- postgres.js `.unsafe(` appears only in scripts, the fixtures and e2e, with
+  constants. `e2e/fixtures.ts:70` builds a table list from the catalog's
+  names, filtered by `/^[a-z_][a-z0-9_]*$/` and quoted.
+- Table and column names always come from the schema objects. Every
+  `orderBy` takes a schema column, for example
+  `src/server/assignments.ts:87`. No `.as(` takes a non-literal.
+- **No SQL identifier is built from input.**
+- Unverified: the advisory's exact affected API. Only npm's title was read.
+
+**zod < 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory on oversized constrained
+collections): report only.**
+- **How zod 3 behaves.** In 3.25.76, `ZodArray` records a `.max` as an
+  issue and then still parses every element
+  (`node_modules/zod/v3/types.js:1788`–`1811`). A `.max` caps what is
+  accepted, not the work done.
+- No `z.record`, `z.set` or `z.map` anywhere.
+- **Request bodies.** Every array in a body schema has a `.max`. Every route
+  checks the role before reading the body: 13 `request.json()` sites, each
+  after `requireRole` or `requireUser`. The exception is
+  `src/app/api/drivers/route.ts:93`, which parses first (rate-limited by
+  address), but its schema has no array.
+  - The capped arrays: `src/lib/override.ts:147` and `:163` (40),
+    `src/lib/truck-lists.ts:172` (200), `src/lib/assignments.ts:23` (500),
+    `src/lib/load-edit.ts:77` (20) and `:84`–`85` (10), and
+    `src/lib/stop-edit.ts:261` (20).
+  - The reader's two bodies are capped in bytes before parsing, by
+    `bodyWithin` (`src/server/ratecon-reader/handle-read.ts:98`):
+    - 64 KiB, `READ_BODY_LIMIT_BYTES` (`src/lib/ratecon/read-codes.ts:16`);
+    - 4 KiB, `OUTCOME_BODY_LIMIT_BYTES`
+      (`src/lib/ratecon/outcome-codes.ts:21`).
+
+    Both use `zod/v4`, the copy shipped inside zod 3.25.76.
+  - The other bodies have no byte cap of ours. The bound is the platform's
+    request-body limit (Vercel's documented 4.5 MB, not checked here).
+  - So a signed-in user can send a very long array and make one function
+    instance build an issue per element. A signed-out user cannot reach
+    this.
+- **Arrays from the network with no `.max`.** All are vendor responses:
+  - Samsara: `src/samsara/schemas.ts:50` (`gps`) and `:92` (`data`);
+  - HERE: `src/server/routing/provider.ts:98`, `:101` and `:121`;
+  - Census: `src/server/geocode.ts:274`.
+
+  The model's answer, `src/lib/ratecon/model-read.ts:85`, has `.max(20)`.
+- Every other `z.array` parses rows from our own database.
+
+**What the two majors would touch:**
+- drizzle-orm 0.44 → 0.45: 91 files import it, 42 of them tests or e2e.
+  19 are under `src/worker`, so this bump also means a worker deploy.
+- zod 3 → 4: 45 files, none of them tests. 4 are under `src/worker`.
+  - 39 files import `zod` and 6 already import `zod/v4`.
+  - `@anthropic-ai/sdk` 0.133.0 accepts `^3.25.0 || ^4.0.0`.
+
+**Worker reach.** None of the updated packages is loaded by the worker.
+- Method: esbuild bundled `src/worker/index.ts` in memory (nothing written
+  to the repo) and its metafile was read.
+- The graph has 37 of our files, the same count as 3as. Its packages are
+  `@opentelemetry/api`, six `@sentry/*`, `dotenv`, `drizzle-orm`,
+  `postgres` and `zod`.
+- No next, `@next/*`, sharp, `@img/*`, postcss or source-map-js.
+- The droplet's next `npm ci --omit=dev` will install the new next and
+  sharp, because they are production dependencies, but the worker never
+  loads them.
+- Limit: esbuild follows static imports and literal dynamic imports only.
+
+**Gates:**
+- `npm run check`: 212 files / 3,825 tests passed; typecheck and lint clean.
+- Forbidden-files grep
+  (`\.pdf|expected\.json|samples|eta-data|taste-skill`): printed nothing.
+- `npm run build`: passed, `▲ Next.js 15.5.28`.
+- `npm run e2e` (full, once): **260 passed** in 19.2 min, run
+  2026-10-28T15-40-52-391Z, `.last-run.json` "passed". No stall, no rerun,
+  no baseline image differed. The machine stayed awake.
+
+**Found wrong in the brief:**
+- "postcss … non-major fixes": true for our own postcss, which is already
+  fixed at 8.5.28. Not true for the flagged copy, which next pins, so its
+  only fix is next 16.
+- "fixed after 15.5.27" is consistent with what was seen: at 15.5.28, npm's
+  data lists none of next's own four advisories. 15.5.26 and 15.5.27 were
+  not tried.
+
+**Questions for Alex:**
+1. The postcss inside next: leave it until next 16, or add an `overrides`
+   entry for next's copy at 8.5.32? An override goes against next's exact
+   pin and would need its own build and e2e. Recommended: leave it. It
+   runs only at build time, on our own CSS.
+2. zod: the exposure is signed-in only. A smaller fix than zod 4 would be
+   a byte cap on the 13 `request.json()` handlers (10 route files) through
+   the reader's existing `bodyWithin`. That is one shared layer, and it would also help after
+   zod 4. Make it a phase?
+3. drizzle 0.45 and zod 4: their own phases later? drizzle is not exposed,
+   since no identifier comes from input. It needs a worker deploy.
 
 ## Next
 
