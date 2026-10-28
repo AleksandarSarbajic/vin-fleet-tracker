@@ -10208,6 +10208,9 @@ edit modal keep §12.14. The routes refuse a viewer as before.
 
 ## 12.142 An unexpected route error reaches Sentry: type, stack, prefix, reference, SQLSTATE, never the message
 
+> Extended by §12.143 (3ar): every server error event, not only a route's,
+> carries no text, and the console line no longer carries the message.
+
 Every route under `src/app/api` answers an unexpected error (anything that
 is not one of its 4xx cases) through `unexpectedFailure`
 (`src/server/route-failure.ts`). The dispatcher still gets the same 500 and
@@ -10245,6 +10248,52 @@ console in one line, by reference only. A guard test fails any route file
 that writes its own console line, reference or 5xx. The reader's two routes
 are excluded by name; they keep their own frozen log line (HANDOFF 3aq,
 item 6).
+
+## 12.143 No server error event carries text
+
+§12.142's rule now covers **every** error event from the app's two server
+runtimes (Node and edge), caught or uncaught, whoever captured it. Each event
+carries the error's type and stack frames, and its causes'. It never carries
+a message, `extra`, request data, or breadcrumb text. The worker and the
+browser are separate (HANDOFF 3ar).
+
+**Uncaught errors.** Sentry's own wrappers around pages, server actions and
+route handlers capture the RAW error themselves, before Next calls
+`onRequestError`. The 5 leaking issues of 2026-10-14/15 ("Page Server
+Component /") came this way. A stand-in handed to `onRequestError` would
+neither cut that capture's text nor be deduplicated against it: it would be
+a second event. So:
+
+- `textlessErrors` (`src/lib/sentry-server-errors.ts`), added by both
+  configs, rebuilds every error event's **whole** exception list from
+  `typeAndStack` of the captured error, causes included. It runs at
+  `preprocessEvent`, after linkedErrors (it registers in `afterAllSetup`),
+  and before source context and the frame rewrite for source maps. The
+  result is the same wherever it sits in the integration list.
+- `onRequestError` stays `Sentry.captureRequestError`, given the raw error.
+  Sentry drops a second capture of the same object, so a page error is one
+  event.
+- Transactions and spans are untouched.
+
+**The backstop.** Both configs' `beforeSend` is `scrubServerEvent`. A reader
+route event goes through `scrubReaderEvent`, exactly as before; any other
+error event goes through `withoutText`. That covers an event with no Error to
+rebuild from, such as a captured message.
+
+**One implementation.** `typeAndStack`, the type names and the SQLSTATE live
+only in `src/lib/sentry-server-errors.ts`, which has no Node import (the edge
+config uses it). A test fails any second place that cuts a message out of a
+stack. PostgresError and DrizzleQueryError are recognised by shape, not by
+class: the build bundles postgres.js once per layer, and minifies its class
+name.
+
+**The route console line** (`unexpectedFailure`) is the label, the reference,
+the error's type (the event's name for it) and the SQLSTATE when there is
+one. Never the message, SQL or bound values. The "not reported" line is
+unchanged.
+
+All of them read `[removed: a server error never reports its text]` where a
+message was. The reader's events keep their own placeholder.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

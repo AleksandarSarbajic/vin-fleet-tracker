@@ -25,6 +25,9 @@ section 1. The table below lists only older commits.
 committed and not pushed.
 **3aq: NOT pushed** (2026-10-28): unexpected route errors reach Sentry,
 without their messages. See "Phase 3aq" below.
+**3ar: NOT pushed** (2026-10-28): no server error event carries text, and
+the route console line drops the message. See "Phase 3ar" below. Neither is
+on origin: its master is `ad04eb9`.
 
 | Commit | What | § |
 |---|---|---|
@@ -7877,6 +7880,213 @@ server.
 5. **Yes**, the console line drops the error message and keeps only the
    class name and SQLSTATE, like the reader's line. In 3ar, not now.
 6. One e2e run of the fixed spec: yes. It passed (see "e2e" above).
+
+### Phase 3ar: no server error event carries text; the console line drops the message (2026-10-28)
+
+From the advisor's brief, after Alex's 3aq answers 3 and 5. **NOT pushed,
+NOT deployed**, built on 3aq, which is not pushed either (origin's master is
+`ad04eb9`; Alex: fine, build on top). No route returns anything different. No
+migration, UI, dependency, env var or Sentry setting changed. The reader's
+code and log lines, the worker and the browser are untouched.
+
+**Why.**
+- 3aq made a caught route error reach Sentry as type and stack only.
+  Uncaught server errors still sent their message. The advisor's read-only
+  count, 2026-10-28: 5 of the 9 Sentry issues from 2026-10-14/15 ("Page
+  Server Component /") carry "Failed query" and "params:" in the exception
+  value.
+- `sentry.server.config.ts` scrubbed the reader route only, and
+  `sentry.edge.config.ts` scrubbed nothing.
+- The route console line wrote `error.message` (SQL and bound values) into
+  Vercel's logs. Alex decided to drop it (3aq answer 5).
+
+**The design changed before any code, agreed with Alex 2026-10-28.** The
+brief asked for a stand-in handed to `onRequestError`. But Sentry's wrapper
+around every page captures the RAW error first
+(`@sentry/nextjs` `common/wrapServerComponentWithSentry.js:35`; present on
+every page in the e2e build). That is exactly the leaking path. Probed on
+the installed SDK:
+- `beforeSend` can drop the value, but a message line holding " at " is a
+  frame filename by then.
+- A stand-in in `onRequestError` is a second event: Sentry dedupes by object
+  identity (`@sentry/core` `client.js:149`).
+
+So instead there is one early hook. Alex's conditions:
+1. Rebuild the whole list, causes included, the same in either order with
+   linkedErrors, tested both ways.
+2. Error events only; with no Error, the backstop strips the text.
+3. A real-client test of a page-style error.
+
+**What was built** (§12.143):
+- `src/lib/sentry-server-errors.ts` (new, no Node import, the only copy):
+  `typeAndStack` (moved from `route-failure.ts`), `errorType`, `sqlstateOf`,
+  `rebuildException`, `textlessErrors()`, `scrubServerEvent`.
+  - `textlessErrors` registers a `preprocessEvent` listener in
+    `afterAllSetup`, so it runs after linkedErrors wherever it sits, and
+    before `processEvent` (source context, the frame rewrite for source
+    maps). It replaces the whole `exception.values` from `typeAndStack(hint.
+    originalException)`, with linkedErrors' ordering and mechanism fields,
+    and frames parsed as Sentry parses them (`stackParser(stack, 1)`,
+    `utils/eventbuilder.js:8–9`). It never swaps `hint.originalException`:
+    span attribution (`utils/errorSpanAttribution.js:19`) and Next's
+    control-flow filter read it later.
+  - PostgresError and DrizzleQueryError are recognised by shape, not
+    `instanceof`. The e2e build bundles postgres.js once per layer (the
+    routes use chunk 5800, the pages chunk 6668), and minifies its class to
+    `o`.
+- `sentry.server.config.ts`, `sentry.edge.config.ts`: `beforeSend:
+  scrubServerEvent` (reader events exactly as `scrubReaderEvent` leaves
+  them; others through `withoutText`), and
+  `Sentry.addIntegration(textlessErrors())` after `init`. Added after init
+  so the `integrations:` line the reader test pins is unchanged;
+  `addIntegration` runs `afterAllSetup` (`client.js:328–336`).
+- `src/instrumentation.ts`: `onRequestError` stays
+  `Sentry.captureRequestError` with the raw error, on purpose. Next hands it
+  the same object the page wrapper captured
+  (`next/dist/server/app-render/create-error-handler.js`, `getProperError`),
+  so it dedupes. Comment only.
+- `src/server/route-failure.ts`: uses the shared stand-in. The console line
+  is now `{ reference, errorName, sqlstate? }`. The "not reported" line is
+  unchanged.
+- The placeholder for all non-reader events is now `[removed: a server error
+  never reports its text]`; 3aq's route text is gone.
+- `src/lib/sentry-reader.ts`: `isReaderEvent` exported.
+  `src/lib/sentry-reader.test.ts`: the wiring regex now expects
+  `scrubServerEvent` (one line). Its behaviour tests are unchanged, and a new
+  test shows reader events come out identical.
+
+**Commits.** Each passed `npm run check` in the pre-commit hook, on its own
+content:
+- `37da6a3`: the shared module, the hook, the backstop in both configs, and
+  their tests;
+- `6355375`: the console line drops the message;
+- `30df300`: e2e, a page's uncaught error;
+- one docs commit: this section, design-spec §12.143 (plus a pointer at the
+  top of §12.142), "What is live".
+
+**Tests**, 3,779 → 3,795 (207 → 209 files):
+- `src/lib/sentry-server-errors.test.ts` (14):
+  - The real `wrapServerComponentWithSentry` throws a Drizzle error (bound
+    value "Meet at dock <sentinel>", a cause with a frame-shaped line and a
+    minified class), then the real `onRequestError` gets the same error. One
+    event, no sentinel, types `PostgresError`/`DrizzleQueryError`, real
+    frames with line numbers, no frame from the message.
+  - A direct capture with `extra` and a breadcrumb, and a captured message:
+    no text.
+  - A transaction untouched by the hook. The backstop on route, edge, page
+    and reader events. The names, and the stand-in.
+  - Both configs' wiring, with no `beforeSendTransaction`/`beforeSendSpan`.
+  - One implementation: no other file cuts a message out of a stack.
+- `src/lib/sentry-linked-errors-order.test.ts` (1): the integration first
+  and last in the list, on two real clients: identical lists, no sentinel.
+- `src/server/route-failure.test.ts` (+1, and the console assertions
+  rewritten): the console line exact for a Drizzle error, a thrown string
+  and a minified postgres.js error, and the sentinel in no console call.
+- `src/app/api/drivers/route-failure.test.ts` (rewritten console
+  assertions): the real database failure logs `{ reference, errorName:
+  'DrizzleQueryError', sqlstate: '42P01' }`, and the non-JSON body logs `{
+  reference, errorName: 'SyntaxError' }`.
+
+**Mutations.** Each was applied alone, then reverted and checked with `cmp`:
+
+| Mutation | Result |
+|---|---|
+| Integration removed from the server config | 1 failed (wiring) |
+| Integration removed from the client (its behaviour) | 2 failed (the page path, a direct capture) |
+| The brief's design: a stand-in handed to `captureRequestError` | 1 failed: **2 events instead of 1** |
+| `beforeSend` removed on edge | 1 failed |
+| `beforeSend` applied to transactions (`beforeSendTransaction` added) | 1 failed |
+| Integration applied to transactions (type guard removed) | 1 failed |
+| The message back on the console line | 8 failed |
+| A second copy of the stand-in (in `route-failure.ts`) | 1 failed |
+| Hooked at setup, in list order, instead of `afterAllSetup` | 1 failed (the order test) |
+| Only the error's own value rebuilt, causes left as linkedErrors made them | 2 failed |
+
+**e2e.** `npm run e2e -- route-failure-sentry sentry-traces`, run
+2026-10-28T14-18-29-267Z: **4 passed on the first run** (setup, the route
+test, the new page test, sentry-traces). No rerun. The machine stayed awake.
+- The new test needs no switch in the app. For the test only, `truck_lists`
+  in the e2e database becomes a view over a function that raises (SQLSTATE
+  P0001) with a sentinel twice, once on a frame-shaped line. `/history`
+  reads it through Drizzle. It is restored in `finally`, and it was
+  restored: afterwards `truck_lists` is a plain table, with no view or
+  function left. The SQL was rehearsed first in a rolled-back transaction.
+- The sink got exactly one server error event: types `PostgresError`,
+  `DrizzleQueryError` (named by shape in the minified build), values the
+  placeholder. The sentinel and `evil.js` were nowhere in anything the sink
+  received, browser events included.
+- The server logged `DRIVER-POST failed { reference: 'DRIVER-POST-500-…',
+  errorName: 'SyntaxError' }`.
+- **Next's own log is not clean:** for the page error the server printed `⨯
+  Error: Failed query: …` with the cause's fields and the raised message
+  (question 1).
+
+**Report only: the worker** (`src/worker/*`, from the code).
+- **Yes, a worker event carries a Drizzle message with bound values.**
+  `captureWorkerError` calls `Sentry.captureException(cause)` with the raw
+  error (`src/worker/sentry.ts:139`). The worker queries through Drizzle
+  (`createDirectDb`, `src/worker/index.ts:139`), so a failed query's value is
+  `Failed query: <sql>\nparams: <values>`, and linkedErrors adds the
+  PostgresError's message. Frame-shaped lines become frames.
+- Its `init` has `dataCollection` but no `beforeSend` and no rebuild.
+- `captureWorkerError` also does `scope.setContext('fields', fields)`, and
+  callers pass `error: message` (`index.ts:182`, `:237`, `:308`). So the
+  message is also in `contexts.fields.error`, which `withoutText` does not
+  touch.
+- The logger's JSON line goes to `console.error`, and so into a console
+  breadcrumb.
+- A fix would touch `src/worker/sentry.ts`: add `scrubServerEvent` and
+  `textlessErrors` (the module has no Node import, so it can be shared), and
+  stop putting `error: message` into the `fields` context, or scrub
+  `contexts`. Possibly the logger's callers too. It is a separate Sentry
+  project and a separate deploy to the droplet.
+
+**Report only: the browser** (`src/instrumentation-client.ts`, from the
+code).
+- **It can carry such data:** its `init` has `dataCollection` but no
+  `beforeSend` and no rebuild. An uncaught browser error's message, its
+  frame-shaped lines, console breadcrumbs, and click breadcrumbs (element
+  selectors and some attributes) go as the SDK builds them.
+- In today's code, nothing found puts data there:
+  - The one client `Error` built from a template holds a status code
+    (`MergePrompt.tsx:39`).
+  - The four client `console.error` calls log a cause's message, and
+    `DriverPhone.tsx:141` leaves the number out on purpose.
+  - Sixteen client files call `.json()`, whose parse error quotes about ten
+    characters of a non-JSON body (a proxy's error page, not our data).
+- Unverified: third-party errors in the browser (pdf.js, OCR, maps) and
+  whether any quotes document text; whether any click target's attributes
+  carry a name.
+- A fix would need a browser-aware cut: the `^\s+at ` frame filter is V8's,
+  and would drop every frame from Firefox and Safari stacks.
+
+**Found wrong in the brief:**
+- "Expected: 3aq pushed, HEAD 41b10ab = origin/master": origin's master is
+  `ad04eb9`. Alex: build on top.
+- Item 1 (a stand-in in `onRequestError`) and the mutation "raw error to
+  `captureRequestError`" assumed `onRequestError` is where uncaught errors
+  are captured. The page wrapper captures first. Replaced as agreed; the
+  brief's design, run as a mutation, gave 2 events.
+- "Its tests must pass unchanged" for the reader: one reader test pins the
+  config's `beforeSend: scrubReaderEvent`, so it cannot stay unchanged when
+  `beforeSend` changes. One line changed; the behaviour tests did not.
+- "Every ERROR event (not transactions/spans) passes through
+  `withoutText`": `beforeSend` only ever sees error events. The hook that
+  does see transactions is `preprocessEvent`, so that is where the guard and
+  its mutation are.
+- "Share `typeAndStack`" carried 3aq's `instanceof` naming. That cannot work
+  on edge (no postgres.js import) or across bundle layers, so the names are
+  by shape.
+
+**Questions for Alex:**
+1. Next prints an uncaught render error in full to the server log (Vercel's
+   logs): SQL, bound values, the PostgresError's fields. Our line is clean;
+   Next's is not. Look into it in a later phase, or accept it?
+2. The worker leaks the same way (above). A worker phase, with its own
+   deploy?
+3. The browser: add a scrub now (it needs a browser-aware stack cut), or
+   leave it, since nothing found carries data today?
+4. Push 3aq and 3ar together, when you are ready? Nothing is pushed.
 
 ## Next
 
