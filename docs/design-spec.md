@@ -10375,7 +10375,12 @@ There is no second status engine, route, query, migration or worker change.
 the column, and nothing in it can be pressed.
 
 **Columns** from 840px wide:
-`64px minmax(240px,360px) 64px minmax(220px,260px) minmax(120px,1fr)`.
+`64px minmax(240px,300px) 64px minmax(220px,260px) minmax(120px,1fr)`.
+- The picker is capped at 300 at every width, down from §12.131's 360
+  (Alex, 2026-10-28). At 360 Currently was 145px at 1280, and at a window
+  of about 1000, and it cut positions after a chip. At 300 it is 205 there,
+  229 at 1024 and 245 from 1440. The open list keeps its own width
+  (`listMaxWidth`).
 - The phone, which took the slack, is capped at 260, and Currently takes the
   slack instead.
 - 120 holds the widest chip whole: "Arrived · forced" is 111px, measured in

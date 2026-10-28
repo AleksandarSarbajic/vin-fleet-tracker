@@ -42,6 +42,8 @@ is not redeployed and does not load these packages.
 **3ap: NOT pushed** (2026-10-28): Currently, the truck's live chip and
 position on /assignments. Seven assignments baselines differ and none is
 re-saved; the advisor reviews the images first. See "Phase 3ap" below.
+**3ap follow-up (2026-10-28):** the picker capped at 300 (Alex), and all 8
+assignments baselines re-saved and committed. Still NOT pushed.
 
 | Commit | What | § |
 |---|---|---|
@@ -8715,6 +8717,79 @@ file restored and checked with `cmp`:
    empty cell until the next poll. Fine?
 4. Below 840 the column is hidden. Fine, or should it show the chip only
    from some narrower width?
+
+#### 3ap follow-up: Alex's answers, the picker cap, the baselines (2026-10-28)
+
+**Alex's answers** (2026-10-28, via the advisor):
+1. Yes: the driver column's maximum goes from 360 to 300.
+2. A driver with no fix showing "—" is fine.
+3. A new truck empty for up to 20s is fine.
+4. Currently hidden below 840px is fine.
+
+**The advisor's review of run 2026-10-28T19-12-49-229Z.** The chips, the
+"—" rows, the position-only rows and the saved-not-draft rule are correct
+in the images. Positions were cut at 1280 ("Bloomingt…", "Cham…") and
+partly at 1024. That is what answer 1 fixes.
+
+**Later, own phase (not now):**
+- `MapPopup.tsx:218` does not withdraw colour on a stale feed (§5.9).
+- One shared helper for the chip's props, which are built in four places.
+
+**The cap** (`c829e86`). In `COLUMNS` the picker is `minmax(240px,300px)`,
+in both the four-column template (below 840) and the five-column one. The
+width-budget comment is redone. The widths, worked out from the grid's
+rules and matched in the new pictures:
+
+| Window | Table | Picker | Phone | Currently |
+|---|---|---|---|---|
+| 1440 and up | 1000 | 300 | 260 | 245 (was 185) |
+| 1280, and a window of about 1000 | 960 | 300 | 260 | 205 (was 145) |
+| 1100 | 780 | ~242 | ~222 | 120 |
+| 1024 | 984 | 300 | 260 | 229 (was 169) |
+| 768, four columns | 728 | 300 (was 329) | 249 (was 220) | hidden |
+
+- No test pinned `COLUMNS`, so none changed. `npm run check`: 213 files /
+  3,862 tests.
+- design-spec §12.145's column line now says 300, with this reason.
+
+**The open picker** (the brief asked). `listMaxWidth`
+(`DriverSelect.tsx:46`) lets the list run past its field up to the nearest
+clipping edge or the viewport, at most 420. The list is `w-max min-w-full`:
+as wide as its widest entry, never narrower than the field.
+- So the cap narrows the field, not the list.
+- In `assignments-picker-open-1024.png` the list is 300px wide, the field's
+  width, because every entry fits. Each visible entry is whole: name, No ELD
+  tag and "ON TRUCK 401".
+- The entries scrolled below the list's fold are not in the picture.
+
+**e2e:**
+- `npm run e2e -- assignments-baseline --update-snapshots=changed` (run
+  `2026-10-28T19-25-21-778Z`): 9 passed, **8 re-saved**.
+  - `assignments-768` changed too: the cap applies to its four-column row
+    (picker 329 → 300, phone 220 → 249). Currently is still hidden there.
+- `--repeat-each=3 --update-snapshots=none` (run
+  `2026-10-28T19-25-54-718Z`): **25 passed**.
+- `desktop-baseline history-baseline history-phone-baseline dispatch
+  driver-phone driver-picker --update-snapshots=none` (run
+  `2026-10-28T19-26-29-451Z`): **31 passed**.
+  - `git status` afterwards showed only the 8 assignments PNGs.
+  - No hosted-auth stall in any of the three runs.
+- **Each saved PNG was opened before the commit:** only the spec's invented
+  seed. At 1024, 1280 and 1440 "Bloomington, IL", "Champaign, IL" and "Last
+  seen Kankakee, IL" are whole.
+- Committed in `bc158b7`, under
+  `e2e/__screenshots__/assignments-baseline.spec.ts/`:
+  - `assignments-768.png`
+  - `assignments-1024.png`
+  - `assignments-1280.png`
+  - `assignments-1440.png`
+  - `assignments-1680.png`
+  - `assignments-1920.png`
+  - `assignments-changed-1440.png`
+  - `assignments-picker-open-1024.png`
+
+**Commits:** `c829e86` (the cap), `bc158b7` (the PNGs), and one docs commit
+(this section and §12.145). NOT pushed.
 
 ## Next
 
