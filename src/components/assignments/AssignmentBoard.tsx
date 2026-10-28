@@ -70,30 +70,36 @@ const label = (t: Board['trucks'][number]) =>
  *   forced", 111px; the widest unforced is "Tomorrow", 79px). Its position
  *   truncates, with the whole of it on hover.
  *
- * With 4 gaps of 16 and the rows' 3px edge, that is 775. The widths below
- * come from measuring the chips in the built Barlow Condensed. The column
- * pixel figures are worked out from the grid's rules: free space goes to the
- * picker (up to 360) and the phone (up to 260) before Currently's 1fr gets
- * any.
+ * With 4 gaps of 16 and the rows' 3px edge, that is 775. The chip widths
+ * come from measuring them in the built Barlow Condensed. The column pixel
+ * figures are worked out from the grid's rules: free space goes to the
+ * picker (up to 300) and the phone (up to 260) before Currently's 1fr gets
+ * any. The figures below:
  * - 1440 and up: the table is capped at 1000 (the section's `max-w`).
- *   Picker 360, phone 260, Currently 185.
- * - 1280: the panels sit beside the table, which is 960 wide. Currently is
- *   145.
- * - 1100: the table is 780 wide. The picker and phone are near their
- *   minimums and Currently is 120: the chip whole, the position cut.
+ *   Picker 300, phone 260, Currently 245.
+ * - 1280: the panels sit beside the table, which is 960 wide. Picker 300,
+ *   phone 260, Currently 205. Alex's window, about 1000 with the panels
+ *   above, has the same 960 table.
+ * - 1100: the table is 780 wide. Picker about 242 and phone about 222, near
+ *   their minimums. Currently is 120: the chip whole, the position cut.
  * - 1024: the panels sit above the table (§12.132), which is 984 wide.
- *   Currently is 169.
- * - Below 840 it does not fit. At 768 the table is 728 wide, 47 short of 775,
- *   so Currently is hidden and the row is the four columns it was (639).
- *   Nothing else gives way: none of the minimums above has 47px to spare.
- *   The console shows the same chip.
+ *   Picker 300, phone 260, Currently 229.
+ * - 840: the table is 800 wide. Currently is 120.
+ * - Below 840 it does not fit. At 768 the table is 728 wide, 47 short of
+ *   775, so Currently is hidden and the row is four columns. Nothing else
+ *   gives way: none of the minimums above has 47px to spare. The console
+ *   shows the same chip. With the four columns at 768 the picker is 300 and
+ *   the phone takes the rest, 249.
  *
- * 3al settled the picker on screen: flexible, it ran 845px wide at 1920, so
- * it is capped at 360; and from 1100px up the whole table is capped at
+ * The picker's cap. 3al settled it on screen: flexible, it ran 845px wide at
+ * 1920, so it was capped at 360. 3ap lowered it to 300 (Alex, 2026-10-28):
+ * at 360, Currently had 145px at 1280 and cut "Champaign, IL" after a chip.
+ * The open list is not bound to the field (`listMaxWidth`: as wide as its
+ * longest entry, up to 420). From 1100px up the whole table is capped at
  * 1000px so its rows stop where their content does.
  */
 const COLUMNS =
-  'grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,1fr)] min-[840px]:grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,260px)_minmax(120px,1fr)]';
+  'grid-cols-[64px_minmax(240px,300px)_64px_minmax(220px,1fr)] min-[840px]:grid-cols-[64px_minmax(240px,300px)_64px_minmax(220px,260px)_minmax(120px,1fr)]';
 /** §12.145: where Currently has its 120px (above); below, hidden. */
 const CURRENTLY_SHOWN = 'hidden min-[840px]:flex';
 
