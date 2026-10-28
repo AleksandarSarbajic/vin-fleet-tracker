@@ -10333,6 +10333,62 @@ variable or anything built at run time fails.
 the full message. So does `feed_health.last_error` for startup and roster
 failures (written by the worker, read by nobody in the app).
 
+## 12.145 Currently: the truck's live chip and position on the assignment board
+
+**What it shows** (Alex, 2026-10-21/22; the approved Claude Design). A fifth
+column on the assignment board, after the driver's phone. It shows the live
+state of the SAVED assignment:
+
+- **The console row's chip.** It is `StatusChip` with the row's own props:
+  - a stale feed withdraws the colour: every chip becomes the dotted Stale
+    GPS carrying its fix's age (§5.9);
+  - a truck's own Stale GPS carries its age (§5.1);
+  - an upcoming load names its day (§12.82);
+  - a forced status says "· forced" (§9.5).
+
+  Only the statuses in `STATUSES` appear. Never "Off duty", which is HOS
+  (never build), and never "Parked", which is no status here.
+- **Then the position**, as the console's Position cell shows it:
+  - `cityState`, the "City, ST" taken from the truck's OWN fix (Samsara's
+    `formattedLocation`, through `cityState()` in `samsara/schemas.ts`);
+  - the whole string on hover;
+  - "Last seen …" once the fix or the feed is stale.
+
+  There is no parsing, geocoding or new field.
+- **The empty cases:**
+  - no driver on the truck: "—", never the Unassigned chip (§12.18's rule);
+  - no open load: the position only, with no chip;
+  - no fix: "—" where the position goes;
+  - a truck the last poll did not carry: nothing.
+
+**Where it comes from.** The fleet the console uses:
+- The page loads `loadFleet()` beside the board.
+- The board runs the console's `useFleet`, which polls every 20s, and joins
+  the fleet to its trucks by id.
+- When a refresh (a save, a retire, a new driver) brings the page a newer
+  fleet than the last poll, the newer one is shown.
+
+There is no second status engine, route, query, migration or worker change.
+
+**The draft never reaches it.** A pick changes the Driver column and its
+"was" (§12.140). Currently stays on the saved truck until a save. Viewers see
+the column, and nothing in it can be pressed.
+
+**Columns** from 840px wide:
+`64px minmax(240px,360px) 64px minmax(220px,260px) minmax(120px,1fr)`.
+- The phone, which took the slack, is capped at 260, and Currently takes the
+  slack instead.
+- 120 holds the widest chip whole: "Arrived · forced" is 111px, measured in
+  the built Barlow Condensed.
+- The minimums come to 775px with the gaps and the rows' edge.
+- Below 840 the board keeps §12.140's four columns and Currently is hidden:
+  at 768 the table is 728 wide, and none of the other minimums can give 47px.
+- The width at each breakpoint is in `AssignmentBoard.tsx`'s `COLUMNS`.
+
+**Cost.** `/api/fleet` spends the `read.heavy` limit, 60 a minute sustained,
+per user. Each open tab polls 3 times a minute, so the console and this page
+together cost 6.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

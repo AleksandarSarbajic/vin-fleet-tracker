@@ -39,6 +39,9 @@ deployed at `17865af` at 15:14 UTC, verified (see "Phase 3as", "Deployed").
 patches only, with no code change. Committed for the phase's one authorised
 push. The push and Vercel's deploy are recorded in "Phase 3at". The worker
 is not redeployed and does not load these packages.
+**3ap: NOT pushed** (2026-10-28): Currently, the truck's live chip and
+position on /assignments. Seven assignments baselines differ and none is
+re-saved; the advisor reviews the images first. See "Phase 3ap" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -8502,6 +8505,216 @@ commit and is not pushed.
    zod 4. Make it a phase?
 3. drizzle 0.45 and zod 4: their own phases later? drizzle is not exposed,
    since no identifier comes from input. It needs a worker deploy.
+
+### Phase 3ap: live status and position in "Currently" on /assignments (2026-10-28)
+
+From the advisor's brief. This is part 2 of Alex's Claude Design (part 1 is
+3ao). **NOT pushed, NOT deployed.** Built on `ebcb8d3`. No change to the
+console, the status engine, the fleet query, the worker, Sentry,
+dependencies, env or migrations. The save request, the search, the tabs,
+the panels and the phone editor are unchanged. Rules: design-spec §12.145.
+
+**Commits** (each passed `npm run check` in the pre-commit hook, on its own
+content):
+- `677a09c`: the column, the page's fleet, the tests;
+- `5f8c4cf`: the baseline seed;
+- one docs commit: this section and §12.145.
+
+**What was built.**
+- `src/components/assignments/Currently.tsx`, new:
+  - `consoleChip` gives the console row's chip props: a stale feed means
+    Stale GPS with its age and no "forced"; a truck's own Stale GPS shows
+    its age; an upcoming load shows its day.
+  - `Currently` draws `StatusChip` with those props, then the position.
+    - No driver: "—". No open load: the position only.
+    - No row in the poll: nothing.
+- `AssignmentBoard.tsx`:
+  - a required `initialFleet` prop, and `useFleet(initialFleet)`, the
+    console's hook and its 20s;
+  - whichever is newer of the polled fleet and the page's own;
+  - a map by truck id;
+  - the fifth column in `COLUMNS`, from 840px;
+  - the header "Currently".
+- `src/app/assignments/page.tsx`: `loadFleet()` beside
+  `loadAssignmentBoard`. Its viewer comment said §12.14 ("never hidden"),
+  which §12.141 replaced on this page; it is corrected.
+
+**`cityState` is the POSITION's** (the brief asked):
+- `toFleetRow` sets `cityState: cityState(raw.formatted_location)`
+  (`src/server/fleet-query.ts:451`). `formatted_location` is the truck's
+  latest fix, Samsara's `gps.reverseGeo.formattedLocation`.
+- `cityState()` (`src/samsara/schemas.ts:142`) detects and drops the zip,
+  then keeps the last two parts. It returns the whole string when it cannot.
+- The console's row uses it (`TruckRow.tsx:471`) with `formattedLocation` on
+  hover (`:673`). The phone sheet prefers the whole string (`TruckSheet.tsx:156`).
+- So the design's "City, ST" already exists as a position field. The cell
+  uses it as the row does: "Last seen …" when stale, and the whole string
+  in its title. No parsing, geocoding or new field.
+
+**The width budget** (the full comment is on `COLUMNS`).
+- The columns from 840px:
+  `64px minmax(240px,360px) 64px minmax(220px,260px) minmax(120px,1fr)`.
+- Why each minimum:
+  - The picker's 240 holds an empty row's 104px field, an 8px gap and
+    "+ Assign driver" (92px).
+  - The phone's 220 holds its editor.
+  - Currently's 120 holds the widest chip whole, "Arrived · forced" at
+    111px. The widest unforced chip is "Tomorrow", 79px.
+  - The chip widths were measured with `@napi-rs/canvas` and the built Barlow
+    Condensed (600, 10.5px, .08em tracking, the chip's padding, icon and
+    border).
+- With 4 gaps of 16 and the 3px edge, the minimums come to 775.
+- The pixel widths below are worked out from the grid's rules: free space
+  goes to the capped picker and phone first, and Currently's `1fr` gets
+  what is left. The pictures agree with them.
+
+| Window | Table | Currently |
+|---|---|---|
+| 1440 and up | 1000 (cap), panels beside | 185 |
+| 1100–1279 | 780–959, panels beside | 120–145 |
+| 1024 | 984, panels above | 169 |
+| 840–1099 | 800–1059, panels above | 120 and up |
+| 768 | 728 | hidden: 47 short |
+
+At 768 nothing else can give 47px, so below 840 Currently is hidden and the
+row is §12.140's four columns (639). The console shows the same chip.
+
+**Rate limit.** The brief said the page uses the `read` bucket. It uses
+`read.heavy`, as the console does: `/api/fleet` spends it
+(`src/app/api/fleet/route.ts:21`), 40 at once and then 1 a second, which is
+60 a minute per user.
+- Each open tab polls 3 times a minute. The console and this page together
+  cost 6 a minute, a tenth of the limit.
+- With the console's truck trail open (`/api/trail`, also `read.heavy`,
+  20s), the total is 9.
+- The per-address backstop is 240 a minute.
+- The page's first paint costs nothing: `loadFleet()` runs in the server
+  render, which no limit counts.
+- A refresh after a save also runs `loadFleet()` in the render. Its result
+  is shown without a request (the newer-of rule).
+
+**Tests** 212 files / 3,825 → 213 / 3,862 (+37, `Currently.test.tsx`):
+- The console row and Currently are rendered for the same row, in 13
+  cases: each status, a later day and tomorrow, forced, its own Stale GPS,
+  and the feed stale with each kind. The chip's `outerHTML` is equal, and
+  so are the position text and title.
+- The words and marks per status. The upcoming day ("Sat 10/31"). "Late ·
+  forced".
+- No driver: "—" with no chip, even with a load and status UNASSIGNED.
+- No load: the position only. A stale feed: the dotted chip with the age,
+  and "Last seen". No fix: "—". No row: nothing.
+- The server's status is shown as given, when the row's own facts would
+  compute another.
+- On the board:
+  - the join by id: a fleet row for a truck not on the board is ignored,
+    and a board truck missing from the poll is empty;
+  - a draft clear and a draft pick leave Currently as it was (the "was"
+    lines prove the draft took);
+  - a viewer sees the column, with nothing pressable in it;
+  - a stale feed on every row;
+  - the 20s poll on fake timers: one `/api/fleet` request, and the cell
+    follows it;
+  - a newer refreshed fleet wins, and an older one does not.
+- Guards:
+  - no "off duty", "off-duty" or "parked" in the board's output (dispatcher
+    and viewer, feed fresh and stale), nor in the page's sources;
+  - no `evaluate`, `applyStatus`, `isFeedStale`, `needsRecompute`,
+    `statusConfig`, `STATUS_DEFAULTS` or `parseFleetRows` in the page's
+    code. Comments are stripped first: the first version tripped on a
+    comment naming `applyStatus`.
+- Harness: `src/test/assignment-board.ts` mounts the board in a fresh query
+  client, with an empty fleet unless given one. The 10 mounts in
+  `AssignmentBoard.test.tsx` and `AddDriverFlow.test.tsx` use it, so their
+  assertions are unchanged.
+  - The two column-order tests now expect five columns.
+
+**Mutations.** Each was applied alone, the 7 assignment suites run, then the
+file restored and checked with `cmp`:
+
+| Mutation | Result |
+|---|---|
+| Unassigned chip on a no-driver row (the "—" branch removed) | 3 failed |
+| A chip on a no-load row | 3 failed |
+| Colour kept when the feed is stale (`status: row.status`) | 5 failed |
+| Status from the draft (the row's driver taken from the draft) | 2 failed |
+| A second status computation (`applyStatus` run in the board) | 8 failed: the source guard by its assertion; the board tests by a `RangeError` from running the engine on the test rows, not by a different status |
+| (extra) The refreshed fleet ignored (`fleet = polled`) | 1 failed |
+
+**e2e.**
+- The seed moved to `e2e/assignments-seed.ts`. It adds positions, loads, an
+  override and a fresh `feed_health` row, all invented.
+  - Before this phase the seed left `feed_health` empty. With no row the
+    feed counts as stale, so every chip would have been withdrawn.
+- The status comes from the SERVER's real clock, which the browser's frozen
+  clock does not reach. So every load is one whose status cannot move with
+  the date, as desktop-baseline's are:
+  - Late: a past appointment and a fresh fix;
+  - Upcoming "Tue 6/4": 2030;
+  - Arrived;
+  - No appt;
+  - "Late · forced": an override until 2030;
+  - Stale GPS: a fix 60h before the seed, so the chip reads "2d" on every
+    run and nothing needs hiding;
+  - two position-only rows, three with no driver, and one with no fix.
+- On time and At risk depend on the time of day, so the unit tests hold
+  them.
+- A dry run of the seed against the local `fleet_e2e`, through the
+  server's own `LATEST_POSITION_SQL`, `parseFleetRows` and `applyStatus`,
+  printed exactly those statuses before the real run.
+- `npm run e2e -- assignments-baseline --update-snapshots=none` (run
+  `2026-10-28T19-12-49-229Z`): 2 passed (setup and `assignments-768`), 7
+  differed. Every failure is a pixel comparison: 8,190 to 10,829 pixels,
+  ratio 0.01.
+  - **768 did not change**, as predicted: Currently is hidden there.
+  - The brief expected 8.
+- `npm run e2e -- desktop-baseline history-baseline history-phone-baseline
+  dispatch driver-phone driver-picker --update-snapshots=none` (run
+  `2026-10-28T19-14-02-924Z`): **31 passed**. Nothing else changed, and no
+  hosted-auth stall.
+- **No baseline was re-saved.** The images for the advisor, under
+  `test-results/2026-10-28T19-12-49-229Z/` (each folder holds `-actual.png`,
+  `-diff.png` and `-expected.png`):
+  - `assignments-baseline-assig-6dc01-1024px-matches-its-baseline-chromium/assignments-1024-*`
+  - `assignments-baseline-assig-fa99c-1280px-matches-its-baseline-chromium/assignments-1280-*`
+  - `assignments-baseline-assig-e9b7b-1440px-matches-its-baseline-chromium/assignments-1440-*`
+  - `assignments-baseline-assig-23d0f-1680px-matches-its-baseline-chromium/assignments-1680-*`
+  - `assignments-baseline-assig-5e8bf-1920px-matches-its-baseline-chromium/assignments-1920-*`
+  - `assignments-baseline-chang-60bb4-1440px-match-their-baseline-chromium/assignments-changed-1440-*`
+  - `assignments-baseline-the-d-34455-1024px-matches-its-baseline-chromium/assignments-picker-open-1024-*`
+- Seen in the actual images:
+  - the chips are the console's, with their words;
+  - 404's "Tue 6/4";
+  - 420's "2D" and "Last seen Kankakee, IL";
+  - "—" on the empty trucks;
+  - in the changed shot, 404's Currently stays on the saved truck while
+    its driver is Ada in the draft, and 410 stays "—".
+  - At 1024 and 1280 the longer positions are cut: "Champaig…" and "Last
+    seen Kank…" (question 1).
+
+**Found wrong in the brief or the design:**
+- The `read` bucket: it is `read.heavy` (above).
+- "The 8 assignments PNGs differ": 7 do. 768 cannot show the column.
+- The console builds the chip's props in three places: the row, the phone
+  card and the phone sheet. The board's `consoleChip` is a fourth copy,
+  pinned to the row by the parity test because the console was out of
+  scope. One shared helper would close that.
+- Found, not changed (the console): `MapPopup.tsx:218` draws `row.status`
+  and never withdraws colour on a stale feed. §5.9 says fleet-wide.
+- The design's "Joliet, IL · Door 9" puts the stop's door in Currently. The
+  cell shows the truck's position, never the stop's, so no door.
+
+**Questions for Alex:**
+1. At about 1000–1280 (Alex's window is about 1000) Currently is 145px,
+   and positions over about 9 characters after a chip are cut. The free
+   space first fills the picker to its 360 cap. A 300 cap would give
+   Currently 205 there, which by the same arithmetic (not rendered) cuts
+   nothing in the seed. Lower it?
+2. A truck with a driver and no fix shows "—", like a truck with no
+   driver. Fine, or should it say something else, such as "No position"?
+3. A truck the last poll did not carry (for example, added since) shows an
+   empty cell until the next poll. Fine?
+4. Below 840 the column is hidden. Fine, or should it show the chip only
+   from some narrower width?
 
 ## Next
 
