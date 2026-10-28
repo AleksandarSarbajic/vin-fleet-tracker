@@ -19,22 +19,29 @@ const isReaderEvent = (event: ErrorEvent) =>
   (event.transaction ?? '').includes(READER_ROUTE) || (event.request?.url ?? '').includes(READER_ROUTE);
 
 /**
- * For an event from the reader route: the exception keeps its type and
- * stack and loses its value; the message, `extra`, request data and every
- * breadcrumb's text and data go. Any other route's event is untouched.
+ * An event with no text in it: the exception keeps its type and stack and
+ * loses its value; the message, `extra`, request data and every breadcrumb's
+ * text and data go. `placeholder` stands where a value or message was.
+ *
+ * Shared with every other route's unexpected error
+ * (src/server/route-failure.ts, §12.142), so the two cannot disagree.
  */
-export function scrubReaderEvent(event: ErrorEvent): ErrorEvent {
-  if (!isReaderEvent(event)) return event;
+export function withoutText(event: ErrorEvent, placeholder: string): ErrorEvent {
   const { extra: _extra, ...rest } = event;
   const values = event.exception?.values;
   const request = event.request;
   return {
     ...rest,
-    ...(event.message !== undefined ? { message: REMOVED } : {}),
-    ...(event.exception ? { exception: values ? { values: values.map((v) => ({ ...v, value: REMOVED })) } : {} } : {}),
+    ...(event.message !== undefined ? { message: placeholder } : {}),
+    ...(event.exception ? { exception: values ? { values: values.map((v) => ({ ...v, value: placeholder })) } : {} } : {}),
     ...(request ? { request: (({ data: _data, ...kept }) => kept)(request) } : {}),
     ...(event.breadcrumbs ? { breadcrumbs: event.breadcrumbs.map(({ message: _m, data: _d, ...crumb }) => crumb) } : {}),
   };
+}
+
+/** An event from the reader route, without its text; any other route's event is untouched. */
+export function scrubReaderEvent(event: ErrorEvent): ErrorEvent {
+  return isReaderEvent(event) ? withoutText(event, REMOVED) : event;
 }
 
 /**
