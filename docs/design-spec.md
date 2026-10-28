@@ -10206,6 +10206,46 @@ never hidden"), on this page only, as the approved design does. The badge
 says why once, in place of a tooltip on each control. The console and the
 edit modal keep §12.14. The routes refuse a viewer as before.
 
+## 12.142 An unexpected route error reaches Sentry: type, stack, prefix, reference, SQLSTATE, never the message
+
+Every route under `src/app/api` answers an unexpected error (anything that
+is not one of its 4xx cases) through `unexpectedFailure`
+(`src/server/route-failure.ts`). The dispatcher still gets the same 500 and
+reference, `<PREFIX>-500-<base36 time>`, and the console line is unchanged.
+One Sentry event goes too, and it carries:
+
+- the exception's **type** and **stack**, and its causes' (Drizzle wraps the
+  PostgresError);
+- tags: `route_prefix`, `reference` (the one in the response, so an event
+  can be matched to what the dispatcher saw), and `sqlstate` when a
+  postgres.js error is the error or a cause. Only a code that looks like a
+  SQLSTATE (five digits or capitals) is tagged.
+
+It **never** carries the message, from the exception's value or anywhere
+else. A Drizzle error's message is the SQL and its bound values. A JSON
+parse error quotes the body it was given. So:
+
+- Sentry is handed a stand-in error with the same name and stack frames. The
+  original message is cut out of the stack text too: Sentry parses every
+  line of that text, and a message line holding " at " becomes a frame
+  (found by trying it: `params: Meet at dock …` arrived as a frame's file
+  name).
+- No own property is copied: not `detail`, `where`, `query` or
+  `parameters`.
+- The event then goes through the reader's scrubber, shared
+  (`withoutText`, `src/lib/sentry-reader.ts`): value, message, `extra`,
+  request data and every breadcrumb's text and data. The route's own console
+  line is one of those breadcrumbs.
+- postgres.js and Drizzle are named by class, because the production build
+  minifies `PostgresError`'s name to one letter and Drizzle never sets one.
+
+4xx answers report nothing. Sentry never holds or fails the response: the
+event is sent without being awaited, and a Sentry that throws is said on the
+console in one line, by reference only. A guard test fails any route file
+that writes its own console line, reference or 5xx. The reader's two routes
+are excluded by name; they keep their own frozen log line (HANDOFF 3aq,
+item 6).
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

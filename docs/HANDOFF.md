@@ -23,6 +23,8 @@ production behind `LLM_READER_ENABLED`, with the caps 25 a user and 100 a day
 section 1. The table below lists only older commits.
 **Not deployed yet:** a fifth template, Route blocks (3aa, `c59042e`), is
 committed and not pushed.
+**3aq: NOT pushed** (2026-10-28): unexpected route errors reach Sentry,
+without their messages. See "Phase 3aq" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -7624,6 +7626,232 @@ at `f8d31b1`, reported that "No phone" and "Add" do not sit on one line.
     invented seed).
   - `--repeat-each=3 --update-snapshots=none` (run
     2026-10-22T14-13-38-898Z): 25 passed, no server errors.
+
+### Phase 3aq: unexpected route errors reach Sentry (2026-10-28)
+
+From the advisor's brief, after the read-only health check of 2026-10-28.
+**NOT pushed, NOT deployed.** No migration, UI, dependency, env var or
+Sentry setting changed, and no route returns anything different. The reader
+(`src/app/api/ratecon/*`, `src/server/ratecon-reader/*`) and the worker are
+untouched.
+
+**Why.**
+- 16 of the 18 `src/app/api/**/route.ts` files handled an unexpected error
+  the same way, each with its own copy: a reference `<PREFIX>-500-<base36
+  time>`, a `console.error` with `error.message`, a 500 JSON with the
+  reference.
+- No production code called Sentry for these. The only `captureException`
+  in `src/` was in a test, and `sentry.server.config.ts` has no console
+  integration. Only uncaught errors reach Sentry (`onRequestError =
+  Sentry.captureRequestError`, `src/instrumentation.ts`), and these were
+  caught. So Sentry's 0 "DRIVER-GET failed" in 14 days said nothing.
+  (DRIVER-GET-500 was seen once in a local e2e run, 2026-10-22, 3ao.)
+- Vercel's runtime logs cannot be read from this machine (no CLI, no
+  token). Sentry is the only error channel we can read.
+
+**Commits.** Each passed `npm run check` in the pre-commit hook, on its own
+content:
+- `785b40e`: the reader's scrubber shared as `withoutText` (behaviour
+  unchanged);
+- `1c25538`: `unexpectedFailure` (`src/server/route-failure.ts`) and its
+  tests;
+- `6088e5d`: the 16 routes use it, plus the drivers route test, plus a
+  corrected comment in `src/instrumentation.ts`;
+- `4b89154`: the guard;
+- `c6ab786`: the e2e spec;
+- one docs commit: this section, design-spec §12.142, "What is live".
+
+**What a route does now** (§12.142). After its 4xx cases it calls
+`return unexpectedFailure(error, { prefix, log, message })`:
+- The reference, console line and 500 JSON are the same as before, byte for
+  byte. Each route passes its own prefix, label and message.
+- One Sentry event goes too: the type and stack, never the message.
+  - Sentry is handed a stand-in: an Error with the same name and stack
+    frames, and its causes in the same form. The message is also cut out of
+    the stack text. **Found by trying it** with the installed SDK: Sentry
+    parses every line of the stack text, and a message line holding " at "
+    became a frame. A Drizzle message's `params: Meet at dock …` arrived as
+    a frame's file name. Dropping the value alone, as `scrubReaderEvent`
+    does, would have sent it.
+  - No own property is copied (`detail`, `where`, `query`, `parameters`).
+  - Then `withoutText`, the reader's scrubber, shared, removes the value,
+    message, `extra`, request data, and breadcrumb text and data. The
+    route's own console line is one of those breadcrumbs.
+  - Tags: `route_prefix`, `reference`, and `sqlstate` when a postgres.js
+    error is the error or one of its causes. Drizzle 0.44 wraps every query
+    error in `DrizzleQueryError`, whose message is `Failed query:
+    <sql>\nparams: <values>`, with the PostgresError as `cause`. Only a
+    five-character code is tagged.
+  - `PostgresError` and `DrizzleQueryError` are named by class. In the e2e
+    build postgres.js is bundled and minified (`class o extends
+    Error{…this.name=this.constructor.name…}`), so its errors are named
+    "o". Drizzle's never sets a name ("Error").
+- 4xx answers report nothing. Sentry never holds or fails the response. A
+  throw or a rejected flush is one console line, `route error not reported
+  to Sentry { reference }`.
+
+**Routes covered:** 16 files, 19 prefixes. PREVIEW, ASSIGN-GET,
+ASSIGN-POST, BULK, DRIVER-GET, DRIVER-POST, FLEET, HEALTH, HISTORY, LOAD,
+OVERRIDE, CLEAR, REOPEN-GET, REOPEN-POST, STOP, TIMELINE, TRAIL, LISTS,
+TRUCK.
+
+**Delivery on Vercel: the flush, and what is unverified.** From
+`node_modules` only (Sentry v11.0.0):
+- Every route handler in the build is wrapped:
+  `.next-e2e/server/app/api/drivers/route.js` contains
+  `wrapRouteHandlerWithSentry(…parameterizedRoute:"/api/drivers"…)`. The
+  wrapper's `finally` runs `waitUntil(flushSafelyWithTimeout())`
+  (`@sentry/nextjs` `build/cjs/common/wrapRouteHandlerWithSentry.js:70–72`;
+  `captureRequestError.js:31` does the same).
+- `waitUntil` calls `vercelWaitUntil` (`common/utils/responseEnd.js:16–22`).
+  That returns at once unless `typeof EdgeRuntime === "string"`
+  (`@sentry/core` `build/cjs/utils/vercelWaitUntil.js:6–8`). Our routes run
+  on Node, so it registers nothing.
+- On Node the transport starts sending at capture, and `flush(2000)` only
+  waits for it. When `VERCEL` is set, the Node SDK also flushes for 200 ms on
+  SIGTERM (`@sentry/node` `build/cjs/sdk/index.js:114–118`).
+- The helper does what the SDK does on Node: it starts `Sentry.flush(2000)`
+  and does not await it. A hang test and a mutation show the response does
+  not wait.
+- **Unverified:** whether Vercel keeps a Node function alive long enough to
+  finish that send after the response. The same holds for every event the
+  SDK sends from a route itself, `onRequestError` included. Next's own
+  mechanism does reach the platform: `after()` takes `waitUntil` from
+  `Symbol.for('@next/request-context')` on any runtime
+  (`next/dist/server/after/builtin-request-context.js:24–29`,
+  `base-server.js:1071–1077`). It is not used here (question 1).
+
+**Tests**, 3,736 → 3,779 (204 → 207 files). All data is invented.
+- `src/server/route-failure.test.ts` (13). A real Sentry client, configured
+  as the server config, with an in-memory transport.
+  - The sentinel is made at run time, so it never appears in the source
+    lines Sentry attaches. It goes into the message, `detail`, `where`,
+    `hint`, a bound value and a frame-shaped message line, and is absent
+    from every envelope.
+  - One event per error; types `PostgresError`, `DrizzleQueryError`; tags
+    exact.
+  - No SQLSTATE for a non-database error or a code that is not a SQLSTATE.
+  - Sentry throwing, a flush that hangs, a flush that rejects.
+- `src/app/api/drivers/route-failure.test.ts` (8). The real handler, with the
+  database failing for real: the test cluster with a `search_path` naming no
+  schema, so 42P01 comes back through Drizzle.
+  - The same 500 and one event, tagged `DRIVER-GET` + reference + `42P01`.
+    None of "Failed query", "params:" or "does not exist" is sent.
+  - A body that is not JSON (the e2e's request): one `SyntaxError` event,
+    and the quoted sentinel is absent.
+  - 429, 401, 403, a `DriverError`, a bad body: answered as before, nothing
+    reported.
+  - With every flush hung, the 500 still answers.
+- `src/test/route-failure-guard.test.ts` (22). 16 routes checked, the 2
+  exclusions exist, plus 4 guard-on-the-guard cases.
+
+**Mutations.** Each was applied alone, then reverted and checked with `cmp`
+against the saved file:
+
+| Mutation | Result |
+|---|---|
+| Message sent: the raw error captured, not the stand-in | 5 failed |
+| Message sent: the scrubbing event processor removed | 6 failed |
+| 4xx reported: the drivers route reports an AuthError, then answers 401 | 2 failed |
+| Capture awaited before the response | 5 failed (helper tests). The route's hang test passed at first: the helper's own flush used up its one-shot hang. It now hangs every flush, and fails (1 failed). |
+| The guard ignores a raw console line | 2 failed |
+| The reference tag differs from the response's | 2 failed |
+
+**e2e.** `npm run e2e -- route-failure-sentry sentry-traces`, run
+2026-10-28T13-39-11-285Z: setup passed and sentry-traces passed.
+**route-failure-sentry failed**, with 400 instead of 500.
+- Cause: the body was passed to Playwright as a string. With a JSON content
+  type, Playwright JSON-encodes a string that does not parse
+  (`playwright-core` `lib/coreBundle.js:59335–59338`, v1.63). The route got a
+  valid JSON string and refused it as a bad body, before any Sentry code
+  ran.
+- Not a hosted-auth stall, so not rerun: the brief allows one run.
+- Fixed: the body is now a Buffer, sent as written. Checked against a
+  loopback echo server: the string arrived JSON-encoded, the Buffer as
+  typed. The drivers vitest case above is the same request through the real
+  handler.
+- **The fixed spec has not run.**
+
+**Item 6, report only.**
+
+(a) **The reader's failures do not reach Sentry today.** "ratecon read
+failed" and "ratecon outcome not recorded" are caught in `handle-read.ts`
+and `handle-outcome.ts`. Each logs one line through `log.ts` (reference,
+code, errorName, and vendorStatus for the read) and returns its own 500.
+Nothing calls Sentry, and no console integration turns the line into an
+event.
+- Would the helper suit them? Not as it is. Its console line carries
+  `error.message`, which the reader's frozen rule forbids. Its body shape
+  (`{ error, reference }`) is not theirs (`{ ok: false, code: 'error',
+  reference }`, reference `RATECON-500-…`).
+- Its Sentry half would suit them. The stand-in plus `withoutText` sends
+  type, stack and tags only, and `scrubReaderEvent` would then scrub the
+  event a second time, harmlessly. A reader phase would export that half
+  (say `reportUnexpected(error, prefix, reference)`) and call it beside
+  `logReadFailure`/`logOutcomeFailure`.
+- `scrubReaderEvent` alone has the frame gap above: an exception thrown in
+  the reader route with a frame-shaped message line would send that line as
+  a frame.
+
+(b) **What an uncaught error carries today**, from the code and the SDK
+source. The API routes no longer let any error escape, so this means pages,
+server components and the login server action. `src/app/page.tsx`,
+`history/page.tsx` and `assignments/page.tsx` load from the database on the
+server.
+- `captureRequestError` (`captureRequestError.js:7–32`) sets request headers
+  and method as processing metadata, a `nextjs` context (request path,
+  router kind, route path, route type) and the transaction name, then calls
+  `captureException(error)` with mechanism unhandled.
+- `beforeSend` is `scrubReaderEvent`, which leaves every non-reader event
+  untouched, so **the exception value is the error's message.**
+  - A PostgresError's message would reach Sentry.
+  - A query through Drizzle would send `Failed query: <sql>\nparams: <bound
+    values>` as the value, plus the PostgresError's message as a linked
+    exception (linkedErrors is a default integration).
+  - A frame-shaped line in either would also arrive as a frame.
+  - Breadcrumbs carry that request's console lines, messages included.
+- `detail`, `where`, `query` and `parameters` are not sent. No default
+  integration serialises an Error's own properties (there is no
+  ExtraErrorData). A probe on `@sentry/node`'s defaults confirmed `detail`
+  and `where` absent from the envelope. The Next server adds Http,
+  distDirRewriteFrames and the use-cache integration
+  (`server/index.js:77–90`), and none of them reads those properties. That
+  last part is from reading, not run.
+- Headers: `dataCollection.httpHeaders: false` should keep them out of
+  `normalizedRequest`. Unverified in this code path.
+
+**Found wrong along the way:**
+- `src/instrumentation.ts` said `onRequestError` made the routes'
+  references findable in Sentry. The routes catch their errors, so it never
+  saw them. Corrected in `6088e5d`.
+- 3ao says the DRIVER-GET log "omits the underlying Postgres error". Half
+  right: the console line has Drizzle's message (SQL and bound values), not
+  the PostgresError's. Since 3aq the Sentry event has its type and SQLSTATE.
+- In the brief, "if the error is a postgres.js PostgresError" would rarely
+  match as written: through Drizzle the error is a `DrizzleQueryError`, with
+  the PostgresError as its `cause`. The helper looks through causes.
+- In the brief, the guard as worded (a raw `console.error` only) would pass
+  a route that answered a 503 or logged with `console.warn`. The guard built
+  here fails any console line and any 5xx.
+
+**Questions for Alex:**
+1. Delivery on Vercel is unverified (above). Accept the SDK's own footing,
+   or a small later phase that hands the flush to Next's `after()`? A check
+   that needs no code: after the deploy, the next real 500 should appear in
+   Sentry with its reference tag.
+2. Should the reader's two 500s report too (item 6a)? That needs a phase
+   inside the frozen reader code.
+3. Uncaught errors (pages, server components, the login action) send their
+   message today, and through Drizzle that means SQL and bound values (item
+   6b). Scrub every server event the same way? That is a change to
+   `beforeSend` in `sentry.server.config.ts`.
+4. A body that is not JSON gets a 500 from the routes that parse inside
+   `try`, and since 3aq each one is a Sentry event. Our console never sends
+   one, and the address limit caps a bot. Make it a 400? That changes what
+   the routes return.
+5. The console line still carries `error.message` into Vercel's logs, as
+   before; for a Drizzle error that is SQL and bound values. Drop it, as the
+   reader's line does?
 
 ## Next
 
