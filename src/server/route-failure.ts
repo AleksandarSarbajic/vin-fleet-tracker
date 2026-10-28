@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { NextResponse } from 'next/server';
 import { withoutText } from '@/lib/sentry-reader';
-import { REMOVED, sqlstateOf, typeAndStack } from '@/lib/sentry-server-errors';
+import { REMOVED, errorType, sqlstateOf, typeAndStack } from '@/lib/sentry-server-errors';
 
 /**
  * A route's UNEXPECTED error (§12.142): what every route under src/app/api
@@ -14,6 +14,9 @@ import { REMOVED, sqlstateOf, typeAndStack } from '@/lib/sentry-server-errors';
  * reference the dispatcher was shown and, for a database error, its SQLSTATE.
  * Never the message: a Drizzle error's message is the SQL and its bound
  * values, and a JSON parse error's quotes the body it was given.
+ *
+ * Since 3ar the console line carries no message either (§12.143): Vercel keeps
+ * function logs, and the message is the same text.
  *
  * Not for the reader's two routes, which keep their own frozen log line
  * (src/server/ratecon-reader/log.ts).
@@ -34,10 +37,8 @@ const FLUSH_MS = 2000;
 export function unexpectedFailure(error: unknown, { prefix, log, message }: RouteFailure): NextResponse {
   const reference = `${prefix}-500-${Date.now().toString(36).toUpperCase()}`;
   const sqlstate = sqlstateOf(error);
-  console.error(log, {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
-  });
+  // A class name and a code, like the reader's line: never the message.
+  console.error(log, { reference, errorName: errorType(error), ...(sqlstate ? { sqlstate } : {}) });
   report(error, prefix, reference, sqlstate);
   return NextResponse.json({ error: message, reference }, { status: 500 });
 }

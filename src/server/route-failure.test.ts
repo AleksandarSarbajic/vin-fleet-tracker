@@ -71,21 +71,31 @@ afterEach(() => {
   vi.mocked(Sentry.withScope).mockClear();
 });
 
-describe('unexpectedFailure: what the dispatcher and the console see, unchanged', () => {
-  it('answers the 500 every route gave: the same body, the same reference, the same console line', async () => {
-    const error = dbError();
-    const response = unexpectedFailure(error, ROUTE);
+describe('unexpectedFailure: what the dispatcher sees, unchanged; the console line, without the message', () => {
+  it('answers the 500 every route gave, and logs the reference, the class name and the SQLSTATE (§12.143)', async () => {
+    const response = unexpectedFailure(dbError(), ROUTE);
     expect(response.status).toBe(500);
     const text = await response.text();
     const body = JSON.parse(text) as { error: string; reference: string };
     expect(body.reference).toMatch(/^DRIVER-GET-500-[0-9A-Z]+$/);
     expect(text).toBe(JSON.stringify({ error: 'The driver could not be saved.', reference: body.reference }));
-    expect(consoleError.mock.calls[0]).toEqual(['DRIVER-GET failed', { reference: body.reference, error: error.message }]);
+    expect(consoleError.mock.calls).toEqual([
+      ['DRIVER-GET failed', { reference: body.reference, errorName: 'DrizzleQueryError', sqlstate: '23505' }],
+    ]);
   });
 
-  it('logs a thrown non-Error as its string, as before', () => {
-    unexpectedFailure(`thrown ${S}`, ROUTE);
-    expect(consoleError.mock.calls[0]?.[1]).toMatchObject({ error: `thrown ${S}` });
+  it('logs a thrown non-Error by its type only', async () => {
+    const body = (await unexpectedFailure(`thrown ${S}`, ROUTE).json()) as { reference: string };
+    expect(consoleError.mock.calls).toEqual([['DRIVER-GET failed', { reference: body.reference, errorName: 'Thrown string' }]]);
+  });
+
+  it('names a postgres.js error whose class the build minified, by its shape', () => {
+    class o extends Error {
+      severity = 'ERROR';
+      code = '40001';
+    }
+    unexpectedFailure(new o(`could not serialize ${S}`), ROUTE);
+    expect(consoleError.mock.calls[0]?.[1]).toMatchObject({ errorName: 'PostgresError', sqlstate: '40001' });
   });
 });
 
@@ -99,13 +109,14 @@ describe('unexpectedFailure: one Sentry event, type and stack, never the message
     ['a thrown object', () => ({ message: S, detail: S })],
   ];
 
-  it.each(cases)('%s: exactly one event, and the sentinel nowhere in what is sent', async (_label, make) => {
-    // The route's own console line becomes a breadcrumb in production.
+  it.each(cases)('%s: exactly one event, and the sentinel nowhere in what is sent or logged', async (_label, make) => {
+    // A console line in the same request becomes a breadcrumb in production.
     Sentry.addBreadcrumb({ category: 'console', message: `DRIVER-GET failed ${S}`, data: { arguments: [S] } });
     unexpectedFailure(make(), ROUTE);
     await Sentry.flush(2000);
     expect(events()).toHaveLength(1);
     expect(sent.join('\n')).not.toContain(S);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(S);
   });
 
   it('keeps the type of the error and of its cause, and the stack frames', async () => {

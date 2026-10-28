@@ -71,6 +71,7 @@ const Sentry = await import('@sentry/nextjs');
 const { AuthError, requireUser } = await import('@/lib/auth');
 const { RateLimitError, enforceRateLimit } = await import('@/server/rate-limit');
 const { DriverError, openMergeCandidates } = await import('@/server/drivers');
+const { db } = await import('@/db');
 const { GET, POST } = await import('./route');
 
 const { options, sent, events } = sentryCapture();
@@ -105,7 +106,13 @@ afterEach(() => {
 });
 
 describeDb('/api/drivers: an unexpected error reaches Sentry without its text (ยง12.142)', () => {
-  it('GET with the query failing in Postgres: the same 500, one event, tagged, none of the error text', async () => {
+  it('GET with the query failing in Postgres: the same 500, one event, tagged, none of the error text sent or logged', async () => {
+    // The same query, called here: its error carries the text that must go nowhere.
+    const thrown = await openMergeCandidates(db).catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/^Failed query: /);
+    expect(String((thrown as Error).cause)).toMatch(/does not exist/);
+
     vi.mocked(requireUser).mockResolvedValue(as('dispatcher'));
     const response = await get();
 
@@ -115,12 +122,10 @@ describeDb('/api/drivers: an unexpected error reaches Sentry without its text (ย
     expect(reference).toMatch(/^DRIVER-GET-500-[0-9A-Z]+$/);
     expect(text).toBe(JSON.stringify({ error: 'The driver could not be saved.', reference }));
 
-    // The console line is as before, and it carries text that must not reach Sentry.
-    expect(consoleError).toHaveBeenCalledTimes(1);
-    const [label, logged] = consoleError.mock.calls[0] as [string, { reference: string; error: string }];
-    expect(label).toBe('DRIVER-GET failed');
-    expect(logged.reference).toBe(reference);
-    expect(logged.error).toMatch(/^Failed query: /);
+    // ยง12.143: the console line is the reference, the class name and the SQLSTATE.
+    expect(consoleError.mock.calls).toEqual([
+      ['DRIVER-GET failed', { reference, errorName: 'DrizzleQueryError', sqlstate: '42P01' }],
+    ]);
 
     await Sentry.flush(2000);
     expect(events()).toHaveLength(1);
@@ -131,17 +136,17 @@ describeDb('/api/drivers: an unexpected error reaches Sentry without its text (ย
     for (const text of ['Failed query', 'params:', 'does not exist']) expect(all).not.toContain(text);
   });
 
-  it('POST with a body that is not JSON: the parse error quotes the body, and the quote never leaves', async () => {
+  it('POST with a body that is not JSON: the parse error quotes the body, and the quote goes nowhere', async () => {
     // Ten characters: V8's parse error quotes about ten from where it failed (e2e/route-failure-sentry.spec.ts).
     const sentinel = `q${randomUUID().replaceAll('-', '').slice(0, 9)}`;
-    const response = await post(`{"action": ${sentinel}}`);
+    const body = `{"action": ${sentinel}}`;
+    expect(() => JSON.parse(body), 'the parse error should quote the sentinel').toThrow(sentinel);
+    const response = await post(body);
 
     expect(response.status).toBe(500);
     const { reference } = (await response.json()) as { reference: string };
     expect(reference).toMatch(/^DRIVER-POST-500-[0-9A-Z]+$/);
-    const [label, logged] = consoleError.mock.calls[0] as [string, { error: string }];
-    expect(label).toBe('DRIVER-POST failed');
-    expect(logged.error).toContain(sentinel);
+    expect(consoleError.mock.calls).toEqual([['DRIVER-POST failed', { reference, errorName: 'SyntaxError' }]]);
 
     await Sentry.flush(2000);
     expect(events()).toHaveLength(1);
