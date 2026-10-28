@@ -10295,6 +10295,44 @@ unchanged.
 All of them read `[removed: a server error never reports its text]` where a
 message was. The reader's events keep their own placeholder.
 
+## 12.144 The worker sends no error text to Sentry
+
+The worker (its own Sentry project, its own deploy) follows §12.143, with
+one extra kind of data: the logger's fields. `src/worker/sentry.ts` adds
+`textlessErrors()` to its integrations and uses `scrubWorkerEvent` as
+`beforeSend`. Both live in `src/lib/sentry-server-errors.ts`; there is no
+second copy.
+
+**What a worker event may carry:**
+- the captured cause's types and stack frames, causes included, and a
+  `sqlstate` tag when a postgres.js error is in the chain;
+- the logger's message, as the event's message and in the fingerprint
+  `['worker', message]`;
+- the `fields` context, value by value: a number, a boolean, null, a UUID, an
+  ISO-8601 date or timestamp, a SQLSTATE under a `sqlstate`/`code` key, or a
+  truck number under a `truck`/`truckNumber`/`truck_number` key. Anything
+  else becomes the placeholder: any other string, an object, an array, and
+  the `error` and `cause` keys whatever they hold. The SQLSTATE and the truck
+  number are tied to their keys because digits alone are also a ZIP code;
+- the worker's own breadcrumbs (warnings and info): their message, and their
+  data under the same rule;
+- every other breadcrumb (the console's JSON lines, outgoing requests) by
+  category and time only, with no message and no data. An outgoing request's
+  query string held the trip's coordinates.
+
+**The literal-message guard.** The logger's message is the one text that
+leaves, so it must be a string literal at every call:
+`src/worker/logger-literal-guard.test.ts` parses `src/worker`,
+`src/samsara`, and any file that imports the logger or names a `…Logger`
+type. It checks every `.error/.warn/.info` call on anything that holds the
+logger. A literal, literals joined with `+`, or a parameter that every
+caller fills with a literal (`die(what)`) pass. A template literal, a
+variable or anything built at run time fails.
+
+**The journald line is unchanged**: it is our own server's log, and it keeps
+the full message. So does `feed_health.last_error` for startup and roster
+failures (written by the worker, read by nobody in the app).
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

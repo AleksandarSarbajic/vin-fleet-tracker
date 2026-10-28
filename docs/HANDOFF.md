@@ -28,6 +28,10 @@ without their messages. See "Phase 3aq" below.
 **3ar: NOT pushed** (2026-10-28): no server error event carries text, and
 the route console line drops the message. See "Phase 3ar" below. Neither is
 on origin: its master is `ad04eb9`.
+**Update at the start of 3as (2026-10-28): 3aq and 3ar are pushed**: origin's
+master was `86084fd`. Whether Vercel has deployed them is not checked here.
+**3as: NOT pushed, worker NOT deployed** (2026-10-28): the worker sends no
+error text to Sentry. See "Phase 3as" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -8087,6 +8091,174 @@ code).
 3. The browser: add a scrub now (it needs a browser-aware stack cut), or
    leave it, since nothing found carries data today?
 4. Push 3aq and 3ar together, when you are ready? Nothing is pushed.
+
+### Phase 3as: the worker sends no error text to Sentry (2026-10-28)
+
+From the advisor's brief, after 3ar's worker report. **NOT pushed, worker
+NOT deployed**: the deploy is a separate step, after Alex's yes. Built on
+3ar (origin's master `86084fd` at the start). No change to the app, the
+browser or the reader; no change to sampling, the DSN, env vars,
+`dataCollection`, the crash handlers in `index.ts`, the journald line,
+migrations or dependencies. No e2e (the worker has no browser path).
+
+**Why.**
+- `captureWorkerError` captured the raw cause (`src/worker/sentry.ts:139`).
+  For a failed Drizzle query that sends the SQL and its bound values as the
+  value, and the PostgresError's message through linkedErrors.
+- It also set `contexts.fields` to the logger's fields, which hold the
+  message again (`error: message` at `index.ts:182`, `:237`, `:250`, `:264`,
+  `:308`, `:352`). 3ar's `withoutText` does not touch `contexts`.
+- Warnings and info became breadcrumbs carrying their fields, and the
+  console integration turned every JSON log line into a breadcrumb.
+- **Found while building:** outgoing requests also became breadcrumbs with
+  their query string (`@sentry/node` `utils/outgoingFetchRequest.js:144–154`,
+  with `urlQueryParams` on). The HERE routing URL carries the trip's origin
+  and destination coordinates (`src/server/routing/provider.ts:172–178`).
+  Its `apiKey` was already sent as `[Filtered]`: the name contains "key",
+  which is on Sentry's own list (`@sentry/core`
+  `utils/data-collection/filtering-snippets.js:4–24`).
+
+**What was built** (§12.144):
+- `src/lib/sentry-server-errors.ts`, extended, not copied:
+  - `workerFields`: a value leaves only as a number, a boolean, null, a UUID,
+    an ISO-8601 date or timestamp, a SQLSTATE under `sqlstate`/`code`, or a
+    truck number under `truck`/`truckNumber`/`truck_number`. Anything else
+    becomes the placeholder.
+  - `scrubWorkerEvent`: `withoutText`, then three things put back safely —
+    the logger's literal message, the `fields` context through
+    `workerFields`, and the worker's own breadcrumbs (literal message, data
+    through `workerFields`). Every other breadcrumb keeps its category and
+    time only.
+  - `WORKER_BREADCRUMB`: the category, shared with `src/worker/sentry.ts`.
+- `src/worker/sentry.ts`: `textlessErrors()` added to its integrations;
+  `beforeSend: scrubWorkerEvent`; a `sqlstate` tag from the cause (what is
+  left of a database error once its message is gone).
+- The fingerprint `['worker', message]` is unchanged, and so is the journald
+  line.
+
+**Commits.** Each passed `npm run check` in the pre-commit hook, on its own
+content:
+- `dd16f35`: the literal-message guard;
+- `bc0b1de`: the worker scrub and its real-client tests;
+- one docs commit: this section, design-spec §12.144, "What is live".
+
+**Tests**, 3,795 → 3,824 (209 → 211 files):
+- `src/worker/sentry-scrub.test.ts` (17). The real `initWorkerSentry`, the
+  real logger and @sentry/node's own HTTP transport, posting to a loopback
+  ingest in the test. No option was added to the worker for it.
+  - A Drizzle error is logged as `logger.error('routing sweep failed', {
+    cause, error: message, truckNumber: 128, stopId })`, with a sentinel in
+    a bound value ("Meet at dock …"), in the cause's message (a frame-shaped
+    line), and in `detail`. Result: one event, the sentinel nowhere, types
+    `PostgresError`/`DrizzleQueryError` and real frames, `fields` `{ error:
+    <placeholder>, truckNumber: 128, stopId }`, the fingerprint, tags
+    `service: worker` and `sqlstate: 23505`.
+  - A real `fetch` first, so its breadcrumb is there without the
+    coordinates. The console breadcrumbs are there, without text.
+  - A warning with the sentinel in string fields, then an error: the
+    warning's breadcrumb keeps its literal message and safe fields only, and
+    the error event (a message event, no cause) keeps `prune failed`.
+  - The field shapes, one by one, including a ZIP-like value under a non-truck
+    key (removed).
+- `src/worker/logger-literal-guard.test.ts` (12). 51 calls found, all
+  literal, in `index.ts`, the four sweeps, the singleton, ingest and the
+  Samsara client. Ten guard-on-the-guard cases.
+  - **Found by checking the count:** the first version keyed on the word
+    `Logger` found 40 calls. The sweeps take narrowed loggers
+    (`SweepLogger`, `WarnLogger`), so the guard now matches any `…Logger`
+    type and every file in `src/worker` and `src/samsara`.
+
+**Mutations.** Each was applied alone, then reverted and checked with `cmp`:
+
+| Mutation | Result |
+|---|---|
+| `textlessErrors` not added | 1 failed |
+| `beforeSend` removed | 2 failed |
+| Any string field kept | 4 failed |
+| The worker's breadcrumb data kept unfiltered | 1 failed |
+| The guard accepts a template literal | 4 failed |
+| A second copy of the stand-in, in `src/worker/sentry.ts` | 1 failed (3ar's one-implementation test) |
+| The guard keyed on `Logger` alone (the first version) | 1 failed |
+
+**What a 3am reader loses in Sentry**, and where it still is:
+- **The error's text.** The SQL, the bound values, Postgres's own sentence
+  ("duplicate key…", "relation … does not exist") and any JavaScript error's
+  message.
+  - Kept: the type chain (`DrizzleQueryError` → `PostgresError`), the stack
+    frames (file and line), the `sqlstate` tag (23505 is a duplicate, 42P01
+    a missing relation, 57014 a timeout) and the logger's message (what
+    failed).
+- **Every free-text field.** `error` (the message again), `reason` (the lock
+  lost), `signal`, `cursor`, a string `orgId`, rule and source names
+  (`from`, `arrivedSource`), and any object or array (the feed-health
+  `detail`, `capped`).
+  - Kept: counts, durations, flags, truck and stop ids, timestamps, dates
+    and truck numbers.
+- **The text of every console line, and every outgoing request's URL,
+  method and status.** These breadcrumbs stay as a category and a time, so
+  the trail still shows that a request or a log line happened. The worker's
+  own warn and info breadcrumbs stay with their literal message and safe
+  fields, which is the readable trail.
+- **The full text is still on the droplet:** the journald line is unchanged.
+  For startup and roster failures it is also in `feed_health.last_error`
+  (`src/worker/ingest.ts:449`, up to 1,000 characters), which the worker
+  writes and nothing in the app reads.
+
+**For the deploy step: what the worker runs that changed since its last
+deploy.** The worker runs `tsx src/worker/index.ts`
+(`deploy/vin-fleet-worker.service:24`). Its runtime import graph from there
+is 37 files (type-only imports left out); computed from the sources, with
+`git log` since 2026-10-15 00:00 UTC.
+- **The deployed commit is not recorded.** The worker went live on
+  2026-10-15 at 23:35 UTC (3ad; advisor's check, unverified here). The
+  two 3ad commits touching it (`5341943`, `2db9c3c`, both at 17:50 UTC:
+  `src/db/schema.ts`, `src/worker/index.ts`, `eta-marks.ts`,
+  `status-changes.ts`) came before that, so they are taken as deployed.
+- **Changed since:**
+  - `src/worker/sentry.ts`: `bc0b1de` (3as).
+  - `src/lib/sentry-server-errors.ts`: `37da6a3` (3ar), `bc0b1de` (3as). New
+    to the worker: it imports this only since 3as.
+  - `src/lib/sentry-reader.ts`: `785b40e` (3aq), `37da6a3` (3ar). New to the
+    worker the same way, through `sentry-server-errors.ts`. It imports only
+    types from `@sentry/core`, so it adds no package at run time.
+  - Every other file the worker runs is unchanged since 2026-10-15.
+- **Dependencies:** the droplet deploys with `git checkout --detach <sha>`
+  and `npm ci --omit=dev` (`deploy/README.md:119–120`).
+  - Since 2026-10-15, 3aj (`d9ea9d0`) added `tesseract.js` 7.0.0 and
+    `@tesseract.js-data/eng` 1.0.0 as production dependencies (and
+    `@napi-rs/canvas`, dev only, skipped).
+  - The worker never imports them, but `npm ci --omit=dev` will install them
+    on the 961 MiB droplet. The README already calls that memory tight.
+- Checked locally: `src/worker/sentry.ts` and the logger load under tsx with
+  no DSN (`initWorkerSentry` returns false, as before).
+
+**Found wrong in the brief:**
+- "Expected HEAD 86084fd = origin/master" was right this time. "What is
+  live" still said 3aq/3ar were not pushed; corrected by an added line.
+- "Every `logger.error(` call in src/worker" was too narrow. The message also
+  leaves through the worker's breadcrumbs (`warn`, `info`), and through calls
+  under other names: the Samsara client's `this.log` and the sweeps'
+  narrowed loggers. The guard covers all 51.
+- The brief's list of what leaks did not include outgoing requests'
+  breadcrumbs, whose query string carried trip coordinates (the key itself
+  was already filtered by Sentry).
+- "Fingerprint unchanged" holds for events with a cause. An event without a
+  cause never had a fingerprint; it groups by its literal message, as
+  before.
+- Pre-existing, not changed: `flushWorkerSentry` has a silent `catch { }`
+  (`src/worker/sentry.ts`), against "no silent catches" (question 3).
+
+**Questions for Alex:**
+1. Deploy the worker at `bc0b1de` or later? It also installs 3aj's
+   tesseract packages on the droplet (above), which the worker never loads.
+2. Outgoing-request breadcrumbs now say only that a request happened. Keep
+   them like that, or drop them from the worker altogether?
+3. `flushWorkerSentry`'s silent catch: give it one console line in a later
+   phase?
+4. `feed_health.last_error` stores up to 1,000 characters of a startup or
+   roster failure's message (possibly SQL and bound values) in the hosted
+   database, read by nothing. Leave it, or store only the type and
+   SQLSTATE?
 
 ## Next
 
