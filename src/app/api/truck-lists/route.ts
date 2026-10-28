@@ -14,6 +14,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
+import { unexpectedFailure } from '@/server/route-failure';
 import {
   TruckListError,
   addToTruckList,
@@ -46,15 +47,11 @@ function failure(error: unknown, route: string): Response {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  const reference = `LISTS-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error(`${route} /api/truck-lists failed`, {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
+  return unexpectedFailure(error, {
+    prefix: 'LISTS',
+    log: `${route} /api/truck-lists failed`,
+    message: 'The list could not be saved.',
   });
-  return NextResponse.json(
-    { error: 'The list could not be saved.', reference },
-    { status: 500 },
-  );
 }
 
 function invalid(error: z.ZodError): Response {

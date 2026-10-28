@@ -26,8 +26,9 @@ export async function register(): Promise<void> {
  * actions (Next 15's `onRequestError`).
  *
  * Without this, a server-side render that throws is caught by Next's own error
- * boundary and reported to nobody. Route handlers here already answer with a
- * reference code (`FLEET-500-…`) — this is what makes that code findable in
- * Sentry instead of only in a terminal the dispatcher cannot see.
+ * boundary and reported to nobody. It sees only what is THROWN: the API routes
+ * catch their errors and answer with a reference (`FLEET-500-…`), so they never
+ * reach it. They report through src/server/route-failure.ts (§12.142), which
+ * tags the event with that reference.
  */
 export const onRequestError = Sentry.captureRequestError;

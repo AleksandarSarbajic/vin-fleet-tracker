@@ -9,6 +9,7 @@ import {
   rateLimitResponse,
 } from '@/server/rate-limit';
 import { clearStop, ClearStopError } from '@/server/clear-stop';
+import { unexpectedFailure } from '@/server/route-failure';
 
 /** §12.88 — Clear stop. Closes one load; see server/clear-stop.ts. */
 export const dynamic = 'force-dynamic';
@@ -41,14 +42,10 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `CLEAR-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('POST /api/stops/clear failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'CLEAR',
+      log: 'POST /api/stops/clear failed',
+      message: 'Nothing was changed: the clear failed.',
     });
-    return NextResponse.json(
-      { error: 'Nothing was changed: the clear failed.', reference },
-      { status: 500 },
-    );
   }
 }

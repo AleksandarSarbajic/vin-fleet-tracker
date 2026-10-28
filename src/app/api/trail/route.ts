@@ -8,6 +8,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
+import { unexpectedFailure } from '@/server/route-failure';
 import { loadTrail } from '@/server/trail';
 
 /** §14 feature 9. One truck's last half hour, never cached. */
@@ -35,14 +36,10 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `TRAIL-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('GET /api/trail failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'TRAIL',
+      log: 'GET /api/trail failed',
+      message: 'Could not load the trail.',
     });
-    return NextResponse.json(
-      { error: 'Could not load the trail.', reference },
-      { status: 500 },
-    );
   }
 }

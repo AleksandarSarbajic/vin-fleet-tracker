@@ -9,6 +9,7 @@ import {
   rateLimitResponse,
 } from '@/server/rate-limit';
 import { previewReassignment } from '@/server/reassign';
+import { unexpectedFailure } from '@/server/route-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,11 +36,10 @@ export async function POST(request: Request) {
   if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `PREVIEW-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('POST /api/assignments/preview failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'PREVIEW',
+      log: 'POST /api/assignments/preview failed',
+      message: 'Could not preview.',
     });
-    return NextResponse.json({ error: 'Could not preview.', reference }, { status: 500 });
   }
 }

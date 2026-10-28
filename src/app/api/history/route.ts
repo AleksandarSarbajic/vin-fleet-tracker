@@ -10,6 +10,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
+import { unexpectedFailure } from '@/server/route-failure';
 
 /**
  * §12.101 — one week of the driver history page. Read-only and never cached.
@@ -39,11 +40,10 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `HISTORY-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('GET /api/history failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'HISTORY',
+      log: 'GET /api/history failed',
+      message: 'Could not load this week.',
     });
-    return NextResponse.json({ error: 'Could not load this week.', reference }, { status: 500 });
   }
 }

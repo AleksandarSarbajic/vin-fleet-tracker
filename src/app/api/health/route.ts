@@ -9,6 +9,7 @@ import {
   rateLimitResponse,
 } from '@/server/rate-limit';
 import { loadFleetHealth } from '@/server/health';
+import { unexpectedFailure } from '@/server/route-failure';
 
 /**
  * §14 feature 8. Its own endpoint, not a field on `/api/fleet`.
@@ -33,14 +34,10 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `HEALTH-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('GET /api/health failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'HEALTH',
+      log: 'GET /api/health failed',
+      message: 'Could not load the day’s totals.',
     });
-    return NextResponse.json(
-      { error: 'Could not load the day’s totals.', reference },
-      { status: 500 },
-    );
   }
 }

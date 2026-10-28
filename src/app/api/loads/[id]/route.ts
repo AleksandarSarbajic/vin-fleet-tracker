@@ -9,6 +9,7 @@ import {
   rateLimitResponse,
 } from '@/server/rate-limit';
 import { loadForEdit } from '@/server/load-read';
+import { unexpectedFailure } from '@/server/route-failure';
 
 /**
  * §12.117. One load, its stops and its version, for the edit modal. A read:
@@ -41,11 +42,10 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `LOAD-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('GET /api/loads/[id] failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'LOAD',
+      log: 'GET /api/loads/[id] failed',
+      message: 'Could not read the load.',
     });
-    return NextResponse.json({ error: 'Could not read the load.', reference }, { status: 500 });
   }
 }

@@ -11,6 +11,7 @@ import {
 import { ClearOverrideInput, OverrideInput } from '@/lib/override';
 import { statusConfig } from '@/server/fleet';
 import { OverrideError, clearOverride, setOverride } from '@/server/override';
+import { unexpectedFailure } from '@/server/route-failure';
 import { StaleLoadError, clearOverrideAt } from '@/server/stop-edit';
 
 export const dynamic = 'force-dynamic';
@@ -35,12 +36,11 @@ function failure(error: unknown) {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  const reference = `OVERRIDE-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error('overrides route failed', {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
+  return unexpectedFailure(error, {
+    prefix: 'OVERRIDE',
+    log: 'overrides route failed',
+    message: 'The override failed.',
   });
-  return NextResponse.json({ error: 'The override failed.', reference }, { status: 500 });
 }
 
 export async function POST(request: Request) {

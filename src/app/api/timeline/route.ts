@@ -8,6 +8,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
+import { unexpectedFailure } from '@/server/route-failure';
 import { loadTruckTimeline } from '@/server/timeline';
 
 /** §14 feature 15. Read-only, never cached. */
@@ -35,14 +36,10 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `TIMELINE-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('GET /api/timeline failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'TIMELINE',
+      log: 'GET /api/timeline failed',
+      message: 'Could not load the timeline.',
     });
-    return NextResponse.json(
-      { error: 'Could not load the timeline.', reference },
-      { status: 500 },
-    );
   }
 }

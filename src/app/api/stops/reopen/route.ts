@@ -11,6 +11,7 @@ import {
   rateLimitResponse,
 } from '@/server/rate-limit';
 import { recentlyClosed, reopenLoad, ReopenError } from '@/server/reopen-load';
+import { unexpectedFailure } from '@/server/route-failure';
 
 /**
  * §12.107 — Reopen load. GET: a truck's loads closed in the last 7 days and
@@ -29,12 +30,7 @@ function failure(error: unknown, prefix: string, fallback: string) {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  const reference = `${prefix}-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error(`${prefix} failed`, {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
-  });
-  return NextResponse.json({ error: fallback, reference }, { status: 500 });
+  return unexpectedFailure(error, { prefix, log: `${prefix} failed`, message: fallback });
 }
 
 export async function GET(request: Request) {

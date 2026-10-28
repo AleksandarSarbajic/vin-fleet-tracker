@@ -13,6 +13,7 @@ import { BulkNoteInput, BulkOverrideInput } from '@/lib/override';
 import { BulkError, bulkNote, bulkOverride } from '@/server/bulk';
 import { statusConfig } from '@/server/fleet';
 import { OverrideError } from '@/server/override';
+import { unexpectedFailure } from '@/server/route-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,12 +47,11 @@ function failure(error: unknown) {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  const reference = `BULK-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error('bulk route failed', {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
+  return unexpectedFailure(error, {
+    prefix: 'BULK',
+    log: 'bulk route failed',
+    message: 'Nothing was changed.',
   });
-  return NextResponse.json({ error: 'Nothing was changed.', reference }, { status: 500 });
 }
 
 export async function POST(request: Request) {

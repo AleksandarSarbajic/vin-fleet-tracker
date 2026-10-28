@@ -18,6 +18,7 @@ import {
   retireDriver,
   updateDriverPhone,
 } from '@/server/drivers';
+import { unexpectedFailure } from '@/server/route-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,12 +30,11 @@ function failure(error: unknown, prefix: string) {
   if (error instanceof DriverError) {
     return NextResponse.json({ error: error.message, field: error.field }, { status: 400 });
   }
-  const reference = `${prefix}-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error(`${prefix} failed`, {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
+  return unexpectedFailure(error, {
+    prefix,
+    log: `${prefix} failed`,
+    message: 'The driver could not be saved.',
   });
-  return NextResponse.json({ error: 'The driver could not be saved.', reference }, { status: 500 });
 }
 
 /** Open merge candidates, for the prompt on the assignment board (§12.35). */

@@ -13,6 +13,7 @@ import {
   loadAssignmentBoard,
   saveAssignments,
 } from '@/server/assignments';
+import { unexpectedFailure } from '@/server/route-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,15 +23,11 @@ function failure(error: unknown, prefix: string) {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  const reference = `${prefix}-500-${Date.now().toString(36).toUpperCase()}`;
-  console.error(`${prefix} failed`, {
-    reference,
-    error: error instanceof Error ? error.message : String(error),
+  return unexpectedFailure(error, {
+    prefix,
+    log: `${prefix} failed`,
+    message: 'The assignment board could not be reached.',
   });
-  return NextResponse.json(
-    { error: 'The assignment board could not be reached.', reference },
-    { status: 500 },
-  );
 }
 
 export async function GET(request: Request) {

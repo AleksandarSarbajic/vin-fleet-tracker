@@ -8,6 +8,7 @@ import {
   enforceRateLimit,
   rateLimitResponse,
 } from '@/server/rate-limit';
+import { unexpectedFailure } from '@/server/route-failure';
 import { setTruckActive } from '@/server/stop-edit';
 
 export const dynamic = 'force-dynamic';
@@ -31,11 +32,10 @@ export async function PATCH(request: Request) {
   if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `TRUCK-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('PATCH /api/trucks failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'TRUCK',
+      log: 'PATCH /api/trucks failed',
+      message: 'The change failed.',
     });
-    return NextResponse.json({ error: 'The change failed.', reference }, { status: 500 });
   }
 }

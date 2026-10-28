@@ -19,6 +19,7 @@ import {
 } from '@/server/stop-edit';
 import { StalePreviewError } from '@/server/reassign';
 import { ClearStopError } from '@/server/clear-stop';
+import { unexpectedFailure } from '@/server/route-failure';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,11 +120,10 @@ export async function POST(request: Request) {
   if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const reference = `STOP-500-${Date.now().toString(36).toUpperCase()}`;
-    console.error('POST /api/stops failed', {
-      reference,
-      error: error instanceof Error ? error.message : String(error),
+    return unexpectedFailure(error, {
+      prefix: 'STOP',
+      log: 'POST /api/stops failed',
+      message: 'The save failed.',
     });
-    return NextResponse.json({ error: 'The save failed.', reference }, { status: 500 });
   }
 }
