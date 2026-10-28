@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
-import { WORKER_BREADCRUMB, scrubWorkerEvent, sqlstateOf, textlessErrors } from '@/lib/sentry-server-errors';
+import { WORKER_BREADCRUMB, errorType, scrubWorkerEvent, sqlstateOf, textlessErrors } from '@/lib/sentry-server-errors';
 
 /**
  * Error reporting for the worker process (phase 6, item 4).
@@ -188,8 +188,10 @@ export async function flushWorkerSentry(timeoutMs = 4_000): Promise<void> {
   if (!active) return;
   try {
     await Sentry.flush(timeoutMs);
-  } catch {
-    // Reporting the reporter is not a thing. Never block a clean exit on it.
+  } catch (error: unknown) {
+    // Never block a clean exit on the reporter, and never say nothing: one
+    // line in journald, the error's type only (§12.144), not its text.
+    console.error('sentry flush failed', { errorName: errorType(error) });
   }
 }
 
