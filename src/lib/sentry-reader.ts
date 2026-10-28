@@ -15,7 +15,7 @@ import type { ErrorEvent, Integration } from '@sentry/core';
 export const READER_ROUTE = '/api/ratecon/read';
 const REMOVED = '[removed: the reader route never reports text]';
 
-const isReaderEvent = (event: ErrorEvent) =>
+export const isReaderEvent = (event: ErrorEvent) =>
   (event.transaction ?? '').includes(READER_ROUTE) || (event.request?.url ?? '').includes(READER_ROUTE);
 
 /**

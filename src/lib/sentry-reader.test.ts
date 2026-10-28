@@ -113,7 +113,8 @@ describe('the server config, started for real with a transport that keeps what i
     const config = readFileSync(join(import.meta.dirname, '..', '..', 'sentry.server.config.ts'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/(^|[^:])\/\/.*$/gm, '$1');
-    expect(config).toMatch(/beforeSend:\s*scrubReaderEvent\b/);
+    // §12.143: scrubServerEvent hands a reader event to scrubReaderEvent, unchanged (sentry-server-errors.test.ts).
+    expect(config).toMatch(/beforeSend:\s*scrubServerEvent\b/);
     expect(config).toMatch(/integrations:\s*withoutAiIntegrations\b/);
   });
 });

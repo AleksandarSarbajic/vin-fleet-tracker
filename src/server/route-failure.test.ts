@@ -32,6 +32,7 @@ vi.mock('@sentry/nextjs', async (importOriginal) => {
 
 const Sentry = await import('@sentry/nextjs');
 const { unexpectedFailure } = await import('./route-failure');
+const { REMOVED } = await import('@/lib/sentry-server-errors');
 
 const S = `sx${randomUUID().replaceAll('-', '')}`;
 const ROUTE = { prefix: 'DRIVER-GET', log: 'DRIVER-GET failed', message: 'The driver could not be saved.' };
@@ -112,7 +113,7 @@ describe('unexpectedFailure: one Sentry event, type and stack, never the message
     await Sentry.flush(2000);
     const values = events()[0]?.exception?.values ?? [];
     expect(values.map((v) => v.type)).toEqual(['PostgresError', 'DrizzleQueryError']);
-    expect(values.every((v) => v.value === '[removed: a route error never reports its message]')).toBe(true);
+    expect(values.every((v) => v.value === REMOVED)).toBe(true);
     const frames = values[1]?.stacktrace?.frames ?? [];
     expect(frames.some((f) => f.filename?.endsWith('route-failure.test.ts'))).toBe(true);
   });

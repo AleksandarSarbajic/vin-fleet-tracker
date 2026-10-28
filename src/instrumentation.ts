@@ -30,5 +30,11 @@ export async function register(): Promise<void> {
  * catch their errors and answer with a reference (`FLEET-500-…`), so they never
  * reach it. They report through src/server/route-failure.ts (§12.142), which
  * tags the event with that reference.
+ *
+ * It is handed the RAW error, on purpose (§12.143). Sentry's wrapper around a
+ * page has usually captured that same error object already, and Sentry drops
+ * a second capture of one object; a stand-in here would be a second event.
+ * The error's text is cut for every capture by the `textlessErrors`
+ * integration both server configs add (src/lib/sentry-server-errors.ts).
  */
 export const onRequestError = Sentry.captureRequestError;

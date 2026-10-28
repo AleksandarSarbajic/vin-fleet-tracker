@@ -1,7 +1,8 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
-import { scrubReaderEvent, withoutAiIntegrations } from '@/lib/sentry-reader';
+import { withoutAiIntegrations } from '@/lib/sentry-reader';
 import { sampleTraces } from '@/lib/sentry-sampling';
+import { scrubServerEvent, textlessErrors } from '@/lib/sentry-server-errors';
 
 /**
  * The Next app's Node runtime. A DIFFERENT Sentry project from the worker's
@@ -40,11 +41,13 @@ Sentry.init({
   dataCollection: SENTRY_DATA_COLLECTION,
 
   /**
-   * The language-model reader's route never reports text: an event from it
-   * keeps its exception type and stack, and loses the message, `extra` and
-   * breadcrumb text (src/lib/sentry-reader.ts).
+   * No error event carries text (§12.143): every one keeps its exception type
+   * and stack, and loses the message, `extra`, request data and breadcrumb
+   * text. The language-model reader's route exactly as before
+   * (`scrubReaderEvent`, src/lib/sentry-reader.ts). A backstop: the text is
+   * cut earlier, by the integration added below.
    */
-  beforeSend: scrubReaderEvent,
+  beforeSend: scrubServerEvent,
 
   /**
    * No AI-monitoring integration: with tracing on, Sentry installs ten by
@@ -52,3 +55,11 @@ Sentry.init({
    */
   integrations: withoutAiIntegrations,
 });
+
+/**
+ * §12.143. Every error event's exception rebuilt from the error's type and
+ * stack frames, before Sentry parses its message lines into frames — whoever
+ * captured it: onRequestError, or Sentry's own wrappers around pages, actions
+ * and route handlers (src/lib/sentry-server-errors.ts).
+ */
+Sentry.addIntegration(textlessErrors());

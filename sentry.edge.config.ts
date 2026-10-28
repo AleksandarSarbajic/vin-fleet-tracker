@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
 import { sampleTraces } from '@/lib/sentry-sampling';
+import { scrubServerEvent, textlessErrors } from '@/lib/sentry-server-errors';
 
 /**
  * The edge runtime — which here means exactly one thing: `src/middleware.ts`,
@@ -31,4 +32,14 @@ Sentry.init({
    * to. Shared across all four runtimes — see src/lib/sentry-privacy.ts.
    */
   dataCollection: SENTRY_DATA_COLLECTION,
+
+  /**
+   * No error event carries text (§12.143), the same backstop as the Node
+   * config: type and stack kept; message, `extra`, request data and
+   * breadcrumb text gone.
+   */
+  beforeSend: scrubServerEvent,
 });
+
+/** §12.143. The same early rebuild as the Node config (src/lib/sentry-server-errors.ts). */
+Sentry.addIntegration(textlessErrors());
