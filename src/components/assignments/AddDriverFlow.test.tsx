@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssignmentBoard } from './AssignmentBoard';
+import type { QueryClient } from '@tanstack/react-query';
+import { boardElement, testQueryClient } from '@/test/assignment-board';
 import type { AssignmentBoard as Board } from '@/server/assignments';
 
 /**
@@ -37,7 +37,7 @@ const refresh = vi.fn(() => {
      * bug cannot verify the fix (§12.38).
      */
     root!.render(
-      createElement(AssignmentBoard, {
+      boardElement(client, {
         board: structuredClone(server.board!),
         role: 'admin' as const,
       }),
@@ -69,7 +69,10 @@ const EMPTY_TRUCK: Board = {
   drivers: [],
 };
 
+let client: QueryClient;
+
 beforeEach(() => {
+  client = testQueryClient();
   posted = [];
   refresh.mockClear();
   container = document.createElement('div');
@@ -122,6 +125,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  client.clear();
   container?.remove();
   root = null;
   container = null;
@@ -161,7 +165,7 @@ const OCCUPIED_TRUCK: Board = {
  */
 const render = async (board: Board = server.board!) => {
   await act(async () => {
-    root!.render(createElement(AssignmentBoard, { board, role: 'admin' as const }));
+    root!.render(boardElement(client, { board, role: 'admin' as const }));
   });
   return container!;
 };

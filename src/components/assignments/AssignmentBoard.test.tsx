@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssignmentBoard } from './AssignmentBoard';
+import type { QueryClient } from '@tanstack/react-query';
+import { boardElement, testQueryClient } from '@/test/assignment-board';
 import type { AssignmentBoard as Board, BoardDriver } from '@/server/assignments';
 
 /**
@@ -28,7 +28,10 @@ vi.mock('next/link', () => ({
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+let client: QueryClient;
+
 beforeEach(() => {
+  client = testQueryClient();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -40,6 +43,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  client.clear();
   container?.remove();
   root = null;
   container = null;
@@ -114,7 +118,7 @@ function board(over: Partial<Board> = {}): Board {
  */
 async function render(role: 'admin' | 'dispatcher' | 'viewer' = 'dispatcher') {
   await act(async () => {
-    root!.render(createElement(AssignmentBoard, { board: board(), role }));
+    root!.render(boardElement(client, { board: board(), role }));
   });
   return container!;
 }
@@ -179,7 +183,7 @@ describe('a driver on two trucks (§12.131)', () => {
 
 async function renderBoard(b: Board) {
   await act(async () => {
-    root!.render(createElement(AssignmentBoard, { board: b, role: 'dispatcher' }));
+    root!.render(boardElement(client, { board: b, role: 'dispatcher' }));
   });
   return container!;
 }
@@ -299,8 +303,8 @@ describe('empty trucks and the two panels', () => {
   });
 });
 
-describe('the column order (§12.135, §12.140)', () => {
-  it('heads the columns Truck, Driver, ELD, Driver’s phone', async () => {
+describe('the column order (§12.135, §12.140, §12.145)', () => {
+  it('heads the columns Truck, Driver, ELD, Driver’s phone, Currently', async () => {
     await render();
     const header = container!.querySelector('[class*="sticky"][class*="grid-cols"]')!;
     expect([...header.children].map((c) => c.textContent)).toEqual([
@@ -308,6 +312,7 @@ describe('the column order (§12.135, §12.140)', () => {
       'Driver',
       'ELD',
       'Driver’s phone',
+      'Currently',
     ]);
   });
 
@@ -324,7 +329,8 @@ describe('the column order (§12.135, §12.140)', () => {
     expect(driverCell.lastElementChild!.matches('[data-was]')).toBe(true);
     expect(cells[2]!.matches('[data-eld]')).toBe(true);
     expect(cells[3]!.matches('[data-driver-phone]')).toBe(true);
-    expect(cells).toHaveLength(4);
+    expect(cells[4]!.matches('[data-currently]')).toBe(true);
+    expect(cells).toHaveLength(5);
   });
 });
 
@@ -339,7 +345,7 @@ describe('the board’s rows and fields (§12.134)', () => {
 
   it('keeps every picker boxed for a viewer', async () => {
     await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+      root!.render(boardElement(client, { board: board(), role: 'viewer' }));
     });
     for (const input of container!.querySelectorAll('input[role="combobox"]')) {
       expect(input.className).not.toContain('border-transparent');
@@ -361,7 +367,7 @@ describe('the footer’s count, and a free driver’s entry', () => {
 
   it('lays a free driver out as name and Retire, then the phone on its own line, at every width (3ao polish)', async () => {
     await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: board(), role: 'admin' }));
+      root!.render(boardElement(client, { board: board(), role: 'admin' }));
     });
     const entry = container!.querySelector('[data-free-driver]')!;
     expect(entry.className).toContain('grid-cols-[minmax(0,1fr)_auto]');
@@ -750,7 +756,7 @@ describe('a viewer’s board (§12.141)', () => {
   const asViewer = async () => {
     await act(async () => {
       root!.render(
-        createElement(AssignmentBoard, {
+        boardElement(client, {
           board: board({
             trucks: [...board().trucks, EMPTY_TRUCK],
             drivers: board().drivers.map((d) => (d.id === 'd-app' ? { ...d, phone: '7085550101' } : d)),
@@ -820,7 +826,7 @@ describe('Save is the primary action only when there is something valid to save 
 
   it('is never solid for a viewer', async () => {
     await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+      root!.render(boardElement(client, { board: board(), role: 'viewer' }));
     });
     expect(saveButton().disabled).toBe(true);
     expect(solid()).toBe(false);
@@ -830,7 +836,7 @@ describe('Save is the primary action only when there is something valid to save 
 describe('the header at narrow widths', () => {
   it('narrows the search below 1100px and lets the counts truncate rather than wrap', async () => {
     await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: board(), role: 'viewer' }));
+      root!.render(boardElement(client, { board: board(), role: 'viewer' }));
     });
     const field = searchBox().closest('label')!;
     expect(field.className).toContain('w-[160px]');
@@ -905,7 +911,7 @@ describe('a truck chip opens that truck’s picker (§12.139, Alex 2026-10-22)',
 
   it('stays inert for a viewer: no button, and a click opens nothing', async () => {
     await act(async () => {
-      root!.render(createElement(AssignmentBoard, { board: withEmpty(), role: 'viewer' }));
+      root!.render(boardElement(client, { board: withEmpty(), role: 'viewer' }));
     });
     const trucks = container!.querySelectorAll('aside > div')[1]!;
     expect(trucks.querySelectorAll('button, [role="button"]')).toHaveLength(0);

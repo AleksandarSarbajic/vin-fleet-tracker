@@ -25,6 +25,8 @@ import {
 } from './boardView';
 import { LockIcon, SearchIcon, WarningIcon } from './icons';
 import { formatPhone } from '@/lib/dial';
+import { useFleet, type FleetResponse } from '@/hooks/useFleet';
+import { Currently } from './Currently';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -41,6 +43,11 @@ import { formatPhone } from '@/lib/dial';
 interface Props {
   board: Board;
   role: Role;
+  /**
+   * §12.145. The console's fleet, loaded with the board, then polled by the
+   * console's own hook. Only "Currently" reads it.
+   */
+  initialFleet: FleetResponse;
 }
 
 const label = (t: Board['trucks'][number]) =>
@@ -48,20 +55,47 @@ const label = (t: Board['trucks'][number]) =>
 
 /**
  * The table's columns, shared by its header and every row (§12.131, §12.135,
- * §12.140).
+ * §12.140, §12.145).
  *
- * Truck, driver, ELD, the driver's phone. The ELD column holds the `No ELD`
- * tag that sat inside the picker's field (§12.129); "was" moved under the
- * driver's name, so Currently is gone until it shows live status (3ap). The
- * phone takes the slack, which its "also 433" warning (§12.138) can use.
- * Minimums: 64 + 240 + 64 + 220 + 3 gaps = 636, plus the rows' 3px edge;
- * the phone keeps 220px for its inline editor (field, Save, Cancel).
+ * Truck, driver, ELD, the driver's phone, Currently. The ELD column holds the
+ * `No ELD` tag that sat inside the picker's field (§12.129). Currently is the
+ * truck's live chip and position, and takes the slack.
+ *
+ * Minimums, each for a reason:
+ * - the picker's 240 holds an empty row's 104px field, its 8px gap and
+ *   "+ Assign driver" (92px);
+ * - the phone keeps 220 for its inline editor (field, Save, Cancel), and is
+ *   capped at 260;
+ * - Currently's 120 holds the widest chip whole, a forced one ("Arrived ·
+ *   forced", 111px; the widest unforced is "Tomorrow", 79px). Its position
+ *   truncates, with the whole of it on hover.
+ *
+ * With 4 gaps of 16 and the rows' 3px edge, that is 775. The widths below
+ * come from measuring the chips in the built Barlow Condensed. The column
+ * pixel figures are worked out from the grid's rules: free space goes to the
+ * picker (up to 360) and the phone (up to 260) before Currently's 1fr gets
+ * any.
+ * - 1440 and up: the table is capped at 1000 (the section's `max-w`).
+ *   Picker 360, phone 260, Currently 185.
+ * - 1280: the panels sit beside the table, which is 960 wide. Currently is
+ *   145.
+ * - 1100: the table is 780 wide. The picker and phone are near their
+ *   minimums and Currently is 120: the chip whole, the position cut.
+ * - 1024: the panels sit above the table (§12.132), which is 984 wide.
+ *   Currently is 169.
+ * - Below 840 it does not fit. At 768 the table is 728 wide, 47 short of 775,
+ *   so Currently is hidden and the row is the four columns it was (639).
+ *   Nothing else gives way: none of the minimums above has 47px to spare.
+ *   The console shows the same chip.
  *
  * 3al settled the picker on screen: flexible, it ran 845px wide at 1920, so
  * it is capped at 360; and from 1100px up the whole table is capped at
- * 1000px (the section's `max-w`) so its rows stop where their content does.
+ * 1000px so its rows stop where their content does.
  */
-const COLUMNS = 'grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,1fr)]';
+const COLUMNS =
+  'grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,1fr)] min-[840px]:grid-cols-[64px_minmax(240px,360px)_64px_minmax(220px,260px)_minmax(120px,1fr)]';
+/** §12.145: where Currently has its 120px (above); below, hidden. */
+const CURRENTLY_SHOWN = 'hidden min-[840px]:flex';
 
 /** "124 and 130", "124, 130 and 138". */
 function listed(labels: string[]): string {
@@ -70,8 +104,19 @@ function listed(labels: string[]): string {
     : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
-export function AssignmentBoard({ board, role }: Props) {
+export function AssignmentBoard({ board, role, initialFleet }: Props) {
   const router = useRouter();
+
+  /**
+   * §12.145. The console's poll, the same hook and the same 20s. When a
+   * refresh brings this page a newer fleet than the last poll (a save, a
+   * retire, a new driver), the newer one is shown, so Currently follows the
+   * saved assignment at once rather than at the next poll. No second status
+   * engine, no request of its own.
+   */
+  const polled = useFleet(initialFleet).data;
+  const fleet = polled.fetchedAt >= initialFleet.fetchedAt ? polled : initialFleet;
+  const live = useMemo(() => new Map(fleet.fleet.map((row) => [row.id, row])), [fleet.fleet]);
   const mayEdit = can(role, 'dispatcher');
   const lockedReason = `Your role is ${role}. Assignments need dispatcher.`;
 
@@ -534,9 +579,10 @@ export function AssignmentBoard({ board, role }: Props) {
         §12.132. Below 1100px the two panels sit above the table, side by side,
         instead of beside it. The four columns needed 722px at their minimums
         when 1100 was chosen, which beside the 260px aside left nothing for
-        the picker under about 1042px. Since §12.140 they need 639, so at 1100
-        the picker is at its 360 cap. The DOM order (table, then panels) is
-        kept, so the keyboard reaches the pickers first.
+        the picker under about 1042px. With Currently (§12.145) they need 775,
+        and at 1100 the table is 780: every column near its minimum (COLUMNS
+        has the budget). The DOM order (table, then panels) is kept, so the
+        keyboard reaches the pickers first.
       */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
         {/*
@@ -562,6 +608,7 @@ export function AssignmentBoard({ board, role }: Props) {
             <span className="pl-2.5">Driver</span>
             <span>ELD</span>
             <span>Driver&rsquo;s phone</span>
+            <span className={CURRENTLY_SHOWN}>Currently</span>
           </div>
 
           {/* §12.106: a row's `driver` is the picker's, so the phone shown is theirs, not the truck's. */}
@@ -716,6 +763,14 @@ export function AssignmentBoard({ board, role }: Props) {
                 ) : (
                   <span />
                 )}
+                {/* §12.145: the SAVED truck's live state, by its id; the draft never reaches it. */}
+                <div data-currently="" className={`${CURRENTLY_SHOWN} min-w-0 items-center gap-2`}>
+                  <Currently
+                    row={live.get(truck.id)}
+                    feedStale={fleet.feedStale}
+                    fetchedAt={fleet.fetchedAt}
+                  />
+                </div>
               </div>
             );
           })}
