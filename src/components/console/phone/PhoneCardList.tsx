@@ -1,10 +1,9 @@
 'use client';
 
 import type { FleetRow } from '@/server/fleet-query';
-import { upcomingLabel } from '@/lib/status';
-import { elapsed } from '@/lib/format';
 import type { EmptyState } from '@/lib/empty-state';
 import { ChipFlip } from '../ChipFlip';
+import { chipProps } from '../chip-props';
 import { apptText } from '../TruckRow';
 
 /**
@@ -87,7 +86,6 @@ function Card({
   reducedMotion: boolean;
   onTap: (id: string) => void;
 }) {
-  const stale = feedStale || row.status === 'STALE_GPS';
   const quiet = !feedStale && row.status === 'TOMORROW';
   const stop = row.nextStop;
   const city = stop
@@ -119,18 +117,7 @@ function Card({
         </span>
         <span data-card-field="status" className="flex shrink-0 items-center">
           {/* The row's own chip, with the row's own label: the stale age, or which later day. */}
-          <ChipFlip
-            status={feedStale ? 'STALE_GPS' : row.status}
-            forced={!feedStale && row.override !== null}
-            label={
-              stale
-                ? (elapsed(row.recordedAt, fetchedAt ? new Date(fetchedAt) : undefined) ?? undefined)
-                : !feedStale && row.status === 'TOMORROW' && row.upcoming
-                  ? upcomingLabel(row.upcoming)
-                  : undefined
-            }
-            reducedMotion={reducedMotion}
-          />
+          <ChipFlip {...chipProps(row, feedStale, fetchedAt)} reducedMotion={reducedMotion} />
         </span>
       </span>
       <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-sans text-[14px] leading-snug">

@@ -6,9 +6,10 @@ import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone, windowEnd } from '@/lib/format';
 import { basisShort, etaCaution, etaDetails, milesText } from '../TruckRow';
 import { StatusChip } from '../StatusChip';
+import { chipProps } from '../chip-props';
 import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
-import { STATUS_LABEL, upcomingLabel } from '@/lib/status';
+import { STATUS_LABEL } from '@/lib/status';
 import { DESKTOP_ONLY } from '@/lib/editing';
 
 /**
@@ -132,6 +133,7 @@ const BasisDetails = ({ row }: { row: FleetRow }) => {
 export function MapPopup({
   row,
   fetchedAt,
+  feedStale,
   onEdit,
   onTimeline,
   onClose,
@@ -139,6 +141,12 @@ export function MapPopup({
 }: {
   row: FleetRow;
   fetchedAt: string | null;
+  /**
+   * §5.9. The chip withdraws its colour with the row's: on a dead feed a green
+   * "On time" here, over a dotted row, would be the lie the rule forbids.
+   * Required, so no caller can leave it out.
+   */
+  feedStale: boolean;
   /** §12.94. Null below the editing width: the popup says where editing is instead. */
   onEdit: ((id: string) => void) | null;
   /**
@@ -215,16 +223,8 @@ export function MapPopup({
           }) ? (
             <NoEldTag />
           ) : null}
-          <StatusChip
-            status={row.status}
-            forced={row.override !== null}
-            // §12.82: which later day, not the bucket's name.
-            label={
-              row.status === 'TOMORROW' && row.upcoming
-                ? upcomingLabel(row.upcoming)
-                : undefined
-            }
-          />
+          {/* The row's chip: withdrawn on a stale feed (§5.9), the day of an upcoming load (§12.82). */}
+          <StatusChip {...chipProps(row, feedStale, fetchedAt)} />
         </div>
 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[5px] px-[10px] py-[9px] text-[12px]">

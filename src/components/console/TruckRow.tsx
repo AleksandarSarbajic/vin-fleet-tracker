@@ -11,11 +11,12 @@ import {
 } from '@/lib/eta-basis';
 import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
-import { upcomingLabel, type Status } from '@/lib/status';
+import type { Status } from '@/lib/status';
 import { calendarDayInZone } from '@/lib/calendar';
-import { elapsed, timeInZone, windowEnd } from '@/lib/format';
+import { timeInZone, windowEnd } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { ChipFlip } from './ChipFlip';
+import { chipProps } from './chip-props';
 import { ROW_HEIGHT, type Density } from '@/lib/density';
 import { addressText, loadText } from '@/lib/copy-text';
 import type { FlashGround, RowFlashView } from '@/lib/flash';
@@ -459,7 +460,6 @@ function TruckRowImpl({
   onEdit,
 }: Props) {
   const truckLabel = row.truckNumber ?? row.samsaraName;
-  const reference = fetchedAt ? new Date(fetchedAt) : undefined;
   const quiet = !feedStale && row.status === 'TOMORROW';
   const stale = feedStale || row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
@@ -775,20 +775,8 @@ function TruckRowImpl({
       ) : null}
 
       <div className="flex min-w-0 items-center justify-end gap-1.5" data-no-dblclick="">
-        {/* A dotted neutral chip carrying the age, fleet-wide (§5.9). */}
-        <ChipFlip
-          status={feedStale ? 'STALE_GPS' : row.status}
-          forced={!feedStale && row.override !== null}
-          label={
-            stale
-              ? (elapsed(row.recordedAt, reference) ?? undefined)
-              : // §12.82: the row says WHICH later day; the bucket is "Upcoming".
-                !feedStale && row.status === 'TOMORROW' && row.upcoming
-                ? upcomingLabel(row.upcoming)
-                : undefined
-          }
-          reducedMotion={reducedMotion}
-        />
+        {/* A dotted neutral chip carrying the age, fleet-wide (§5.9); the day of an upcoming load (§12.82). */}
+        <ChipFlip {...chipProps(row, feedStale, fetchedAt)} reducedMotion={reducedMotion} />
         {/*
           §14.4, the reduced-motion half: "the flash is replaced by a static
           tag after the chip for 60s -- the signal SURVIVES without the

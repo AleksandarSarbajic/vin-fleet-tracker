@@ -470,6 +470,7 @@ export function FleetMap({
             <MapPopup
               row={selectedRow}
               fetchedAt={fetchedAt}
+              feedStale={feedStale}
               onEdit={onEdit}
               onTimeline={onTimeline}
               onClose={() => onSelect(null)}

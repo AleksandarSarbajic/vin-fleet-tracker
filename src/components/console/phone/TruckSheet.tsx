@@ -3,12 +3,13 @@
 import { Fragment, useEffect, useRef } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph } from '@/lib/format';
-import { upcomingLabel, STATUS_LABEL } from '@/lib/status';
+import { STATUS_LABEL } from '@/lib/status';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { DESKTOP_ONLY } from '@/lib/editing';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
 import { DriverName } from '@/components/DriverName';
 import { StatusChip } from '../StatusChip';
+import { chipProps } from '../chip-props';
 import { etaCaution, etaDetails } from '../TruckRow';
 import { apptLine, projectedLine, stopOfLoad } from '../map/MapPopup';
 
@@ -86,17 +87,7 @@ export function TruckSheet({
             {label}
           </h2>
           <span data-sheet-field="status" className="flex shrink-0 items-center">
-            <StatusChip
-              status={feedStale ? 'STALE_GPS' : row.status}
-              forced={!feedStale && row.override !== null}
-              label={
-                stale
-                  ? (age ?? undefined)
-                  : row.status === 'TOMORROW' && row.upcoming
-                    ? upcomingLabel(row.upcoming)
-                    : undefined
-              }
-            />
+            <StatusChip {...chipProps(row, feedStale, fetchedAt)} />
           </span>
           <button
             type="button"

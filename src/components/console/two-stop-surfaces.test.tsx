@@ -91,7 +91,7 @@ async function rowFor(tx: Tx, truckId: string): Promise<FleetRow> {
 
 const popupText = (row: FleetRow) =>
   renderToStaticMarkup(
-    <MapPopup row={row} fetchedAt={new Date().toISOString()} onEdit={() => {}} onTimeline={() => {}} onClose={() => {}} />,
+    <MapPopup row={row} fetchedAt={new Date().toISOString()} feedStale={false} onEdit={() => {}} onTimeline={() => {}} onClose={() => {}} />,
   );
 const sheetText = (row: FleetRow) =>
   renderToStaticMarkup(

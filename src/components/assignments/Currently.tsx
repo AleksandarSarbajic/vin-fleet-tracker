@@ -1,6 +1,5 @@
 import { StatusChip } from '@/components/console/StatusChip';
-import { elapsed } from '@/lib/format';
-import { upcomingLabel, type Status } from '@/lib/status';
+import { chipProps } from '@/components/console/chip-props';
 import type { FleetRow } from '@/server/fleet-query';
 
 /**
@@ -12,38 +11,11 @@ import type { FleetRow } from '@/server/fleet-query';
  *
  * It is the SAVED assignment's live state. The board's draft never reaches
  * it: a pick changes the Driver column and its "was", not this.
+ *
+ * The chip's props are the console's own (`chipProps`, shared with the row,
+ * the phone and the popup). `Currently.test.tsx` renders the console's row
+ * beside this and compares the two chips.
  */
-
-export interface ConsoleChip {
-  status: Status;
-  forced: boolean;
-  label: string | undefined;
-}
-
-/**
- * The chip the console's row draws for this truck (`TruckRow`, its Status
- * cell). A stale FEED withdraws schedule colour from every chip: each becomes
- * the dotted Stale GPS carrying its fix's age (§5.9). A truck's own stale GPS
- * carries its age the same way (§5.1), and an upcoming load names its day
- * (§12.82). `Currently.test.tsx` renders the console's row beside this and
- * compares the two chips.
- */
-export function consoleChip(
-  row: FleetRow,
-  feedStale: boolean,
-  fetchedAt: string | null,
-): ConsoleChip {
-  const stale = feedStale || row.status === 'STALE_GPS';
-  return {
-    status: feedStale ? 'STALE_GPS' : row.status,
-    forced: !feedStale && row.override !== null,
-    label: stale
-      ? (elapsed(row.recordedAt, fetchedAt ? new Date(fetchedAt) : undefined) ?? undefined)
-      : row.status === 'TOMORROW' && row.upcoming
-        ? upcomingLabel(row.upcoming)
-        : undefined,
-  };
-}
 
 export function Currently({
   row,
@@ -72,7 +44,7 @@ export function Currently({
   const stale = feedStale || row.status === 'STALE_GPS';
   const position = stale ? `Last seen ${row.cityState ?? '—'}` : (row.cityState ?? '—');
   // No open load: the position only. A chip would be a status for nothing.
-  const chip = row.openLoadCount > 0 ? consoleChip(row, feedStale, fetchedAt) : null;
+  const chip = row.openLoadCount > 0 ? chipProps(row, feedStale, fetchedAt) : null;
 
   return (
     <>
