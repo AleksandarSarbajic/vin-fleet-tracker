@@ -10410,6 +10410,46 @@ differ (§9.5).
 - One function gives the ink to both surfaces: `computedInk` in
   `MapPopup.tsx`.
 
+## 12.147 Five more rate-confirmation templates, and two widened readers
+
+Phases 3ax and 3ay. §12.122's templates, in `templates.ts`, gain five layouts.
+Each is recognised by its own printed headings and read by column; the strip
+names it from `LAYOUT_NAME`:
+
+| Layout id | Recognised by |
+|---|---|
+| `stop-detail` | "CARRIER RATE CONFIRMATION PAGE n of m", "STOP DETAIL", the table's "Type … Name and Address … Commodity … Reference #" and "Arrival … Departure … Dims" lines |
+| `pickup-drop-blocks` | "LOAD CONFIRMATION", "Service for Load # … Amount Rate Extended", "Pickup INSTRUCTIONS", "Drop INSTRUCTIONS" |
+| `location-blocks` | "Load Confirmation" beside "Attachment to Broker Carrier Agreement", "Shipper or Pick Up Location:", "Receiver or Delivery Location #:", a line ending "Delivery Date and Time:" |
+| `stop-rows` | "Load Confirmation and Rate Agreement" and the table's "Stop / Pickup", "Type / Location / Notes", "Number / Time" lines |
+| `origin-destination` | "LOAD CONFIRMATION AND PAYMENT AGREEMENT", "Carrier Rate Details" beside "Total Items", "Origin" beside "Destination" |
+
+- **Exactly one layout, still.** A PDF is read only when exactly one layout
+  has every label it is recognised by; two, or none, and nothing is filled
+  (§12.122). No label is a broker's name or the load number, which is
+  optional (§12.21). Each layout's tests check that its invented fixture is
+  recognised as it alone, and no other layout's fixture as it.
+- **Strict, as the first six.** A shape a reader does not know is refused
+  whole, and the PDF goes to Read with AI as before. No field is guessed. The
+  load number is never invented; when the places it is printed disagree, it
+  is left blank and says so. Appointments are what the text says, in
+  stop-local wall time, and `ratecon-fill`'s window rules decide APPT or FCFS.
+  A bare HH:MM is read by the 24-hour rule (§12.122); `stop-rows` prints AM
+  and PM.
+- **A street printed on two lines** (`stop-detail`) is read joined with one
+  space, and its field says
+  "Check: the street is printed on more than one line, read as “…”. Confirm
+  it against the PDF." (`WRAP_CHECK`). The PDF can run two words together at
+  the break, so the dispatcher looks.
+- **A ", c/o " in a street row** (`pickup-drop-blocks`) is left out only when
+  the stop's own name follows it; a "c/o" naming anything else is refused.
+- **`stop-detail` reads a window** under "Scheduled Arrival": the start
+  printed "HH:MM -", the end on the line under it, on the same date (Alex,
+  3ay).
+- **`stop-table` (§12.122, 3ak) finds a phone printed as three digit groups
+  separated by spaces** ("555 010 0100") as well as its earlier shapes (Alex,
+  3ay). The phone still only marks where the street ends; it is never read.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

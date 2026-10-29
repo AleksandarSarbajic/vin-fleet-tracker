@@ -55,6 +55,9 @@ Computed lines on a dead feed read as the phone sheet's (§12.146). See
 **3ax: STOPPED after its first template, NOT pushed** (2026-10-29): a
 seventh template, `stop-detail`, committed; it changed an existing sample's
 score, the brief's gate, so the phase waits for Alex. See "Phase 3ax" below.
+**3ay: NOT pushed** (2026-10-29): 3ax continued on Alex's answers: four more
+templates (eleven in all), `stop-detail` reads a window, `stop-table` finds a
+spaced phone (§12.147). See "Phase 3ay" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -9598,6 +9601,193 @@ before its end.
    or not?
 5. Sample 16's arrival is a window. Read it as one in `stop-detail` (sample
    16 would then be scored), or keep refusing it?
+
+**Alex's answers (2026-10-29, through the 3ay brief):**
+
+1. Correct sample 17's truth: each street includes its second printed line,
+   joined with one space. Done in 3ay (`expected.json.before-3ay` beside it).
+2. Yes: a new template may read older samples of its own layout. The gate
+   becomes: ALLOWED, and reported per sample, a sample going from "not a
+   template layout" to read by a new template of its own layout. STOP on any
+   field wrong and not marked Check, any change of layout or field result for
+   a sample an existing template reads, or any sample going from read to
+   refused.
+3. d7, stop 2 (sample 38): the truth stays as a dispatcher would type it.
+   The field stays FAIL in the score, reported as "wrong, marked Check".
+4. Yes: `stop-table` accepts a phone printed as digit groups separated by
+   spaces, so d1 (sample 31) reads; its own commit; samples 5 and 30 score as
+   before.
+5. Yes: `stop-detail` reads a time window (sample 16) as the other templates
+   read windows; a clock or window it cannot read with certainty stays
+   unreadable or refused; sample 16 with no unmarked wrong field.
+
+### Phase 3ay: 3ax continued, four more templates, and stop-table reads d1 (2026-10-29)
+
+From the advisor's brief, on Alex's answers to 3ax (recorded under "Phase
+3ax"). Local only: no AI call, no network, no paid call. **NOT pushed.**
+Built on `0d4e463`, two ahead of `951815b`, clean. No change to the AI
+reader, redaction, the routes, the DB, migrations, the worker or env.
+Rule: design-spec §12.147 (new).
+
+**Commits:**
+
+- `22fb664`: `stop-detail` reads a window under "Scheduled Arrival" (answer 5);
+- `f0d5752`: `stop-table` finds a phone printed as three spaced digit groups
+  (answer 4);
+- `dbb27b6`: an eighth template, `pickup-drop-blocks` (d6's layout);
+- `07970df`: a ninth, `location-blocks` (d4's), with `stamp` and
+  `stampedTime`, one reading of "MM/DD/YYYY HH:MM" for it and the eighth;
+- `d63451b`: a tenth, `stop-rows` (d5's);
+- `5cde16b`: an eleventh, `origin-destination` (d2's, and samples 7 and 11);
+- one docs commit: this section, 3ax's answers, the "What is live" line,
+  design-spec §12.147.
+
+**Ground truth.** Sample 17 corrected (answer 1): each street now ends with
+its second printed line, joined with one space. The added word was taken
+from the PDF's own line by a scratch script, in normal case, not typed. The
+file as it was is beside it as `expected.json.before-3ay`; one entry changed.
+`ratecon:check-expected`: every written entry complete. No other entry was
+touched, priorities included (question 2).
+
+**The gate.** `ratecon:score` saved at the start, before the truth fix (the
+bar 19 of 21). `ratecon:score` prints FAIL for a wrong field whether or not
+it is marked, so a scratch scorer, the same pipeline, also split each wrong
+field into marked or unmarked. After each commit both were compared with the
+saved run.
+
+| Commit | Samples that changed | Result |
+|---|---|---|
+| `22fb664` | 16 (new), 17 (truth) | 16: AI → `stop-detail`, 13 of 13; 17: 13 of 13 |
+| `f0d5752` | 31 (d1) | AI → `stop-table`, from its scan, 13 of 13, every field marked as a scan's |
+| `dbb27b6` | 37 (d6) | AI → `pickup-drop-blocks`, 13 of 13 |
+| `07970df` | 35 (d4) | AI → `location-blocks`, 13 of 13; 37 unchanged |
+| `d63451b` | 36 (d5) | AI → `stop-rows`, 13 of 13 |
+| `5cde16b` | 33 (d2), 11, 7 | AI → `origin-destination`: 33 and 11 13 of 13; 7 12 of 13, one wrong and marked |
+
+No sample an existing template read changed (samples 5 and 30 included), and
+none went from read to refused. No field is wrong and unmarked anywhere.
+
+**Per sample at the end** (fields right of 13, or 19 for three stops; the
+load number and six a stop):
+
+| Sample | d | Layout | Right | Wrong, marked Check |
+|---|---|---|---|---|
+| 7 | — | `origin-destination` | 12 | 1: stop 2's appointment (below) |
+| 11 | — | `origin-destination` | 13 | 0 |
+| 16 | — | `stop-detail` | 13 | 0 |
+| 17 | — | `stop-detail` | 13 | 0 |
+| 31 | d1 | `stop-table`, a scan | 13 | 0 |
+| 32 | d10 | `pu-so-blocks` | 13 | 0 |
+| 33 | d2 | `origin-destination` | 13 | 0 |
+| 34 | d3 | `route-blocks` | 19 | 0 |
+| 35 | d4 | `location-blocks` | 13 | 0 |
+| 36 | d5 | `stop-rows` | 13 | 0 |
+| 37 | d6 | `pickup-drop-blocks` | 13 | 0 |
+| 38 | d7 | `stop-detail` | 12 | 1: stop 2's street (answer 3) |
+| 39 | d8 | `stops-section` | 13 | 0 |
+| 40 | d9 | `pu-so-blocks` | 13 | 0 |
+
+`ratecon:score`: the bar 28 of 29 (19 of 21 at the start, 15 of 15 before
+3ax). Its one FAIL is sample 38's marked street; no appointment is WRONG.
+Every sample not in the table above is identical to the start, line for line.
+
+**Sample 7, stop 2.** Its time is an hour under 13 with no leading zero, and
+the document has a PM elsewhere (its signature's time). By the 24-hour rule
+(§12.122, and the ground-truth how-to since 2026-10-15) that is not a time
+anyone can enter, so the template fills the date, leaves the time blank and
+marks it "Couldn't read". The truth, Alex's, gives the time as an
+appointment (question 1).
+
+**The new templates** (what each recognises: §12.147):
+
+- **`pickup-drop-blocks`.** A block from its "Pickup" or "Drop" heading to
+  its own INSTRUCTIONS row, on one page; the right column starts at
+  "Earliest:". Earliest to Latest is the window. The street row's ", c/o "
+  is left out only when the stop's own name follows it; any other "c/o" is
+  refused, any other comma kept. Load number: the "ORDER" line, when
+  "Service for Load #" agrees.
+- **`location-blocks`.** A block from its label to the next or the end of
+  its page; the dates and times beside "Pickup:", or on the line under
+  "Delivery Date and Time:", and nowhere else. A label line with anything
+  more on it is refused. Load number: the "Load Number:" line, the same on
+  every page.
+- **`stop-rows`.** A row between the full-width rows that start left of the
+  location column; number and type on one line, two AM/PM times. The blank
+  the layout prints as "null" is no value. Every stop's line in the document
+  must be this table's, and nothing after the last row may be a time or a
+  city line. Known limit: a stray line just above a row's name cannot be told
+  from the name's first line, and is read as part of the name, which is
+  never filled. Load number: after "Order #", the same everywhere.
+- **`origin-destination`.** Two panels, each with "Date:", "Time:", "From:"
+  and "Email:" once; the address from "From:" to the line before "Email:".
+  The weekday must be the date's. Notes are not read (d2's destination has
+  one). Load number: after "Load #".
+- **`stop-detail` windows:** "HH:MM -" with the end on the line under it, on
+  the same date; any other shape refused.
+- **`stop-table`'s spaced phone:** three tokens of 3, 3 and 4 digits. With
+  parentheses, or other group lengths, a spaced phone is still refused. The
+  ZIP must still follow.
+
+**Tests.** Invented fixtures only (`stopDetail` widened; `pickupDropBlocks`,
+`locationBlocks`, `stopRows`, `originDestination` and their stops, in
+`src/test/ratecon-fixtures.ts`). 58 new in `templates.test.ts`: 3, 1, 15, 13,
+13 and 13 by commit. Each new layout's block checks that its fixture is
+recognised as it alone and that no other layout's fixture is recognised as
+it; the earlier blocks check their own the same way.
+
+**Mutations** (`templates.test.ts`), each applied alone and reverted:
+
+| Commit | Applied | Fail a test | Not failed |
+|---|---|---|---|
+| `22fb664` | 5 | 5 | — |
+| `f0d5752` | 4 | 4 | — |
+| `dbb27b6` | 19 | 18 | positions needed |
+| `07970df` | 15 | 14 | positions needed |
+| `d63451b` | 17 | 16 | positions needed |
+| `5cde16b` | 13 | 12 | positions needed |
+
+Positions needed is a second line of defence, as in 3aa and 3ak. First runs
+left survivors whose tests refused for another reason: a case was added for
+each. Five checks that no mutation could fail were removed, as 3ak did:
+INSTRUCTIONS before the next heading (`pickup-drop-blocks`, which now also
+counts "Earliest:" once, not twice); the "Page n of m" stop
+(`location-blocks`); only "null" beside a row (`stop-rows`); the heading
+cells' text and the labels' order (`origin-destination`). What each guarded
+is refused by another rule, named in the code. `07970df`'s message says 16
+mutations and 15 failing: the sixteenth was the "Page n of m" stop, removed
+in that commit, so 15 and 14 is right.
+
+**Checks.** `npm run check`: 216 files and 4012 tests (216 and 3954 at the
+start). The forbidden-files grep printed nothing. Real data: 192 terms (the
+3ax entries, sample 17 as corrected, samples 7, 11 and 16, and the names in
+those PDFs); 89 were excluded as already in the repo before 3ax; 0 hits in
+the added lines and messages of all seven commits. E2e, once:
+`npm run e2e -- ratecon-`, 7 of 7 passed in 45.0 s, run folder
+test-results/2026-10-29T18-59-49-904Z, the machine awake throughout.
+
+**Found wrong in the brief:**
+
+1. The gate's "wrong and not marked Check" cannot be read off
+   `ratecon:score`: it prints FAIL for a wrong field marked or not, and
+   "Appointments silently wrong: see FAIL above" whenever any field fails,
+   even with no appointment WRONG (as now). A scratch scorer did the split
+   (question 3).
+2. The report list is samples 16, 17 and 31 to 40, but the d2 template also
+   reads samples 7 and 11 (rule 2). They are in the table above.
+
+**Questions for Alex:**
+
+1. Sample 7, stop 2: keep its truth (an appointment at the printed time), so
+   the field stays wrong and marked; or write it as "couldn't read" with its
+   date, as the how-to's 24-hour rule gives?
+2. Set priority 2 on every sample a template now reads (7, 11, 16 and 17;
+   31, 33 and 35 to 38)? With priority 1, if a template later stopped
+   reading one, `ratecon:score` would print "ground truth for the AI
+   evaluation only" instead of FAIL.
+3. `ratecon:score`: print a wrong field that carries a Check as "FAIL
+   (marked)", and "none" for silently wrong appointments when none is WRONG?
+   A small script change, in a phase of its own or not.
+4. When to push 3ax and 3ay.
 
 ## Next
 
