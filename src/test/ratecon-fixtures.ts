@@ -567,3 +567,116 @@ export const TABLE_MIDDLE: TableStop = {
   zip: '58801',
   apptRef: 'A-3003',
 };
+
+export interface DetailStop {
+  type: 'PU' | 'SO';
+  /** The "Name and Address" cell line by line, as printed, centred: the name, the street, "City, ST 12345". */
+  cell: string[];
+  /** Under "Scheduled Arrival", after the word "Arrival": "10/12/26", "14:30". */
+  date: string;
+  time: string;
+  /** Under "Scheduled Departure", line by line; "N/A" when not given. */
+  departure?: string[];
+}
+
+/**
+ * Phase 3ax. A stop detail table: a header on every page ("CARRIER RATE
+ * CONFIRMATION PAGE n of 3", the date it was made, "Load Confirmation" and
+ * the number under it, two barcodes' captions); page 1 the carrier, the pay
+ * and the agreement; page 2 the order information, then "STOP DETAIL": a
+ * three-line header, one row a stop with the name and address centred in its
+ * column, then "NOTES"; page 3 terms. Only the printed headings are the
+ * layout's: every value is made up. ASCII only.
+ */
+export function stopDetail(stops: DetailStop[], options: { loadNumber?: string; later?: string } = {}): TinyRun[][] {
+  const { loadNumber = '7700451' } = options;
+  const later = options.later ?? loadNumber;
+  const header = (page: number, number: string): TinyRun[] => [
+    run(387, 770, `CARRIER RATE CONFIRMATION PAGE ${page} of 3`),
+    run(491, 758, 'CREATED 10/01/26 09:15'),
+    run(262, 734, 'Load Confirmation'),
+    run(288, 722, number),
+    run(55, 708, `LZ${number}`),
+    run(520, 708, 'AT1500.00'),
+  ];
+  /** Where a line of a centred cell starts. */
+  const centred = (text: string) => Math.round(214 - text.length * 2.4);
+  const first: TinyRun[] = [
+    ...header(1, loadNumber),
+    run(23, 680, 'CARRIER INFORMATION'),
+    run(345, 680, 'CONTACT INFORMATION'),
+    run(20, 668, 'Carrier'),
+    run(148, 668, 'Contact'),
+    run(342, 668, 'Example Broker Inc.'),
+    run(20, 656, 'SAMPLE CARRIER LLC'),
+    run(148, 656, 'DANA EXAMPLE'),
+    run(342, 656, 'Casey Example'),
+    run(20, 644, 'Minot, ND 58701'),
+    run(23, 620, 'PAYMENT'),
+    run(20, 608, 'Carrier Pay Breakdown'),
+    run(386, 608, 'Bill To Address'),
+    run(28, 596, 'LNH | Line Haul | Flat'),
+    run(290, 596, '$1500.00'),
+    run(386, 596, 'EXAMPLE BROKER'),
+    run(386, 584, 'PO Box 100'),
+    run(386, 572, 'Kearney, NE 68847'),
+    run(20, 560, 'Total Carrier Pay'),
+    run(296, 560, '$1500.00'),
+    run(23, 530, 'AGREEMENT'),
+    run(20, 518, 'Example terms and conditions apply to this load.'),
+  ];
+  const second: TinyRun[] = [
+    ...header(2, later),
+    run(23, 680, 'ORDER INFORMATION'),
+    run(20, 668, 'Order #'),
+    run(148, 668, 'Total Weight (lbs.)'),
+    run(277, 668, 'Equipment'),
+    run(407, 668, 'Temp'),
+    run(498, 668, 'Reference #'),
+    run(20, 656, loadNumber),
+    run(148, 656, '20000.00'),
+    run(277, 656, 'Van - 53 Feet'),
+    run(407, 656, 'N/A - N/A'),
+    run(500, 656, 'BM'),
+    run(536, 656, 'EX-1001'),
+    run(23, 630, 'STOP DETAIL'),
+    run(60, 612, 'Scheduled'),
+    run(110, 612, 'Scheduled'),
+    run(418, 612, 'Weight (lbs)/Cases/'),
+    run(25, 606, 'Type'),
+    run(166, 606, 'Name and Address'),
+    run(310, 606, 'Commodity'),
+    run(548, 606, 'Reference #'),
+    run(68, 600, 'Arrival'),
+    run(112, 600, 'Departure'),
+    run(451, 600, 'Dims'),
+  ];
+  let y = 580;
+  for (const [i, s] of stops.entries()) {
+    second.push(run(22, y, s.type), run(59, y, 'Arrival'), run(59, y - 10, s.date), run(59, y - 20, s.time));
+    (s.departure ?? ['N/A']).forEach((text, k) => second.push(run(109, y - 10 * k, text)));
+    s.cell.forEach((text, k) => second.push(run(centred(text), y - 15 * k, text)));
+    second.push(
+      run(270, y, 'GENERAL FREIGHT'),
+      run(425, y, '20000'),
+      run(459, y, '(1)'),
+      run(414, y - 30, 'Dim: N/A x N/A x N/A'),
+      run(522, y, 'SI'),
+      run(549, y, `EX-${2001 + i}`),
+    );
+    y -= Math.max(s.cell.length, 4) * 15 + 30;
+  }
+  second.push(run(23, y, 'NOTES'), run(20, y - 12, 'Order Notes'), run(20, y - 24, 'Example: tracking is required for this load'));
+  const terms: TinyRun[] = [
+    ...header(3, later),
+    run(20, 680, 'POD required : example terms apply'),
+    run(20, 668, 'Pickup appointment required : example fine applies'),
+  ];
+  return [first, second, terms];
+}
+
+/** A pickup whose name wraps onto a second line, and a stop-off whose street wraps: the two-stop table. */
+export const DETAIL_STOPS: DetailStop[] = [
+  { type: 'PU', cell: ['Prairie Example Foods', 'Plant 2', '4001 Main St', 'Minot, ND 58701'], date: '10/12/26', time: '23:30' },
+  { type: 'SO', cell: ['HARBOR COLD', '880 Harbor View', 'Pkwy Bldg 4', 'Mandan, ND 58554'], date: '10/14/26', time: '08:00' },
+];

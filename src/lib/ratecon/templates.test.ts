@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   COLUMNS_STOPS,
+  DETAIL_STOPS,
   LABEL_ROWS,
   PU_SO,
   PU_SO_PASTED,
@@ -11,16 +12,18 @@ import {
   pickupDeliveryColumns,
   puSoBlocks,
   routeBlocks,
+  stopDetail,
   stopTable,
   type ColumnsStop,
+  type DetailStop,
   type RouteStop,
   type TableStop,
 } from '@/test/ratecon-fixtures';
 import type { TinyRun } from '@/test/tiny-pdf';
 import { linesFromRuns, linesFromText, type Line } from './lines';
-import { SPLIT_CHECK, readRatecon, recognisedLayouts, type ReadOutcome, type RateconRead } from './templates';
+import { SPLIT_CHECK, STOP_OFF_CHECK, WRAP_CHECK, readRatecon, recognisedLayouts, type ReadOutcome, type RateconRead } from './templates';
 
-/** §12.122. The six layouts, read from INVENTED documents (src/test/ratecon-fixtures.ts). */
+/** §12.122. The layouts, read from INVENTED documents (src/test/ratecon-fixtures.ts). */
 
 const lines = (pages: TinyRun[][]): Line[] =>
   linesFromRuns(pages.flatMap((runs, i) => runs.map((r) => ({ page: i + 1, ...r }))));
@@ -626,6 +629,144 @@ describe('Stop table (3ak)', () => {
   it('never carries a rate, a phone, a ref, a name, a note or the carrier into what it read', () => {
     const said = JSON.stringify(read(readRatecon(doc([TABLE_STOPS[0]!, TABLE_MIDDLE, TABLE_STOPS[1]!]))));
     for (const never of ['$', '1,900', '555', 'R-1001', 'A-2002', 'PRAIRIE', 'LAKESIDE', 'NORTH YARD', 'CLEAN DRY', 'SAMPLE', '000000', 'Yes']) {
+      expect(said).not.toContain(never);
+    }
+  });
+});
+
+describe('Stop detail (3ax)', () => {
+  const NOT = { ok: false, reason: 'not-recognised' };
+  type Options = Parameters<typeof stopDetail>[1];
+  const doc = (stops: DetailStop[] = DETAIL_STOPS, options?: Options) => lines(stopDetail(stops, options));
+  const r = read(readRatecon(doc()));
+  /** Every run of one text replaced, on every page. */
+  const edited = (from: string, to: string, stops: DetailStop[] = DETAIL_STOPS) =>
+    lines(stopDetail(stops).map((p) => p.map((run) => (run.text === from ? { ...run, text: to } : run))));
+  /** A run added to page 2, the stops page. */
+  const withRun = (x: number, y: number, text: string) =>
+    lines(stopDetail(DETAIL_STOPS).map((p, i) => (i === 1 ? [...p, { x, y, text }] : p)));
+  const stop = (i: number, patch: Partial<DetailStop>): DetailStop[] => DETAIL_STOPS.map((s, k) => (k === i ? { ...s, ...patch } : s));
+  const others = () => [
+    lines(LABEL_ROWS),
+    lines(STOPS_SECTION),
+    lines(puSoBlocks(PU_SO)),
+    lines(pickupDeliveryColumns(COLUMNS_STOPS)),
+    lines(routeBlocks(ROUTE_STOPS)),
+    lines(stopTable(TABLE_STOPS)),
+  ];
+
+  it('is recognised as this layout only, and recognises no other layout', () => {
+    expect(recognisedLayouts(doc())).toEqual(['stop-detail']);
+    expect(others().map((o) => recognisedLayouts(o))).toEqual([
+      ['label-rows'], ['stops-section'], ['pu-so-blocks'], ['pickup-delivery-columns'], ['route-blocks'], ['stop-table'],
+    ]);
+  });
+
+  it('reads the number under "Load Confirmation", the same on every page, as the load number', () => {
+    expect(r.layout).toBe('stop-detail');
+    expect(r.loadNumber).toEqual({ value: '7700451', source: { text: 'Load Confirmation  7700451', page: 1 } });
+    expect(r.loadNumberCheck).toBeNull();
+    const differs = read(readRatecon(doc(DETAIL_STOPS, { later: '7700452' })));
+    expect(differs.loadNumber).toBeNull();
+    expect(differs.loadNumberCheck).toBe('More than one number is under “Load Confirmation”: “7700451”, “7700452”.');
+  });
+
+  it('reads each stop: PU or SO, the street after the name’s lines, the city, state and ZIP from the cell’s last line', () => {
+    expect(summary(r)).toEqual([
+      ['PU', '4001 Main St', 'Minot', 'ND', '58701'],
+      ['DEL', '880 Harbor View Pkwy Bldg 4', 'Mandan', 'ND', '58554'],
+    ]);
+    const s = r.stops[0]!;
+    expect([s.type.source, s.street?.source, s.city?.source, s.zip?.source]).toEqual([
+      { text: 'PU', page: 2 },
+      { text: '4001 Main St', page: 2 },
+      { text: 'Minot, ND 58701', page: 2 },
+      { text: 'Minot, ND 58701', page: 2 },
+    ]);
+    expect(r.stops.every((x) => x.typeCheck === null)).toBe(true);
+  });
+
+  it('reads a street printed on two lines joined with a space, and marks it; one on one line is not marked', () => {
+    expect(r.stops[1]!.fieldChecks).toEqual({ street: WRAP_CHECK('880 Harbor View Pkwy Bldg 4') });
+    expect(r.stops[1]!.street?.source).toEqual({ text: '880 Harbor View Pkwy Bldg 4', page: 2 });
+    expect(r.stops[0]!.fieldChecks).toBeUndefined();
+  });
+
+  it('reads the scheduled arrival as an appointment at that time, the year from its two digits', () => {
+    expect(r.stops[0]!.time).toEqual({
+      kind: 'exact', date: '2026-10-12', time: '23:30', flag: null, source: { text: 'Arrival · 10/12/26 · 23:30', page: 2 },
+    });
+    expect(r.stops[1]!.time).toMatchObject({ kind: 'exact', date: '2026-10-14', time: '08:00' });
+  });
+
+  it('reads "10:00" by the 24-hour rule: a time on a 24-hour document, quoted when AM or PM is anywhere in it', () => {
+    expect(read(readRatecon(doc(stop(1, { time: '10:00' })))).stops[1]!.time).toMatchObject({ kind: 'exact', time: '10:00' });
+    const ampm = lines(stopDetail(stop(1, { time: '10:00' })).map((p, i) => (i === 2 ? [...p, { x: 20, y: 600, text: 'Office hours 8 AM to 5 PM' }] : p)));
+    expect(read(readRatecon(ampm)).stops[1]!.time).toMatchObject({ kind: 'unreadable', date: '2026-10-14', quoted: '10/14/26 10:00' });
+  });
+
+  it('reads three stops; an SO before the last is read as a delivery and says so', () => {
+    const middle: DetailStop = { type: 'SO', cell: ['NORTH YARD', '77 Depot Ave', 'Hastings, NE 68901'], date: '10/13/26', time: '18:00' };
+    const three = read(readRatecon(doc([DETAIL_STOPS[0]!, middle, DETAIL_STOPS[1]!])));
+    expect(summary(three).map((s) => s.slice(0, 3))).toEqual([
+      ['PU', '4001 Main St', 'Minot'],
+      ['DEL', '77 Depot Ave', 'Hastings'],
+      ['DEL', '880 Harbor View Pkwy Bldg 4', 'Mandan'],
+    ]);
+    expect(three.stops.map((s) => s.typeCheck)).toEqual([null, STOP_OFF_CHECK, null]);
+    const pickups = read(readRatecon(doc([DETAIL_STOPS[0]!, { ...middle, type: 'PU' }, DETAIL_STOPS[1]!])));
+    expect(pickups.stops.map((s) => [s.type.value, s.typeCheck])).toEqual([['PU', null], ['PU', null], ['DEL', null]]);
+  });
+
+  it('refuses a name that starts like a street, a second line after the name that does, or a cell with no name', () => {
+    expect(readRatecon(doc(stop(0, { cell: ['84 Example Supply', '4001 Main St', 'Minot, ND 58701'] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { cell: ['Prairie Example Foods', '4001 Main St', '7 Gate B', 'Minot, ND 58701'] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { cell: ['4001 Main St', 'Minot, ND 58701'] })))).toEqual(NOT);
+  });
+
+  it('refuses a cell whose last line is not "City, ST 12345", a state that is not one, or a city line in another column', () => {
+    expect(readRatecon(doc(stop(0, { cell: ['Prairie Example Foods', '4001 Main St', 'Minot ND 58701'] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { cell: ['Prairie Example Foods', '4001 Main St', 'Minot, NX 58701'] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { cell: ['Prairie Example Foods', '4001 Main St', 'Minot, ND 58701', 'Dock 4'] })))).toEqual(NOT);
+    expect(readRatecon(withRun(270, 565, 'Ames, IA 50010'))).toEqual(NOT);
+  });
+
+  it('refuses an arrival that is not "Arrival", a date and a time, or a departure that is not "N/A"', () => {
+    const word = lines(stopDetail(DETAIL_STOPS).map((p) => p.map((run) => (run.text === 'Arrival' && run.x === 59 && run.y === 580 ? { ...run, text: 'Window' } : run))));
+    expect(readRatecon(word)).toEqual(NOT);
+    expect(readRatecon(edited('10/12/26', '10/12/2026'))).toEqual(NOT);
+    expect(readRatecon(edited('23:30', '2330'))).toEqual(NOT);
+    expect(readRatecon(withRun(59, 550, '23:59'))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { departure: ['10/13/26', '06:00'] })))).toEqual(NOT);
+  });
+
+  it('refuses another stop type, a first stop that is not PU, or a last that is not SO', () => {
+    expect(readRatecon(doc(stop(1, { type: 'DL' as DetailStop['type'] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(0, { type: 'SO' })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { type: 'PU' })))).toEqual(NOT);
+    expect(readRatecon(doc([DETAIL_STOPS[0]!]))).toEqual(NOT);
+  });
+
+  it('refuses a stray line in the type column, or a table with no heading after it on its page', () => {
+    expect(readRatecon(withRun(22, 420, 'See attached'))).toEqual(NOT);
+    const noEnd = stopDetail(DETAIL_STOPS).map((p) => p.filter((run) => !['NOTES', 'Order Notes', 'Example: tracking is required for this load'].includes(run.text)));
+    expect(readRatecon(lines(noEnd))).toEqual(NOT);
+  });
+
+  it('is not recognised without a line of its header', () => {
+    expect(recognisedLayouts(edited('Dims', 'Size'))).toEqual([]);
+    expect(recognisedLayouts(edited('STOP DETAIL', 'STOPS'))).toEqual([]);
+  });
+
+  it('does not read the same document pasted as text: its columns cannot be told apart', () => {
+    const pasted = linesFromText(doc().map((l) => l.text).join('\n'));
+    expect(recognisedLayouts(pasted)).toEqual(['stop-detail']);
+    expect(readRatecon(pasted)).toEqual(NOT);
+  });
+
+  it('never carries a name, the commodity, a weight, a reference, the rate or the carrier into what it read', () => {
+    const said = JSON.stringify(r);
+    for (const never of ['Prairie', 'Plant 2', 'HARBOR COLD', 'GENERAL FREIGHT', '20000', 'EX-', 'SI', '1500', 'SAMPLE', 'N/A']) {
       expect(said).not.toContain(never);
     }
   });

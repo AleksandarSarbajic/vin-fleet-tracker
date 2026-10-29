@@ -5,7 +5,7 @@ import type { Line } from './lines';
 import { splitStreetCity } from './street-split';
 
 /**
- * §12.122. The six rate-confirmation layouts this fleet receives, each
+ * §12.122. The rate-confirmation layouts this fleet receives, each
  * recognised by its labels and read by them. Pure.
  *
  * A layout is used only when EVERY label it is recognised by is present, and
@@ -20,8 +20,16 @@ import { splitStreetCity } from './street-split';
  * notes, instructions. No pattern below looks at them.
  */
 
-/** The six templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
-export type LayoutId = 'label-rows' | 'stops-section' | 'pu-so-blocks' | 'pickup-delivery-columns' | 'route-blocks' | 'stop-table' | 'model';
+/** The templates, and `model`: a language-model read, checked by `verify-read.ts` (docs/llm-reader-design.md). */
+export type LayoutId =
+  | 'label-rows'
+  | 'stops-section'
+  | 'pu-so-blocks'
+  | 'pickup-delivery-columns'
+  | 'route-blocks'
+  | 'stop-table'
+  | 'stop-detail'
+  | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
   'label-rows': 'label rows (PICKUP DATE / SHIPPER / CONSIGNEE)',
@@ -30,6 +38,7 @@ export const LAYOUT_NAME: Record<LayoutId, string> = {
   'pickup-delivery-columns': 'Pickup # / Delivery # blocks (address and appointment columns)',
   'route-blocks': 'Route blocks (Pickup / Delivery, a date and “HH:MM Apt” beside each stop)',
   'stop-table': 'a stop table (Stop, From, To, Name, City, St; two lines a stop)',
+  'stop-detail': 'a Stop Detail table (Type, Scheduled Arrival, Name and Address)',
   model: 'an AI read',
 };
 
@@ -315,6 +324,9 @@ function sectionTime(right: string, source: Source): TimeRead {
 
 /* ------------------------------ PU / SO blocks ------------------------------ */
 
+/** Said under an SO (stop-off) read as a delivery when it is not the last stop. */
+export const STOP_OFF_CHECK = 'An SO (stop-off) before the last stop is read as a delivery. It can be a pickup.';
+
 const BLOCKS = {
   recognise: [/^(PU|SO)\b(?:\s+\d+)?\s+Name:/, /^Address:/, /\bDriver Load:/, /\b(?:Order|Load Number):\s*\S/],
   stop: /^(PU|SO)\b(?:\s+(\d+))?\s+Name:\s*(.*?)(?:\s+Date:\s*(.*))?$/,
@@ -376,7 +388,7 @@ function readBlocks(lines: Line[]): RateconRead {
   // a pickup too, and is said so rather than assumed.
   stops.forEach((stop, i) => {
     if (/^SO\b/.test(stop.type.source.text) && i < stops.length - 1) {
-      stop.typeCheck = 'An SO (stop-off) before the last stop is read as a delivery. It can be a pickup.';
+      stop.typeCheck = STOP_OFF_CHECK;
     }
   });
   return {
@@ -954,6 +966,183 @@ function readStopTable(lines: Line[]): RateconRead {
   return { layout: 'stop-table', loadNumber, loadNumberCheck, stops };
 }
 
+/* ------------------------------ Stop detail (3ax) ------------------------------ */
+
+/**
+ * A header on every page ("CARRIER RATE CONFIRMATION PAGE n of m", then
+ * "Load Confirmation" and the load number under it), and the stops in a
+ * "STOP DETAIL" table under a three-line header:
+ *
+ *             Scheduled  Scheduled                               Weight (lbs)/Cases/
+ *     Type                          Name and Address  Commodity                       Reference #
+ *             Arrival    Departure                               Dims
+ *
+ * One stop is one row. Its type, PU or SO (a stop-off), on the row's first
+ * line; under "Scheduled Arrival" the word "Arrival", the date (M/D/YY) and
+ * the time, one a line; under "Scheduled Departure" "N/A"; under "Name and
+ * Address", centred, the facility's name on one line or more, the street on
+ * one or more, then "City, ST 12345". The table ends at the next section's
+ * heading ("NOTES"), on its page. The other columns are not read.
+ *
+ * Read by COLUMN, so it needs a PDF's positions: pasted text is not read. A
+ * cell belongs to the heading that starts nearest to it, because the address
+ * column is centred and the columns beside it are not.
+ *
+ * The name ends where the street starts: at the one line of the cell before
+ * the city line that starts like a street (a house number). A name that
+ * starts like one too leaves two such lines, and nothing is read. A street on
+ * more than one line is read joined with a space and marked (`WRAP_CHECK`):
+ * the PDF can run two words together at the break.
+ *
+ * The time is an appointment at the scheduled arrival. Times are read as
+ * Route blocks reads them: 24-hour when past 12, with a leading zero, or on a
+ * 24-hour document (`documentIs24Hour`). The departure must be "N/A": what a
+ * departure time would mean, no copy shows. The last stop must be an SO, read
+ * as the delivery; an SO before it is read as a delivery and says so
+ * (`STOP_OFF_CHECK`), as PU / SO blocks says it.
+ *
+ * The load number is the one under "Load Confirmation", the same on every
+ * page; one that differs leaves it blank with a check.
+ *
+ * Strict, because a wrong stop is worse than none: a heading not its own
+ * cell; a line in the table before the first stop, or in the type column
+ * that is not PU, SO or a heading; an arrival other than "Arrival", a date
+ * and a time; a departure other than "N/A"; a name cell with no name, two
+ * street-like lines, or a last line that is not a city line; a city line in
+ * any other column; a first stop that is not PU or a last that is not SO; a
+ * table that does not end on its page — and nothing is read.
+ */
+const DETAIL = {
+  recognise: [
+    /^CARRIER RATE CONFIRMATION PAGE \d+ of \d+$/,
+    /^STOP DETAIL$/,
+    /^Type\s+Name and Address\s+Commodity\s+Reference #$/,
+    /^Arrival\s+Departure\s+Dims$/,
+  ],
+  type: /^(PU|SO)$/,
+  date: /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
+  clock: /^(\d{1,2}):(\d{2})$/,
+  place: /^(.+), ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
+  /** The next section's heading, which ends the table: one cell, capitals. */
+  heading: /^[A-Z][A-Z ]*[A-Z]$/,
+  id: /^[A-Za-z0-9][A-Za-z0-9-]*$/,
+};
+
+/**
+ * Said under a street the layout prints on more than one line, read joined with a space. The
+ * field shows it after "Check: ", as every check; edited, the field's check goes.
+ */
+export const WRAP_CHECK = (text: string) => `the street is printed on more than one line, read as “${text}”. Confirm it against the PDF.`;
+
+function detailTime(date: string, clock: string, hours24: boolean, source: Source): TimeRead {
+  const d = DETAIL.date.exec(date)!;
+  const [y, m, day] = [2000 + Number(d[3]), Number(d[1]), Number(d[2])];
+  const t = DETAIL.clock.exec(clock)!;
+  const [h, mi] = [Number(t[1]), Number(t[2])];
+  const at = validDate(y, m, day) ? iso(y, m, day) : null;
+  // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
+  const clear = validClock(h, mi) && (h >= 13 || t[1]!.startsWith('0') || hours24);
+  if (at && clear) return { kind: 'exact', date: at, time: hhmm(h, mi), flag: null, source };
+  return { kind: 'unreadable', date: at, quoted: `${date} ${clock}`, source };
+}
+
+function readStopDetail(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'stop-detail', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const heads = lines.flatMap((l, i) => (DETAIL.recognise[2]!.test(l.text) ? [i] : []));
+  if (heads.length !== 1) return refuse;
+  const [above, header, below] = [lines[heads[0]! - 1], lines[heads[0]!]!, lines[heads[0]! + 1]];
+  if (!above || !below || above.page !== header.page || below.page !== header.page || !DETAIL.recognise[3]!.test(below.text)) return refuse;
+  // Each heading is its own cell; "Scheduled" twice above, for the arrival and the departure.
+  const scheduled = above.cells.filter((c) => c.text === 'Scheduled');
+  const weight = above.cells.find((c) => c.text.startsWith('Weight'));
+  const named = ['Type', 'Name and Address', 'Commodity', 'Reference #'].map((t) => header.cells.find((c) => c.text === t));
+  if (scheduled.length !== 2 || !weight || named.some((c) => !c)) return refuse;
+  const [type, name, commodity, reference] = named as Line['cells'];
+  const headings = [
+    { column: 'type', x: type!.x! },
+    { column: 'arrival', x: scheduled[0]!.x! },
+    { column: 'departure', x: scheduled[1]!.x! },
+    { column: 'name', x: name!.x! },
+    { column: 'commodity', x: commodity!.x! },
+    { column: 'weight', x: weight.x! },
+    { column: 'reference', x: reference!.x! },
+  ];
+  const column = (cell: Line['cells'][number]) =>
+    headings.reduce((a, b) => (Math.abs(cell.x! - b.x) < Math.abs(cell.x! - a.x) ? b : a)).column;
+
+  // The rows: a stop starts at PU or SO in the type column; the table ends at a heading there.
+  const blocks: { head: Line; type: 'PU' | 'SO'; lines: Line[] }[] = [];
+  for (let i = heads[0]! + 2; ; i += 1) {
+    const line = lines[i];
+    if (!line || line.page !== header.page) return refuse;
+    const typed = line.cells.filter((c) => column(c) === 'type');
+    if (typed.length === 0) {
+      if (blocks.length === 0) return refuse;
+      blocks.at(-1)!.lines.push(line);
+      continue;
+    }
+    if (typed.length === 1 && line.cells[0] === typed[0] && DETAIL.type.test(typed[0]!.text)) {
+      blocks.push({ head: line, type: typed[0]!.text as 'PU' | 'SO', lines: [line] });
+      continue;
+    }
+    if (line.cells.length === 1 && DETAIL.heading.test(line.text) && blocks.length > 0) break;
+    return refuse;
+  }
+  if (blocks[0]!.type !== 'PU' || blocks.at(-1)!.type !== 'SO') return refuse;
+
+  const hours24 = documentIs24Hour(lines.map((l, n) => ({ n, text: l.text, page: l.page })));
+  const stops: StopRead[] = [];
+  for (const [n, b] of blocks.entries()) {
+    const of = (where: string) => b.lines.flatMap((l) => l.cells.filter((c) => column(c) === where).map((c) => c.text));
+    const arrival = of('arrival');
+    if (arrival.length !== 3 || arrival[0] !== 'Arrival' || !DETAIL.date.test(arrival[1]!) || !DETAIL.clock.test(arrival[2]!)) return refuse;
+    const departure = of('departure');
+    if (departure.length !== 1 || departure[0] !== 'N/A') return refuse;
+    // The address cell: one cell a line, the city line last and nowhere else in the row.
+    if (b.lines.some((l) => l.cells.filter((c) => column(c) === 'name').length > 1)) return refuse;
+    if (b.lines.some((l) => l.cells.some((c) => column(c) !== 'name' && cityLine(c.text)))) return refuse;
+    const cell = of('name');
+    const place = DETAIL.place.exec(cell.at(-1) ?? '');
+    if (!place || !US.has(place[2]!)) return refuse;
+    const streetAt = cell.slice(0, -1).flatMap((t, k) => (startsLikeStreet(t) ? [k] : []));
+    if (streetAt.length !== 1 || streetAt[0] === 0) return refuse;
+    const streetLines = cell.slice(streetAt[0]!, -1);
+    const street = streetLines.join(' ');
+    const at = (text: string): Source => ({ text, page: b.head.page });
+    stops.push({
+      type: { value: b.type === 'PU' ? 'PU' : 'DEL', source: at(b.type) },
+      typeCheck: b.type === 'SO' && n < blocks.length - 1 ? STOP_OFF_CHECK : null,
+      street: { value: street, source: at(street) },
+      city: { value: place[1]!, source: at(cell.at(-1)!) },
+      state: { value: place[2]!, source: at(cell.at(-1)!) },
+      zip: { value: place[3]!, source: at(cell.at(-1)!) },
+      ...(streetLines.length > 1 ? { fieldChecks: { street: WRAP_CHECK(street) } } : {}),
+      time: detailTime(arrival[1]!, arrival[2]!, hours24, at(arrival.join(' · '))),
+    });
+  }
+
+  const ids = lines.flatMap((l, k) => {
+    const next = lines[k + 1];
+    return l.cells.length === 1 && l.text === 'Load Confirmation' && next?.page === l.page && next.cells.length === 1 && DETAIL.id.test(next.text)
+      ? [{ value: next.text, source: { text: `Load Confirmation  ${next.text}`, page: next.page } }]
+      : [];
+  });
+  const distinct = new Set(ids.map((x) => x.value));
+  const loadNumber = distinct.size === 1 ? ids[0]! : null;
+  return {
+    layout: 'stop-detail',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : distinct.size > 1
+        ? `More than one number is under “Load Confirmation”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`
+        : 'No number under “Load Confirmation”.',
+    stops,
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -963,6 +1152,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'pickup-delivery-columns', labels: COLUMNS.recognise, read: readColumns },
   { id: 'route-blocks', labels: ROUTE.recognise, read: readRouteBlocks },
   { id: 'stop-table', labels: TABLE.recognise, read: readStopTable },
+  { id: 'stop-detail', labels: DETAIL.recognise, read: readStopDetail },
 ];
 
 /** Which layouts have every one of their labels here. */
