@@ -32,6 +32,7 @@ export type LayoutId =
   | 'pickup-drop-blocks'
   | 'location-blocks'
   | 'stop-rows'
+  | 'origin-destination'
   | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
@@ -45,6 +46,7 @@ export const LAYOUT_NAME: Record<LayoutId, string> = {
   'pickup-drop-blocks': 'Pickup / Drop blocks (the address beside Earliest and Latest)',
   'location-blocks': 'Pick Up / Delivery Location blocks (the address beside its dates and times)',
   'stop-rows': 'stop rows (Stop Number, Type, Location / Notes, Pickup Time)',
+  'origin-destination': 'Origin / Destination panels (Date, Time, From)',
   model: 'an AI read',
 };
 
@@ -1589,6 +1591,133 @@ function readStopRows(lines: Line[]): RateconRead {
   };
 }
 
+/* ------------------------- Origin / Destination panels (3ay) ------------------------- */
+
+/**
+ * "Load #<n>" at the top, "LOAD CONFIRMATION AND PAYMENT AGREEMENT", "Carrier
+ * Rate Details" beside "Total Items", and two panels side by side, one stop
+ * each:
+ *
+ *     Origin                                     Destination
+ *     Date:  MM/DD/YYYY <Weekday>  Pickup #: …   Date:  MM/DD/YYYY <Weekday>  Delivery #: …
+ *     Time:  HH:MM - HH:MM         Contact:      Time:  HH:MM - HH:MM         Contact:
+ *     From:  <name>                Phone: …      From:  <name>                Phone:
+ *            <street>              Cell:                <street>              Cell:
+ *            <City>, <ST> <ZIP>                         <City>, <ST> <ZIP>
+ *     Email:                                     Email:
+ *
+ * Origin is the pickup, Destination the delivery. Read by column: a panel
+ * starts at its heading, and its address column runs from just right of its
+ * labels to its second column of labels, which starts at the third cell of
+ * its "Date:" line. The address runs from the "From:" line to the line before
+ * "Email:": the name on one line or more, the street, the city line last.
+ *
+ * The weekday must be the date's. The time runs from the first time to the
+ * second on that date, and the fill's window rules decide what that is; the
+ * same twice is one time. Times are read as Route blocks reads them (24-hour
+ * when past 12, with a leading zero, or on a 24-hour document), so on a
+ * document with AM or PM anywhere, a signature's time included, "10:00" is
+ * quoted. Notes are not read. The load number is the one after "Load #".
+ *
+ * Strict, because a wrong stop is worse than none: the heading line other
+ * than "Origin" and "Destination" as two cells; a panel without "Date:",
+ * "Time:", "From:" and "Email:" each once, or with "Email:" above "From:"; a
+ * second column of labels that does not start with one; a date, weekday or
+ * time in another shape, or a weekday that is not the date's; an address
+ * without the city line last, or a state that is not one; no name, a name
+ * line that starts like a street, a street that does not; two cells on a line
+ * of the address, or a city line in a panel's other columns — and nothing is
+ * read.
+ */
+const PANELS = {
+  recognise: [/^LOAD CONFIRMATION AND PAYMENT AGREEMENT$/, /^Carrier Rate Details\s+Total Items$/, /^Origin\s+Destination$/],
+  date: /^(\d{2})\/(\d{2})\/(\d{4}) (Sun|Mon|Tues|Wednes|Thurs|Fri|Satur)day$/,
+  time: /^(\d{2}):(\d{2}) - (\d{2}):(\d{2})$/,
+  place: /^(.+), ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
+  load: /^Load #\s?([A-Za-z0-9][A-Za-z0-9-]*)$/,
+};
+const WEEKDAYS = ['Sun', 'Mon', 'Tues', 'Wednes', 'Thurs', 'Fri', 'Satur'];
+
+function readPanels(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'origin-destination', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const heads = lines.flatMap((l, i) => (PANELS.recognise[2]!.test(l.text) ? [i] : []));
+  if (heads.length !== 1) return refuse;
+  const head = lines[heads[0]!]!;
+  // Two cells, which the line's pattern makes "Origin" and "Destination".
+  if (head.cells.length !== 2) return refuse;
+  const [origin, destination] = head.cells as [Line['cells'][number], Line['cells'][number]];
+  const region = lines.slice(heads[0]! + 1).filter((l) => l.page === head.page);
+  const hours24 = documentIs24Hour(lines.map((l, n) => ({ n, text: l.text, page: l.page })));
+
+  const panel = (left: number, right: number, type: 'PU' | 'DEL', heading: string): StopRead | null => {
+    const within = (l: Line) => l.cells.filter((c) => c.x! >= left - 4 && c.x! < right - 4);
+    const label = (text: string) => region.flatMap((l, k) => {
+      const first = within(l)[0];
+      return first && first.text === text && Math.abs(first.x! - left) <= 4 ? [k] : [];
+    });
+    // Each label once. The address runs from "From:" to "Email:"; the other way round it is empty, and refused.
+    const found = ['Date:', 'Time:', 'From:', 'Email:'].map(label);
+    if (found.some((k) => k.length !== 1)) return null;
+    const [d, t, f, e] = found.map((k) => k[0]!) as [number, number, number, number];
+    const [dateCells, timeCells] = [within(region[d]!), within(region[t]!)];
+    const date = PANELS.date.exec(dateCells[1]?.text ?? '');
+    const time = PANELS.time.exec(timeCells[1]?.text ?? '');
+    const second = dateCells[2];
+    if (!date || !time || !second || !second.text.endsWith(':')) return null;
+    const [mo, day, y] = [Number(date[1]), Number(date[2]), Number(date[3])];
+    if (!validDate(y, mo, day) || WEEKDAYS[new Date(Date.UTC(y, mo - 1, day)).getUTCDay()] !== date[4]) return null;
+
+    // The address column, one cell a line; nothing like a city line in the panel's other columns.
+    const address: string[] = [];
+    for (const l of region.slice(f, e)) {
+      const cells = within(l);
+      const column = cells.filter((c) => c.x! > left + 4 && c.x! < second.x! - 4);
+      if (column.length > 1 || cells.some((c) => !column.includes(c) && (cityLine(c.text) || PANELS.place.test(c.text)))) return null;
+      address.push(...column.map((c) => c.text));
+    }
+    const placeText = address.at(-1) ?? '';
+    const place = PANELS.place.exec(placeText);
+    const street = address.at(-2) ?? '';
+    const names = address.slice(0, -2);
+    if (!place || !US.has(place[2]!) || names.length === 0 || !startsLikeStreet(street)) return null;
+    if (names.some((n) => startsLikeStreet(n) || cityLine(n) || PANELS.place.test(n))) return null;
+
+    const at = (text: string): Source => ({ text, page: head.page });
+    const stamped = (h: string, m: string) => stamp([date[1]!, date[2]!, date[3]!, h, m], hours24);
+    return {
+      type: { value: type, source: at(heading) },
+      typeCheck: null,
+      street: { value: street, source: at(street) },
+      city: { value: place[1]!, source: at(placeText) },
+      state: { value: place[2]!, source: at(placeText) },
+      zip: { value: place[3]!, source: at(placeText) },
+      time: stampedTime(stamped(time[1]!, time[2]!), stamped(time[3]!, time[4]!), at(`${dateCells[1]!.text} · ${timeCells[1]!.text}`)),
+    };
+  };
+  const pickup = panel(origin.x!, destination.x!, 'PU', 'Origin');
+  const delivery = panel(destination.x!, Infinity, 'DEL', 'Destination');
+  if (!pickup || !delivery) return refuse;
+
+  const numbers = lines.flatMap((l) => {
+    const m = l.cells.length === 1 ? PANELS.load.exec(l.text) : null;
+    return m ? [{ value: m[1]!, source: { text: l.text, page: l.page } }] : [];
+  });
+  const distinct = new Set(numbers.map((x) => x.value));
+  const loadNumber = distinct.size === 1 ? numbers[0]! : null;
+  return {
+    layout: 'origin-destination',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : distinct.size > 1
+        ? `More than one number is after “Load #”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`
+        : 'No number after “Load #”.',
+    stops: [pickup, delivery],
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -1602,6 +1731,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'pickup-drop-blocks', labels: DROP.recognise, read: readPickupDrop },
   { id: 'location-blocks', labels: LOCATION.recognise, read: readLocationBlocks },
   { id: 'stop-rows', labels: ROWS.recognise, read: readStopRows },
+  { id: 'origin-destination', labels: PANELS.recognise, read: readPanels },
 ];
 
 /** Which layouts have every one of their labels here. */

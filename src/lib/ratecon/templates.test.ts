@@ -5,6 +5,7 @@ import {
   DROP_STOPS,
   LABEL_ROWS,
   LOCATION_STOPS,
+  PANEL_STOPS,
   PU_SO,
   PU_SO_PASTED,
   ROUTE_STOPS,
@@ -14,6 +15,7 @@ import {
   TABLE_STOPS,
   pickupDeliveryColumns,
   locationBlocks,
+  originDestination,
   pickupDropBlocks,
   puSoBlocks,
   routeBlocks,
@@ -24,6 +26,7 @@ import {
   type DetailStop,
   type DropStop,
   type LocationStop,
+  type PanelStop,
   type RouteStop,
   type RowStop,
   type TableStop,
@@ -1205,6 +1208,128 @@ describe('Stop rows (3ay)', () => {
   it('never carries a name, a phone, a PO, a note, the rate or the carrier into what it read', () => {
     const said = JSON.stringify(r);
     for (const never of ['Prairie', 'Harbor Cold', '(555)', '4100', 'NO TOUCH', '1,500', 'SAMPLE', 'Dana', '"null"']) {
+      expect(said).not.toContain(never);
+    }
+  });
+});
+
+describe('Origin / Destination panels (3ay)', () => {
+  const NOT = { ok: false, reason: 'not-recognised' };
+  type Options = Parameters<typeof originDestination>[1];
+  const doc = (stops: [PanelStop, PanelStop] = PANEL_STOPS, options?: Options) => lines(originDestination(stops, options));
+  const r = read(readRatecon(doc()));
+  const with_ = (i: 0 | 1, patch: Partial<PanelStop>): [PanelStop, PanelStop] =>
+    PANEL_STOPS.map((s, k) => (k === i ? { ...s, ...patch } : s)) as [PanelStop, PanelStop];
+  /** Every run of one text replaced, on every page. */
+  const edited = (from: string, to: string) => lines(originDestination(PANEL_STOPS).map((p) => p.map((run) => (run.text === from ? { ...run, text: to } : run))));
+  /** A run added to page 1. */
+  const withRun = (x: number, y: number, text: string) => lines(originDestination(PANEL_STOPS).map((p, i) => (i === 0 ? [...p, { x, y, text }] : p)));
+
+  it('is recognised as this layout only, and recognises no other layout', () => {
+    expect(recognisedLayouts(doc())).toEqual(['origin-destination']);
+    expect(
+      [
+        lines(LABEL_ROWS), lines(STOPS_SECTION), lines(puSoBlocks(PU_SO)), lines(pickupDeliveryColumns(COLUMNS_STOPS)), lines(routeBlocks(ROUTE_STOPS)),
+        lines(stopTable(TABLE_STOPS)), lines(stopDetail(DETAIL_STOPS)), lines(pickupDropBlocks(DROP_STOPS)), lines(locationBlocks(LOCATION_STOPS)), lines(stopRows(ROW_STOPS)),
+      ].map((o) => recognisedLayouts(o)),
+    ).toEqual([
+      ['label-rows'], ['stops-section'], ['pu-so-blocks'], ['pickup-delivery-columns'], ['route-blocks'], ['stop-table'], ['stop-detail'], ['pickup-drop-blocks'], ['location-blocks'], ['stop-rows'],
+    ]);
+  });
+
+  it('reads the number after "Load #" as the load number', () => {
+    expect(r.layout).toBe('origin-destination');
+    expect(r.loadNumber).toEqual({ value: 'L-300418', source: { text: 'Load #L-300418', page: 1 } });
+    expect(r.loadNumberCheck).toBeNull();
+    expect(read(readRatecon(edited('Load #L-300418', 'Load Confirmation'))).loadNumberCheck).toBe('No number after “Load #”.');
+  });
+
+  it('reads Origin as the pickup and Destination as the delivery: the street after the name’s lines, then the city line', () => {
+    expect(summary(r)).toEqual([
+      ['PU', '4001 Main St', 'Minot', 'ND', '58701'],
+      ['DEL', '880 HARBOR VIEW PKWY', 'MANDAN', 'ND', '58554'],
+    ]);
+    const s = r.stops[1]!;
+    expect([s.type.source, s.street?.source, s.city?.source]).toEqual([
+      { text: 'Destination', page: 1 },
+      { text: '880 HARBOR VIEW PKWY', page: 1 },
+      { text: 'MANDAN, ND 58554', page: 1 },
+    ]);
+    expect(r.stops.every((x) => x.typeCheck === null && x.fieldChecks === undefined)).toBe(true);
+  });
+
+  it('reads the date and the time window on it; the same time twice is one time; the window rules decide the rest', () => {
+    expect(r.stops[0]!.time).toEqual({
+      kind: 'range', date: '2026-10-12', time: '07:00', endDate: '2026-10-12', endTime: '15:00', flag: null,
+      source: { text: '10/12/2026 Monday · 07:00 - 15:00', page: 1 },
+    });
+    expect(r.stops[1]!.time).toMatchObject({ kind: 'exact', date: '2026-10-14', time: '13:30' });
+  });
+
+  it('reads "10:00" by the 24-hour rule: a time on a 24-hour document, quoted when AM or PM is anywhere, the signature’s time too', () => {
+    const at10 = with_(1, { time: '10:00 - 11:00' });
+    expect(read(readRatecon(doc(at10))).stops[1]!.time).toMatchObject({ kind: 'range', time: '10:00', endTime: '11:00' });
+    expect(read(readRatecon(doc(at10, { signed: '10/01/2026 4:06:21 PM' }))).stops[1]!.time).toMatchObject({
+      kind: 'unreadable', date: '2026-10-14', quoted: '10/14/2026 Wednesday · 10:00 - 11:00',
+    });
+  });
+
+  it('refuses a date whose weekday is not that date’s, or a date or time in another shape', () => {
+    expect(readRatecon(doc(with_(0, { date: '10/12/2026 Tuesday' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(0, { date: '10/12/2026' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { time: '13:30' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { time: '1:30 PM - 2:00 PM' })))).toEqual(NOT);
+  });
+
+  it('refuses a panel without each label once, with "Email:" above "From:", or a second column not opened by a label', () => {
+    expect(readRatecon(edited('Email:', 'E-mail:'))).toEqual(NOT);
+    expect(readRatecon(withRun(327, 380, 'Time:'))).toEqual(NOT);
+    const raised = lines(originDestination(PANEL_STOPS).map((p) => p.map((run) => (run.x === 54 && run.text === 'Email:' ? { ...run, y: 518 } : run))));
+    expect(readRatecon(raised)).toEqual(NOT);
+    expect(readRatecon(edited('Pickup #:', 'Pickup'))).toEqual(NOT);
+  });
+
+  it('refuses the heading run into one cell, or two cells on one line of an address', () => {
+    const one = originDestination(PANEL_STOPS).map((p) =>
+      p.filter((run) => run.text !== 'Destination').map((run) => (run.text === 'Origin' ? { ...run, text: 'Origin Destination' } : run)),
+    );
+    expect(recognisedLayouts(lines(one))).toEqual(['origin-destination']);
+    expect(readRatecon(lines(one))).toEqual(NOT);
+    expect(readRatecon(withRun(160, 500, 'ANNEX'))).toEqual(NOT);
+  });
+
+  it('leaves the load number blank, and says so, when "Load #" gives two numbers', () => {
+    const two = originDestination(PANEL_STOPS).map((p, i) => (i === 1 ? [...p, { x: 272, y: 770, text: 'Load #L-300419' }] : p));
+    const got = read(readRatecon(lines(two)));
+    expect(got.loadNumber).toBeNull();
+    expect(got.loadNumberCheck).toBe('More than one number is after “Load #”: “L-300418”, “L-300419”.');
+  });
+
+  it('refuses an address without the city line last, a street that does not start like one, no name, or a name that starts like one', () => {
+    expect(readRatecon(doc(with_(1, { cityLine: 'MANDAN ND 58554' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { cityLine: 'MANDAN, NX 58554' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { street: 'HARBOR VIEW PKWY' })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { name: [] })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(1, { name: ['12 EXAMPLE YARD'] })))).toEqual(NOT);
+    expect(readRatecon(doc(with_(0, { name: ['Prairie Example Foods', 'Ames, IA 50010'] })))).toEqual(NOT);
+    // A city line in the panel's second column.
+    expect(readRatecon(edited('(555) 010-0181', 'Ames, IA 50010'))).toEqual(NOT);
+  });
+
+  it('is not recognised without "Origin" and "Destination" side by side, or without the rate details line', () => {
+    expect(recognisedLayouts(edited('Destination', 'Stops'))).toEqual([]);
+    expect(recognisedLayouts(edited('Total Items', 'Items'))).toEqual([]);
+  });
+
+  it('does not read the same document pasted as text: its columns cannot be told apart', () => {
+    const pasted = linesFromText(doc().map((l) => l.text).join('\n'));
+    expect(recognisedLayouts(pasted)).toEqual(['origin-destination']);
+    expect(readRatecon(pasted)).toEqual(NOT);
+  });
+
+  it('never carries a name, a phone, a stop’s number, the rate or the carrier into what it read', () => {
+    const said = JSON.stringify(r);
+    for (const never of ['Prairie', 'HARBOR COLD', '(555)', '4100', '1,500', 'SAMPLE', 'Dana', 'GENERAL']) {
       expect(said).not.toContain(never);
     }
   });

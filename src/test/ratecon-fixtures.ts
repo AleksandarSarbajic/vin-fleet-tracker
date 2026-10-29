@@ -946,3 +946,83 @@ export const ROW_STOPS: RowStop[] = [
   { type: 'Pickup', name: ['Prairie Example Foods', 'Plant 2'], street: '4001 Main St', cityLine: 'MINOT, ND 58701', from: '10/12/26 6:00 AM', to: '10/12/26 2:30 PM' },
   { type: 'Delivery', name: ['Harbor Cold'], street: '880 Harbor View Pkwy', cityLine: 'MANDAN, ND 58554', from: '10/14/26 8:00 AM', to: '10/14/26 9:30 AM' },
 ];
+
+export interface PanelStop {
+  /** The name on one line or more, then the street and the city line ("Minot, ND 58701"), under "From:". */
+  name: string[];
+  street: string;
+  cityLine: string;
+  /** "10/12/2026 Monday". */
+  date: string;
+  /** "07:00 - 15:00": from and to, the same when it is one time. */
+  time: string;
+}
+
+/**
+ * Phase 3ay. Origin / Destination panels: "Load #<n>" at the top; the
+ * broker's address; "LOAD CONFIRMATION AND PAYMENT AGREEMENT"; the lane, the
+ * carrier and the broker; "Load Details"; "Carrier Rate Details" beside
+ * "Total Items"; then the two panels side by side under "Origin" and
+ * "Destination", each with "Date:", "Time:", "From:" (the name, the street,
+ * the city line) and "Email:" down its left, and a second column of labels
+ * (the stop's number, contact, phone, cell) to the right. Page 2 terms and the
+ * signature, its time with or without PM. Only the printed headings are the
+ * layout's: every value is made up. ASCII only.
+ */
+export function originDestination(
+  [origin, destination]: [PanelStop, PanelStop],
+  options: { loadNumber?: string; signed?: string } = {},
+): TinyRun[][] {
+  const { loadNumber = 'L-300418', signed = '10/01/2026 16:06:21' } = options;
+  const first: TinyRun[] = [
+    run(272, 770, `Load #${loadNumber}`),
+    run(97, 750, 'Please have driver'),
+    run(426, 750, 'EXAMPLE BROKER INC'),
+    run(100, 738, 'call for dispatch.'),
+    run(427, 738, '100 Sample Ave #4'),
+    run(103, 726, '(555) 010-0180'),
+    run(441, 726, 'Kearney, NE 68847'),
+    run(169, 700, 'LOAD CONFIRMATION AND PAYMENT AGREEMENT'),
+    run(255, 688, 'PLEASE SIGN ASAP'),
+    run(254, 676, 'Minot, ND'),
+    run(322, 676, 'Mandan, ND'),
+    run(229, 660, 'Carrier:'),
+    run(259, 660, 'SAMPLE CARRIER LLC'),
+    run(279, 648, 'Broker: Dana'),
+    run(54, 620, 'Load Details'),
+    run(54, 608, 'Equipment Type:'),
+    run(115, 608, 'Van'),
+    run(54, 584, 'Carrier Rate Details'),
+    run(327, 584, 'Total Items'),
+    run(56, 572, 'Flat Rate'),
+    run(251, 572, '$1,500.00'),
+    run(330, 572, 'GENERAL FREIGHT'),
+    run(54, 548, 'Origin'),
+    run(327, 548, 'Destination'),
+  ];
+  const panel = (s: PanelStop, x: number, side: number, number: string) => {
+    let y = 536;
+    first.push(run(x, y, 'Date:'), run(x + 20, y, s.date), run(side, y, number), run(side + 35, y, '4100'));
+    first.push(run(x, y - 12, 'Time:'), run(x + 21, y - 12, s.time), run(side, y - 12, 'Contact:'));
+    const address = [...s.name, s.street, s.cityLine];
+    address.forEach((text, k) => first.push(run(x + 22, y - 24 - 12 * k, text)));
+    first.push(run(x, y - 24, 'From:'), run(side, y - 24, 'Phone:'), run(side + 27, y - 24, '(555) 010-0181'), run(side, y - 36, 'Cell:'));
+    y -= 24 + 12 * address.length;
+    first.push(run(x, y, 'Email:'));
+  };
+  panel(origin, 54, 201, 'Pickup #:');
+  panel(destination, 327, 475, 'Delivery #:');
+  const terms: TinyRun[] = [
+    run(54, 760, 'Carrier Rate Confirmation Terms'),
+    run(54, 748, 'Example terms and conditions apply to this load.'),
+    run(144, 700, 'Broker Signature'),
+    run(124, 688, `${signed} -04:00`),
+  ];
+  return [first, terms];
+}
+
+/** A pickup whose name runs onto two lines over a window, and a delivery at one time: the two panels. */
+export const PANEL_STOPS: [PanelStop, PanelStop] = [
+  { name: ['Prairie Example Foods', 'Plant 2'], street: '4001 Main St', cityLine: 'Minot, ND 58701', date: '10/12/2026 Monday', time: '07:00 - 15:00' },
+  { name: ['HARBOR COLD'], street: '880 HARBOR VIEW PKWY', cityLine: 'MANDAN, ND 58554', date: '10/14/2026 Wednesday', time: '13:30 - 13:30' },
+];
