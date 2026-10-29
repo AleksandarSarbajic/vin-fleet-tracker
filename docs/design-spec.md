@@ -10394,6 +10394,22 @@ the column, and nothing in it can be pressed.
 per user. Each open tab polls 3 times a minute, so the console and this page
 together cost 6.
 
+## 12.146 An override's Computed line on a dead feed: kept, and muted
+
+Phase 3aw. The map popup and the phone's truck sheet print an override's
+**Computed** status, with **Forced by** under it, when the two statuses
+differ (§9.5).
+
+- **On a dead feed both lines stay.** They are facts from our database, like
+  the appointment, which §5.9 keeps at full strength.
+- **Computed loses its status colour** (`text.muted`, no new token). The
+  chip above it has withdrawn its own: it is the dotted Stale GPS, no longer
+  "forced" (§5.9). A coloured status under it would bring back what the chip
+  withdrew.
+- On a live feed nothing changes.
+- One function gives the ink to both surfaces: `computedInk` in
+  `MapPopup.tsx`.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the

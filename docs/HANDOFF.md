@@ -47,6 +47,11 @@ assignments baselines re-saved and committed. Still NOT pushed.
 **3av: NOT pushed** (2026-10-29): one helper for the status chip's props,
 and the map popup's chip withdraws its colour on a stale feed (§5.9). See
 "Phase 3av" below.
+**Update at the start of 3aw (2026-10-29): 3av is pushed**: origin's
+master was `9e688d8`. Its deploy is not checked here.
+**3aw: NOT pushed** (2026-10-29): the map popup's Position, Projected and
+Computed lines on a dead feed read as the phone sheet's (§12.146). See
+"Phase 3aw" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -9272,12 +9277,15 @@ is derived from the run's own clock; the ages are offsets from it.
     and no "frozen". The list's head says "Position (frozen)"
     (`FleetList.tsx:200`); the phone sheet says "Last seen"
     (`TruckSheet.tsx:146`).
+    Done in 3aw: "Last seen", as the sheet says.
   - `MapPopup.tsx:256`, Projected: the full line ("412 mi · ETA 14:18 CDT
     · …"). §5.9 says every ETA cell reads "stale"; the row's does. The
     phone sheet keeps the ETA and adds "Feed down: built on positions we
     no longer trust." (`TruckSheet.tsx:123`).
+    Done in 3aw: the ETA and the Feed down line, as the sheet has them.
   - `MapPopup.tsx:295`: "Computed" (in the at-risk amber) and "Forced by"
     still show, under a chip that no longer says "forced".
+    Done in 3aw: both stay, Computed muted, on the popup and the sheet.
 
 **Questions for Alex:**
 1. On a working feed, the popup's chip for a truck whose own GPS is stale
@@ -9291,6 +9299,131 @@ is derived from the run's own clock; the ages are offsets from it.
 **Commits:** `4415dbf` (the helper and the five sites), `726fd68` (the
 tests), and one docs commit (this section, 3ap's "Later" list, the "What
 is live" line). NOT pushed.
+
+### Phase 3aw: the map popup's lines on a dead feed read as the phone sheet's (2026-10-29)
+
+From the advisor's brief: 3av's "Found, not changed" list. A small console
+fix. **NOT pushed, NOT deployed.** Built on `9e688d8`, which was
+`origin/master` at the start (3av pushed; its deploy is not checked here).
+No change to the chip (`chipProps`), the row, the phone card, `geo.ts`,
+Currently, the status engine, the server, the fleet query, the worker,
+migrations, env or tokens. Rule: design-spec §12.146 (new).
+
+3av's question 2 is answered by this brief (fix the lines, as the sheet
+reads). Question 1 (the popup's own-stale chip shows the age) is not
+answered in it; the chip is unchanged.
+
+**What changed** (`6e69df2`). The phone sheet was the model.
+- `MapPopup.tsx:103`, new: `FEED_DOWN_ETA`, the words "Feed down: built on
+  positions we no longer trust." The sheet had them inline
+  (`TruckSheet.tsx:123` at `9e688d8`); both surfaces now use the constant
+  (`MapPopup.tsx:282`, `TruckSheet.tsx:128`).
+- `MapPopup.tsx:111`, new: `computedInk(feedStale)`. It returns
+  `text-text-muted` on a dead feed, otherwise `text-status-risk-fg` (the ink
+  both surfaces used before). Both surfaces use it (`MapPopup.tsx:322`,
+  `TruckSheet.tsx:170`).
+- The popup:
+  - Position (`:252`): "Last seen …" when `feedStale || row.status ===
+    'STALE_GPS'` (`:208`), as the sheet (`TruckSheet.tsx:150`) and the row
+    say. Its fallback stays `formattedLocation ?? '—'`. The sheet's has
+    `cityState` between the two, but `cityState()` is null whenever
+    `formattedLocation` is (`samsara/schemas.ts:143`), so the text is the
+    same.
+  - Projected (`:277`): the ETA line as before, then the Feed down line in
+    `block text-status-risk-fg`, as the sheet has it, on a dead feed only.
+  - Computed (`:321`): the ink from `computedInk`. Forced by is unchanged
+    and still printed.
+- The sheet: Computed's ink from `computedInk`; the Feed down line from the
+  constant. Nothing else.
+
+**Every visible change on a live feed: one.** A truck whose OWN GPS is
+stale now reads "Last seen 1 Broadway, …" in the popup's Position, as its
+row and the sheet already did. Checked, not argued: a throwaway test
+rendered both surfaces for seven rows, on a live and a dead feed, at
+`9e688d8` and with the change, and the markup was compared (the test was
+deleted, not committed):
+- Rows: on time, forced (Late over On time), a ZIP-centre ETA, upcoming,
+  no load, no fix, its own Stale GPS.
+- Live feed: 13 of 14 renders byte-identical. The one that differs is the
+  popup for its own Stale GPS: "Last seen" only.
+- Dead feed:
+  - The popup: "Last seen" on all seven, including "Last seen —" with no
+    fix, as the sheet and the row say. The Feed down line on the six with
+    a stop (no load means no Projected line). Computed muted on the forced
+    row.
+  - The sheet: Computed muted on the forced row, and nothing else.
+
+**Tests** 216 files / 3,926 → 216 / 3,939 (+13). Every instant is derived
+from the run's clock.
+- `MapPopup.test.tsx` (+11):
+  - a dead feed: Position "Last seen …"; Projected "140 mi · ETA hh:mm …"
+    and exactly one Feed down line, `block text-status-risk-fg`, its words
+    pinned in the test; Computed "On time" in `text-text-muted` (no status
+    class); Forced by "Test Dispatcher — Receiver confirmed detention";
+  - a live feed: the position, no Feed down line, Computed in
+    `text-status-risk-fg`; a truck's own Stale GPS: "Last seen", and no
+    Feed down line;
+  - parity with the sheet in five cases (dead feed forced, own stale, no
+    fix; live feed forced, own stale): the same Position text, the same
+    Feed down line (`outerHTML`, one on a dead feed, none on a live one),
+    the same Computed class;
+  - a guard: no file under `src/components` but `MapPopup.tsx` contains
+    "Feed down: built on" (tests left out).
+- `TruckSheet.test.tsx` (+2): Computed `text-text-muted` on a dead feed,
+  `text-status-risk-fg` on a live one, Forced by printed in both.
+
+**Mutations.** Each was applied alone, the popup and sheet suites run
+(`MapPopup`, the phone suites, `two-stop-surfaces`, `OvernightDisplay`),
+then the file restored and checked with `cmp`:
+
+| Mutation | Result |
+|---|---|
+| The popup drops "Last seen" | 6 failed |
+| The popup drops the Feed down line | 4 failed |
+| Computed keeps the amber on a dead feed: the popup | 3 failed |
+| Computed keeps the amber on a dead feed: the sheet | 3 failed |
+| The Feed down words changed in one place: the sheet back to its own copy ("…we do not trust.") | 4 failed: the guard and 3 parity cases |
+| The Feed down words changed in one place: the shared constant | 1 failed: the pinned words |
+
+**e2e.**
+- Which baselines show the popup or the sheet: the popup only, in
+  `desktop-baseline`'s `4-selected-with-popup-*`. That is truck 101 on a
+  live feed with a fresh fix and an upcoming load, which this phase does
+  not change. No baseline shows the truck sheet, and none shows a popup on
+  a dead feed (3av). Zero diffs were expected.
+- `npm run e2e -- --project=chromium desktop-baseline feed.spec
+  --update-snapshots=none` (run `2026-10-29T17-15-17-855Z`, on `6e9f814`):
+  **15 passed** in 3.3 min (setup 1, desktop-baseline 12, feed 2).
+  - No `-diff.png` or `-actual.png` in the run's folder. No baseline was
+    re-saved; `git status` was clean afterwards.
+  - The run reported "the Mac slept 1 minute during this run". Two widths
+    took about 37s instead of about 18s (768 and 1440); both passed.
+
+**Found wrong in the brief or the design:**
+- §5.9 says every ETA cell reads "stale" on a dead feed. The popup and the
+  sheet keep the projection and add the Feed down line (the brief, and the
+  sheet before it). That holds for the row's ETA cell, which reads
+  "stale". But no section of design-spec records the popup and sheet
+  keeping their ETA under a caveat. §12.146 covers Computed only, as the
+  brief asked.
+- §9.5: "Showing and Computed … both carry their own status colour". On a
+  live feed the popup and the sheet print Computed in the at-risk amber
+  whatever the computed status is ("On time" in amber). That is older than
+  this phase and unchanged.
+- Found, not changed (out of scope): the edit modal draws the computed
+  status as a coloured chip with no knowledge of the feed
+  (`OverrideBlock.tsx:120`; `StopForm.tsx:159` for the next stop), so on
+  a dead feed it still shows schedule colour. Not looked at: the other
+  status colours a dead feed may leave (the filter chips, the Today strip,
+  the timeline).
+
+**Questions for Alex:**
+1. The edit modal's Computed chip (above) keeps its colour on a dead feed.
+   Withdraw it there too, in its own small phase?
+
+**Commits:** `6e69df2` (the popup and the sheet), `6e9f814` (the tests),
+and one docs commit (this section, 3av's list, the "What is live" line,
+design-spec §12.146). NOT pushed.
 
 ## Next
 
