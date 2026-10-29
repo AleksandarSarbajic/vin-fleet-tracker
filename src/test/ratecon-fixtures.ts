@@ -770,3 +770,85 @@ export const DROP_STOPS: DropStop[] = [
     latest: '10/14/2026 09:30',
   },
 ];
+
+export interface LocationStop {
+  kind: 'Pickup' | 'Delivery';
+  /** The name on one line or more. */
+  name: string[];
+  street: string;
+  /** "Minot, ND 58701". */
+  cityLine: string;
+  /** "10/12/2026 14:00 - 10/12/2026 14:00": from and to, the same when it is one time. */
+  when: string;
+}
+
+/**
+ * Phase 3ay. Location blocks: on every page "Load Confirmation" beside
+ * "Attachment to Broker Carrier Agreement", the "Load Number:" line under it,
+ * and "Page n of m" at the foot; page 1 numbered paragraphs, "4. Load
+ * Details ("Load"):" with the rate and the equipment, then a block a stop. A
+ * pickup is "Shipper or Pick Up Location:" over the name, street, city line
+ * and phone, beside "Pickup:" and its dates and times on the same line; a
+ * delivery is "Receiver or Delivery Location #:" beside "Delivery Date and
+ * Time:", the dates and times on the line under it. Other labels on the
+ * right are not read. Only the printed headings are the layout's: every
+ * value is made up. ASCII only.
+ */
+export function locationBlocks(stops: LocationStop[], options: { loadNumber?: string; later?: string } = {}): TinyRun[][] {
+  const { loadNumber = '47Q1180' } = options;
+  const later = options.later ?? loadNumber;
+  const header = (number: string): TinyRun[] => [
+    run(61, 760, 'Load Confirmation'),
+    run(330, 760, 'Attachment to Broker Carrier Agreement'),
+    run(61, 748, `Load Number: ${number}`),
+  ];
+  const first: TinyRun[] = [
+    ...header(loadNumber),
+    run(61, 730, 'Example Broker Inc. ("BROKER") arranges for the carrier to transport this Load as follows:'),
+    run(60, 710, '1.'),
+    run(78, 710, 'This Load Confirmation is subject to the agreement between the parties.'),
+    run(60, 690, '3.'),
+    run(78, 690, 'BROKER Contact:'),
+    run(297, 690, 'Carrier Contact:'),
+    run(78, 678, 'Dana Example'),
+    run(297, 678, 'Sample Carrier LLC'),
+    run(60, 660, '4.'),
+    run(78, 660, 'Load Details ("Load"):'),
+    run(297, 660, 'Hazmat: No'),
+    run(78, 648, 'TRANSIT'),
+    run(188, 648, '1500.0'),
+    run(297, 648, 'Heavy Haul: No'),
+    run(78, 636, 'Equipment Type: 53\' Dry Van'),
+    run(297, 636, 'Live/Live Shipment: Yes'),
+  ];
+  let y = 600;
+  for (const s of stops) {
+    if (s.kind === 'Pickup') {
+      first.push(run(78, y, 'Shipper or Pick Up Location:'), run(297, y, 'Pickup:'), run(341, y, s.when));
+    } else {
+      first.push(run(78, y, 'Receiver or Delivery Location #:'), run(297, y, 'Delivery Date and Time:'), run(297, y - 12, s.when));
+    }
+    const left = [...s.name, s.street, s.cityLine, 'Phone: +1 (555)-010-0160'];
+    const right = s.kind === 'Pickup'
+      ? ['Commodity to Pick Up: General (20000.0 lbs)', 'Pickup #:', 'Shipper ID:', 'PO #:', 'Live/Live Shipment: Yes']
+      : ['Pickup #:', 'Shipper ID:', 'PO #:', 'Live/Live Shipment: Yes'];
+    left.forEach((text, k) => first.push(run(78, y - 12 * (k + 1), text)));
+    right.forEach((text, k) => first.push(run(297, y - 12 * (k + (s.kind === 'Pickup' ? 1 : 2)), text)));
+    y -= 12 * (Math.max(left.length, right.length + 1) + 1);
+  }
+  first.push(run(415, 60, 'Page 1 of'), run(464, 60, '2'));
+  const terms: TinyRun[] = [
+    ...header(later),
+    run(60, 720, '5.'),
+    run(78, 720, 'Example terms and conditions apply to this load.'),
+    run(415, 60, 'Page 2 of'),
+    run(464, 60, '2'),
+  ];
+  return [first, terms];
+}
+
+/** A pickup at one time, and a delivery whose name runs onto two lines: the two-stop document. */
+export const LOCATION_STOPS: LocationStop[] = [
+  { kind: 'Pickup', name: ['Prairie Example Foods #12'], street: '4001 Main St', cityLine: 'Minot, ND 58701', when: '10/12/2026 14:00 - 10/12/2026 14:00' },
+  { kind: 'Delivery', name: ['Harbor Cold', 'Annex B'], street: '880 Harbor View Pkwy', cityLine: 'Mandan, ND 58554', when: '10/14/2026 08:00 - 10/14/2026 09:30' },
+];
