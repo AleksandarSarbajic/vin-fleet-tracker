@@ -29,6 +29,7 @@ export type LayoutId =
   | 'route-blocks'
   | 'stop-table'
   | 'stop-detail'
+  | 'pickup-drop-blocks'
   | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
@@ -39,6 +40,7 @@ export const LAYOUT_NAME: Record<LayoutId, string> = {
   'route-blocks': 'Route blocks (Pickup / Delivery, a date and “HH:MM Apt” beside each stop)',
   'stop-table': 'a stop table (Stop, From, To, Name, City, St; two lines a stop)',
   'stop-detail': 'a Stop Detail table (Type, Scheduled Arrival, Name and Address)',
+  'pickup-drop-blocks': 'Pickup / Drop blocks (the address beside Earliest and Latest)',
   model: 'an AI read',
 };
 
@@ -1166,6 +1168,151 @@ function readStopDetail(lines: Line[]): RateconRead {
   };
 }
 
+/* ---------------------------- Pickup / Drop blocks (3ay) ---------------------------- */
+
+/**
+ * "LOAD CONFIRMATION", the order number on its own line ("ORDER <n>"), and
+ * "Service for Load # <n>" over the rate; then one block a stop:
+ *
+ *                              Pickup
+ *     <name>                                 PKU# PO# <n>
+ *     <street>                               Earliest: MM/DD/YYYY HH:MM
+ *     <CITY> <ST> <ZIP>                      Latest: MM/DD/YYYY HH:MM
+ *     <phone>                                Weight: <n>
+ *     Boxes: <n>                             Pallets: <n>
+ *     Item: <text>
+ *                         Pickup INSTRUCTIONS
+ *
+ * "Drop" for a delivery. A block runs from its heading to its own
+ * "INSTRUCTIONS" row, on one page. Read by column: the right one starts where
+ * "Earliest:" does, the address is everything left of it.
+ *
+ * The address column: the name on one line or more, the street row, the city
+ * line (no comma needed), then lines not read. The street row may go on with
+ * ", c/o " and the stop's own name, which is not part of the street and is
+ * left out; a "c/o" naming anything else is refused, and any other comma is
+ * kept as printed.
+ *
+ * The time runs from Earliest to Latest, and the fill's window rules decide
+ * what that is; the same date and time twice is one time. Times are read as
+ * Route blocks reads them: 24-hour when past 12, with a leading zero, or on a
+ * 24-hour document (`documentIs24Hour`); an unclear one is quoted.
+ *
+ * The load number is the "ORDER" line's, when "Service for Load #" agrees;
+ * one that differs leaves it blank with a check.
+ *
+ * Strict, because a wrong stop is worse than none: a heading without its own
+ * INSTRUCTIONS row before the next heading; a block across pages; no
+ * Earliest or Latest, or either in another shape; an address column without
+ * exactly one city line, or a state that is not one; no name, or a name
+ * line that starts like a street; a street row that does not; a city line in
+ * the right column; a first block that is not a Pickup or a last that is not
+ * a Drop — and nothing is read.
+ */
+const DROP = {
+  recognise: [/^LOAD CONFIRMATION$/, /^Service for Load #(?: \S+)?\s+Amount\s+Rate\s+Extended$/, /^Pickup INSTRUCTIONS$/, /^Drop INSTRUCTIONS$/],
+  heading: /^(Pickup|Drop)$/,
+  end: /^(Pickup|Drop) INSTRUCTIONS$/,
+  when: /^(Earliest|Latest): (\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/,
+  place: /^(.+?),? ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
+  careOf: /, c\/o (.+)$/i,
+  order: /^ORDER ([A-Za-z0-9][A-Za-z0-9-]*)$/,
+  service: /^Service for Load # ([A-Za-z0-9][A-Za-z0-9-]*)$/,
+};
+
+function dropTime(from: RegExpExecArray, to: RegExpExecArray, hours24: boolean, source: Source): TimeRead {
+  const at = (m: RegExpExecArray) => {
+    const [mo, d, y, h, mi] = [m[2], m[3], m[4], m[5], m[6]].map(Number) as [number, number, number, number, number];
+    // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
+    const clear = validClock(h, mi) && (h >= 13 || m[5]!.startsWith('0') || hours24);
+    return { date: validDate(y, mo, d) ? iso(y, mo, d) : null, time: clear ? hhmm(h, mi) : null };
+  };
+  const [a, b] = [at(from), at(to)];
+  if (a.date && a.time && b.date && b.time) {
+    return a.date === b.date && a.time === b.time
+      ? { kind: 'exact', date: a.date, time: a.time, flag: null, source }
+      : { kind: 'range', date: a.date, time: a.time, endDate: b.date, endTime: b.time, flag: null, source };
+  }
+  return { kind: 'unreadable', date: a.date, quoted: source.text, source };
+}
+
+function readPickupDrop(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'pickup-drop-blocks', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const heads = lines.flatMap((l, i) => (l.cells.length === 1 && DROP.heading.test(l.text) ? [i] : []));
+  const ends = lines.flatMap((l, i) => (l.cells.length === 1 && DROP.end.test(l.text) ? [i] : []));
+  if (heads.length === 0 || heads.length !== ends.length) return refuse;
+
+  const hours24 = documentIs24Hour(lines.map((l, n) => ({ n, text: l.text, page: l.page })));
+  const stops: StopRead[] = [];
+  for (const [n, h] of heads.entries()) {
+    const head = lines[h]!;
+    const e = ends[n]!;
+    // Its own INSTRUCTIONS row closes the block, on the heading's page. A block that ran on into the
+    // next would hold two "Earliest:" rows, and is refused below.
+    if (e <= h || lines[e]!.text !== `${head.text} INSTRUCTIONS`) return refuse;
+    const block = lines.slice(h + 1, e);
+    if (block.length === 0 || lines.slice(h, e + 1).some((l) => l.page !== head.page)) return refuse;
+    // One "Earliest:" and one "Latest:"; the right column starts where "Earliest:" does.
+    const earliest = block.flatMap((l) => l.cells.filter((c) => c.text.startsWith('Earliest:')));
+    if (earliest.length !== 1) return refuse;
+    const rightX = earliest[0]!.x!;
+    const left = block.flatMap((l) => l.cells.filter((c) => c.x! < rightX - 4).map((c) => c.text));
+    const right = block.flatMap((l) => l.cells.filter((c) => c.x! >= rightX - 4).map((c) => c.text));
+    const latest = right.filter((t) => t.startsWith('Latest:'));
+    const from = DROP.when.exec(earliest[0]!.text);
+    const to = latest.length === 1 ? DROP.when.exec(latest[0]!) : null;
+    if (!from || !to || right.some((t) => DROP.place.test(t) || cityLine(t))) return refuse;
+
+    // The name, the street row, the city line; the lines after it are not read.
+    const placeAt = left.flatMap((t, k) => (DROP.place.test(t) ? [k] : []));
+    if (placeAt.length !== 1 || placeAt[0]! < 2) return refuse;
+    const placeText = left[placeAt[0]!]!;
+    const place = DROP.place.exec(placeText)!;
+    if (!US.has(place[2]!)) return refuse;
+    const row = left[placeAt[0]! - 1]!;
+    const names = left.slice(0, placeAt[0]! - 1);
+    if (!startsLikeStreet(row) || names.some((t) => startsLikeStreet(t))) return refuse;
+    const careOf = DROP.careOf.exec(row);
+    if (careOf && careOf[1] !== names.join(' ')) return refuse;
+    const street = careOf ? row.slice(0, careOf.index) : row;
+
+    const at = (text: string): Source => ({ text, page: head.page });
+    stops.push({
+      type: { value: head.text === 'Pickup' ? 'PU' : 'DEL', source: at(head.text) },
+      typeCheck: null,
+      street: { value: street, source: at(row) },
+      city: { value: place[1]!, source: at(placeText) },
+      state: { value: place[2]!, source: at(placeText) },
+      zip: { value: place[3]!, source: at(placeText) },
+      time: dropTime(from, to, hours24, at(`${earliest[0]!.text} · ${latest[0]}`)),
+    });
+  }
+  if (stops[0]!.type.value !== 'PU' || stops.at(-1)!.type.value !== 'DEL') return refuse;
+
+  const orders = lines.flatMap((l) => {
+    const m = l.cells.length === 1 ? DROP.order.exec(l.text) : null;
+    return m ? [{ value: m[1]!, source: { text: l.text, page: l.page } }] : [];
+  });
+  const services = lines.flatMap((l) => {
+    const m = DROP.service.exec(l.cells[0]?.text ?? '');
+    return m ? [m[1]!] : [];
+  });
+  const distinct = new Set([...orders.map((o) => o.value), ...services]);
+  const loadNumber = orders.length > 0 && distinct.size === 1 ? orders[0]! : null;
+  return {
+    layout: 'pickup-drop-blocks',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : orders.length === 0
+        ? 'No number on an “ORDER” line.'
+        : `More than one number is on the “ORDER” line or after “Service for Load #”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`,
+    stops,
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -1176,6 +1323,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'route-blocks', labels: ROUTE.recognise, read: readRouteBlocks },
   { id: 'stop-table', labels: TABLE.recognise, read: readStopTable },
   { id: 'stop-detail', labels: DETAIL.recognise, read: readStopDetail },
+  { id: 'pickup-drop-blocks', labels: DROP.recognise, read: readPickupDrop },
 ];
 
 /** Which layouts have every one of their labels here. */

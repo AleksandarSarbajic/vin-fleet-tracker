@@ -684,3 +684,89 @@ export const DETAIL_STOPS: DetailStop[] = [
   { type: 'PU', cell: ['Prairie Example Foods', 'Plant 2', '4001 Main St', 'Minot, ND 58701'], date: '10/12/26', time: '23:30' },
   { type: 'SO', cell: ['HARBOR COLD', '880 Harbor View', 'Pkwy Bldg 4', 'Mandan, ND 58554'], date: '10/14/26', time: '08:00' },
 ];
+
+export interface DropStop {
+  kind: 'Pickup' | 'Drop';
+  name: string;
+  /** The street row as printed: "4001 MAIN ST", or with ", c/o <name>" after it. */
+  street: string;
+  /** "Minot ND 58701": no comma. */
+  cityLine: string;
+  /** Beside the address: "10/12/2026 07:30". */
+  earliest: string;
+  latest: string;
+}
+
+/**
+ * Phase 3ay. Pickup / Drop blocks: page 1 the title, the order number on its
+ * own line, the rep and the trailer, an agreement paragraph and "Service for
+ * Load # <n>" over the rate; page 2 more terms, then a block a stop: a
+ * centred "Pickup" or "Drop" heading; the name, the street row, the city line
+ * (no comma), a phone, boxes and the item on the left; the PKU# or DELV#
+ * row, "Earliest:", "Latest:", weight and pallets on the right; a centred
+ * "<kind> INSTRUCTIONS" row closing it; then the invoice requirements. Only
+ * the printed headings are the layout's: every value is made up. ASCII only.
+ */
+export function pickupDropBlocks(stops: DropStop[], options: { order?: string; service?: string } = {}): TinyRun[][] {
+  const { order = '51200433' } = options;
+  const service = options.service ?? order;
+  const first: TinyRun[] = [
+    run(212, 760, 'LOAD CONFIRMATION'),
+    run(171, 746, '24/7 DRIVER SUPPORT (555) 010-0150'),
+    run(132, 720, `Call the Driver Support line and ask for Load Number ${order}`),
+    run(239, 706, `ORDER ${order}`),
+    run(23, 690, 'CARRIER'),
+    run(104, 690, 'SAMPLE CARRIER LLC'),
+    run(266, 690, '***ORDER NUMBER(S) MUST APPEAR ON ALL BILLING***'),
+    run(23, 678, 'Example Rep'),
+    run(104, 678, 'Dana Example'),
+    run(266, 678, 'MODE: TL'),
+    run(23, 666, 'Rep Phone'),
+    run(104, 666, '(555) 010-0151'),
+    run(266, 654, "TRAILER TYPE: Van 53'"),
+    run(24, 620, `Pursuant to our agreement, load number ${order} will move at the following rate:`),
+    run(23, 600, `Service for Load # ${service}`),
+    run(173, 600, 'Amount'),
+    run(241, 600, 'Rate'),
+    run(309, 600, 'Extended'),
+    run(23, 588, 'Line Haul'),
+    run(181, 588, '1.00'),
+    run(230, 588, '$1,500.00'),
+    run(308, 588, '$1,500.00'),
+    run(33, 560, '1.'),
+    run(53, 560, 'Example terms and conditions apply to this load.'),
+  ];
+  const second: TinyRun[] = [run(33, 760, '2.'), run(53, 760, 'Example terms continue on this page.')];
+  let y = 720;
+  for (const s of stops) {
+    second.push(run(s.kind === 'Pickup' ? 272 : 278, y, s.kind));
+    const left = [s.name, s.street, s.cityLine, '5550100152', 'Boxes: 26', 'Item: General freight'];
+    const right = [`${s.kind === 'Pickup' ? 'PKU#' : 'DELV#'} PO# 4100`, `Earliest: ${s.earliest}`, `Latest: ${s.latest}`, 'Weight: 40000', 'Pallets: 26'];
+    left.forEach((text, k) => second.push(run(24, y - 14 * (k + 1), text)));
+    right.forEach((text, k) => second.push(run(312, y - 14 * (k + 1), text)));
+    second.push(run(s.kind === 'Pickup' ? 235 : 239, y - 14 * 7, `${s.kind} INSTRUCTIONS`));
+    y -= 14 * 9;
+  }
+  second.push(run(23, y, 'INVOICE PAYMENT REQUIREMENTS:'), run(30, y - 12, 'SIGNED BOL / SIGNED RATE CONFIRMATION SHEET.'));
+  return [first, second];
+}
+
+/** A pickup whose street row names its own facility after "c/o", and a drop: the two-stop document. */
+export const DROP_STOPS: DropStop[] = [
+  {
+    kind: 'Pickup',
+    name: 'Prairie Example Foods - Plant 2',
+    street: '4001 Main St, c/o Prairie Example Foods - Plant 2',
+    cityLine: 'MINOT ND 58701',
+    earliest: '10/12/2026 07:30',
+    latest: '10/12/2026 15:00',
+  },
+  {
+    kind: 'Drop',
+    name: 'HARBOR COLD',
+    street: '880 HARBOR VIEW PKWY',
+    cityLine: 'MANDAN ND 58554',
+    earliest: '10/14/2026 08:00',
+    latest: '10/14/2026 09:30',
+  },
+];

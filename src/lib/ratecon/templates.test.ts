@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   COLUMNS_STOPS,
   DETAIL_STOPS,
+  DROP_STOPS,
   LABEL_ROWS,
   PU_SO,
   PU_SO_PASTED,
@@ -10,12 +11,14 @@ import {
   TABLE_MIDDLE,
   TABLE_STOPS,
   pickupDeliveryColumns,
+  pickupDropBlocks,
   puSoBlocks,
   routeBlocks,
   stopDetail,
   stopTable,
   type ColumnsStop,
   type DetailStop,
+  type DropStop,
   type RouteStop,
   type TableStop,
 } from '@/test/ratecon-fixtures';
@@ -810,6 +813,151 @@ describe('Stop detail (3ax)', () => {
   it('never carries a name, the commodity, a weight, a reference, the rate or the carrier into what it read', () => {
     const said = JSON.stringify(r);
     for (const never of ['Prairie', 'Plant 2', 'HARBOR COLD', 'GENERAL FREIGHT', '20000', 'EX-', 'SI', '1500', 'SAMPLE', 'N/A']) {
+      expect(said).not.toContain(never);
+    }
+  });
+});
+
+describe('Pickup / Drop blocks (3ay)', () => {
+  const NOT = { ok: false, reason: 'not-recognised' };
+  type Options = Parameters<typeof pickupDropBlocks>[1];
+  const doc = (stops: DropStop[] = DROP_STOPS, options?: Options) => lines(pickupDropBlocks(stops, options));
+  const r = read(readRatecon(doc()));
+  const stop = (i: number, patch: Partial<DropStop>): DropStop[] => DROP_STOPS.map((s, k) => (k === i ? { ...s, ...patch } : s));
+  /** Every run of one text replaced, on every page. */
+  const edited = (from: string, to: string) => lines(pickupDropBlocks(DROP_STOPS).map((p) => p.map((run) => (run.text === from ? { ...run, text: to } : run))));
+  /** Every run of these texts taken out. */
+  const without = (...texts: string[]) => lines(pickupDropBlocks(DROP_STOPS).map((p) => p.filter((run) => !texts.includes(run.text))));
+  /** A run added to page 2, the stops page. */
+  const withRun = (x: number, y: number, text: string) =>
+    lines(pickupDropBlocks(DROP_STOPS).map((p, i) => (i === 1 ? [...p, { x, y, text }] : p)));
+
+  it('is recognised as this layout only, and recognises no other layout', () => {
+    expect(recognisedLayouts(doc())).toEqual(['pickup-drop-blocks']);
+    expect(
+      [lines(LABEL_ROWS), lines(STOPS_SECTION), lines(puSoBlocks(PU_SO)), lines(pickupDeliveryColumns(COLUMNS_STOPS)), lines(routeBlocks(ROUTE_STOPS)), lines(stopTable(TABLE_STOPS)), lines(stopDetail(DETAIL_STOPS))].map(
+        (o) => recognisedLayouts(o),
+      ),
+    ).toEqual([['label-rows'], ['stops-section'], ['pu-so-blocks'], ['pickup-delivery-columns'], ['route-blocks'], ['stop-table'], ['stop-detail']]);
+  });
+
+  it('reads the number on the "ORDER" line as the load number when "Service for Load #" agrees', () => {
+    expect(r.layout).toBe('pickup-drop-blocks');
+    expect(r.loadNumber).toEqual({ value: '51200433', source: { text: 'ORDER 51200433', page: 1 } });
+    expect(r.loadNumberCheck).toBeNull();
+    const differs = read(readRatecon(doc(DROP_STOPS, { service: '51200434' })));
+    expect(differs.loadNumber).toBeNull();
+    expect(differs.loadNumberCheck).toBe('More than one number is on the “ORDER” line or after “Service for Load #”: “51200433”, “51200434”.');
+    expect(read(readRatecon(without('ORDER 51200433'))).loadNumberCheck).toBe('No number on an “ORDER” line.');
+  });
+
+  it('reads each block: Pickup or Drop, the street row after the name, the city line with no comma', () => {
+    expect(summary(r)).toEqual([
+      ['PU', '4001 Main St', 'MINOT', 'ND', '58701'],
+      ['DEL', '880 HARBOR VIEW PKWY', 'MANDAN', 'ND', '58554'],
+    ]);
+    const s = r.stops[0]!;
+    expect([s.type.source, s.street?.source, s.city?.source, s.zip?.source]).toEqual([
+      { text: 'Pickup', page: 2 },
+      { text: '4001 Main St, c/o Prairie Example Foods - Plant 2', page: 2 },
+      { text: 'MINOT ND 58701', page: 2 },
+      { text: 'MINOT ND 58701', page: 2 },
+    ]);
+    expect(r.stops.every((x) => x.typeCheck === null && x.fieldChecks === undefined)).toBe(true);
+  });
+
+  it('drops ", c/o" from the street only when the stop’s own name follows it; keeps any other comma; refuses another c/o', () => {
+    expect(read(readRatecon(doc(stop(1, { street: '880 HARBOR VIEW PKWY, BLDG 4' })))).stops[1]!.street?.value).toBe('880 HARBOR VIEW PKWY, BLDG 4');
+    expect(readRatecon(doc(stop(0, { street: '4001 Main St, c/o Another Example Yard' })))).toEqual(NOT);
+  });
+
+  it('reads Earliest to Latest as a window, the window rules deciding the rest; the same time twice is one time', () => {
+    expect(r.stops[0]!.time).toEqual({
+      kind: 'range', date: '2026-10-12', time: '07:30', endDate: '2026-10-12', endTime: '15:00', flag: null,
+      source: { text: 'Earliest: 10/12/2026 07:30 · Latest: 10/12/2026 15:00', page: 2 },
+    });
+    expect(r.stops[1]!.time).toMatchObject({ kind: 'range', date: '2026-10-14', time: '08:00', endTime: '09:30' });
+    expect(read(readRatecon(doc(stop(1, { latest: '10/14/2026 08:00' })))).stops[1]!.time).toMatchObject({ kind: 'exact', time: '08:00' });
+    expect(read(readRatecon(doc(stop(0, { latest: '10/13/2026 06:00' })))).stops[0]!.time).toMatchObject({ kind: 'range', endDate: '2026-10-13' });
+  });
+
+  it('reads times by the 24-hour rule: "10:00" quoted when AM or PM is anywhere in the document', () => {
+    const at10 = stop(1, { earliest: '10/14/2026 10:00', latest: '10/14/2026 11:00' });
+    expect(read(readRatecon(doc(at10))).stops[1]!.time).toMatchObject({ kind: 'range', time: '10:00', endTime: '11:00' });
+    const ampm = lines(pickupDropBlocks(at10).map((p, i) => (i === 0 ? [...p, { x: 53, y: 540, text: 'Office hours 8 AM to 5 PM.' }] : p)));
+    expect(read(readRatecon(ampm)).stops[1]!.time).toMatchObject({ kind: 'unreadable', date: '2026-10-14' });
+  });
+
+  it('reads three blocks in order', () => {
+    const middle: DropStop = { kind: 'Drop', name: 'NORTH YARD', street: '77 DEPOT AVE', cityLine: 'HASTINGS NE 68901', earliest: '10/13/2026 18:00', latest: '10/13/2026 19:00' };
+    expect(summary(read(readRatecon(doc([DROP_STOPS[0]!, middle, DROP_STOPS[1]!]))))).toEqual([
+      ['PU', '4001 Main St', 'MINOT', 'ND', '58701'],
+      ['DEL', '77 DEPOT AVE', 'HASTINGS', 'NE', '68901'],
+      ['DEL', '880 HARBOR VIEW PKWY', 'MANDAN', 'ND', '58554'],
+    ]);
+  });
+
+  it('refuses a block with two Earliest rows (a block run on into the next would have them), or closed by the other kind’s INSTRUCTIONS row', () => {
+    // Block 2's heading is at y 594; its sixth row has nothing on the right.
+    expect(readRatecon(withRun(312, 594 - 14 * 6, 'Earliest: 10/14/2026 08:00'))).toEqual(NOT);
+    const swapped = pickupDropBlocks(DROP_STOPS).map((p) =>
+      p.map((run) => (run.text === 'Pickup INSTRUCTIONS' ? { ...run, text: 'Drop INSTRUCTIONS' } : run.text === 'Drop INSTRUCTIONS' ? { ...run, text: 'Pickup INSTRUCTIONS' } : run)),
+    );
+    expect(recognisedLayouts(lines(swapped))).toEqual(['pickup-drop-blocks']);
+    expect(readRatecon(lines(swapped))).toEqual(NOT);
+  });
+
+  it('refuses a block without Earliest or Latest, or with either in another shape', () => {
+    expect(readRatecon(without('Latest: 10/14/2026 09:30'))).toEqual(NOT);
+    expect(readRatecon(without('Earliest: 10/12/2026 07:30'))).toEqual(NOT);
+    expect(readRatecon(edited('Earliest: 10/12/2026 07:30', 'Earliest: 10/12/2026'))).toEqual(NOT);
+    expect(readRatecon(edited('Latest: 10/14/2026 09:30', 'Latest: 10/14 09:30'))).toEqual(NOT);
+    expect(readRatecon(withRun(312, 594 - 14 * 6, 'Latest: 10/14/2026 11:00'))).toEqual(NOT);
+  });
+
+  it('refuses an address column without one city line, a street that does not start like one, no name, or a city line on the right', () => {
+    expect(readRatecon(without('MANDAN ND 58554'))).toEqual(NOT);
+    expect(readRatecon(edited('5550100152', 'AMES IA 50010'))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { street: 'HARBOR VIEW PKWY' })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { cityLine: 'MANDAN NX 58554' })))).toEqual(NOT);
+    expect(readRatecon(withRun(312, 594 - 14 * 6, 'AMES IA 50010'))).toEqual(NOT);
+    expect(readRatecon(without('HARBOR COLD'))).toEqual(NOT);
+  });
+
+  it('refuses a first block that is not a Pickup, a last that is not a Drop, or a heading without its INSTRUCTIONS row', () => {
+    expect(readRatecon(doc([DROP_STOPS[1]!, DROP_STOPS[0]!, DROP_STOPS[1]!]))).toEqual(NOT);
+    expect(readRatecon(doc([DROP_STOPS[0]!, DROP_STOPS[1]!, DROP_STOPS[0]!]))).toEqual(NOT);
+    const lost = pickupDropBlocks([...DROP_STOPS, DROP_STOPS[1]!]).map((p) => {
+      const at = p.map((run) => run.text).lastIndexOf('Drop INSTRUCTIONS');
+      return at === -1 ? p : p.filter((_, k) => k !== at);
+    });
+    expect(recognisedLayouts(lines(lost))).toEqual(['pickup-drop-blocks']);
+    expect(readRatecon(lines(lost))).toEqual(NOT);
+    expect(readRatecon(withRun(24, 300, 'Drop'))).toEqual(NOT);
+  });
+
+  it('refuses a block that runs onto the next page', () => {
+    const pages = pickupDropBlocks(DROP_STOPS);
+    const second = pages[1]!;
+    const broken = [pages[0]!, second.filter((run) => run.y > 560), second.filter((run) => run.y <= 560)];
+    expect(readRatecon(lines(broken))).toEqual(NOT);
+  });
+
+  it('is not recognised without a block’s INSTRUCTIONS row, or without "Service for Load #"', () => {
+    expect(recognisedLayouts(without('Pickup INSTRUCTIONS'))).toEqual([]);
+    expect(recognisedLayouts(edited('Service for Load # 51200433', 'Service for this load'))).toEqual([]);
+  });
+
+  it('does not read the same document pasted as text: its columns cannot be told apart', () => {
+    const pasted = linesFromText(doc().map((l) => l.text).join('\n'));
+    expect(recognisedLayouts(pasted)).toEqual(['pickup-drop-blocks']);
+    expect(readRatecon(pasted)).toEqual(NOT);
+  });
+
+  it('never carries a name, a phone, the PO, the weight, the item, the rate or the carrier into what it read', () => {
+    // The street's source quotes its printed row, the dropped "c/o" name with it (pinned above); nothing else does.
+    const said = JSON.stringify({ ...r, stops: r.stops.map((x) => ({ ...x, street: x.street?.value })) });
+    for (const never of ['Prairie', 'HARBOR COLD', '5550100152', 'PO#', '4100', 'Weight', 'Pallets', 'General freight', '1,500', 'SAMPLE', 'Dana']) {
       expect(said).not.toContain(never);
     }
   });
