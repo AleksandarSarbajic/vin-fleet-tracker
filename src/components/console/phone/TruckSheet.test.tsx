@@ -141,3 +141,57 @@ describe('the sheet', () => {
     addedDoc.mockRestore();
   });
 });
+
+/**
+ * §12.146. An override's Computed line is a fact from our database, so it
+ * stays on a dead feed, but it loses its status colour there: the chip above
+ * is the dotted Stale GPS and no longer says "forced" (§5.9).
+ */
+describe('Computed on a dead feed (§12.146)', () => {
+  const now = Date.now();
+  const FORCED = fleetRow({
+    status: 'LATE',
+    computed: 'ON_TIME',
+    recordedAt: new Date(now - 2 * 60_000).toISOString(),
+    override: {
+      forcedStatus: 'LATE',
+      reason: 'RECEIVER_CONFIRMED_DETENTION',
+      reasonNote: null,
+      setByName: 'Test Dispatcher',
+      setAtUtc: new Date(now - 2 * 3_600_000).toISOString(),
+      expiresAtUtc: new Date(now + 6 * 3_600_000).toISOString(),
+    },
+  });
+
+  function sheetWith(feedStale: boolean) {
+    act(() => {
+      root.render(
+        <TruckSheet
+          row={FORCED}
+          fetchedAt={new Date(now).toISOString()}
+          feedStale={feedStale}
+          tel={null}
+          onClose={() => {}}
+          onTimeline={() => {}}
+          onShowOnMap={() => {}}
+        />,
+      );
+    });
+  }
+  const computedInk = () =>
+    container.querySelector('[data-sheet-field="computed"] span')?.className ?? null;
+
+  it('muted on a dead feed, and Forced by still printed', () => {
+    sheetWith(true);
+    expect(field('computed')).toBe('On time');
+    expect(computedInk()).toBe('text-text-muted');
+    expect(field('forced-by')).toBe('Test Dispatcher — Receiver confirmed detention');
+  });
+
+  it('in the risk ink on a live feed, as before', () => {
+    sheetWith(false);
+    expect(field('computed')).toBe('On time');
+    expect(computedInk()).toBe('text-status-risk-fg');
+    expect(field('forced-by')).toBe('Test Dispatcher — Receiver confirmed detention');
+  });
+});

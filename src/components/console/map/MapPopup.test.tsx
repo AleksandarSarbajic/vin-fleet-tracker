@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
 import type { ReactNode } from 'react';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { fleetRow, type FleetRowOver } from '@/test/fleet-row';
 import type { FleetRow } from '@/server/fleet-query';
 import { StatusChip } from '../StatusChip';
 import { TruckRow } from '../TruckRow';
+import { TruckSheet } from '../phone/TruckSheet';
 import { MapPopup } from './MapPopup';
 
 /**
@@ -13,6 +16,10 @@ import { MapPopup } from './MapPopup';
  * its colour as every row does (§5.9). Before 3av it drew `row.status` and
  * never knew the feed was down, so a dead feed could show a green "On time"
  * here over a dotted row.
+ *
+ * Phase 3aw. The popup's other lines on a dead feed read as the phone's
+ * truck sheet does: "Last seen" on the position, the Feed down line under
+ * the projection, and the override's Computed line muted (§12.146).
  *
  * The map's Popup is a pass-through: it needs a live map, and only what the
  * popup puts inside it is being read. Invented data only (the repo is public).
@@ -166,4 +173,143 @@ describe('the popup’s chip is the console row’s chip', () => {
     const row = live(over);
     expect(chipOf(popup(row, feedStale)).outerHTML).toBe(chipOf(consoleRow(row, feedStale)).outerHTML);
   });
+});
+
+/* ------------------------- 3aw: the popup's other lines ------------------------- */
+
+const after = (minutes: number) =>
+  new Date(Date.parse(FETCHED_AT) + minutes * 60_000).toISOString();
+
+/** A routed ETA to an appointment, so the popup has a Projected line. */
+const ON_A_LOAD: FleetRowOver = {
+  etaAbsence: 'has-eta',
+  etaUtc: after(180),
+  milesRemaining: 140,
+  distanceBasis: 'routed',
+  nextStop: { apptStartUtc: after(240), apptTz: 'America/Chicago', apptType: 'APPT' },
+};
+/** An override that hides a different computed status: Computed and Forced by show. */
+const FORCED: FleetRowOver = { status: 'LATE', computed: 'ON_TIME', override: OVERRIDE };
+const WHERE = '1 Broadway, Chicago, IL';
+/** The wording, pinned here as well as kept in one place (FEED_DOWN_ETA). */
+const FEED_DOWN = 'Feed down: built on positions we no longer trust.';
+
+/** The value the popup prints beside a label (its `Row`). */
+function popupValue(host: HTMLElement, label: string): HTMLElement | null {
+  const labels = [...host.querySelectorAll<HTMLElement>('span.text-text-muted')];
+  const found = labels.find((el) => el.textContent === label);
+  return (found?.nextElementSibling as HTMLElement | null) ?? null;
+}
+const feedDownLines = (host: HTMLElement) =>
+  [...host.querySelectorAll<HTMLElement>('span.block')].filter((el) =>
+    el.textContent?.startsWith('Feed down'),
+  );
+
+const sheet = (row: FleetRow, feedStale: boolean) =>
+  html(
+    renderToStaticMarkup(
+      <TruckSheet
+        row={row}
+        fetchedAt={FETCHED_AT}
+        feedStale={feedStale}
+        tel={null}
+        onClose={() => {}}
+        onTimeline={() => {}}
+        onShowOnMap={() => {}}
+      />,
+    ),
+  );
+
+describe('the popup’s other lines on a dead feed (§5.9, §12.146)', () => {
+  const host = () => popup(live({ ...ON_A_LOAD, ...FORCED }), true);
+
+  it('Position says "Last seen"', () => {
+    expect(popupValue(host(), 'Position')?.textContent).toBe(`Last seen ${WHERE}`);
+  });
+
+  it('Projected keeps the ETA, and adds the Feed down line in the risk ink', () => {
+    const projected = popupValue(host(), 'Projected')!;
+    expect(projected.textContent).toMatch(/^140 mi · ETA \d{2}:\d{2} /);
+    const lines = feedDownLines(projected);
+    expect(lines.map((l) => l.textContent)).toEqual([FEED_DOWN]);
+    expect(lines[0]!.className).toBe('block text-status-risk-fg');
+  });
+
+  it('Computed loses its status colour; Forced by is still printed', () => {
+    const el = host();
+    const computed = popupValue(el, 'Computed')!.firstElementChild as HTMLElement;
+    expect(computed.textContent).toBe('On time');
+    expect(computed.className).toBe('text-text-muted');
+    expect(computed.className).not.toMatch(/status/);
+    expect(popupValue(el, 'Forced by')?.textContent).toBe(
+      'Test Dispatcher — Receiver confirmed detention',
+    );
+  });
+});
+
+describe('the popup’s other lines on a live feed: as before', () => {
+  it('a fresh truck: its position, no Feed down line, Computed in the risk ink', () => {
+    const el = popup(live({ ...ON_A_LOAD, ...FORCED, recordedAt: before(2) }), false);
+    expect(popupValue(el, 'Position')?.textContent).toBe(WHERE);
+    expect(feedDownLines(el)).toEqual([]);
+    expect(el.textContent).not.toContain('Feed down');
+    const computed = popupValue(el, 'Computed')!.firstElementChild as HTMLElement;
+    expect(computed.className).toBe('text-status-risk-fg');
+  });
+
+  /** The one change on a live feed: what the row and the sheet already say. */
+  it('a truck whose own GPS is stale: "Last seen", and nothing else', () => {
+    const el = popup(live({ ...ON_A_LOAD, status: 'STALE_GPS', computed: 'STALE_GPS' }), false);
+    expect(popupValue(el, 'Position')?.textContent).toBe(`Last seen ${WHERE}`);
+    expect(feedDownLines(el)).toEqual([]);
+  });
+});
+
+describe('the popup and the sheet read the same', () => {
+  const cases: [string, FleetRowOver, boolean][] = [
+    ['dead feed, forced', { ...ON_A_LOAD, ...FORCED }, true],
+    ['dead feed, its own stale GPS', { ...ON_A_LOAD, status: 'STALE_GPS', computed: 'STALE_GPS' }, true],
+    ['dead feed, no fix', { ...ON_A_LOAD, ...FORCED, formattedLocation: null, cityState: null }, true],
+    ['live feed, forced', { ...ON_A_LOAD, ...FORCED, recordedAt: before(2) }, false],
+    ['live feed, its own stale GPS', { ...ON_A_LOAD, status: 'STALE_GPS', computed: 'STALE_GPS' }, false],
+  ];
+
+  it.each(cases)('%s: Position, the Feed down line, the Computed ink', (_name, over, feedStale) => {
+    const row = live(over);
+    const ours = popup(row, feedStale);
+    const theirs = sheet(row, feedStale);
+
+    expect(popupValue(ours, 'Position')?.textContent).toBe(
+      theirs.querySelector('[data-sheet-field="position"]')?.textContent,
+    );
+    expect(feedDownLines(ours).map((l) => l.outerHTML)).toEqual(
+      feedDownLines(theirs).map((l) => l.outerHTML),
+    );
+    expect(feedDownLines(ours)).toHaveLength(feedStale ? 1 : 0);
+    const ourComputed = popupValue(ours, 'Computed')?.firstElementChild ?? null;
+    const theirComputed = theirs.querySelector('[data-sheet-field="computed"] span');
+    expect(ourComputed?.className).toBe(theirComputed?.className);
+  });
+});
+
+/**
+ * One place for the wording: no file under src/components but MapPopup.tsx
+ * writes it, so a surface cannot drift to its own copy. Tests are left out;
+ * this one pins the words.
+ */
+it('the Feed down wording is written in MapPopup.tsx alone', () => {
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name) ? [path] : [];
+    });
+  }
+  const files = sources(join(process.cwd(), 'src/components')).map((f) =>
+    relative(process.cwd(), f),
+  );
+  expect(files.length).toBeGreaterThan(50);
+  expect(files.filter((f) => /Feed down: built on/.test(readFileSync(f, 'utf8')))).toEqual([
+    'src/components/console/map/MapPopup.tsx',
+  ]);
 });
