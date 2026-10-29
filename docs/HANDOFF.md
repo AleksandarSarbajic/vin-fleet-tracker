@@ -52,6 +52,9 @@ master was `9e688d8`. Its deploy is not checked here.
 **3aw: NOT pushed** (2026-10-29): the map popup's Position, Projected and
 Computed lines on a dead feed read as the phone sheet's (§12.146). See
 "Phase 3aw" below.
+**3ax: STOPPED after its first template, NOT pushed** (2026-10-29): a
+seventh template, `stop-detail`, committed; it changed an existing sample's
+score, the brief's gate, so the phase waits for Alex. See "Phase 3ax" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -9424,6 +9427,177 @@ then the file restored and checked with `cmp`:
 **Commits:** `6e69df2` (the popup and the sheet), `6e9f814` (the tests),
 and one docs commit (this section, 3av's list, the "What is live" line,
 design-spec §12.146). NOT pushed.
+
+### Phase 3ax: templates for the layouts that still go to the AI, stopped after the first (2026-10-29)
+
+From the advisor's brief: a template for each of six layouts that go to Read
+with AI, built in the order d7, d1, d6, d4, d5, d2. Local only: no AI call,
+no network, no paid call. **Stopped at the brief's gate after template 1:**
+the new template changed an existing sample's result (sample 17). **NOT
+pushed.** Built on `951815b`, which was `origin/master` at the start, with a
+clean tree. No change to the AI reader, redaction, the routes, the DB,
+migrations, the worker or env.
+
+**Commits:** `b1b23b7` (template 1, `stop-detail`: code, fixture, tests)
+and this docs commit. Design-spec §12.147 is not written yet: it lists the
+new layout ids, and the rule for a street on two lines depends on Alex's
+answers to questions 1 and 3.
+
+**The ten files.** Copied from Alex's new folder into
+`.samples/rate-confirmations/` as `zzz_3ax-d1.pdf` to `zzz_3ax-d10.pdf`, in
+the name order of `sampleFiles()`; his folder is untouched. They sort after
+every existing sample, so no number shifted. Name order puts d10 before d2,
+so the sample numbers are: d1 31, d10 32, d2 33, d3 34, d4 35, d5 36, d6 37,
+d7 38, d8 39, d9 40.
+
+**Ground truth.** Ten entries added to `expected.json` (git-ignored). The
+file as it was is beside it as `expected.json.before-3ax`; the old entries
+were compared and are unchanged. Written from the PDFs, each page looked at
+as an image; d1's from its OCR text, as 3ak did for sample 5. Priority 1 for
+d1, d2 and d4 to d7 (no template read them), 2 for d3, d8, d9 and d10.
+`ratecon:check-expected`: all ten complete. Judgment calls:
+
+- d6, stop 1: the street line goes on after a comma with "c/o" and the
+  stop's own name. The truth is the street without that.
+- d7, stop 2: the street wraps in its cell, and the PDF runs two of its
+  words together across the break. The truth has them apart, as a dispatcher
+  would type them (question 3).
+- d2, stop 2: "HH:MM - HH:MM" with no AM/PM, on a document that has AM/PM
+  elsewhere (a note and the signature's time). Couldn't read, with its date,
+  by the how-to's rule. The note gives a time too; notes are never read.
+- d3, stop 3: the street as printed, ending in a short unit word.
+
+**Per d-number:**
+
+- **d1: skipped.** Not a new layout: it is `stop-table`'s (3ak), recognised
+  by its header and refused. The one reason, found in a scratch run with no
+  code changed: stop 2's phone is printed as three groups separated by
+  spaces, a shape `TABLE.phone` does not accept, so where that street ends
+  is not known. With only that cell given dashes, the scratch run read all
+  of d1 with `stop-table`. Changing an existing template is outside this
+  phase (question 4). It stays on the AI.
+- **d7: built**, layout `stop-detail` (below).
+- **d6, d4, d5, d2: not built**: the phase stopped first. Their headings
+  were searched for in every sample's text layer: d6, d4 and d5 have no
+  older copy; d2's layout is also samples 7 and 11, so a d2 template meets
+  the same gate.
+
+**`stop-detail`** (`readStopDetail`, `templates.ts`):
+
+- **Recognised by** the page header "CARRIER RATE CONFIRMATION PAGE n of m",
+  "STOP DETAIL", and the table's header lines "Type … Name and Address …
+  Commodity … Reference #" and "Arrival … Departure … Dims". None is a
+  "label:" or a broker's name.
+- **Read by column.** Each cell belongs to the heading that starts nearest
+  to it: the address column is centred, the columns beside it are not.
+- **One row a stop.** PU or SO in the type column; under "Scheduled
+  Arrival" exactly "Arrival", M/D/YY and HH:MM, read as an appointment at
+  that time (24-hour by Route blocks' rule); "Scheduled Departure" must be
+  N/A. The address cell: the name's lines, then the street from its one line
+  that starts like a street, then "City, ST 12345" last.
+- **A street on two lines** is joined with a space and marked
+  (`WRAP_CHECK`).
+- **Stops:** the first must be PU and the last SO, read as the delivery. An
+  SO before the last is read as a delivery and says so: `STOP_OFF_CHECK`,
+  PU / SO blocks' message, now one constant for both (its text unchanged).
+- **The load number** is the one under "Load Confirmation", the same on
+  every page; one that differs leaves it blank with a check.
+- **Refused:** pasted text; a table that leaves its page; a stray line in
+  the type column; any other arrival or departure; a name that starts like a
+  street, two street-like lines, no name; a last line that is not a city
+  line, or a state that is not one; a city line in another column; a first
+  stop that is not PU or a last that is not SO.
+
+**The gate.** `ratecon:score`, its output saved before any change:
+
+- Before: the bar 15 of 15. With the ten truths, before any template: 19
+  of 19, and samples 1 to 30 identical line for line.
+- After template 1: 19 of 21, and sample 17's lines changed. That is the
+  stop.
+- **Samples 16 and 17 are older copies of d7's layout.** Both priority 1,
+  scored before as "ground truth for the AI evaluation only".
+  - Sample 17 is now read, 2 stops: load number, stop count, order and
+    type, ZIP, city, state and both appointments (exact) right; **both
+    streets FAIL**. Each is printed on two lines, the second its street-type
+    word. The template reads both lines, joined and marked; the truth has
+    the first line only (question 1).
+  - Sample 16 is recognised and refused, as before: its arrival is a window
+    (a time with " -", a second time below), a shape the template refuses
+    (question 5). Its score line is unchanged.
+- **d7 (sample 38):** read, 2 stops; every field right but stop 2's street,
+  filled as printed (the two words run together) and marked.
+- **Every other sample:** recognised layouts and read (layout, stop count,
+  load number filled or not) compared with HEAD's, scans read by OCR: only
+  samples 16, 17 and 38 changed.
+
+**The existing templates on d3, d8, d9 and d10:** each read by the template
+it matched (`route-blocks`, 3 stops; `stops-section`; `pu-so-blocks` twice).
+Every field right. Appointments, 9 stops: 5 exact, 4 marked and filled as
+the PDF says, none WRONG.
+
+**Tests.** Invented fixture `stopDetail` and `DETAIL_STOPS` in
+`src/test/ratecon-fixtures.ts`: no name, street, number or place from the
+real PDFs; only the printed headings are the layout's. 15 new in
+`templates.test.ts`: recognised as this layout only, and no other layout's
+fixture as it; the load number, agreeing and not; the stops and their
+sources; the wrapped street, marked; the time and the 24-hour rule; three
+stops and an SO before the last; the refusals above; pasted text; nothing
+of the name, commodity, weight, reference or rate in the read.
+
+**Mutations** (`templates.test.ts`), each applied alone and reverted:
+
+| Broken | Tests that fail |
+|---|---|
+| a name line required; one street-like line only | 1 each |
+| departure N/A; the word "Arrival"; three arrival cells | 1 each |
+| the wrap marked; the SO before the last marked | 1 each |
+| first stop PU; last stop SO | 1 each |
+| a US state; no city line in another column | 1 each |
+| the table on its page; only a heading ends it | 1 each |
+| the 24-hour rule; the load numbers agreeing | 1 each |
+| positions needed | 0 |
+
+Three first survived (a second street-like line, the word "Arrival", a
+first stop that is not PU): their tests refused for another reason, and a
+case for each was added. Positions needed is a second line of defence, as
+in 3aa and 3ak: pasted lines have no heading cells.
+
+**Checks.** `npm run check`: 216 files and 3954 tests (216 and 3939
+before). The forbidden-files grep printed nothing. Real data: 172 terms
+(the ten new truth entries' streets, cities, ZIPs and load numbers, the
+names in the ten PDFs, and samples 16 and 17's entries), 0 hits in the
+commit's added lines and in its message. E2e: not run, as the phase stopped
+before its end.
+
+**Found wrong in the brief:**
+
+1. d1 is not a new layout. It is `stop-table`'s, refused by one phone.
+   `readRatecon` says "not recognised" both when no layout matches and when
+   one matches and refuses; `recognisedLayouts` tells the two apart.
+2. "Each a different layout" holds among the ten, but d7's layout is also
+   samples 16 and 17, and d2's is also samples 7 and 11. A template that
+   reads an older copy of its own layout changes that sample's score line,
+   so the gate stops the phase even when the read is the point.
+3. The ten sort after every existing sample, as the brief says, but d10
+   sorts before d2: d-numbers and sample numbers do not run in step.
+
+**Questions for Alex:**
+
+1. Sample 17's truth gives both streets without their second printed line,
+   the street-type word. Correct the truth to the whole printed street (then
+   `stop-detail` reads sample 17 right), or read only a street's first line?
+   Recommended: correct the truth, and keep joining and marking.
+2. May a new template read older samples of its own layout (17 now; 7 and
+   11 for d2), each such sample's result reported, without stopping the
+   phase? If yes, the next session builds d6, d4, d5 and d2.
+3. d7, stop 2: the template fills the street as printed, two words run
+   together, and marks it; the truth has them apart, so that field fails the
+   bar. Keep the truth as a dispatcher types it, or write it as printed?
+4. d1: accept a phone printed as three groups separated by spaces in
+   `stop-table` (a change to an existing template), as a phase of its own,
+   or not?
+5. Sample 16's arrival is a window. Read it as one in `stop-detail` (sample
+   16 would then be scored), or keep refusing it?
 
 ## Next
 
