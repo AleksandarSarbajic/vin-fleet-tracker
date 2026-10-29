@@ -852,3 +852,97 @@ export const LOCATION_STOPS: LocationStop[] = [
   { kind: 'Pickup', name: ['Prairie Example Foods #12'], street: '4001 Main St', cityLine: 'Minot, ND 58701', when: '10/12/2026 14:00 - 10/12/2026 14:00' },
   { kind: 'Delivery', name: ['Harbor Cold', 'Annex B'], street: '880 Harbor View Pkwy', cityLine: 'Mandan, ND 58554', when: '10/14/2026 08:00 - 10/14/2026 09:30' },
 ];
+
+export interface RowStop {
+  type: 'Pickup' | 'Delivery';
+  name: string[];
+  street: string;
+  /** "MINOT, ND 58701". */
+  cityLine: string;
+  /** "10/12/26 6:00 AM". */
+  from: string;
+  to: string;
+}
+
+/**
+ * Phase 3ay. Stop rows: on every page "Load Confirmation and Rate Agreement"
+ * and the time it was made, the broker's contact lines and the carrier's
+ * address; page 1 the order number, the load's details, then a table under a
+ * header in three lines ("Stop / Pickup", "Type / Location / Notes",
+ * "Number / Time"). A stop is one row: the name, the street and the city line
+ * in the location column, the stop's number and type on the street's line
+ * with a blank value the layout prints as "null", and the from and to times
+ * in the time column, one on each side of that line. Full-width rows for the
+ * contact, notes and PO follow each stop. Then notes, and a footer with the
+ * order number and the page on every page. Only the printed headings are the
+ * layout's: every value is made up. ASCII only.
+ */
+export function stopRows(stops: RowStop[], options: { order?: string; footer?: string } = {}): TinyRun[][] {
+  const { order = '20517744' } = options;
+  const footer = options.footer ?? order;
+  const head = (): TinyRun[] => [
+    run(343, 770, 'Load Confirmation and Rate Agreement'),
+    run(420, 758, '10/01/26 9:15 AM'),
+    run(409, 746, 'Contact:'),
+    run(455, 746, 'Dana Example'),
+    run(416, 734, 'Phone:'),
+    run(455, 734, '555-010-0170'),
+    run(55, 710, 'Carrier:'),
+    run(97, 710, 'SAMPLE CARRIER LLC'),
+    run(97, 698, '100 EXAMPLE RD'),
+    run(97, 686, 'KEARNEY, NE 68847'),
+  ];
+  const foot = (page: number): TinyRun[] => [
+    run(71, 60, `Order #${footer}`),
+    run(542, 60, `Page ${page} of`),
+    run(584, 60, '2'),
+    run(74, 48, 'FOR YOUR NEXT LOAD PLEASE VISIT OUR SITE OR ASK FOR AN INVITE TO'),
+    run(136, 38, 'OUR MOBILE APP'),
+  ];
+  const first: TinyRun[] = [
+    ...head(),
+    run(98, 672, `Order # ${order}`),
+    run(110, 660, 'Trailer:'),
+    run(147, 660, "53' Van"),
+    run(90, 648, 'Commodity:'),
+    run(147, 648, 'GENERAL FREIGHT'),
+    run(38, 620, 'Stop'),
+    run(486, 620, 'Pickup'),
+    run(95, 612, 'Type'),
+    run(149, 612, 'Location / Notes'),
+    run(31, 604, 'Number'),
+    run(493, 604, 'Time'),
+  ];
+  let y = 590;
+  for (const [i, s] of stops.entries()) {
+    const cell = [...s.name, s.street, s.cityLine, 'Pickup#: 4100'];
+    const streetY = y - 10 * s.name.length;
+    cell.forEach((text, k) => first.push(run(144, y - 10 * k, text)));
+    first.push(
+      run(47, streetY, String(i + 1)),
+      run(s.type === 'Pickup' ? 92 : 86, streetY, s.type),
+      run(407, streetY, 'null'),
+      run(460, streetY + 5, s.from),
+      run(460, streetY - 5, s.to),
+    );
+    y -= 10 * cell.length + 4;
+    first.push(run(30, y, 'Contact: Dock 4'), run(150, y, '(555) 010-0171'), run(30, y - 12, 'NO TOUCH FREIGHT AT RECEIVER'), run(30, y - 24, 'PO: 4100'));
+    y -= 40;
+  }
+  first.push(run(30, y, 'FOR AFTER HOUR EMERGENCIES CALL THE EXAMPLE LINE'), run(30, y - 12, '-MUST BE ON TIME FOR APPOINTMENTS OR FCFS WINDOWS'), ...foot(1));
+  const second: TinyRun[] = [
+    ...head(),
+    run(30, 660, 'Example terms and conditions apply to this load.'),
+    run(19, 640, 'Carrier Pay Information:'),
+    run(255, 640, 'Carrier Freight Pay:'),
+    run(344, 640, '$1,500.00'),
+    ...foot(2),
+  ];
+  return [first, second];
+}
+
+/** A pickup whose name runs onto two lines, and a delivery: the two-stop table. */
+export const ROW_STOPS: RowStop[] = [
+  { type: 'Pickup', name: ['Prairie Example Foods', 'Plant 2'], street: '4001 Main St', cityLine: 'MINOT, ND 58701', from: '10/12/26 6:00 AM', to: '10/12/26 2:30 PM' },
+  { type: 'Delivery', name: ['Harbor Cold'], street: '880 Harbor View Pkwy', cityLine: 'MANDAN, ND 58554', from: '10/14/26 8:00 AM', to: '10/14/26 9:30 AM' },
+];

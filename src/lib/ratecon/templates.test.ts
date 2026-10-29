@@ -8,6 +8,7 @@ import {
   PU_SO,
   PU_SO_PASTED,
   ROUTE_STOPS,
+  ROW_STOPS,
   STOPS_SECTION,
   TABLE_MIDDLE,
   TABLE_STOPS,
@@ -17,12 +18,14 @@ import {
   puSoBlocks,
   routeBlocks,
   stopDetail,
+  stopRows,
   stopTable,
   type ColumnsStop,
   type DetailStop,
   type DropStop,
   type LocationStop,
   type RouteStop,
+  type RowStop,
   type TableStop,
 } from '@/test/ratecon-fixtures';
 import type { TinyRun } from '@/test/tiny-pdf';
@@ -1081,6 +1084,127 @@ describe('Location blocks (3ay)', () => {
   it('never carries a name, a phone, the commodity, a PO, the rate or the carrier into what it read', () => {
     const said = JSON.stringify(r);
     for (const never of ['Prairie', 'Harbor Cold', 'Annex', '(555)', 'Commodity', 'PO #', '1500', 'Sample Carrier', 'Dana']) {
+      expect(said).not.toContain(never);
+    }
+  });
+});
+
+describe('Stop rows (3ay)', () => {
+  const NOT = { ok: false, reason: 'not-recognised' };
+  type Options = Parameters<typeof stopRows>[1];
+  const doc = (stops: RowStop[] = ROW_STOPS, options?: Options) => lines(stopRows(stops, options));
+  const r = read(readRatecon(doc()));
+  const stop = (i: number, patch: Partial<RowStop>): RowStop[] => ROW_STOPS.map((s, k) => (k === i ? { ...s, ...patch } : s));
+  /** Every run of one text replaced, on every page. */
+  const edited = (from: string, to: string, stops: RowStop[] = ROW_STOPS) =>
+    lines(stopRows(stops).map((p) => p.map((run) => (run.text === from ? { ...run, text: to } : run))));
+  /** A run added to a page. */
+  const withRun = (x: number, y: number, text: string, page = 0) => lines(stopRows(ROW_STOPS).map((p, i) => (i === page ? [...p, { x, y, text }] : p)));
+  /** The fixture's rows: stop 1's name at 590, its street and number at 570, its city at 560. */
+  const Y = { street1: 570 };
+
+  it('is recognised as this layout only, and recognises no other layout', () => {
+    expect(recognisedLayouts(doc())).toEqual(['stop-rows']);
+    expect(
+      [
+        lines(LABEL_ROWS), lines(STOPS_SECTION), lines(puSoBlocks(PU_SO)), lines(pickupDeliveryColumns(COLUMNS_STOPS)), lines(routeBlocks(ROUTE_STOPS)),
+        lines(stopTable(TABLE_STOPS)), lines(stopDetail(DETAIL_STOPS)), lines(pickupDropBlocks(DROP_STOPS)), lines(locationBlocks(LOCATION_STOPS)),
+      ].map((o) => recognisedLayouts(o)),
+    ).toEqual([
+      ['label-rows'], ['stops-section'], ['pu-so-blocks'], ['pickup-delivery-columns'], ['route-blocks'], ['stop-table'], ['stop-detail'], ['pickup-drop-blocks'], ['location-blocks'],
+    ]);
+  });
+
+  it('reads the "Order #" number, the same on every page, as the load number', () => {
+    expect(r.layout).toBe('stop-rows');
+    expect(r.loadNumber).toEqual({ value: '20517744', source: { text: 'Order # 20517744', page: 1 } });
+    expect(r.loadNumberCheck).toBeNull();
+    const differs = read(readRatecon(doc(ROW_STOPS, { footer: '20517745' })));
+    expect(differs.loadNumber).toBeNull();
+    expect(differs.loadNumberCheck).toBe('More than one number is after “Order #”: “20517744”, “20517745”.');
+  });
+
+  it('reads each row: its number and type, the street after the name’s lines, then the city line', () => {
+    expect(summary(r)).toEqual([
+      ['PU', '4001 Main St', 'MINOT', 'ND', '58701'],
+      ['DEL', '880 Harbor View Pkwy', 'MANDAN', 'ND', '58554'],
+    ]);
+    const s = r.stops[0]!;
+    expect([s.type.source, s.street?.source, s.city?.source]).toEqual([
+      { text: '1 Pickup', page: 1 },
+      { text: '4001 Main St', page: 1 },
+      { text: 'MINOT, ND 58701', page: 1 },
+    ]);
+    expect(r.stops.every((x) => x.typeCheck === null && x.fieldChecks === undefined)).toBe(true);
+  });
+
+  it('reads the two times as a window, AM and PM as printed; the window rules decide the rest', () => {
+    expect(r.stops[0]!.time).toEqual({
+      kind: 'range', date: '2026-10-12', time: '06:00', endDate: '2026-10-12', endTime: '14:30', flag: null,
+      source: { text: '10/12/26 6:00 AM · 10/12/26 2:30 PM', page: 1 },
+    });
+    expect(r.stops[1]!.time).toMatchObject({ kind: 'range', time: '08:00', endTime: '09:30' });
+    const noon = read(readRatecon(doc(stop(1, { from: '10/14/26 12:00 PM', to: '10/14/26 12:00 PM' }))));
+    expect(noon.stops[1]!.time).toMatchObject({ kind: 'exact', date: '2026-10-14', time: '12:00' });
+    expect(read(readRatecon(doc(stop(1, { from: '10/14/26 12:30 AM', to: '10/14/26 1:00 AM' })))).stops[1]!.time).toMatchObject({ time: '00:30', endTime: '01:00' });
+  });
+
+  it('reads three rows, in order', () => {
+    const middle: RowStop = { type: 'Delivery', name: ['North Yard'], street: '77 Depot Ave', cityLine: 'HASTINGS, NE 68901', from: '10/13/26 6:00 PM', to: '10/13/26 7:00 PM' };
+    expect(summary(read(readRatecon(doc([ROW_STOPS[0]!, middle, ROW_STOPS[1]!])))).map((x) => [x[0], x[2]])).toEqual([['PU', 'MINOT'], ['DEL', 'HASTINGS'], ['DEL', 'MANDAN']]);
+  });
+
+  it('refuses times that are not two, or in another shape', () => {
+    const one = stopRows(ROW_STOPS).map((p) => p.filter((run) => run.text !== '10/12/26 2:30 PM'));
+    expect(readRatecon(lines(one))).toEqual(NOT);
+    expect(readRatecon(edited('10/12/26 2:30 PM', '10/12/26 14:30'))).toEqual(NOT);
+    expect(readRatecon(edited('10/12/26 2:30 PM', '10/12/2026 2:30 PM'))).toEqual(NOT);
+    expect(readRatecon(withRun(460, Y.street1 - 15, '10/12/26 4:00 PM'))).toEqual(NOT);
+  });
+
+  it('refuses a value beside the row other than the blank "null"', () => {
+    expect(readRatecon(edited('null', 'APPT'))).toEqual(NOT);
+  });
+
+  it('refuses a location without one city line, a street that does not start like one or is not followed by it, no name, or a name that starts like one', () => {
+    expect(readRatecon(edited('MANDAN, ND 58554', 'MANDAN ND'))).toEqual(NOT);
+    expect(readRatecon(edited('Pickup#: 4100', 'AMES, IA 50010'))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { street: 'Harbor View Pkwy' })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { cityLine: 'MANDAN, NX 58554' })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { name: [] })))).toEqual(NOT);
+    expect(readRatecon(doc(stop(1, { name: ['12 Example Yard'] })))).toEqual(NOT);
+    // A line between the street and the city line.
+    expect(readRatecon(withRun(144, Y.street1 - 5, 'Bldg 4'))).toEqual(NOT);
+  });
+
+  it('refuses rows out of order, a first that is not a pickup, or a last that is not a delivery', () => {
+    expect(readRatecon(edited('2', '3'))).toEqual(NOT);
+    expect(readRatecon(doc([ROW_STOPS[1]!, ROW_STOPS[0]!, ROW_STOPS[1]!]))).toEqual(NOT);
+    expect(readRatecon(doc([ROW_STOPS[0]!, ROW_STOPS[1]!, ROW_STOPS[0]!]))).toEqual(NOT);
+  });
+
+  it('refuses a stop on another page, a line between the rows that is not a full-width row, or a time or address after them', () => {
+    expect(readRatecon(withRun(47, 600, '3  Delivery', 1))).toEqual(NOT);
+    // Between stop 1's contact row (536) and its notes row (524). A line just above a name is the name's.
+    expect(readRatecon(withRun(144, 530, 'SEE ATTACHED'))).toEqual(NOT);
+    expect(readRatecon(withRun(460, 100, '10/15/26 8:00 AM'))).toEqual(NOT);
+    expect(readRatecon(withRun(144, 100, 'AMES, IA 50010'))).toEqual(NOT);
+  });
+
+  it('is not recognised without a line of its header', () => {
+    expect(recognisedLayouts(edited('Location / Notes', 'Location'))).toEqual([]);
+    expect(recognisedLayouts(edited('Load Confirmation and Rate Agreement', 'Load Confirmation'))).toEqual([]);
+  });
+
+  it('does not read the same document pasted as text: its columns cannot be told apart', () => {
+    const pasted = linesFromText(doc().map((l) => l.text).join('\n'));
+    expect(recognisedLayouts(pasted)).toEqual(['stop-rows']);
+    expect(readRatecon(pasted)).toEqual(NOT);
+  });
+
+  it('never carries a name, a phone, a PO, a note, the rate or the carrier into what it read', () => {
+    const said = JSON.stringify(r);
+    for (const never of ['Prairie', 'Harbor Cold', '(555)', '4100', 'NO TOUCH', '1,500', 'SAMPLE', 'Dana', '"null"']) {
       expect(said).not.toContain(never);
     }
   });

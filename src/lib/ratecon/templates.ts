@@ -31,6 +31,7 @@ export type LayoutId =
   | 'stop-detail'
   | 'pickup-drop-blocks'
   | 'location-blocks'
+  | 'stop-rows'
   | 'model';
 
 export const LAYOUT_NAME: Record<LayoutId, string> = {
@@ -43,6 +44,7 @@ export const LAYOUT_NAME: Record<LayoutId, string> = {
   'stop-detail': 'a Stop Detail table (Type, Scheduled Arrival, Name and Address)',
   'pickup-drop-blocks': 'Pickup / Drop blocks (the address beside Earliest and Latest)',
   'location-blocks': 'Pick Up / Delivery Location blocks (the address beside its dates and times)',
+  'stop-rows': 'stop rows (Stop Number, Type, Location / Notes, Pickup Time)',
   model: 'an AI read',
 };
 
@@ -1439,6 +1441,154 @@ function readLocationBlocks(lines: Line[]): RateconRead {
   };
 }
 
+/* -------------------------------- Stop rows (3ay) -------------------------------- */
+
+/**
+ * "Load Confirmation and Rate Agreement" on every page, "Order # <n>" on
+ * page 1 and again in each page's footer, and the stops in a table under a
+ * header of three lines:
+ *
+ *     Stop                                                   Pickup
+ *              Type    Location / Notes
+ *     Number                                                 Time
+ *
+ * A stop is one row. The location column holds the facility's name on one
+ * line or more, the street, the city line ("CITY, ST 12345"), then lines not
+ * read. The stop's number and type (Pickup or Delivery) are on one line of
+ * the row, with nothing after them but a blank value the layout prints as
+ * "null"; the time column holds two times ("MM/DD/YY H:MM AM"). Full-width
+ * rows follow a stop (its contact, notes, PO): a line that starts left of the
+ * location column and is not a stop's ends a row.
+ *
+ * Read by column, so it needs a PDF's positions: pasted text is not read.
+ * A cell belongs to the heading that starts nearest to it.
+ *
+ * The time runs from the first time to the second, and the fill's window
+ * rules decide what that is; the same twice is one time. AM and PM are
+ * printed, so no 24-hour rule is needed. The load number is the one after
+ * "Order #", the same everywhere it is printed; one that differs leaves it
+ * blank with a check.
+ *
+ * Strict, because a wrong stop is worse than none: a stop's line anywhere
+ * but in this table on its page; stops not numbered 1, 2, 3…; a value beside
+ * a row other than "null" (it is one more time or location line); times that
+ * are not two, or in another shape; a location without exactly one city
+ * line, or a state that is not one; no name, a name line that starts like a
+ * street, a street that does not, or a street not followed by the city line;
+ * lines between the rows other than full-width ones; a time or a city line
+ * after the last row; a first stop that is not a pickup or a last that is not
+ * a delivery — and nothing is read.
+ */
+const ROWS = {
+  recognise: [/^Load Confirmation and Rate Agreement$/, /^Stop\s+Pickup$/, /^Type\s+Location \/ Notes$/, /^Number\s+Time$/],
+  number: /^\d{1,2}$/,
+  type: /^(Pickup|Delivery)$/,
+  /** A stop's line, by its text: wherever it is, it must be one of this table's. */
+  stopLine: /^\d{1,2}\s+(?:Pickup|Delivery)\b/,
+  stamp: /^(\d{2})\/(\d{2})\/(\d{2}) (\d{1,2}:\d{2} [AP]M)$/,
+  place: /^(.+), ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
+  order: /^Order #\s?([A-Za-z0-9][A-Za-z0-9-]*)$/,
+};
+
+/** "MM/DD/YY H:MM AM": the date, and the time from its AM or PM. */
+function rowStamp(text: string): Stamp {
+  const m = ROWS.stamp.exec(text)!;
+  const [mo, d, y] = [Number(m[1]), Number(m[2]), 2000 + Number(m[3])];
+  const c = clock12(m[4]!);
+  return { date: validDate(y, mo, d) ? iso(y, mo, d) : null, time: c ? hhmm(c.h, c.m) : null };
+}
+
+function readStopRows(lines: Line[]): RateconRead {
+  const refuse: RateconRead = { layout: 'stop-rows', loadNumber: null, loadNumberCheck: null, stops: [] };
+  if (lines.some((l) => l.page === null || l.cells.some((c) => c.x === null))) return refuse;
+
+  const heads = lines.flatMap((l, i) => (ROWS.recognise[2]!.test(l.text) ? [i] : []));
+  if (heads.length !== 1) return refuse;
+  const [above, header, below] = [lines[heads[0]! - 1], lines[heads[0]!]!, lines[heads[0]! + 1]];
+  if (!above || !below || above.page !== header.page || below.page !== header.page) return refuse;
+  if (!ROWS.recognise[1]!.test(above.text) || !ROWS.recognise[3]!.test(below.text)) return refuse;
+  const find = (line: Line, text: string) => line.cells.find((c) => c.text === text)?.x ?? null;
+  const xs = [find(below, 'Number'), find(header, 'Type'), find(header, 'Location / Notes'), find(above, 'Pickup')];
+  if (xs.some((x) => x === null)) return refuse;
+  const headings = (['number', 'type', 'location', 'time'] as const).map((column, k) => ({ column, x: xs[k]! }));
+  const column = (cell: Line['cells'][number]) =>
+    headings.reduce((a, b) => (Math.abs(cell.x! - b.x) < Math.abs(cell.x! - a.x) ? b : a)).column;
+  const isStop = (l: Line) =>
+    l.cells.length >= 3 &&
+    column(l.cells[0]!) === 'number' && ROWS.number.test(l.cells[0]!.text) &&
+    column(l.cells[1]!) === 'type' && ROWS.type.test(l.cells[1]!.text) &&
+    column(l.cells[2]!) === 'location';
+
+  // Every stop's line in the document is this table's, on its page.
+  const stopAt = lines.flatMap((l, i) => (ROWS.stopLine.test(l.text) ? [i] : []));
+  if (stopAt.length === 0 || stopAt.some((i) => i < heads[0]! + 2 || lines[i]!.page !== header.page || !isStop(lines[i]!))) return refuse;
+
+  // The rows: the page's lines after the header, split where a line starts left of the location column.
+  const parts: Line[][] = [[]];
+  for (let i = heads[0]! + 2; i < lines.length && lines[i]!.page === header.page; i += 1) {
+    const l = lines[i]!;
+    const first = column(l.cells[0]!);
+    if ((first === 'number' || first === 'type') && !isStop(l)) parts.push([]);
+    else parts.at(-1)!.push(l);
+  }
+  const filled = parts.filter((p) => p.length > 0);
+  const last = filled.map((p) => p.some(isStop)).lastIndexOf(true);
+  const rows = filled.slice(0, last + 1);
+  if (rows.some((p) => p.filter(isStop).length !== 1)) return refuse;
+  // After the last row, nothing a stop is made of: no time, no city line.
+  if (filled.slice(last + 1).some((p) => p.some((l) => l.cells.some((c) => ROWS.stamp.test(c.text) || cityLine(c.text))))) return refuse;
+
+  const stops: StopRead[] = [];
+  for (const [k, row] of rows.entries()) {
+    const line = row.find(isStop)!;
+    const [number, type] = line.cells;
+    if (Number(number!.text) !== k + 1) return refuse;
+    // The blank the layout prints as "null" on the stop's line is no value. Anything else there is one
+    // more time or location line, and is refused below.
+    const of = (where: string) => row.flatMap((l) => l.cells.filter((c) => column(c) === where && !(l === line && c.text === 'null')).map((c) => c.text));
+    const times = of('time');
+    if (times.length !== 2 || !times.every((t) => ROWS.stamp.test(t))) return refuse;
+    const cell = of('location');
+    const placeAt = cell.flatMap((t, i) => (ROWS.place.test(t) || cityLine(t) ? [i] : []));
+    if (placeAt.length !== 1 || placeAt[0]! < 2) return refuse;
+    const placeText = cell[placeAt[0]!]!;
+    const place = ROWS.place.exec(placeText);
+    const street = cell[placeAt[0]! - 1]!;
+    if (!place || !US.has(place[2]!) || !startsLikeStreet(street) || cell.slice(0, placeAt[0]! - 1).some((t) => startsLikeStreet(t))) return refuse;
+
+    const at = (text: string): Source => ({ text, page: line.page });
+    stops.push({
+      type: { value: type!.text === 'Pickup' ? 'PU' : 'DEL', source: at(`${number!.text} ${type!.text}`) },
+      typeCheck: null,
+      street: { value: street, source: at(street) },
+      city: { value: place[1]!, source: at(placeText) },
+      state: { value: place[2]!, source: at(placeText) },
+      zip: { value: place[3]!, source: at(placeText) },
+      time: stampedTime(rowStamp(times[0]!), rowStamp(times[1]!), at(times.join(' · '))),
+    });
+  }
+  if (stops[0]!.type.value !== 'PU' || stops.at(-1)!.type.value !== 'DEL') return refuse;
+
+  const orders = lines.flatMap((l) =>
+    l.cells.flatMap((c) => {
+      const m = ROWS.order.exec(c.text);
+      return m ? [{ value: m[1]!, source: { text: c.text, page: l.page } }] : [];
+    }),
+  );
+  const distinct = new Set(orders.map((x) => x.value));
+  const loadNumber = distinct.size === 1 ? orders[0]! : null;
+  return {
+    layout: 'stop-rows',
+    loadNumber,
+    loadNumberCheck: loadNumber
+      ? null
+      : distinct.size > 1
+        ? `More than one number is after “Order #”: ${[...distinct].map((x) => `“${x}”`).join(', ')}.`
+        : 'No number after “Order #”.',
+    stops,
+  };
+}
+
 /* -------------------------------- choose -------------------------------- */
 
 const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => RateconRead }[] = [
@@ -1451,6 +1601,7 @@ const LAYOUTS: { id: LayoutId; labels: RegExp[]; read: (lines: Line[]) => Rateco
   { id: 'stop-detail', labels: DETAIL.recognise, read: readStopDetail },
   { id: 'pickup-drop-blocks', labels: DROP.recognise, read: readPickupDrop },
   { id: 'location-blocks', labels: LOCATION.recognise, read: readLocationBlocks },
+  { id: 'stop-rows', labels: ROWS.recognise, read: readStopRows },
 ];
 
 /** Which layouts have every one of their labels here. */
