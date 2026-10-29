@@ -44,6 +44,9 @@ position on /assignments. Seven assignments baselines differ and none is
 re-saved; the advisor reviews the images first. See "Phase 3ap" below.
 **3ap follow-up (2026-10-28):** the picker capped at 300 (Alex), and all 8
 assignments baselines re-saved and committed. Still NOT pushed.
+**3av: NOT pushed** (2026-10-29): one helper for the status chip's props,
+and the map popup's chip withdraws its colour on a stale feed (§5.9). See
+"Phase 3av" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -8733,7 +8736,9 @@ partly at 1024. That is what answer 1 fixes.
 
 **Later, own phase (not now):**
 - `MapPopup.tsx:218` does not withdraw colour on a stale feed (§5.9).
+  Done in 3av (`4415dbf`): the popup takes `feedStale`.
 - One shared helper for the chip's props, which are built in four places.
+  Done in 3av (`4415dbf`): `chipProps`, at all five sites.
 
 **The cap** (`c829e86`). In `COLUMNS` the picker is `minmax(240px,300px)`,
 in both the four-column template (below 840) and the five-column one. The
@@ -9129,6 +9134,163 @@ bins, the replay's arithmetic and the two tails.
 **Commits:** `9fb2d97` (`eta-trips.mts`, the refactor), `c7d0624` (the
 report, its module, tests and `npm run eta:stops`), and one docs commit
 (this section). NOT pushed. No design-spec change.
+
+### Phase 3av: the map popup withdraws colour on a stale feed; one helper for the chip's props (2026-10-29)
+
+From the advisor's brief, out of 3ap's "Later, own phase". A small console
+fix. **NOT pushed, NOT deployed.** Built on `a0df574`. No change to the
+status engine (`src/lib/status.ts`), the server, the fleet query, the
+worker, migrations, env or tokens. No design-spec change: no rule changed.
+
+**The bug.** `MapPopup.tsx:218` drew `status={row.status}` and
+`forced={row.override !== null}`, and the popup had no `feedStale`. On a
+dead feed it could show a green "On time", or a forced "Late", over a row
+showing the dotted Stale GPS. `FleetMap` had `feedStale` (`FleetMap.tsx:70`)
+and did not pass it.
+
+**The four copies, checked against each other before the merge.** They
+agreed in behaviour:
+- `TruckRow.tsx:780` and `PhoneCardList.tsx:123` (`ChipFlip`),
+  `TruckSheet.tsx:90` (`StatusChip`) and Currently's `consoleChip`
+  (`Currently.tsx:31`), all three props:
+  - status: `feedStale ? 'STALE_GPS' : row.status`;
+  - forced: `!feedStale && row.override !== null`;
+  - label: the fix's age when the feed or the truck is stale; else the day
+    of an upcoming load; else none.
+- The `!feedStale &&` before TOMORROW (TruckRow `:786`, PhoneCardList
+  `:128`) sat in the branch where `stale` is false, so the feed was already
+  fresh there. It changed nothing; TruckSheet and Currently do not have it.
+- The age's reference: TruckRow's `reference` (`:462`) is
+  `fetchedAt ? new Date(fetchedAt) : undefined`, the expression the other
+  three write inline. TruckSheet's `age` uses the same (`:60`).
+- So no copy differed, and nothing was chosen between them.
+
+**The popup differed in a second way**, which the brief did not name. On a
+FRESH feed, a truck whose own status is Stale GPS got no label (only
+TOMORROW had one), so its popup chip said "Stale GPS" while its row said
+the age, "2h 40m". §5.1 gives Stale GPS one chip word everywhere: the
+elapsed age. With the helper the popup prints the age too. That is the one
+visible change on a fresh feed, where the brief expected none. It is a
+§5.1 fix; question 1. No baseline holds it (e2e below).
+
+**What was built** (`4415dbf`).
+- `src/components/console/chip-props.ts`, new: `chipProps(row, feedStale,
+  fetchedAt)` returns `{ status, forced, label }`. It is `consoleChip`'s
+  logic and doc comment, moved. The third argument is `fetchedAt`, the
+  poll's instant as the sites hold it, rather than a `Date`: the helper
+  makes the reference as every copy did.
+- Used at all five sites, spread into the chip:
+  - `TruckRow.tsx:779` (`ChipFlip`). Its `reference` local, used only by
+    the chip, is gone.
+  - `PhoneCardList.tsx:120` (`ChipFlip`). Its `stale` local, used only by
+    the chip, is gone.
+  - `TruckSheet.tsx:90` (`StatusChip`). `stale` and `age` stay: the
+    Position and GPS age lines use them.
+  - `Currently.tsx:47`. `consoleChip` and `ConsoleChip` are removed; nothing
+    else imported them. The parity test in `Currently.test.tsx` still
+    renders the console's row beside the cell and compares the two chips.
+  - `MapPopup.tsx:227` (`StatusChip`).
+- `MapPopup` takes `feedStale: boolean`, required (`MapPopup.tsx:149`).
+  `FleetMap.tsx:473` passes it. The one other caller,
+  `two-stop-surfaces.test.tsx`, passes `false`; that test was always a
+  fresh feed. The typecheck named it.
+
+**geo.ts is left as it was** (`geo.ts:30` and `:66`). The markers take the
+status alone, with no "forced" and no label. `chipProps(…).status` would
+build an age for every marker on every render for nothing, and `:66` needs
+its own change, so it is not one line. The guard allows geo.ts by name.
+Also left, the same rule for something that is not a chip: the row's
+stripe, `TruckRow.tsx:593` (`feedStale ? RAIL.STALE_GPS : RAIL[row.status]`).
+The guard's pattern does not match it.
+
+**Tests** (`726fd68`). 214 files / 3,884 → 216 / 3,926 (+42). Every instant
+is derived from the run's own clock; the ages are offsets from it.
+- `src/components/console/chip-props.test.ts`, 23:
+  - a stale feed: each of the 8 statuses becomes the dotted Stale GPS with
+    the fix's age, not forced; an override is not forced; an upcoming load
+    (tomorrow, and a later day) gets the age, not the day; no fix keeps the
+    word;
+  - a fresh feed: a truck's own Stale GPS shows its age ("2h 40m"); an
+    upcoming load shows "Tomorrow", or the weekday and date (worked out
+    with `Intl.DateTimeFormat`, not by `upcomingLabel`); no day, no label;
+    an override is forced and keeps its status; the other five statuses
+    are plain;
+  - the age is measured from the poll's instant: with the clock moved five
+    hours on, it still reads "48m";
+  - the guard: no file under `src/components` but `chip-props.ts` and
+    `map/geo.ts` matches `/feedStale\s*\?\s*['"`]STALE_GPS['"`]/`. It
+    expects exactly those two, so the regex is shown to match. A regex, so
+    the test file does not contain what it looks for.
+- `src/components/console/map/MapPopup.test.tsx`, 19:
+  - a stale feed: On time, and a forced Late, each give a chip equal to
+    `<StatusChip status="STALE_GPS" label="48m" />`: dotted, "48m", no
+    hand (the override glyph), no "forced", not its own colour; an upcoming
+    load shows the age;
+  - a fresh feed, as before: "On time"; "Late · forced" with the hand;
+    "Tomorrow"; and a truck's own Stale GPS: its age (the change above);
+  - the popup's chip equals the console row's in 12 cases (each status,
+    upcoming with and without a day, forced, own Stale GPS, and three with
+    the feed stale).
+
+**Mutations.** Each was applied alone, the chip suites run
+(`chip-props`, `MapPopup`, `Currently`, the phone suites,
+`two-stop-surfaces`), then the file restored and checked with `cmp`:
+
+| Mutation | Result |
+|---|---|
+| The popup ignores `feedStale` (`chipProps(row, false, …)`) | 6 failed; the received chip was the green "On time" |
+| `forced` without `!feedStale` | 2 failed |
+| The day before the age (TOMORROW checked first) | 2 failed |
+| A site back to its inline copy (`TruckRow.tsx` restored from `a0df574`) | 1 failed: the guard, naming `TruckRow.tsx` |
+
+**e2e.**
+- Which baselines show the popup or a stale feed: `desktop-baseline` only.
+  - `4-selected-with-popup-*` (6 page shots, 6 popup shots) is truck 101 on
+    a FRESH feed (positions re-stamped 90s old), with an upcoming load. Its
+    chip, "Tue 6/4", comes out of the helper unchanged.
+  - `3-feed-down-*` (6) is the stale feed with no popup open. The rows'
+    chips were already withdrawn there.
+  - So no baseline shows a popup on a stale feed, or a popup for a truck
+    whose own GPS is stale. Zero diffs were expected.
+- `assignments-baseline` too: Currently is one of the five sites (its own
+  Stale GPS chip, "2d").
+- `npm run e2e -- --project=chromium desktop-baseline assignments-baseline
+  feed.spec map-popup /phone.spec --update-snapshots=none` (run
+  `2026-10-29T16-40-18-096Z`, on `726fd68`): **62 passed** in 7.2 min
+  (setup 1, assignments-baseline 8, desktop-baseline 12, feed 2,
+  map-popup 14, phone 25).
+  - No `-diff.png` or `-actual.png` in the run's folder. No baseline was
+    re-saved; `git status` was clean afterwards. No hosted-auth stall.
+
+**Found wrong in the brief or the design:**
+- "No visual change on a fresh feed anywhere": there is one, the popup's
+  own Stale GPS chip (above, question 1).
+- "TruckRow's `reference` vs `fetchedAt`": the same instant (above).
+- Found, not changed (the brief fenced it out): the popup's other lines on
+  a stale feed, against §5.9:
+  - `MapPopup.tsx:231`, Position: the whole string, with no "Last seen"
+    and no "frozen". The list's head says "Position (frozen)"
+    (`FleetList.tsx:200`); the phone sheet says "Last seen"
+    (`TruckSheet.tsx:146`).
+  - `MapPopup.tsx:256`, Projected: the full line ("412 mi · ETA 14:18 CDT
+    · …"). §5.9 says every ETA cell reads "stale"; the row's does. The
+    phone sheet keeps the ETA and adds "Feed down: built on positions we
+    no longer trust." (`TruckSheet.tsx:123`).
+  - `MapPopup.tsx:295`: "Computed" (in the at-risk amber) and "Forced by"
+    still show, under a chip that no longer says "forced".
+
+**Questions for Alex:**
+1. On a working feed, the popup's chip for a truck whose own GPS is stale
+   now shows its age ("2h 40m"), as its row and the phone already do
+   (§5.1), instead of the words "Stale GPS". Keep it? The popup's "GPS
+   age" line also shows the age, so the popup now says it twice.
+2. The popup's Position, Projected and Computed/Forced-by lines on a dead
+   feed (above): fix them in their own small phase, to match the phone
+   sheet?
+
+**Commits:** `4415dbf` (the helper and the five sites), `726fd68` (the
+tests), and one docs commit (this section, 3ap's "Later" list, the "What
+is live" line). NOT pushed.
 
 ## Next
 
