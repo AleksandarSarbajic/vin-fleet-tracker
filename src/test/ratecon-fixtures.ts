@@ -575,6 +575,8 @@ export interface DetailStop {
   /** Under "Scheduled Arrival", after the word "Arrival": "10/12/26", "14:30". */
   date: string;
   time: string;
+  /** A window's end: the time is then printed "14:30 -", and this under it. */
+  until?: string;
   /** Under "Scheduled Departure", line by line; "N/A" when not given. */
   departure?: string[];
 }
@@ -653,7 +655,9 @@ export function stopDetail(stops: DetailStop[], options: { loadNumber?: string; 
   ];
   let y = 580;
   for (const [i, s] of stops.entries()) {
-    second.push(run(22, y, s.type), run(59, y, 'Arrival'), run(59, y - 10, s.date), run(59, y - 20, s.time));
+    second.push(run(22, y, s.type), run(59, y, 'Arrival'), run(59, y - 10, s.date));
+    if (s.until) second.push(run(59, y - 20, `${s.time} -`), run(59, y - 40, s.until));
+    else second.push(run(59, y - 20, s.time));
     (s.departure ?? ['N/A']).forEach((text, k) => second.push(run(109, y - 10 * k, text)));
     s.cell.forEach((text, k) => second.push(run(centred(text), y - 15 * k, text)));
     second.push(

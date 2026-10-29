@@ -705,6 +705,38 @@ describe('Stop detail (3ax)', () => {
     expect(read(readRatecon(ampm)).stops[1]!.time).toMatchObject({ kind: 'unreadable', date: '2026-10-14', quoted: '10/14/26 10:00' });
   });
 
+  it('reads a window, "HH:MM -" over a second time, as a window on that date; the window rules decide the rest', () => {
+    const window = read(readRatecon(doc(stop(0, { time: '06:00', until: '14:00' }))));
+    expect(window.stops[0]!.time).toEqual({
+      kind: 'range', date: '2026-10-12', time: '06:00', endDate: '2026-10-12', endTime: '14:00', flag: null,
+      source: { text: 'Arrival · 10/12/26 · 06:00 - · 14:00', page: 2 },
+    });
+    expect(summary(window)).toEqual(summary(r));
+    // An end before its start is read as written: the fill blanks it and says so.
+    expect(read(readRatecon(doc(stop(0, { time: '22:00', until: '06:00' })))).stops[0]!.time).toMatchObject({
+      kind: 'range', date: '2026-10-12', time: '22:00', endDate: '2026-10-12', endTime: '06:00',
+    });
+  });
+
+  it('reads a window by the 24-hour rule too: either end unclear, and it is quoted', () => {
+    const ampm = (pages: ReturnType<typeof stopDetail>) =>
+      lines(pages.map((p, i) => (i === 2 ? [...p, { x: 20, y: 600, text: 'Office hours 8 AM to 5 PM' }] : p)));
+    expect(read(readRatecon(ampm(stopDetail(stop(0, { time: '09:00', until: '11:00' }))))).stops[0]!.time).toMatchObject({
+      kind: 'unreadable', date: '2026-10-12', quoted: '10/12/26 09:00 - 11:00',
+    });
+    expect(read(readRatecon(doc(stop(0, { time: '09:00', until: '11:00' })))).stops[0]!.time).toMatchObject({ kind: 'range', endTime: '11:00' });
+  });
+
+  it('refuses a window of any other shape: no end, an end with a date, a start without its dash', () => {
+    const windowed = stopDetail(stop(0, { time: '06:00', until: '14:00' }));
+    const noEnd = windowed.map((p) => p.filter((run) => run.text !== '14:00'));
+    expect(readRatecon(lines(noEnd))).toEqual(NOT);
+    const dated = windowed.map((p, i) => (i === 1 ? [...p, { x: 59, y: 550, text: '10/13/26' }] : p));
+    expect(readRatecon(lines(dated))).toEqual(NOT);
+    const noDash = windowed.map((p) => p.map((run) => (run.text === '06:00 -' ? { ...run, text: '06:00' } : run)));
+    expect(readRatecon(lines(noDash))).toEqual(NOT);
+  });
+
   it('reads three stops; an SO before the last is read as a delivery and says so', () => {
     const middle: DetailStop = { type: 'SO', cell: ['NORTH YARD', '77 Depot Ave', 'Hastings, NE 68901'], date: '10/13/26', time: '18:00' };
     const three = read(readRatecon(doc([DETAIL_STOPS[0]!, middle, DETAIL_STOPS[1]!])));

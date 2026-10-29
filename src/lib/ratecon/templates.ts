@@ -979,7 +979,8 @@ function readStopTable(lines: Line[]): RateconRead {
  *
  * One stop is one row. Its type, PU or SO (a stop-off), on the row's first
  * line; under "Scheduled Arrival" the word "Arrival", the date (M/D/YY) and
- * the time, one a line; under "Scheduled Departure" "N/A"; under "Name and
+ * the time, one a line, or for a window (3ay) the start as "HH:MM -" and the
+ * end on the line under it; under "Scheduled Departure" "N/A"; under "Name and
  * Address", centred, the facility's name on one line or more, the street on
  * one or more, then "City, ST 12345". The table ends at the next section's
  * heading ("NOTES"), on its page. The other columns are not read.
@@ -994,9 +995,12 @@ function readStopTable(lines: Line[]): RateconRead {
  * more than one line is read joined with a space and marked (`WRAP_CHECK`):
  * the PDF can run two words together at the break.
  *
- * The time is an appointment at the scheduled arrival. Times are read as
- * Route blocks reads them: 24-hour when past 12, with a leading zero, or on a
- * 24-hour document (`documentIs24Hour`). The departure must be "N/A": what a
+ * The time is an appointment at the scheduled arrival; a window runs from
+ * its start to its end on the same date, and the fill's window rules decide
+ * what that is (`appointmentFrom`). Times are read as Route blocks reads
+ * them: 24-hour when past 12, with a leading zero, or on a 24-hour document
+ * (`documentIs24Hour`); either end of a window unclear, and the stop's time
+ * is quoted as unreadable. The departure must be "N/A": what a
  * departure time would mean, no copy shows. The last stop must be an SO, read
  * as the delivery; an SO before it is read as a delivery and says so
  * (`STOP_OFF_CHECK`), as PU / SO blocks says it.
@@ -1007,10 +1011,10 @@ function readStopTable(lines: Line[]): RateconRead {
  * Strict, because a wrong stop is worse than none: a heading not its own
  * cell; a line in the table before the first stop, or in the type column
  * that is not PU, SO or a heading; an arrival other than "Arrival", a date
- * and a time; a departure other than "N/A"; a name cell with no name, two
- * street-like lines, or a last line that is not a city line; a city line in
- * any other column; a first stop that is not PU or a last that is not SO; a
- * table that does not end on its page — and nothing is read.
+ * and a time or a window; a departure other than "N/A"; a name cell with no
+ * name, two street-like lines, or a last line that is not a city line; a
+ * city line in any other column; a first stop that is not PU or a last that
+ * is not SO; a table that does not end on its page — and nothing is read.
  */
 const DETAIL = {
   recognise: [
@@ -1022,6 +1026,8 @@ const DETAIL = {
   type: /^(PU|SO)$/,
   date: /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
   clock: /^(\d{1,2}):(\d{2})$/,
+  /** A window's start; its end is the next line's clock. */
+  from: /^(\d{1,2}):(\d{2}) -$/,
   place: /^(.+), ([A-Z]{2}) (\d{5})(?:-\d{4})?$/,
   /** The next section's heading, which ends the table: one cell, capitals. */
   heading: /^[A-Z][A-Z ]*[A-Z]$/,
@@ -1034,16 +1040,25 @@ const DETAIL = {
  */
 export const WRAP_CHECK = (text: string) => `the street is printed on more than one line, read as “${text}”. Confirm it against the PDF.`;
 
-function detailTime(date: string, clock: string, hours24: boolean, source: Source): TimeRead {
+/** One time, or a window's start ("HH:MM -") and end, on one M/D/YY date. */
+function detailTime(date: string, clocks: string[], hours24: boolean, source: Source): TimeRead {
   const d = DETAIL.date.exec(date)!;
   const [y, m, day] = [2000 + Number(d[3]), Number(d[1]), Number(d[2])];
-  const t = DETAIL.clock.exec(clock)!;
-  const [h, mi] = [Number(t[1]), Number(t[2])];
   const at = validDate(y, m, day) ? iso(y, m, day) : null;
-  // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
-  const clear = validClock(h, mi) && (h >= 13 || t[1]!.startsWith('0') || hours24);
-  if (at && clear) return { kind: 'exact', date: at, time: hhmm(h, mi), flag: null, source };
-  return { kind: 'unreadable', date: at, quoted: `${date} ${clock}`, source };
+  const times = clocks.map((text) => {
+    const t = DETAIL.clock.exec(text.replace(/ -$/, ''))!;
+    const [h, mi] = [Number(t[1]), Number(t[2])];
+    // "10:00" alone could be either half of the day: it is a time only on a 24-hour document.
+    return validClock(h, mi) && (h >= 13 || t[1]!.startsWith('0') || hours24) ? hhmm(h, mi) : null;
+  });
+  const [time, endTime] = times;
+  if (at && time && clocks.length === 1) return { kind: 'exact', date: at, time, flag: null, source };
+  if (at && time && endTime) {
+    return time === endTime
+      ? { kind: 'exact', date: at, time, flag: null, source }
+      : { kind: 'range', date: at, time, endDate: at, endTime, flag: null, source };
+  }
+  return { kind: 'unreadable', date: at, quoted: `${date} ${clocks.join(' ')}`, source };
 }
 
 function readStopDetail(lines: Line[]): RateconRead {
@@ -1096,8 +1111,12 @@ function readStopDetail(lines: Line[]): RateconRead {
   const stops: StopRead[] = [];
   for (const [n, b] of blocks.entries()) {
     const of = (where: string) => b.lines.flatMap((l) => l.cells.filter((c) => column(c) === where).map((c) => c.text));
+    // "Arrival", the date, then one time, or a window's "HH:MM -" and its end.
     const arrival = of('arrival');
-    if (arrival.length !== 3 || arrival[0] !== 'Arrival' || !DETAIL.date.test(arrival[1]!) || !DETAIL.clock.test(arrival[2]!)) return refuse;
+    const [word, date, ...clocks] = arrival;
+    const one = clocks.length === 1 && DETAIL.clock.test(clocks[0]!);
+    const window = clocks.length === 2 && DETAIL.from.test(clocks[0]!) && DETAIL.clock.test(clocks[1]!);
+    if (word !== 'Arrival' || !date || !DETAIL.date.test(date) || !(one || window)) return refuse;
     const departure = of('departure');
     if (departure.length !== 1 || departure[0] !== 'N/A') return refuse;
     // The address cell: one cell a line, the city line last and nowhere else in the row.
@@ -1119,7 +1138,7 @@ function readStopDetail(lines: Line[]): RateconRead {
       state: { value: place[2]!, source: at(cell.at(-1)!) },
       zip: { value: place[3]!, source: at(cell.at(-1)!) },
       ...(streetLines.length > 1 ? { fieldChecks: { street: WRAP_CHECK(street) } } : {}),
-      time: detailTime(arrival[1]!, arrival[2]!, hours24, at(arrival.join(' · '))),
+      time: detailTime(date, clocks, hours24, at(arrival.join(' · '))),
     });
   }
 
