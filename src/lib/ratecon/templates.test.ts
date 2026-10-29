@@ -535,6 +535,17 @@ describe('Stop table (3ak)', () => {
     expect(summary(read(readRatecon(joined(Y.b1, [156, 295]))))).toEqual(summary(r));
   });
 
+  it('finds a phone printed as three digit groups separated by spaces (3ay), and only that spaced shape', () => {
+    const spaced = read(readRatecon(doc(pickup({ phone: '555 010 0103' }))));
+    expect(summary(spaced)).toEqual(summary(r));
+    expect(read(readRatecon(doc([TABLE_STOPS[0]!, { ...TABLE_MIDDLE, phone: '555 010 0104' }, TABLE_STOPS[1]!]))).stops[1]!.street?.value).toBe('77 DEPOT AVE');
+    // A street that ends in a number keeps it.
+    expect(read(readRatecon(doc(pickup({ street: '4001 HWY 210', phone: '555 010 0103' })))).stops[0]!.street?.value).toBe('4001 HWY 210');
+    for (const phone of ['555 010 010', '55 010 0103', '5550 010 0103', '555 0100 103']) {
+      expect(readRatecon(doc(pickup({ phone }))), phone).toEqual(NOT);
+    }
+  });
+
   it('reads the cells OCR runs together where they hold a fixed shape: the number and type, a date and the name, a time and the street, the state and the ref', () => {
     for (const [y, xs] of [[Y.a1, [45, 65]], [Y.a1, [127, 156]], [Y.b1, [127, 156]], [Y.a1, [392, 431]]] as const) {
       const got = read(readRatecon(joined(y, [...xs])));

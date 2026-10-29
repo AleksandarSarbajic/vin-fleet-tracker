@@ -765,7 +765,8 @@ function readRouteBlocks(lines: Line[]): RateconRead {
  * Line B is read in order: the times, then the street up to the phone, then
  * the ZIP, the five digits after the phone. The phone only marks where the
  * street ends; it is never read or quoted. It may be one token or two
- * ("(555) 010-0100", "555-010-0100", OCR's "(555)010-0100").
+ * ("(555) 010-0100", "555-010-0100", OCR's "(555)010-0100"), or three digit
+ * groups separated by spaces, "555 010 0100" (3ay, Alex).
  *
  * Dates are M/D with no year: the year is the one that puts the date nearest
  * the document's own date (the box's, else a "Load No" line's); with neither,
@@ -794,6 +795,8 @@ const TABLE = {
   date: /^(\d{1,2})\/(\d{1,2})$/,
   clock: /^(\d{1,2}):(\d{2})$/,
   phone: /^\(?\d{3}\)?[-.\s]?\d{3}[-.]\d{4}$/,
+  /** The phone as three digit groups separated by spaces: three tokens. */
+  spacedPhone: /^\d{3} \d{3} \d{4}$/,
   zip: /^(\d{5})(?:-\d{4})?$/,
   boxDate: /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
   later: /^Load No\s+(\S+)\s+-\s+(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
@@ -912,6 +915,7 @@ function readStopTable(lines: Line[]): RateconRead {
     for (let j = k + 1; j < tokens.length && phone === -1; j += 1) {
       if (TABLE.phone.test(tokens[j]!)) [phone, width] = [j, 1];
       else if (j + 1 < tokens.length && TABLE.phone.test(`${tokens[j]} ${tokens[j + 1]}`)) [phone, width] = [j, 2];
+      else if (j + 2 < tokens.length && TABLE.spacedPhone.test(tokens.slice(j, j + 3).join(' '))) [phone, width] = [j, 3];
     }
     if (phone === -1) return null;
     const street = tokens.slice(k, phone).join(' ');
