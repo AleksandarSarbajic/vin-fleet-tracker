@@ -95,6 +95,23 @@ export function projectedLine(row: FleetRow): string {
   }
 }
 
+/**
+ * §5.9. Said under the projection while the feed is down, here and on the
+ * phone's truck sheet: the ETA stays, and says what it is built on. One
+ * string, so the two surfaces cannot word it apart.
+ */
+export const FEED_DOWN_ETA = 'Feed down: built on positions we no longer trust.';
+
+/**
+ * §12.146. The ink of an override's Computed line, here and on the sheet. A
+ * status colour on a live feed (§9.5); muted while the feed is down, when the
+ * chip above is the dotted Stale GPS and no longer says "forced" (§5.9). The
+ * line itself stays: it is a fact from our database, like the appointment.
+ */
+export function computedInk(feedStale: boolean): string {
+  return feedStale ? 'text-text-muted' : 'text-status-risk-fg';
+}
+
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <>
     <span className="text-text-muted">{label}</span>
@@ -187,6 +204,9 @@ export function MapPopup({
   // Measured from the fetch instant, so server and client agree — see
   // TruckRow's note on hydration.
   const age = elapsed(row.recordedAt, fetchedAt ? new Date(fetchedAt) : undefined);
+  // The feed's or the truck's own: either way the position is not live.
+  const stale = feedStale || row.status === 'STALE_GPS';
+  const position = row.formattedLocation ?? '—';
 
   return (
     <Popup
@@ -228,7 +248,8 @@ export function MapPopup({
         </div>
 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[5px] px-[10px] py-[9px] text-[12px]">
-          <Row label="Position">{row.formattedLocation ?? '—'}</Row>
+          {/* "Last seen" once it is not live, as the row and the sheet say. */}
+          <Row label="Position">{stale ? `Last seen ${position}` : position}</Row>
           <Row label="Speed">
             <span className="tabular-nums">
               {speed ?? '—'}
@@ -257,6 +278,9 @@ export function MapPopup({
               <span className="tabular-nums" title={etaCaution(row)}>
                 {projectedLine(row)}
               </span>
+              {feedStale ? (
+                <span className="block text-status-risk-fg">{FEED_DOWN_ETA}</span>
+              ) : null}
             </Row>
           ) : null}
           {/**
@@ -295,7 +319,7 @@ export function MapPopup({
           {row.override && row.override.forcedStatus !== row.computed ? (
             <>
               <Row label="Computed">
-                <span className="text-status-risk-fg">{STATUS_LABEL[row.computed]}</span>
+                <span className={computedInk(feedStale)}>{STATUS_LABEL[row.computed]}</span>
               </Row>
               <Row label="Forced by">
                 {row.override.setByName ?? 'a dispatcher'} —{' '}

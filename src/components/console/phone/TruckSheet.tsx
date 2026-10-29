@@ -11,7 +11,13 @@ import { DriverName } from '@/components/DriverName';
 import { StatusChip } from '../StatusChip';
 import { chipProps } from '../chip-props';
 import { etaCaution, etaDetails } from '../TruckRow';
-import { apptLine, projectedLine, stopOfLoad } from '../map/MapPopup';
+import {
+  FEED_DOWN_ETA,
+  apptLine,
+  computedInk,
+  projectedLine,
+  stopOfLoad,
+} from '../map/MapPopup';
 
 /**
  * §12.96, stage 3 — the truck sheet. On a phone it replaces the map popup
@@ -119,9 +125,7 @@ export function TruckSheet({
             <Fact field="eta" label="ETA">
               <span className="tabular-nums">{stop ? projectedLine(row) : '—'}</span>
               {feedStale && stop ? (
-                <span className="block text-status-risk-fg">
-                  Feed down: built on positions we no longer trust.
-                </span>
+                <span className="block text-status-risk-fg">{FEED_DOWN_ETA}</span>
               ) : null}
               {row.etaPrecision === 'zip' || row.etaPrecision === 'block' ? (
                 <span className="block text-status-risk-fg">{etaCaution(row)}</span>
@@ -163,9 +167,7 @@ export function TruckSheet({
             {row.override && row.override.forcedStatus !== row.computed ? (
               <>
                 <Fact field="computed" label="Computed">
-                  <span className="text-status-risk-fg">
-                    {STATUS_LABEL[row.computed]}
-                  </span>
+                  <span className={computedInk(feedStale)}>{STATUS_LABEL[row.computed]}</span>
                 </Fact>
                 <Fact field="forced-by" label="Forced by">
                   {row.override.setByName ?? 'a dispatcher'} —{' '}
