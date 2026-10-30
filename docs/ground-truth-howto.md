@@ -17,9 +17,14 @@ broker, address, load or time appears in this document, and none may.
   that had none, by `npm run ratecon:expected-skeleton`. The 7 entries
   already there were not touched. The 3 scans have none.
   - `"priority": 1`: a layout no template reads. The AI reader exists for
-    these: write them first.
-  - `"priority": 2`: read by a template, but never checked against the PDF.
-    The control group.
+    these: write them first. `ratecon:score` skips such an entry as ground
+    truth for the AI evaluation only. Once a template reads it, set it to 2
+    (Alex, 2026-10-30): with 1, a template that stopped reading it would be
+    skipped instead of failed.
+  - `"priority": 2`: read by a template. The control group: `ratecon:score`
+    scores the template's fill against it, and says FAIL if no template
+    reads it.
+  - No `"priority"` at all is the same as 2.
 - **The backup** of the file as it was is beside it:
   `expected.json.before-skeleton-2026-10-14`. Delete it when you no longer
   want it.
@@ -83,7 +88,10 @@ app's answer would make the score agree with itself.
 }
 ```
 
-Leave `"priority"` in; it changes nothing in the score.
+Leave `"priority"` in: it decides what `ratecon:score` does with an entry no
+template reads. Priority 1 is skipped, as ground truth for the AI evaluation
+only; any other entry that is not read is a FAIL. An entry a template reads
+is scored the same whatever its priority.
 
 ## Appointments
 

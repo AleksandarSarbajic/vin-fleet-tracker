@@ -58,6 +58,13 @@ score, the brief's gate, so the phase waits for Alex. See "Phase 3ax" below.
 **3ay: NOT pushed** (2026-10-29): 3ax continued on Alex's answers: four more
 templates (eleven in all), `stop-detail` reads a window, `stop-table` finds a
 spaced phone (§12.147). See "Phase 3ay" below.
+**Update at the start of 3az (2026-10-30): 3ax and 3ay are pushed**, live
+2026-10-29 19:12 UTC (Alex's answer, through the 3az brief); origin's master
+was `a5e52e9`. Its deploy is not checked here.
+**3az: NOT pushed** (2026-10-30): scripts, their tests and docs only.
+`ratecon:score` prints "FAIL (marked)", says why a sample was not read, and
+lists what is wrong and not marked; priority 2 on the eleven samples a
+template reads. No app code changed. See "Phase 3az" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -9788,6 +9795,145 @@ test-results/2026-10-29T18-59-49-904Z, the machine awake throughout.
    (marked)", and "none" for silently wrong appointments when none is WRONG?
    A small script change, in a phase of its own or not.
 4. When to push 3ax and 3ay.
+
+**Alex's answers (2026-10-30, through the 3az brief):**
+
+1. Sample 7's truth stays an appointment at the printed time; its stop 2
+   stays wrong and marked Check. `ratecon:score` already scores that
+   appointment "marked, filled differently (time)", which is not a failure,
+   so sample 7 prints pass. Appointment scoring does not change.
+2. Yes: priority 2 on every sample a template now reads. The advisor found
+   that sample 8 is priority 1 and has been read by `route-blocks` since 3aa;
+   the rule covers it, so the list is eleven samples: 7, 8, 11, 16, 17, 31,
+   33, 35, 36, 37 and 38. Samples with no priority key (1, 18, 19, 23, 24,
+   28) already score as priority 2 and are left alone. Done in 3az.
+3. Yes: `ratecon:score` prints "FAIL (marked)" for a wrong field that
+   carries a Check, apart from an unmarked FAIL, and the appointments line
+   says "none" when no appointment is silently wrong. Done in 3az.
+4. 3ax and 3ay pushed, live 2026-10-29 19:12 UTC.
+
+### Phase 3az: ratecon:score tells marked from unmarked, and says why a sample was not read (2026-10-30)
+
+From the advisor's brief, on Alex's answers to 3ay (recorded under "Phase
+3ay"). Scripts, their tests and docs only. Local only: no AI call, no
+network, no paid call, no e2e (no app code changed). **NOT pushed.** Built
+on `a5e52e9`, which was `origin/master` at the start, with a clean tree;
+`npm run check` there: 216 files and 4012 tests. No change to `templates.ts`,
+`src/lib`, `src/components`, `src/app`, the AI reader, redaction, the routes,
+the DB, migrations, the worker or env.
+
+**Commits:**
+
+- `9464256`: the score's wording; its logic in `scripts/ratecon-score-lines.mts`
+  (new), under test;
+- one docs commit: this section, 3ay's answers, the "What is live" lines,
+  design-spec §12.122's `ratecon:score` paragraph, the ground-truth how-to.
+
+**Priorities (answer 2).** `expected.json` is git-ignored, so no commit. The
+file as it was is beside it as `expected.json.before-3az`; the before-3ax
+and before-3ay backups are untouched. A value-free scratch script listed
+each sample's priority and what `readRatecon` read: the samples with
+priority 1 that a template reads were exactly the eleven above. Each was
+set to 2 by a text edit, so the file's formatting is kept (the same line and
+byte counts). A second scratch script compared the file with its backup: 38
+entries, the same keys in the same order, every entry deep-equal with
+priority removed, exactly eleven priorities changed, all 1 → 2.
+`ratecon:check-expected`: 37 complete, 1 still blank in places (sample 22),
+0 wrong shape, 2 with no entry (samples 3 and 6). `ratecon:score` re-run:
+identical to the run before, line for line, as all eleven are read. The
+scratch scripts are deleted.
+
+**What `ratecon:score` prints now.** `ratecon-score.mts` reads, fills and
+prints; every line is built in `ratecon-score-lines.mts`.
+
+- **A bar field:** right is `pass`, marked or not. Wrong is `FAIL (marked)`
+  when the fill's own Check is on it (`loadNumberCheck` for the load number;
+  the stop's `checks` for type, street, ZIP, city and state: the test
+  `appointmentScore` uses for the appointment), and `FAIL` when not. The stop
+  count has no mark. A stop missing from the fill: each of its fields
+  `FAIL`, its appointment WRONG.
+- **The sample's line:** `pass` when every bar field is right and no
+  appointment is WRONG; `FAIL (marked)` when every wrong bar field is marked
+  and none is WRONG; `FAIL` otherwise. Unchanged: whether a sample fails,
+  the bar (`FAIL (marked)` misses it) and the exit code (1 on any failure).
+- **A sample not read says why,** from `recognisedLayouts`: "no layout
+  recognised", "recognised as <id>, refused", or "recognised as <id>, <id>:
+  more than one layout". Priority 1 is still skipped, "— ground truth for
+  the AI evaluation only"; any other entry is "FAIL — <why>". An entry whose
+  truth is `notRecognised` (none today) says why as well, with no count of
+  layouts.
+- **The last lines:** the bar; "Wrong and not marked", every unmarked FAIL
+  but an appointment, by sample, field and stop ("sample 12 street stop 1"),
+  and every sample that fails before its fields are scored ("sample 19 not
+  read"); "Appointments silently wrong", every WRONG appointment by sample
+  and stop. Each is a count and a list, or "none".
+
+**Decision (mine, within the brief):** the brief's example lists a sample
+not read. The four other ways a sample fails before its fields are scored
+are listed the same way: "PDF not read", "fill refused", "ground truth wrong
+shape", "read, expected not". So when both lists say "none" and the exit code
+is 1, the only failures are `FAIL (marked)`.
+
+**The gate.** `ratecon:score` saved before any change
+(`.samples/score-before-3az.txt`: the bar 28 of 29, "Appointments silently
+wrong: see FAIL above") and after `9464256` (`.samples/score-after-3az.txt`),
+both git-ignored. The diff held exactly the lines the brief listed, no other:
+
+- samples 2, 4, 9, 10, 12, 21 and 29: "not a template layout" → "no layout
+  recognised", still "— ground truth for the AI evaluation only";
+- sample 5: → "recognised as stop-table, refused — ground truth for the AI
+  evaluation only";
+- sample 38: its line "FAIL" → "FAIL (marked)", its street line "stop 2
+  FAIL" → "stop 2 FAIL (marked)";
+- new: "Wrong and not marked: none";
+- "Appointments silently wrong: see FAIL above" → "Appointments silently
+  wrong: none".
+
+The bar stays 28 of 29 and the exit code 1 (sample 38's marked street).
+
+**Tests.** 54 new in `src/test/ratecon-score-lines.test.ts`, StopForms built
+as `ratecon-expected.test.ts` builds them, invented values only: `markOf`'s
+four cases; each stop field right and marked, wrong and marked, wrong and
+unmarked, and wrong with a Check on another field; the load number five
+ways through `loadNumberCheck`, not marked by a stop's Check, and with no
+fill; the stop count never "(marked)", every field marked; a missing stop; a
+stop too many; a marked appointment not WRONG; the sample's line six ways;
+a scored sample's lines; the reason for 0, 1 and 2 layouts and the not-read
+lines; both summary lines as "none" and as lists; no value in any printed
+string.
+
+**Mutations** (`ratecon-score-lines.mts`), each applied alone and reverted;
+the file restored byte for byte:
+
+| Broken | Tests that fail |
+|---|---|
+| marked treated as unmarked, in `markOf` | 12 |
+| marked treated as unmarked, a stop field's Check ignored | 9 |
+| marked treated as unmarked, `loadNumberCheck` ignored | 3 |
+| the sample's line ignoring a WRONG appointment | 2 |
+| one recognised layout reported as none | 2 |
+| the summary always "none" | 2 |
+| the stop count allowed "(marked)", by `loadNumberCheck` | 1 |
+| the stop count allowed "(marked)", by any stop's Check | 2 |
+
+**Checks.** `npm run check`: 217 files and 4066 tests (216 and 4012 at the
+start). `ratecon-score.mts`, typechecked ad hoc (a scratch tsconfig extending
+the repo's, with `allowImportingTsExtensions`, deleted afterwards): no
+errors. The forbidden-files grep printed nothing. Real data: 189 terms
+(every entry's load number, streets, cities and ZIPs); 78 excluded as
+already in the repo at `a5e52e9`; 0 hits in the added lines and in the
+messages.
+
+**Found wrong in the brief:** nothing. One gap, filled above: "Wrong and not
+marked" named a sample not read but not the other early failures. The
+how-to's priority 2 bullet ("never checked against the PDF") was stale too,
+beside the line the brief named; both are corrected.
+
+**Questions for Alex:**
+
+1. When to push 3az. Scripts, tests and docs only, so a deploy changes
+   nothing that runs. Recommended: push now, so the next phase starts with
+   nothing unpushed.
 
 ## Next
 

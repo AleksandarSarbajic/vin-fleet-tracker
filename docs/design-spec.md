@@ -9288,6 +9288,19 @@ only WRONG fails. On 2026-10-08: **6 of 6** on the load number, stop count,
 order and type, street, ZIP, city and state; no appointment silently wrong;
 the seventh sample, a fourth layout, correctly not recognised.
 
+Since phase 3az (2026-10-30), a wrong bar field that carries the fill's own
+Check (`loadNumberCheck` for the load number, the stop's `checks` for type,
+street, ZIP, city and state) prints `FAIL (marked)`, apart from an unmarked
+`FAIL`; the stop count has no mark. A sample's line is `FAIL (marked)` when
+every wrong bar field is marked and no appointment is WRONG; it still fails,
+misses the bar and sets the exit code to 1. A sample not read says why, from
+`recognisedLayouts`: "no layout recognised", "recognised as <id>, refused",
+or "recognised as <id>, <id>: more than one layout". After the bar, "Wrong
+and not marked" lists every unmarked FAIL but an appointment, by sample,
+field and stop, and "Appointments silently wrong" every WRONG appointment by
+sample and stop; each says "none" when there is nothing to list. The lines
+are built in `scripts/ratecon-score-lines.mts`, under test.
+
 Tests use invented documents only (`src/test/ratecon-fixtures.ts`), read as
 lines or built into a real PDF in memory (`src/test/tiny-pdf.ts`).
 
