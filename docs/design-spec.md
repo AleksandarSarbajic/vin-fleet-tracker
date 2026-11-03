@@ -714,6 +714,9 @@ would not read (`2h`).
 | Map pan on selection | **150ms** |
 | Everything else | **Nothing else animates** |
 
+*(Superseded in part by §12.148: a dialog opens with motion, and its
+background fades away when it closes. The rest of this table stands.)*
+
 Under `prefers-reduced-motion`: **all of it becomes 0ms** and the map
 **jumps rather than pans**. The marker→row link becomes a static highlight.
 Skeletons have no shimmer, so reduced-motion changes nothing about them.
@@ -10463,6 +10466,83 @@ names it from `LAYOUT_NAME`:
   separated by spaces** ("555 010 0100") as well as its earlier shapes (Alex,
   3ay). The phone still only marks where the street ends; it is never read.
 
+## 12.148 Dialogs open with motion, and close without waiting
+
+Phase 3ba, step 1 (Alex, 2026-11-03). **Supersedes in part** §8.3's
+"Everything else: nothing else animates" and §14.4's "whole motion budget":
+a dialog now opens with motion, and its background fades away when it
+closes. Everything else in both stays as written.
+
+**Where, in step 1.** The edit modal (its reading panel and its editor) and
+the six confirms over it: Discard changes, Clear stop, Reassign, Reopen,
+Previous load still open, Stop already reached. Step 2 comes after Alex has
+seen step 1 live: menus and dropdowns, the bulk and add-to-list modals, and
+the phone sheet. The palette, cheat sheet and tour join the same motion
+then. Until then they keep §14.4's 120ms fade.
+
+**Opening.** The scrim fades in, and the panel fades in while it grows from
+98% to full size, in place. 150ms (`dialogIn`), decelerating
+(`EASING.dialog`, the toast's curve). Opacity and transform only. It grows
+and does not slide, for the overlay rule's reason (`tailwind.config.ts`): a
+panel that moves over a list that may be moving reads as a jump.
+
+**Nothing is left on the window.** The animation fills backwards only, and
+its class comes off when it ends. The panel ends with no transform and no
+opacity of its own. A transform left on it would make the panel the
+containing block for anything fixed inside it (Reopen's confirm is drawn
+inside the edit modal's panel). It would also skew anything that measures
+itself against the screen. The one measurement taken while the panel is
+still growing, the editor's opening focus (§12.119), compares two boxes
+inside the panel. They grow together, so its answer does not change.
+
+**It plays once per opening.** A dialog animates when it opens and at no
+other time. A frame that replaces another in the same commit continues that
+opening instead of starting one:
+
+- the reading panel giving way to the editor;
+- the editor's remount after a save lands (§12.127);
+- the console's remount of the modal on Reload.
+
+If the opening is still under way, the replacement takes it up where it
+stood. If it has finished, the replacement simply appears. A re-render
+never replays it, whether a poll or a fresh preview in an open Reassign
+confirm.
+
+**Only what the dispatcher does.** Each of the seven opens because of a
+click, a key or a Save, sometimes after the server's answer to that Save.
+None opens because of a poll. Nothing moves when data refreshes on its own:
+rows, lists, re-sorts and new rows keep §8.3's and §14.4's rules.
+
+**Closing never waits.** The dialog closes as it always has: removed at
+once, focus returned at once, and the next click and key land at once. What
+fades is a copy of its background only, over 100ms (`dialogOut`), then
+removed. It is an empty layer: `aria-hidden`, `inert`, `pointer-events:
+none`, with no words and no controls. It cannot be clicked, read aloud or
+found by a test.
+
+- **Reopening during the fade.** A dialog that opens removes any fading
+  background at once and then opens normally. There are never two
+  backgrounds.
+- **Several closing together** leave one fading background. Discard, for
+  example, closes its confirm and the modal at once.
+
+**Reduced motion.** No opening motion and no fading background. The global
+rule in `globals.css` stays as a second line.
+
+**Tokens.** `MOTION_MS.dialogIn` 150 and `MOTION_MS.dialogOut` 100, plus
+`EASING.dialog`. Tailwind animations: `dialog-in`, `scrim-in` and
+`scrim-out`. No component spells a millisecond figure. They are CSS
+keyframes, because a transition cannot run on an element that has just
+appeared. No animation library (Alex: "CSS only" means no library).
+
+**One component.** `DialogFrame` (`src/components/overlay/DialogFrame.tsx`)
+draws the scrim and the panel. The timing rules live beside it in
+`dialog-motion.ts`, so a dialog built on it cannot ship without them.
+
+**Known gap until step 2.** The windows not yet on `DialogFrame` do not
+remove a fading background when they open. One of them opened within 100ms
+of a close shows what is left of the fade under its own scrim.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
@@ -10857,6 +10937,10 @@ transitionTimingFunction: { flash: 'cubic-bezier(.2,0,0,1)',
 ```
 
 ### The whole motion budget
+
+*(Superseded in part by §12.148: the edit modal and its confirms open with
+motion, and their background fades away when they close. The rows below
+stand.)*
 
 | | |
 |---|---|
