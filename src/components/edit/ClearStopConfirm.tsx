@@ -14,6 +14,7 @@ import {
 import { LOAD_STATUS_LABEL } from '@/lib/loads';
 import { timelineStay } from '@/lib/timeline';
 import { useFocusTrap } from './useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * §12.88 — Clear stop's confirm step.
@@ -169,141 +170,138 @@ export function ClearStopConfirm({
   }, [confirm, onBack]);
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="max-h-full w-[560px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label="Confirm clear stop"
     >
-      <div
-        ref={trap}
-        className="max-h-full w-[560px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            Clear stop — truck {truckName}
-          </h2>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          Clear stop — truck {truckName}
+        </h2>
+      </div>
 
-        <div className="p-4">
-          {!ready ? (
-            <p className="text-body text-text-mutedOnOverlay">
-              Reading this truck&apos;s loads…
-            </p>
-          ) : timeline.isError ? (
-            <p role="alert" className="text-body text-status-late-fg">
-              This truck&apos;s loads could not be read. Nothing was changed.
-            </p>
-          ) : (
-            <>
-              {choices.length > 1 ? (
-                <fieldset className="mb-4 border-0 p-0" data-clear-loads>
-                  <legend className="mb-2 text-body text-text">
-                    This truck holds {choices.length} open loads. Choose the one to close.
-                  </legend>
-                  {choices.map((c) => (
-                    <label
-                      key={c.loadId}
-                      className="flex items-center gap-2 py-1 text-body text-text"
-                    >
-                      <input
-                        type="radio"
-                        name="clear-load"
-                        value={c.loadId}
-                        checked={chosenId === c.loadId}
-                        onChange={() => {
-                          setPicked(c.loadId);
-                          setProblem(null);
-                        }}
-                      />
-                      <span className="font-medium tabular-nums">
-                        {c.loadNumber ?? 'No load number'}
-                      </span>
-                      <span className="text-text-mutedOnOverlay">
-                        · next stop {c.nextPlace}
-                      </span>
-                    </label>
-                  ))}
-                </fieldset>
-              ) : null}
-
-              <fieldset className="mb-4 border-0 p-0">
-                <legend className="mb-2 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-                  Close it as
+      <div className="p-4">
+        {!ready ? (
+          <p className="text-body text-text-mutedOnOverlay">
+            Reading this truck&apos;s loads…
+          </p>
+        ) : timeline.isError ? (
+          <p role="alert" className="text-body text-status-late-fg">
+            This truck&apos;s loads could not be read. Nothing was changed.
+          </p>
+        ) : (
+          <>
+            {choices.length > 1 ? (
+              <fieldset className="mb-4 border-0 p-0" data-clear-loads>
+                <legend className="mb-2 text-body text-text">
+                  This truck holds {choices.length} open loads. Choose the one to close.
                 </legend>
-                <div className="flex gap-5">
-                  {CLEAR_STATUSES.map((s) => (
-                    <label
-                      key={s}
-                      className="flex items-center gap-2 text-body text-text"
-                    >
-                      <input
-                        type="radio"
-                        name="clear-status"
-                        value={s}
-                        checked={status === s}
-                        onChange={() => setStatus(s)}
-                      />
-                      {LOAD_STATUS_LABEL[s]}
-                    </label>
-                  ))}
-                </div>
+                {choices.map((c) => (
+                  <label
+                    key={c.loadId}
+                    className="flex items-center gap-2 py-1 text-body text-text"
+                  >
+                    <input
+                      type="radio"
+                      name="clear-load"
+                      value={c.loadId}
+                      checked={chosenId === c.loadId}
+                      onChange={() => {
+                        setPicked(c.loadId);
+                        setProblem(null);
+                      }}
+                    />
+                    <span className="font-medium tabular-nums">
+                      {c.loadNumber ?? 'No load number'}
+                    </span>
+                    <span className="text-text-mutedOnOverlay">
+                      · next stop {c.nextPlace}
+                    </span>
+                  </label>
+                ))}
               </fieldset>
+            ) : null}
 
-              {lines.length > 0 ? (
-                <ul
-                  className="list-disc space-y-1 pl-5 text-[13px] leading-[1.5] text-text"
-                  data-clear-lines
-                >
-                  {lines.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-body text-text-mutedOnOverlay">
-                  {choices.length === 0
-                    ? 'This truck has no open load any more.'
-                    : 'Choose a load to see what closing it does.'}
-                </p>
-              )}
-            </>
-          )}
+            <fieldset className="mb-4 border-0 p-0">
+              <legend className="mb-2 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
+                Close it as
+              </legend>
+              <div className="flex gap-5">
+                {CLEAR_STATUSES.map((s) => (
+                  <label
+                    key={s}
+                    className="flex items-center gap-2 text-body text-text"
+                  >
+                    <input
+                      type="radio"
+                      name="clear-status"
+                      value={s}
+                      checked={status === s}
+                      onChange={() => setStatus(s)}
+                    />
+                    {LOAD_STATUS_LABEL[s]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
 
-          {problem ? (
-            <p
-              role="alert"
-              className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
-            >
-              {problem}
-            </p>
-          ) : null}
-        </div>
+            {lines.length > 0 ? (
+              <ul
+                className="list-disc space-y-1 pl-5 text-[13px] leading-[1.5] text-text"
+                data-clear-lines
+              >
+                {lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-body text-text-mutedOnOverlay">
+                {choices.length === 0
+                  ? 'This truck has no open load any more.'
+                  : 'Choose a load to see what closing it does.'}
+              </p>
+            )}
+          </>
+        )}
 
-        <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-          <span className="text-small text-text-mutedOnOverlay">
-            Enter confirms · Esc back
-          </span>
-          <div className="flex gap-2.5">
-            <button
-              type="button"
-              data-clear-back
-              onClick={onBack}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              data-initial-focus
-              aria-disabled={!choice || busy || !ready}
-              onClick={() => void confirm()}
-              className="h-10 border border-status-late-bd bg-status-late-bg px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-late-fg aria-disabled:opacity-45"
-            >
-              {busy ? 'Closing…' : 'Close load'}
-            </button>
-          </div>
+        {problem ? (
+          <p
+            role="alert"
+            className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
+          >
+            {problem}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
+        <span className="text-small text-text-mutedOnOverlay">
+          Enter confirms · Esc back
+        </span>
+        <div className="flex gap-2.5">
+          <button
+            type="button"
+            data-clear-back
+            onClick={onBack}
+            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            data-initial-focus
+            aria-disabled={!choice || busy || !ready}
+            onClick={() => void confirm()}
+            className="h-10 border border-status-late-bd bg-status-late-bg px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-status-late-fg aria-disabled:opacity-45"
+          >
+            {busy ? 'Closing…' : 'Close load'}
+          </button>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

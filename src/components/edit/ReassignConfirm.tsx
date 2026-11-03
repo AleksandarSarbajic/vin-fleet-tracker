@@ -3,6 +3,7 @@
 import type { ReassignPreview } from '@/server/reassign';
 import { timeInZone } from '@/lib/format';
 import { useFocusTrap } from './useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 import { DriverName } from '@/components/DriverName';
 
 /**
@@ -32,111 +33,108 @@ export function ReassignConfirm({
   const { gaining, losing } = preview;
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="w-[620px] max-w-full border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label="Confirm reassignment"
     >
-      <div
-        ref={trap}
-        className="w-[620px] max-w-full border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            {losing ? 'Confirm reassignment — two trucks affected' : 'Confirm assignment'}
-          </h2>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          {losing ? 'Confirm reassignment — two trucks affected' : 'Confirm assignment'}
+        </h2>
+      </div>
 
-        <div className="p-4">
-          <div className="grid grid-cols-2 border border-line-hair">
-            <div className="border-r border-line-hair p-3">
-              <p className="font-sans text-data font-bold tabular-nums text-text">
-                {gaining.truckLabel}
-              </p>
-              <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-text-mutedOnOverlay">
-                gains a driver
-              </p>
-              <Line label="From">
-                <DriverName
-                  name={gaining.driverName}
-                  source={gaining.driverSource}
-                  samsaraDriverId={gaining.driverSamsaraId}
-                  fallback="Unassigned"
-                  struck
-                />
-              </Line>
-              <Line label="To">{gaining.toDriverName ?? 'Unassigned'}</Line>
-              <Line label="Next appt">
-                <Appt utc={gaining.nextApptUtc} tz={gaining.nextApptTz} />
-              </Line>
-            </div>
+      <div className="p-4">
+        <div className="grid grid-cols-2 border border-line-hair">
+          <div className="border-r border-line-hair p-3">
+            <p className="font-sans text-data font-bold tabular-nums text-text">
+              {gaining.truckLabel}
+            </p>
+            <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-text-mutedOnOverlay">
+              gains a driver
+            </p>
+            <Line label="From">
+              <DriverName
+                name={gaining.driverName}
+                source={gaining.driverSource}
+                samsaraDriverId={gaining.driverSamsaraId}
+                fallback="Unassigned"
+                struck
+              />
+            </Line>
+            <Line label="To">{gaining.toDriverName ?? 'Unassigned'}</Line>
+            <Line label="Next appt">
+              <Appt utc={gaining.nextApptUtc} tz={gaining.nextApptTz} />
+            </Line>
+          </div>
 
-            <div className="bg-surface-sunken p-3">
-              {losing ? (
-                <>
-                  <p className="font-sans text-data font-bold tabular-nums text-text">
-                    {losing.truckLabel}
-                  </p>
-                  <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-status-neutral-fg">
-                    loses its driver
-                  </p>
-                  <Line label="Was">
-                    <DriverName
-                      name={losing.driverName}
-                      source={losing.driverSource}
-                      samsaraDriverId={losing.driverSamsaraId}
-                      fallback="—"
-                      struck
-                    />
-                  </Line>
-                  <Line label="Becomes">
-                    <span className="text-status-neutral-fg">Unassigned</span>
-                  </Line>
-                  <Line label="Next appt">
-                    <Appt utc={losing.nextApptUtc} tz={losing.nextApptTz} />
-                  </Line>
-                </>
-              ) : (
-                <p className="text-body text-text-mutedOnOverlay">
-                  No other truck is affected — this driver is not on one.
+          <div className="bg-surface-sunken p-3">
+            {losing ? (
+              <>
+                <p className="font-sans text-data font-bold tabular-nums text-text">
+                  {losing.truckLabel}
                 </p>
-              )}
-            </div>
+                <p className="mb-2 font-cond text-micro uppercase tracking-[.1em] text-status-neutral-fg">
+                  loses its driver
+                </p>
+                <Line label="Was">
+                  <DriverName
+                    name={losing.driverName}
+                    source={losing.driverSource}
+                    samsaraDriverId={losing.driverSamsaraId}
+                    fallback="—"
+                    struck
+                  />
+                </Line>
+                <Line label="Becomes">
+                  <span className="text-status-neutral-fg">Unassigned</span>
+                </Line>
+                <Line label="Next appt">
+                  <Appt utc={losing.nextApptUtc} tz={losing.nextApptTz} />
+                </Line>
+              </>
+            ) : (
+              <p className="text-body text-text-mutedOnOverlay">
+                No other truck is affected — this driver is not on one.
+              </p>
+            )}
           </div>
-
-          <p className="mt-3 text-[13px] leading-[1.6] text-text">{preview.summary}</p>
-          <p className="mt-2 text-small text-text-mutedOnOverlay">{preview.note}</p>
         </div>
 
-        <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-          <span className="text-small text-text-mutedOnOverlay">
-            {losing
-              ? // Alex, 2026-10-21: the history page shipped (§12.101) and is
-                // not where a move is undone; the board is.
-                'You can change it back on the assignment board.'
-              : 'Reversible by clearing the driver again.'}
-          </span>
-          <div className="flex gap-2.5">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={busy}
-              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
-            >
-              {busy ? 'Saving…' : losing ? 'Reassign both trucks' : 'Assign driver'}
-            </button>
-          </div>
+        <p className="mt-3 text-[13px] leading-[1.6] text-text">{preview.summary}</p>
+        <p className="mt-2 text-small text-text-mutedOnOverlay">{preview.note}</p>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
+        <span className="text-small text-text-mutedOnOverlay">
+          {losing
+            ? // Alex, 2026-10-21: the history page shipped (§12.101) and is
+              // not where a move is undone; the board is.
+              'You can change it back on the assignment board.'
+            : 'Reversible by clearing the driver again.'}
+        </span>
+        <div className="flex gap-2.5">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+          >
+            {busy ? 'Saving…' : losing ? 'Reassign both trucks' : 'Assign driver'}
+          </button>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }
 

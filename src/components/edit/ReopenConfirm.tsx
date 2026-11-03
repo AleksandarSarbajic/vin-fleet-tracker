@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { LOAD_STATUS_LABEL, type LoadStatus } from '@/lib/loads';
 import { OPEN_STATUSES, reopenLines, reopenTitle, type RecentlyClosed } from '@/lib/reopen-load';
 import { useFocusTrap } from './useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * §12.107 — Reopen load's confirm step. Every sentence comes from
@@ -110,89 +111,86 @@ export function ReopenConfirm({
   const [first, ...rest] = lines;
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="max-h-full w-[640px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label="Confirm reopen load"
       data-reopen-confirm=""
     >
-      <div
-        ref={trap}
-        className="max-h-full w-[640px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            {reopenTitle(load.loadNumber)}
-          </h2>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          {reopenTitle(load.loadNumber)}
+        </h2>
+      </div>
 
-        <div className="p-4">
-          <p className="mb-3 text-[13px] leading-[1.5] text-text" data-reopen-first>
-            {first}
+      <div className="p-4">
+        <p className="mb-3 text-[13px] leading-[1.5] text-text" data-reopen-first>
+          {first}
+        </p>
+
+        {asks ? (
+          <fieldset className="mb-4 border-0 p-0" data-reopen-status>
+            <legend className="sr-only">The status the load goes back to</legend>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {OPEN_STATUSES.map((s) => (
+                <label key={s} className="flex items-center gap-2 text-body text-text">
+                  <input
+                    type="radio"
+                    name="reopen-status"
+                    value={s}
+                    checked={chosen === s}
+                    onChange={() => {
+                      setChosen(s);
+                      setProblem(null);
+                    }}
+                  />
+                  {LOAD_STATUS_LABEL[s]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
+        <ul className="list-disc space-y-1 pl-5 text-[13px] leading-[1.5] text-text" data-reopen-lines>
+          {rest.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+
+        {problem ? (
+          <p
+            role="alert"
+            className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
+          >
+            {problem}
           </p>
+        ) : null}
+      </div>
 
-          {asks ? (
-            <fieldset className="mb-4 border-0 p-0" data-reopen-status>
-              <legend className="sr-only">The status the load goes back to</legend>
-              <div className="flex flex-wrap gap-x-5 gap-y-2">
-                {OPEN_STATUSES.map((s) => (
-                  <label key={s} className="flex items-center gap-2 text-body text-text">
-                    <input
-                      type="radio"
-                      name="reopen-status"
-                      value={s}
-                      checked={chosen === s}
-                      onChange={() => {
-                        setChosen(s);
-                        setProblem(null);
-                      }}
-                    />
-                    {LOAD_STATUS_LABEL[s]}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          ) : null}
-
-          <ul className="list-disc space-y-1 pl-5 text-[13px] leading-[1.5] text-text" data-reopen-lines>
-            {rest.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-
-          {problem ? (
-            <p
-              role="alert"
-              className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
-            >
-              {problem}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-          <span className="text-small text-text-mutedOnOverlay">Esc back</span>
-          <div className="flex gap-2.5">
-            <button
-              type="button"
-              data-initial-focus
-              onClick={onBack}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              aria-disabled={busy || (asks && chosen === null)}
-              onClick={() => void confirm()}
-              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover aria-disabled:opacity-45"
-            >
-              {busy ? 'Reopening…' : 'Reopen load'}
-            </button>
-          </div>
+      <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
+        <span className="text-small text-text-mutedOnOverlay">Esc back</span>
+        <div className="flex gap-2.5">
+          <button
+            type="button"
+            data-initial-focus
+            onClick={onBack}
+            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            aria-disabled={busy || (asks && chosen === null)}
+            onClick={() => void confirm()}
+            className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover aria-disabled:opacity-45"
+          >
+            {busy ? 'Reopening…' : 'Reopen load'}
+          </button>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

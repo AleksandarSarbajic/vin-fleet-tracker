@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { loadName } from '@/lib/clear-stop';
 import { reachedPrompt, type ReachedAnswer } from '@/lib/reached-stop';
 import { useFocusTrap } from './useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * The overwritten-trips fix: a REACHED stop saved with a new city or load
@@ -69,61 +70,58 @@ export function ReachedStopQuestion({
   ];
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="max-h-full w-[560px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label="Stop already reached"
     >
-      <div
-        ref={trap}
-        className="max-h-full w-[560px] max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            Before this is saved
-          </h2>
-        </div>
-
-        <div className="space-y-4 p-4">
-          <p className="text-body font-medium text-text">
-            {reachedPrompt(arrivedAt, dispatchTz, now, stopName)}
-          </p>
-          {options.map((option) => (
-            <div key={option.answer} className="flex items-start gap-3">
-              <button
-                type="button"
-                onClick={() => onAnswer(option.answer)}
-                className="h-9 w-[112px] shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
-              >
-                {option.label}
-              </button>
-              <p className="pt-2 text-small text-text-mutedOnOverlay">{option.says}</p>
-            </div>
-          ))}
-          {nextTrip ? (
-            <p className="text-small text-text-mutedOnOverlay">
-              Closing and saving happen together: if either fails, neither does.
-            </p>
-          ) : (
-            <p className="text-small text-text-mutedOnOverlay" data-next-trip-elsewhere="">
-              To enter the next trip, close this load with Clear stop.
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
-          <span className="text-small text-text-mutedOnOverlay">Esc back</span>
-          <button
-            type="button"
-            data-initial-focus
-            onClick={onBack}
-            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-          >
-            Back to the form
-          </button>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          Before this is saved
+        </h2>
       </div>
-    </div>
+
+      <div className="space-y-4 p-4">
+        <p className="text-body font-medium text-text">
+          {reachedPrompt(arrivedAt, dispatchTz, now, stopName)}
+        </p>
+        {options.map((option) => (
+          <div key={option.answer} className="flex items-start gap-3">
+            <button
+              type="button"
+              onClick={() => onAnswer(option.answer)}
+              className="h-9 w-[112px] shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
+            >
+              {option.label}
+            </button>
+            <p className="pt-2 text-small text-text-mutedOnOverlay">{option.says}</p>
+          </div>
+        ))}
+        {nextTrip ? (
+          <p className="text-small text-text-mutedOnOverlay">
+            Closing and saving happen together: if either fails, neither does.
+          </p>
+        ) : (
+          <p className="text-small text-text-mutedOnOverlay" data-next-trip-elsewhere="">
+            To enter the next trip, close this load with Clear stop.
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line-hair bg-surface-raised px-4 py-3">
+        <span className="text-small text-text-mutedOnOverlay">Esc back</span>
+        <button
+          type="button"
+          data-initial-focus
+          onClick={onBack}
+          className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+        >
+          Back to the form
+        </button>
+      </div>
+    </DialogFrame>
   );
 }

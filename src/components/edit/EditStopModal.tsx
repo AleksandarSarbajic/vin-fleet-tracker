@@ -78,6 +78,7 @@ import {
 } from './ratecon-fill';
 import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * design-spec §9.9, §12.119. One modal covers editing a load and entering
@@ -210,51 +211,50 @@ function ReadingPanel({
   }, [onClose]);
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+      panelClassName="flex w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
       role="dialog"
       aria-modal="true"
       aria-busy={failed === null}
       aria-label={`Edit load for truck ${truckName}`}
     >
-      <div className="flex w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal">
-        <div className="flex items-baseline justify-between border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            Edit load — truck {truckName}
-          </h2>
-          <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
-            Esc close
-          </span>
-        </div>
-        <div className="flex items-center gap-3 px-4 py-6">
-          {failed ? (
-            <>
-              <p role="alert" className="flex-1 text-body text-status-late-fg">
-                {failed}
-              </p>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
-              >
-                Retry
-              </button>
-            </>
-          ) : (
-            <p className="text-body text-text-secondary">Reading this load…</p>
-          )}
-        </div>
-        <div className="flex justify-end border-t border-line-hair bg-surface-raised px-4 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-          >
-            Cancel
-          </button>
-        </div>
+      <div className="flex items-baseline justify-between border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          Edit load — truck {truckName}
+        </h2>
+        <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
+          Esc close
+        </span>
       </div>
-    </div>
+      <div className="flex items-center gap-3 px-4 py-6">
+        {failed ? (
+          <>
+            <p role="alert" className="flex-1 text-body text-status-late-fg">
+              {failed}
+            </p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+            >
+              Retry
+            </button>
+          </>
+        ) : (
+          <p className="text-body text-text-secondary">Reading this load…</p>
+        )}
+      </div>
+      <div className="flex justify-end border-t border-line-hair bg-surface-raised px-4 py-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+        >
+          Cancel
+        </button>
+      </div>
+    </DialogFrame>
   );
 }
 
@@ -1058,342 +1058,339 @@ function LoadEditor({
 
   return (
     <>
-      <div
+      <DialogFrame
         className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+        panelClassName="flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
+        panelRef={trap}
         role="dialog"
         aria-modal="true"
         aria-label={`${read ? 'Edit' : 'New'} load for truck ${truckName}`}
       >
-        <div
-          ref={trap}
-          className="flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
-        >
-          {/* -------------------------- header, fixed ----------------------- */}
-          <div className="flex flex-none items-baseline justify-between border-b border-line-soft px-4 py-3">
-            <div>
-              <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-                {title}
-              </h2>
-              <p className="mt-0.5 text-small text-text-mutedOnOverlay">
-                {read
-                  ? (read.loadNumber ?? 'Load number not given yet')
-                  : // §12.92: the same count that enables Clear stop.
-                    newLoadSubtitle(row.openLoadCount)}
-                {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
-              </p>
-            </div>
-            <div className="flex items-baseline gap-3">
-              <span className="text-small text-text-mutedOnOverlay" data-stop-count="">
-                {stopCount}
-              </span>
-              <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
-                Esc close
-              </span>
-            </div>
+        {/* -------------------------- header, fixed ----------------------- */}
+        <div className="flex flex-none items-baseline justify-between border-b border-line-soft px-4 py-3">
+          <div>
+            <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+              {title}
+            </h2>
+            <p className="mt-0.5 text-small text-text-mutedOnOverlay">
+              {read
+                ? (read.loadNumber ?? 'Load number not given yet')
+                : // §12.92: the same count that enables Clear stop.
+                  newLoadSubtitle(row.openLoadCount)}
+              {currentDriverName ? ` · ${currentDriverName}` : ' · Unassigned'}
+            </p>
           </div>
-
-          {/* ------------------------- middle, scrolls ---------------------- */}
-          <div data-edit-scroll="" className="min-h-0 flex-1 overflow-auto">
-            {bannerError ? (
-              <div className="flex items-center gap-3 border-b border-status-late-bd bg-status-late-bg px-4 py-2">
-                <p role="alert" className="flex-1 text-body text-status-late-fg">
-                  {bannerError}
-                </p>
-                {stale && onReload ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // The board as it is now, then the modal on it, read
-                      // afresh. The typed values are discarded only here.
-                      void queryClient.refetchQueries({ queryKey: ['fleet'] }).finally(() => {
-                        if (read) queryClient.removeQueries({ queryKey: ['load', read.loadId] });
-                        onReload();
-                      });
-                    }}
-                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
-                  >
-                    Reload
-                  </button>
-                ) : null}
-                {landing ? (
-                  <button
-                    type="button"
-                    // §12.127. The save landed; only the read of it failed.
-                    onClick={() => void landOn(landing)}
-                    className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
-                  >
-                    Retry
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
-            {unsaved.length > 0 ? (
-              <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
-                Unsaved changes — {unsaved.join(', ')}.
-              </p>
-            ) : null}
-
-            {saveWarnings.length > 0 ? (
-              <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
-                <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
-                  Saved · one thing to know
-                </p>
-                {saveWarnings.map((warning) => (
-                  <p key={warning.field + warning.message} className="mt-0.5 text-body text-text">
-                    {warning.message}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-
-            {/* ------------------------ previous loads -------------------- */}
-            {needsPrevious ? (
-              <div
-                data-previous-loads=""
-                className="space-y-2 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2"
-              >
-                {timeline.isError ? (
-                  <p role="alert" className="text-body text-status-late-fg">
-                    This truck&apos;s open loads could not be read.
-                  </p>
-                ) : previous === null ? (
-                  <p className="text-body text-text-secondary">
-                    Reading this truck&apos;s open loads…
-                  </p>
-                ) : (
-                  previous.map((load) => (
-                    <div
-                      key={load.loadId}
-                      data-previous-load={load.loadId}
-                      className="flex items-center gap-3"
-                    >
-                      <p className="flex-1 text-body text-text">
-                        {previousLoadLine(load, dispatchTz, new Date(openedAt))}
-                      </p>
-                      <button
-                        type="button"
-                        disabled={!canClear}
-                        title={mayEdit ? undefined : lockedReason}
-                        onClick={() => {
-                          setClearLoadId(load.loadId);
-                          setClearing(true);
-                        }}
-                        className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45"
-                      >
-                        Close load…
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : null}
-
-            <LoadStrip
-              truckName={truckName}
-              drivers={drivers}
-              driverId={form.driverId}
-              initialDriverId={initialDriverId}
-              currentDriverName={currentDriverName}
-              claimedBy={claimedBy}
-              loadNumber={form.loadNumber}
-              loadStatus={form.loadStatus}
-              active={active}
-              mayEdit={mayEdit}
-              mayFlipActive={mayFlipActive}
-              saving={saving}
-              lockedReason={lockedReason}
-              loadNumberError={errorFor('loadNumber')}
-              onDriver={(id) => setForm((f) => ({ ...f, driverId: id }))}
-              onDriverCreated={() => {
-                // The picker holds the new driver itself until this lands.
-                void queryClient.invalidateQueries({ queryKey: ['fleet'] });
-              }}
-              onLoadNumber={(value) => {
-                // §12.122. A filled load number edited by hand is the dispatcher's now.
-                if (form.fill?.loadNumber || form.fill?.loadNumberCheck) countEdits(1);
-                setEditsVersion((v) => v + 1);
-                setForm((f) => ({
-                  ...f,
-                  loadNumber: value,
-                  fill: f.fill ? { ...f.fill, loadNumber: null, loadNumberCheck: null } : null,
-                }));
-              }}
-              loadNumberSource={
-                form.fill?.ai
-                  ? aiSourceLine(form.fill.loadNumber ?? undefined)
-                  : sourceLine(form.fill?.loadNumber ?? undefined)
-              }
-              loadNumberCheck={form.fill?.loadNumberCheck ?? undefined}
-              loadNumberAi={Boolean(form.fill?.ai && form.fill.loadNumber)}
-              onConfirmLoadNumber={() => setForm((f) => confirmAiLoadNumber(f))}
-              onLoadStatus={(value) => setForm((f) => ({ ...f, loadStatus: value }))}
-              onActive={setActive}
-            />
-
-            {/* §12.122. Only while every stop is unsaved: a fill replaces stops. */}
-            {mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null) ? (
-              <RateconStrip
-                hasEntries={
-                  form.loadNumber.trim() !== '' ||
-                  form.stops.some((s) =>
-                    [s.addressLine, s.city, s.state, s.zip, s.appointment.time].some((v) => v.trim() !== ''),
-                  )
-                }
-                toCheck={form.fill ? fieldsToCheck(form) : null}
-                aiMarks={form.fill ? aiMarks(form) : null}
-                aiReader={aiReader}
-                countsVersion={countsVersion}
-                editsVersion={editsVersion}
-                onFill={(read, meta, from) => {
-                  const filled = fillLoad(form, read, openedAt, new Date(), from);
-                  if (!filled.ok) return filled.message;
-                  setForm(filled.form);
-                  setSelected(0);
-                  // An AI read that filled the form waits for the first save after it; any other fill replaces it.
-                  pendingOutcome.current =
-                    read.layout === 'model' && meta ? { readId: meta.readId, layout: meta.layout, snapshot: fillSnapshot(filled.form) } : null;
-                  return null;
-                }}
-              />
-            ) : null}
-
-            <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr]">
-              <StopList
-                stops={form.stops}
-                flags={flags}
-                selected={selected}
-                dirtyKeys={new Set(dirty.stops.keys())}
-                errorKeys={errorKeys}
-                onSelect={setSelected}
-                mayEdit={mayEdit && !saving}
-                addBlocked={mayEdit ? addBlocked(form) : lockedReason}
-                onAdd={addOne}
-              />
-              <StopForm
-                key={current.key}
-                stop={current}
-                index={selected}
-                flags={currentFlags}
-                mayEdit={mayEdit}
-                loadExists={read !== null}
-                dispatchTz={dispatchTz}
-                storedWindow={initialCurrent?.appointment.windowMinutes}
-                initialFocus={initialDriverId !== null}
-                addressChanged={normalizeAddress(editCurrent) !== normalizeAddress(editInitial)}
-                computed={read && currentFlags.next ? row.computed : null}
-                basisDetails={read && currentFlags.next ? etaDetails(row) : []}
-                overrideBlock={
-                  (!read && selected === 0) || currentFlags.next ? (
-                    <OverrideBlock
-                      draft={override}
-                      onChange={setOverride}
-                      computed={row.computed}
-                      live={
-                        row.override
-                          ? {
-                              forcedStatus: row.override.forcedStatus,
-                              reasonLabel: OVERRIDE_REASON_LABEL[row.override.reason],
-                              setByName: row.override.setByName,
-                              setAtUtc: row.override.setAtUtc,
-                              expiresAtUtc: row.override.expiresAtUtc,
-                            }
-                          : null
-                      }
-                      disabled={!mayEdit || !read}
-                      onClearNow={() => void clearOverrideNow()}
-                      errors={(field) =>
-                        overrideErrors.find((e) => e.field === field)?.message ??
-                        errors.find((e) => e.field === field && !e.stopKey)?.message
-                      }
-                    />
-                  ) : null
-                }
-                notNextNote={
-                  read && !currentFlags.next && nextIndex !== -1
-                    ? `A status override applies to the truck's next stop (stop ${nextIndex + 1}).`
-                    : null
-                }
-                errorFor={(field) => errorFor(field, current.key)}
-                onChange={(patch) => setStop(selected, patch)}
-                onConfirmZone={() => confirmStopZone(selected)}
-                onPasteAddress={(pasted) => {
-                  countEdits(filledAmong(current, Object.keys(pasted.values) as FillField[]));
-                  setEditsVersion((v) => v + 1);
-                  updateStop(selected, (s) => pasteAddress(s, pasted));
-                }}
-                onUndoPaste={() => updateStop(selected, undoPaste)}
-                onTakePasted={() => updateStop(selected, takePasted)}
-                removeBlocked={
-                  mayEdit
-                    ? removeBlocked(form, selected, dispatchTz)
-                    : { text: lockedReason, reached: false }
-                }
-                onRemove={() => removeOne(current.key)}
-                orderNote={deliveryBeforePickup(form, selected)}
-                onConfirmAi={() => setForm((f) => confirmAiStop(f, current.key))}
-              />
-            </div>
-
-            {/* §12.107. Drawn only when this truck closed a load in the last 7 days. */}
-            <div className="px-4 pb-4">
-              <RecentlyClosed
-                truckId={row.id}
-                truckName={truckName}
-                dispatchTz={dispatchTz}
-                mayEdit={mayEdit}
-                lockedReason={lockedReason}
-                onReopened={onClose}
-              />
-            </div>
-          </div>
-
-          {/* --------------------------- footer, fixed ---------------------- */}
-          <div className="flex flex-none items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              {/* §12.88. Bottom-left, away from Save and Cancel. */}
-              <button
-                type="button"
-                data-clear-stop
-                disabled={!canClear}
-                title={clearTitle}
-                onClick={() => {
-                  setClearLoadId(null);
-                  setClearing(true);
-                }}
-                className="h-10 shrink-0 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45 disabled:hover:bg-transparent"
-              >
-                Clear stop
-              </button>
-              <span
-                className={`text-[11.5px] font-medium ${
-                  driverChanged ? 'text-status-risk-fg' : 'text-status-late-fg'
-                }`}
-              >
-                {footerNote}
-              </span>
-            </div>
-            <div className="flex shrink-0 gap-2.5">
-              <button
-                type="button"
-                onClick={() => (unsaved.length > 0 ? setDiscarding(true) : onClose())}
-                className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!canSave}
-                title={mayEdit ? undefined : lockedReason}
-                onClick={() => void save()}
-                className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
-              >
-                {saving ? 'Saving…' : driverChanged ? 'Confirm reassign & save' : 'Save'}
-              </button>
-            </div>
+          <div className="flex items-baseline gap-3">
+            <span className="text-small text-text-mutedOnOverlay" data-stop-count="">
+              {stopCount}
+            </span>
+            <span className="font-cond text-micro uppercase tracking-[.09em] text-text-mutedOnOverlay">
+              Esc close
+            </span>
           </div>
         </div>
-      </div>
+
+        {/* ------------------------- middle, scrolls ---------------------- */}
+        <div data-edit-scroll="" className="min-h-0 flex-1 overflow-auto">
+          {bannerError ? (
+            <div className="flex items-center gap-3 border-b border-status-late-bd bg-status-late-bg px-4 py-2">
+              <p role="alert" className="flex-1 text-body text-status-late-fg">
+                {bannerError}
+              </p>
+              {stale && onReload ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // The board as it is now, then the modal on it, read
+                    // afresh. The typed values are discarded only here.
+                    void queryClient.refetchQueries({ queryKey: ['fleet'] }).finally(() => {
+                      if (read) queryClient.removeQueries({ queryKey: ['load', read.loadId] });
+                      onReload();
+                    });
+                  }}
+                  className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+                >
+                  Reload
+                </button>
+              ) : null}
+              {landing ? (
+                <button
+                  type="button"
+                  // §12.127. The save landed; only the read of it failed.
+                  onClick={() => void landOn(landing)}
+                  className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg"
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {unsaved.length > 0 ? (
+            <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
+              Unsaved changes — {unsaved.join(', ')}.
+            </p>
+          ) : null}
+
+          {saveWarnings.length > 0 ? (
+            <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
+              <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
+                Saved · one thing to know
+              </p>
+              {saveWarnings.map((warning) => (
+                <p key={warning.field + warning.message} className="mt-0.5 text-body text-text">
+                  {warning.message}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          {/* ------------------------ previous loads -------------------- */}
+          {needsPrevious ? (
+            <div
+              data-previous-loads=""
+              className="space-y-2 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2"
+            >
+              {timeline.isError ? (
+                <p role="alert" className="text-body text-status-late-fg">
+                  This truck&apos;s open loads could not be read.
+                </p>
+              ) : previous === null ? (
+                <p className="text-body text-text-secondary">
+                  Reading this truck&apos;s open loads…
+                </p>
+              ) : (
+                previous.map((load) => (
+                  <div
+                    key={load.loadId}
+                    data-previous-load={load.loadId}
+                    className="flex items-center gap-3"
+                  >
+                    <p className="flex-1 text-body text-text">
+                      {previousLoadLine(load, dispatchTz, new Date(openedAt))}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!canClear}
+                      title={mayEdit ? undefined : lockedReason}
+                      onClick={() => {
+                        setClearLoadId(load.loadId);
+                        setClearing(true);
+                      }}
+                      className="h-8 shrink-0 border border-status-late-bd px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45"
+                    >
+                      Close load…
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          <LoadStrip
+            truckName={truckName}
+            drivers={drivers}
+            driverId={form.driverId}
+            initialDriverId={initialDriverId}
+            currentDriverName={currentDriverName}
+            claimedBy={claimedBy}
+            loadNumber={form.loadNumber}
+            loadStatus={form.loadStatus}
+            active={active}
+            mayEdit={mayEdit}
+            mayFlipActive={mayFlipActive}
+            saving={saving}
+            lockedReason={lockedReason}
+            loadNumberError={errorFor('loadNumber')}
+            onDriver={(id) => setForm((f) => ({ ...f, driverId: id }))}
+            onDriverCreated={() => {
+              // The picker holds the new driver itself until this lands.
+              void queryClient.invalidateQueries({ queryKey: ['fleet'] });
+            }}
+            onLoadNumber={(value) => {
+              // §12.122. A filled load number edited by hand is the dispatcher's now.
+              if (form.fill?.loadNumber || form.fill?.loadNumberCheck) countEdits(1);
+              setEditsVersion((v) => v + 1);
+              setForm((f) => ({
+                ...f,
+                loadNumber: value,
+                fill: f.fill ? { ...f.fill, loadNumber: null, loadNumberCheck: null } : null,
+              }));
+            }}
+            loadNumberSource={
+              form.fill?.ai
+                ? aiSourceLine(form.fill.loadNumber ?? undefined)
+                : sourceLine(form.fill?.loadNumber ?? undefined)
+            }
+            loadNumberCheck={form.fill?.loadNumberCheck ?? undefined}
+            loadNumberAi={Boolean(form.fill?.ai && form.fill.loadNumber)}
+            onConfirmLoadNumber={() => setForm((f) => confirmAiLoadNumber(f))}
+            onLoadStatus={(value) => setForm((f) => ({ ...f, loadStatus: value }))}
+            onActive={setActive}
+          />
+
+          {/* §12.122. Only while every stop is unsaved: a fill replaces stops. */}
+          {mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null) ? (
+            <RateconStrip
+              hasEntries={
+                form.loadNumber.trim() !== '' ||
+                form.stops.some((s) =>
+                  [s.addressLine, s.city, s.state, s.zip, s.appointment.time].some((v) => v.trim() !== ''),
+                )
+              }
+              toCheck={form.fill ? fieldsToCheck(form) : null}
+              aiMarks={form.fill ? aiMarks(form) : null}
+              aiReader={aiReader}
+              countsVersion={countsVersion}
+              editsVersion={editsVersion}
+              onFill={(read, meta, from) => {
+                const filled = fillLoad(form, read, openedAt, new Date(), from);
+                if (!filled.ok) return filled.message;
+                setForm(filled.form);
+                setSelected(0);
+                // An AI read that filled the form waits for the first save after it; any other fill replaces it.
+                pendingOutcome.current =
+                  read.layout === 'model' && meta ? { readId: meta.readId, layout: meta.layout, snapshot: fillSnapshot(filled.form) } : null;
+                return null;
+              }}
+            />
+          ) : null}
+
+          <div className="min-[1008px]:grid min-[1008px]:grid-cols-[280px_1fr]">
+            <StopList
+              stops={form.stops}
+              flags={flags}
+              selected={selected}
+              dirtyKeys={new Set(dirty.stops.keys())}
+              errorKeys={errorKeys}
+              onSelect={setSelected}
+              mayEdit={mayEdit && !saving}
+              addBlocked={mayEdit ? addBlocked(form) : lockedReason}
+              onAdd={addOne}
+            />
+            <StopForm
+              key={current.key}
+              stop={current}
+              index={selected}
+              flags={currentFlags}
+              mayEdit={mayEdit}
+              loadExists={read !== null}
+              dispatchTz={dispatchTz}
+              storedWindow={initialCurrent?.appointment.windowMinutes}
+              initialFocus={initialDriverId !== null}
+              addressChanged={normalizeAddress(editCurrent) !== normalizeAddress(editInitial)}
+              computed={read && currentFlags.next ? row.computed : null}
+              basisDetails={read && currentFlags.next ? etaDetails(row) : []}
+              overrideBlock={
+                (!read && selected === 0) || currentFlags.next ? (
+                  <OverrideBlock
+                    draft={override}
+                    onChange={setOverride}
+                    computed={row.computed}
+                    live={
+                      row.override
+                        ? {
+                            forcedStatus: row.override.forcedStatus,
+                            reasonLabel: OVERRIDE_REASON_LABEL[row.override.reason],
+                            setByName: row.override.setByName,
+                            setAtUtc: row.override.setAtUtc,
+                            expiresAtUtc: row.override.expiresAtUtc,
+                          }
+                        : null
+                    }
+                    disabled={!mayEdit || !read}
+                    onClearNow={() => void clearOverrideNow()}
+                    errors={(field) =>
+                      overrideErrors.find((e) => e.field === field)?.message ??
+                      errors.find((e) => e.field === field && !e.stopKey)?.message
+                    }
+                  />
+                ) : null
+              }
+              notNextNote={
+                read && !currentFlags.next && nextIndex !== -1
+                  ? `A status override applies to the truck's next stop (stop ${nextIndex + 1}).`
+                  : null
+              }
+              errorFor={(field) => errorFor(field, current.key)}
+              onChange={(patch) => setStop(selected, patch)}
+              onConfirmZone={() => confirmStopZone(selected)}
+              onPasteAddress={(pasted) => {
+                countEdits(filledAmong(current, Object.keys(pasted.values) as FillField[]));
+                setEditsVersion((v) => v + 1);
+                updateStop(selected, (s) => pasteAddress(s, pasted));
+              }}
+              onUndoPaste={() => updateStop(selected, undoPaste)}
+              onTakePasted={() => updateStop(selected, takePasted)}
+              removeBlocked={
+                mayEdit
+                  ? removeBlocked(form, selected, dispatchTz)
+                  : { text: lockedReason, reached: false }
+              }
+              onRemove={() => removeOne(current.key)}
+              orderNote={deliveryBeforePickup(form, selected)}
+              onConfirmAi={() => setForm((f) => confirmAiStop(f, current.key))}
+            />
+          </div>
+
+          {/* §12.107. Drawn only when this truck closed a load in the last 7 days. */}
+          <div className="px-4 pb-4">
+            <RecentlyClosed
+              truckId={row.id}
+              truckName={truckName}
+              dispatchTz={dispatchTz}
+              mayEdit={mayEdit}
+              lockedReason={lockedReason}
+              onReopened={onClose}
+            />
+          </div>
+        </div>
+
+        {/* --------------------------- footer, fixed ---------------------- */}
+        <div className="flex flex-none items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {/* §12.88. Bottom-left, away from Save and Cancel. */}
+            <button
+              type="button"
+              data-clear-stop
+              disabled={!canClear}
+              title={clearTitle}
+              onClick={() => {
+                setClearLoadId(null);
+                setClearing(true);
+              }}
+              className="h-10 shrink-0 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45 disabled:hover:bg-transparent"
+            >
+              Clear stop
+            </button>
+            <span
+              className={`text-[11.5px] font-medium ${
+                driverChanged ? 'text-status-risk-fg' : 'text-status-late-fg'
+              }`}
+            >
+              {footerNote}
+            </span>
+          </div>
+          <div className="flex shrink-0 gap-2.5">
+            <button
+              type="button"
+              onClick={() => (unsaved.length > 0 ? setDiscarding(true) : onClose())}
+              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canSave}
+              title={mayEdit ? undefined : lockedReason}
+              onClick={() => void save()}
+              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+            >
+              {saving ? 'Saving…' : driverChanged ? 'Confirm reassign & save' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </DialogFrame>
 
       {preview ? (
         <ReassignConfirm
@@ -1444,32 +1441,33 @@ function LoadEditor({
       ) : null}
 
       {discarding ? (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-scrim p-6">
-          <div className="w-[420px] border border-line-hair bg-surface-overlay p-4 shadow-modal">
-            <h3 className="font-cond text-[15px] font-semibold uppercase tracking-[.06em] text-text">
-              Discard changes?
-            </h3>
-            <p className="mt-1.5 text-body text-text-secondary">
-              {unsaved.join(', ')} would be lost.
-            </p>
-            <div className="mt-4 flex justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setDiscarding(false)}
-                className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-10 border border-status-late-bd bg-status-late-bg px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
-              >
-                Discard
-              </button>
-            </div>
+        <DialogFrame
+          className="fixed inset-0 z-[60] grid place-items-center bg-scrim p-6"
+          panelClassName="w-[420px] border border-line-hair bg-surface-overlay p-4 shadow-modal"
+        >
+          <h3 className="font-cond text-[15px] font-semibold uppercase tracking-[.06em] text-text">
+            Discard changes?
+          </h3>
+          <p className="mt-1.5 text-body text-text-secondary">
+            {unsaved.join(', ')} would be lost.
+          </p>
+          <div className="mt-4 flex justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={() => setDiscarding(false)}
+              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+            >
+              Keep editing
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-10 border border-status-late-bd bg-status-late-bg px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
+            >
+              Discard
+            </button>
           </div>
-        </div>
+        </DialogFrame>
       ) : null}
     </>
   );
