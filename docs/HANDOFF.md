@@ -65,6 +65,12 @@ was `a5e52e9`. Its deploy is not checked here.
 `ratecon:score` prints "FAIL (marked)", says why a sample was not read, and
 lists what is wrong and not marked; priority 2 on the eleven samples a
 template reads. No app code changed. See "Phase 3az" below.
+**Update at the start of 3ba (2026-11-03): 3az is pushed**: origin's master
+was `2099542`. Its deploy is not checked here.
+**3ba: NOT pushed** (2026-11-03): step 1 of the console's motion work. The
+edit modal and its six confirms open with motion, and their background fades
+when they close (§12.148). Alex looks at it live before step 2. See "Phase
+3ba" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -9934,6 +9940,173 @@ beside the line the brief named; both are corrected.
 1. When to push 3az. Scripts, tests and docs only, so a deploy changes
    nothing that runs. Recommended: push now, so the next phase starts with
    nothing unpushed.
+
+### Phase 3ba: dialogs open with motion, and close without waiting, step 1 (2026-11-03)
+
+Alex asked the design agent for "more animations and pop-ups" to make the
+console smoother. The agent pushed back first, on three points Alex agreed
+with: a pop-up that blocks costs a click every time; motion is how the
+console says "something changed" (the row flash), so motion goes only where
+the dispatcher acts; and speed first. Built in the design session, on Alex's
+answers. **NOT pushed.** Built on `2099542`, which was `origin/master` at the
+start, with a clean tree; `npm run check` there: 217 files and 4066 tests.
+
+**Alex's decisions** (2026-11-03, recorded here and in §12.148):
+
+1. **A only**: the windows that already exist open and close smoothly. Not
+   hover cards (B), not more confirms (D). "Done" feedback (C) maybe, after
+   he has seen A.
+2. **Two steps.** Step 1: the edit modal and its six confirms. **Alex looks
+   at it live before step 2**: menus and dropdowns, the bulk and
+   add-to-list modals, the phone sheet. The palette, cheat sheet and tour
+   join then.
+3. **CSS only, meaning no animation library.** Keyframes are fine.
+4. **Open in about 150 ms or less, close faster.** Closing never waits:
+   focus returns and the next click or key works at once; the fade is only
+   visual.
+5. **Closing, option 1** of three: the dialog goes at once, and only its
+   background, an empty layer, fades over 100 ms. Option 2 (the whole panel
+   fading as a copy that cannot be clicked) and option 3 (no fade) declined.
+6. **Reopening during the fade**: the old background goes at once, never two
+   backgrounds, and the new dialog opens normally, with a test.
+7. **Opacity and transform only**, and nothing left on the window after.
+   **Keep the 98% grow.**
+8. **Motion only on what the dispatcher does** (open, close, press). Nothing
+   moves on its own: polls, re-sorts, new rows.
+9. **Durations are tokens.** §8.3 changes through a new §12 rule with a
+   "superseded" note, not by rewriting it.
+10. **Reduced motion stays 0 ms.** No new pop-ups, and nothing that blocks.
+11. **No stop for a spec review**: §12.148 written, then step 1 built in
+    the same session.
+
+**Commits:**
+
+- `9683bfa`: design-spec §12.148, and "superseded in part" notes at §8.3
+  and §14.4's motion budget;
+- `9774fed`: the tokens (`MOTION_MS.dialogIn` 150, `dialogOut` 100,
+  `EASING.dialog`, the toast's curve), the Tailwind animations `dialog-in`,
+  `scrim-in` and `scrim-out`, `DialogFrame` and `dialog-motion.ts`, with
+  20 tests;
+- `6d36d4c`: the seven dialogs through `DialogFrame`, with 12 tests;
+- `0c71d39`: `e2e/dialog-motion.spec.ts`, 5 tests;
+- one docs commit: this section and the "What is live" lines.
+
+**How it works.** `DialogFrame` (`src/components/overlay/`) draws a
+dialog's scrim and panel. Every attribute the dialog had (role, aria-*,
+data-*) stays on the scrim, and the focus trap's ref on the panel. On mount,
+in a layout effect, it decides the motion; on unmount it is simply gone. The
+rules that span frames are in `dialog-motion.ts`:
+
+- **A frame that mounts in the same commit another unmounted is a
+  replacement** and continues its opening: the same animation with a
+  negative `animation-delay`, or nothing if 150 ms have passed. "The same
+  commit" is the microtask boundary.
+- **A close, not replaced, leaves one empty layer**: the scrim's own
+  classes, no children, `aria-hidden`, `inert`, `pointer-events-none`,
+  `data-dialog-fading`. It is removed on `animationend` or after twice
+  `dialogOut`. Any frame that mounts removes it at once.
+- **StrictMode**: a frame recognises its own simulated unmount, so dev
+  neither skips the opening nor leaves a background.
+- The reduced-motion check reads `matchMedia` at the moment of the decision.
+
+**Wiring (`6d36d4c`).** Only the two outer divs of each dialog changed: one
+`<DialogFrame>` with the same class strings, attributes and `ref={trap}`. The
+rest of each diff is the children's indentation (`git diff -w`: 38 lines
+added, 50 removed, in 6 files). No props, save path, focus handling or key
+handling changed. The edit modal has three frames (reading panel, editor,
+Discard changes), each confirm one.
+
+**What did not change:** `package.json` (no dependency); the palette,
+cheat sheet and tour (still §14.4's 120 ms fade); every other modal, menu,
+dropdown and the phone sheet (step 2); rows, lists, chips, toasts and the
+flash.
+
+**Found while building:**
+
+1. **A naive "animate on mount" would have replayed.** The modal mounts a
+   reading panel and then swaps in the editor; it remounts the editor after
+   a save lands (§12.127), and the console remounts the whole modal on
+   Reload (`key`, `Console.tsx`). Hence the replacement rule.
+2. **A transform left on the panel would break Reopen's confirm.** It is
+   drawn inside the edit modal's panel (`RecentlyClosed`), with
+   `position: fixed`. A transform makes the panel its containing block, so
+   the confirm would be pinned to the panel and not the screen. Hence
+   `backwards` fill, and the class coming off at the end.
+3. **`useReducedMotion` is too late for this.** It learns the preference in
+   a passive effect, after the layout effect that decides. The frame reads
+   `matchMedia` itself.
+4. **The Discard confirm has no `role="dialog"`, `aria-modal` or label**
+   (before 3ba too). Kept as it was: step 1 adds motion, not semantics.
+   Worth a fix in step 2 (question 3).
+5. **Known gap until step 2** (§12.148): a window not yet on `DialogFrame`,
+   opened within 100 ms of a close, shows what is left of the fade under its
+   own scrim.
+6. **Four of the six dialog files were not Prettier-clean before 3ba.** Not
+   reformatted; only the moved children were re-indented, so the diff stays
+   the change.
+
+**Tests.** `DialogFrame.test.tsx` (20): the opening, the classes and
+attributes kept, nothing left once it ends, an animation inside the panel
+not ending it, no replay on a re-render, StrictMode, a replacement taking
+the opening up (`-40ms`) or simply appearing, closing at once, focus back at
+once through the real `useFocusTrap`, the empty inert layer, its removal
+both ways, one layer for several closing, reopening mid-fade, and reduced
+motion. `edit/dialog-motion.test.tsx` (12): the reading panel to editor
+swap, a remount with no replay and no layer, Discard over the modal,
+Reassign, and a guard that each of the seven files draws through
+`DialogFrame` with no `bg-scrim` div of its own. **Mutations**, each alone
+and reverted:
+
+| Broken | Fails |
+|---|---|
+| a mounting frame no longer clears the fading layer | 1 unit (reopening mid-fade) |
+| a replacement starts its own opening | 2 unit |
+| any animation inside the panel ends the opening | 1 unit |
+| the fading layer without `pointer-events-none` and `inert` | the e2e "closing never waits", on `clickReachesRowB` |
+
+**e2e.** The new spec alone first: 6 passed (setup and its 5). Then the
+full suite at `0c71d39`, run `2026-11-03T20-07-30-064Z`, built before
+anything changed on disk: **265 passed, 0 failed, 0 flaky** (19.4 min). Every
+screenshot baseline matched at threshold 0 and 0 pixels (Playwright freezes
+animations for them); none re-saved. The two server errors in its log are
+`route-failure-sentry.spec.ts`'s deliberate injections (`DRIVER-POST`
+SyntaxError; "list read failed … evil.js"), and that spec passed.
+
+**Checks.** `npm run check` on the committed tree: 219 files and 4098
+tests (217 and 4066 at the start: 2 files and 32 tests added). The
+forbidden-files grep printed nothing. One React `act(...)` warning, from
+`multi-stop-modal.test.tsx`, prints at `2099542` too (checked in a
+worktree), so it predates 3ba. The localStorage ExperimentalWarning predates
+3an.
+
+**A formatter edited six files after the build.** ECC's
+`stop:format-typecheck` hook (the plugin Alex installed on 2026-11-03) ran
+Prettier at 21:09:02 local on the files this session's file tools had
+written: `DialogFrame.tsx`, its test, `dialog-motion.ts`,
+`EditStopModal.tsx`, `edit/dialog-motion.test.tsx` and the e2e spec. Each is
+exactly Prettier's output of its committed version (`prettier --stdin` of
+`HEAD`'s file, compared with `cmp`), so nothing behaves differently. But it
+reformats about 250 lines of `EditStopModal.tsx` that 3ba never touched, so
+it is **not committed and not reverted**. It is set aside in a named
+`git stash` ("ECC stop:format-typecheck output …"), so the checks above ran
+on exactly the committed tree. The hook will do the same after every
+session that edits a file (question 4).
+
+**Questions for Alex:**
+
+1. **Push 3ba?** It changes what the dispatchers see: the edit modal and
+   its confirms open with motion. Your call under "Do not push".
+2. **After you have seen it live:** does the opening feel right (150 ms,
+   growing from 98%), and closing crisp enough? Then yes or no to step 2.
+3. **Step 2 also gives Discard changes its `role="dialog"` and a label**
+   (finding 4)? Recommended: yes; it is one line and screen readers then
+   announce it.
+4. **The formatter's six files** (stash above): drop them, or commit them
+   as a style commit of their own? Recommended: drop (`git stash drop`).
+   Whole-file reformats bury real changes, and four of the six dialog files
+   were not Prettier-clean before 3ba either. Separately: keep ECC's
+   `stop:format-typecheck` hook on for this repo, or turn it off?
+   Recommended: off here, or the next phase will open with the same diff.
 
 ## Next
 
