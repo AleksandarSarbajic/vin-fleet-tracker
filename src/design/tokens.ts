@@ -232,6 +232,13 @@ export const MOTION_MS = {
   /** Shorter than `toastIn` on purpose: a dismissal must never feel stuck. */
   toastOut: 120,
   overlay: 120,
+  /** §12.148. A dialog's opening: the scrim fades in, the panel grows from 98%. */
+  dialogIn: 150,
+  /**
+   * §12.148. The fading copy of a closed dialog's background. Shorter than
+   * `dialogIn` for the toast's reason; the dialog itself is already gone.
+   */
+  dialogOut: 100,
 } as const;
 
 /**
@@ -242,8 +249,13 @@ export const MOTION_MS = {
  */
 export const FLASH_TAG_MS = 60_000;
 
+/** Fast, then settling. Everything that arrives decelerates the same way. */
+const ARRIVE = 'cubic-bezier(.2,.8,.2,1)';
+
 export const EASING = {
   /** Jumps, then decays: the flash is at full ground on frame one. */
   flash: 'cubic-bezier(.2,0,0,1)',
-  toast: 'cubic-bezier(.2,.8,.2,1)',
+  toast: ARRIVE,
+  /** §12.148. The toast's curve, so a dialog and a toast arrive alike. */
+  dialog: ARRIVE,
 } as const;

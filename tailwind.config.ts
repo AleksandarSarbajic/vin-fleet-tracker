@@ -33,8 +33,9 @@ const config: Config = {
         micro: ['10.5px', { lineHeight: '1', letterSpacing: '.11em' }],
       },
       /**
-       * §14.4's motion budget, in full. Every duration the fifteen features
-       * use is named here; a component may not spell a millisecond figure.
+       * §14.4's motion budget, in full, and §12.148's dialogs. Every duration
+       * the fifteen features use is named here; a component may not spell a
+       * millisecond figure.
        *
        * The numbers come from `MOTION_MS` rather than being typed here,
        * because `useRowFlash` and the toast's exit have to outlive their own
@@ -52,10 +53,13 @@ const config: Config = {
         'toast-in': ms(MOTION_MS.toastIn),
         'toast-out': ms(MOTION_MS.toastOut),
         overlay: ms(MOTION_MS.overlay),
+        'dialog-in': ms(MOTION_MS.dialogIn),
+        'dialog-out': ms(MOTION_MS.dialogOut),
       },
       transitionTimingFunction: {
         flash: EASING.flash,
         toast: EASING.toast,
+        dialog: EASING.dialog,
       },
       /**
        * §14.4, the half a transition cannot express.
@@ -83,6 +87,14 @@ const config: Config = {
         'toast-out': { from: { opacity: '1' }, to: { opacity: '0' } },
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
         'fade-out': { from: { opacity: '1' }, to: { opacity: '0' } },
+        /**
+         * §12.148. Opacity and transform only, and the `to` is the panel's
+         * own resting state: no transform at all.
+         */
+        'dialog-in': {
+          from: { opacity: '0', transform: 'scale(.98)' },
+          to: { opacity: '1', transform: 'none' },
+        },
       },
       animation: {
         flash: `flash-decay ${ms(MOTION_MS.flash)} ${EASING.flash} forwards`,
@@ -96,6 +108,17 @@ const config: Config = {
         // the outgoing copy is out of flow, so it cannot animate the layout.
         chip: `fade-in ${ms(MOTION_MS.chip)} ${EASING.toast} both`,
         'chip-out': `fade-out ${ms(MOTION_MS.chip)} ${EASING.toast} forwards`,
+        /**
+         * §12.148. `backwards`, never `both`: the opening's first frame
+         * applies from the moment it mounts, and NOTHING applies once it
+         * ends. A transform left on the panel would make it the containing
+         * block for every fixed element inside it (Reopen's confirm is one),
+         * and DialogFrame takes the class off at the end as well.
+         */
+        'dialog-in': `dialog-in ${ms(MOTION_MS.dialogIn)} ${EASING.dialog} backwards`,
+        'scrim-in': `fade-in ${ms(MOTION_MS.dialogIn)} linear backwards`,
+        // The fading copy of a closed dialog's background: removed when this ends.
+        'scrim-out': `fade-out ${ms(MOTION_MS.dialogOut)} linear forwards`,
       },
       /**
        * §14.4's density pair. The row heights are a token rather than a

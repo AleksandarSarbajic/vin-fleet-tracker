@@ -114,8 +114,10 @@
     outline-offset: 2px;
   }
 
-  /* Spec §8.3: 120ms ground/selection, 150ms map pan, nothing else. Under
-     reduced motion all of it becomes 0ms and the map jumps. */
+  /* Spec §8.3: 120ms ground/selection, 150ms map pan, and §14.4's and
+     §12.148's lists; nothing else. Under reduced motion all of it becomes 0ms
+     and the map jumps. A dialog does not rely on this rule alone: it skips
+     its motion entirely under the preference (§12.148). */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
