@@ -1,21 +1,8 @@
 'use client';
 
-import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type AnimationEvent,
-  type HTMLAttributes,
-  type ReactNode,
-  type Ref,
-} from 'react';
+import type { HTMLAttributes, ReactNode, Ref } from 'react';
 import { MOTION_MS } from '@/design/tokens';
-import {
-  frameMounted,
-  frameUnmounted,
-  prefersReducedMotion,
-  resumeAt,
-} from './dialog-motion';
+import { useOpening } from './useOpening';
 
 type Props = Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children' | 'style'> & {
   /** The scrim's classes, exactly as the dialog drew them before §12.148. */
@@ -30,6 +17,10 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children' | 'st
    * an opening of its own.
    */
   family?: string | undefined;
+  /** Drawn behind the panel, inside the scrim: a phone sheet's tap to close. */
+  backdrop?: ReactNode;
+  /** What goes on the panel: on a phone sheet the panel is the dialog. */
+  panelProps?: HTMLAttributes<HTMLDivElement> & { [key: `data-${string}`]: string };
   children: ReactNode;
 };
 
@@ -47,49 +38,29 @@ export function DialogFrame({
   panelClassName,
   panelRef,
   family,
+  backdrop,
+  panelProps,
   children,
   ...scrim
 }: Props) {
-  const scrimRef = useRef<HTMLDivElement>(null);
-  const [owner] = useState(() => ({}));
-  /** When this frame's opening began. Set once; StrictMode's re-run keeps it. */
-  const openedAt = useRef<number | null>(null);
-  /** How far into the opening the motion starts; null when there is none. */
-  const [entering, setEntering] = useState<number | null>(null);
-
-  // Layout, not passive: the decision lands before the first paint, so the
-  // panel is never seen at full strength and then made to fade in.
-  useLayoutEffect(() => {
-    const now = performance.now();
-    const began = frameMounted(owner, now, family);
-    if (openedAt.current === null) {
-      openedAt.current = began;
-      const elapsed = now - began;
-      if (elapsed < MOTION_MS.dialogIn && !prefersReducedMotion()) setEntering(elapsed);
-    }
-    const node = scrimRef.current;
-    const opening = openedAt.current;
-    return () => frameUnmounted(owner, node, opening, family);
-  }, [owner, family]);
-
-  /** The panel's own animation only; one inside it bubbles here too. */
-  const ended = (event: AnimationEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) setEntering(null);
-  };
-  const style = entering === null ? undefined : resumeAt(entering);
+  const { node, entering, style, ended } = useOpening<HTMLDivElement>(
+    'window',
+    MOTION_MS.dialogIn,
+    family,
+  );
 
   return (
     <div
       {...scrim}
-      ref={scrimRef}
-      className={entering === null ? className : `${className} animate-scrim-in`}
+      ref={node}
+      className={entering ? `${className} animate-scrim-in` : className}
       style={style}
     >
+      {backdrop}
       <div
+        {...panelProps}
         ref={panelRef}
-        className={
-          entering === null ? panelClassName : `${panelClassName} animate-dialog-in`
-        }
+        className={entering ? `${panelClassName} animate-dialog-in` : panelClassName}
         style={style}
         onAnimationEnd={ended}
       >

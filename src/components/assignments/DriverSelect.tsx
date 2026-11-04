@@ -14,6 +14,7 @@ import type { BoardDriver } from '@/server/assignments';
 import { isEldBacked } from '@/lib/driver';
 import { NoEldTag } from '@/components/DriverName';
 import { AddDriverInline } from './AddDriverInline';
+import { PopFrame } from '@/components/overlay/PopFrame';
 
 /**
  * Searchable driver picker (design-spec §9.9's assignment group, at board
@@ -334,7 +335,8 @@ export function DriverSelect({
          * most what `listMaxWidth` measures, and a name that still does not
          * fit truncates on one line with its whole self in the title.
          */
-        <ul
+        <PopFrame
+          as="ul"
           id={listId}
           role="listbox"
           style={maxWidth === null ? undefined : { maxWidth }}
@@ -460,7 +462,7 @@ export function DriverSelect({
               />
             </li>
           ) : null}
-        </ul>
+        </PopFrame>
       ) : null}
     </div>
   );

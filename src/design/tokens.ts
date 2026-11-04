@@ -231,7 +231,6 @@ export const MOTION_MS = {
   toastIn: 180,
   /** Shorter than `toastIn` on purpose: a dismissal must never feel stuck. */
   toastOut: 120,
-  overlay: 120,
   /** §12.148. A window's opening: the scrim fades in, the panel rises and grows. */
   dialogIn: 220,
   /**
@@ -239,6 +238,9 @@ export const MOTION_MS = {
    * the toast's reason; the window itself is already gone.
    */
   dialogOut: 140,
+  /** §12.148. A menu or a dropdown, smaller, so quicker than a window. */
+  menuIn: 180,
+  menuOut: 100,
 } as const;
 
 /**
@@ -248,6 +250,9 @@ export const MOTION_MS = {
 export const MOTION_SHAPE = {
   dialogFromScale: 0.96,
   dialogRisePx: 8,
+  menuFromScale: 0.96,
+  /** A menu hangs from what opened it, so it drops into place, not rises. */
+  menuDropPx: 4,
 } as const;
 
 /**

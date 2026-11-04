@@ -8,6 +8,7 @@ import { updateDisplayName, type RenameState } from '@/app/actions/profile';
 import { initials } from '@/lib/profile';
 import type { Role } from '@/lib/roles';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
+import { PopFrame } from '@/components/overlay/PopFrame';
 
 /**
  * The account menu behind the header circle (§12.45).
@@ -124,7 +125,8 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
       </button>
 
       {open ? (
-        <div
+        <PopFrame
+          origin="right"
           id={menuId}
           role="menu"
           aria-label="Account"
@@ -247,7 +249,7 @@ export function AccountMenu({ user, phone = false }: { user: AccountUser; phone?
               Sign out
             </button>
           </form>
-        </div>
+        </PopFrame>
       ) : null}
     </div>
   );

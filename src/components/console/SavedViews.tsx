@@ -6,6 +6,7 @@ import { isTypingTarget } from '@/lib/keymap';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
 import type { TruckList } from '@/lib/truck-lists';
 import { chipLabel } from './FilterChips';
+import { PopFrame } from '@/components/overlay/PopFrame';
 
 /**
  * §12.91 — the scope button (header option 6a). It merges what were two
@@ -366,7 +367,7 @@ export function ScopeMenu({
       </div>
 
       {open ? (
-        <div
+        <PopFrame
           id={menuId}
           role="menu"
           aria-label="Lists and views"
@@ -605,7 +606,7 @@ export function ScopeMenu({
               </div>
             )}
           </div>
-        </div>
+        </PopFrame>
       ) : null}
     </div>
   );

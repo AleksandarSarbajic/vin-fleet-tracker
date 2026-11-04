@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { MOTION_MS } from '@/design/tokens';
 
 /**
- * §12.148, the timing rules behind `DialogFrame`.
+ * §12.148, the timing rules behind `DialogFrame` and `PopFrame`.
  *
  * Two rules need to know about MORE than one frame, which is why they live in
  * a module and not in the component:
@@ -29,8 +29,21 @@ import { MOTION_MS } from '@/design/tokens';
 export const FADING_COPY = 'data-dialog-fading';
 
 /** Written whole, so Tailwind's content scan generates them. */
-const MOTION_IN = ['animate-scrim-in', 'animate-dialog-in'];
-const FADING = ['pointer-events-none', 'animate-window-out'];
+const MOTION_IN = ['animate-scrim-in', 'animate-dialog-in', 'animate-menu-in'];
+const FADING: Record<FrameKind, string[]> = {
+  window: ['pointer-events-none', 'animate-window-out'],
+  menu: ['pointer-events-none', 'animate-menu-out'],
+};
+const FADE_MS: Record<FrameKind, number> = {
+  window: MOTION_MS.dialogOut,
+  menu: MOTION_MS.menuOut,
+};
+/**
+ * Above the highest window (z-[60]). A menu's copy stands in `body`, outside
+ * whatever stacking context the menu was in, and a dropdown in a window must
+ * not fade out behind that window.
+ */
+const MENU_COPY_LAYER = '70';
 /** What would let anything find the copy instead of the real thing. */
 const IDENTITY = /^(id|name|for|role|tabindex|autofocus|aria-.*|data-.*)$/;
 
@@ -46,10 +59,17 @@ export function prefersReducedMotion(): boolean {
   );
 }
 
-type Picture = { node: HTMLElement; scrolls: [Element, number, number][] };
+/** A window fills the screen; a menu hangs from something. */
+export type FrameKind = 'window' | 'menu';
+
+type Picture = {
+  node: HTMLElement;
+  kind: FrameKind;
+  scrolls: [Element, number, number][];
+};
 type Closed = {
   owner: object;
-  scrim: HTMLElement | null;
+  frame: HTMLElement | null;
   picture: Picture | null;
   openedAt: number;
   family: string | undefined;
@@ -90,14 +110,15 @@ export function frameMounted(owner: object, now: number, family?: string): numbe
 /** A frame has unmounted. Its copy fades after the commit, unless replaced. */
 export function frameUnmounted(
   owner: object,
-  scrim: HTMLElement | null,
+  frame: HTMLElement | null,
   openedAt: number,
   family?: string,
+  kind: FrameKind = 'window',
 ): void {
   // Taken here, while it still has layout: a scroll position does not survive
   // leaving the document.
-  const picture = scrim && !prefersReducedMotion() ? takePicture(scrim) : null;
-  closed.push({ owner, scrim, picture, openedAt, family });
+  const picture = frame && !prefersReducedMotion() ? takePicture(frame, kind) : null;
+  closed.push({ owner, frame, picture, openedAt, family });
   if (flushQueued) return;
   flushQueued = true;
   queueMicrotask(() => {
@@ -107,7 +128,7 @@ export function frameUnmounted(
     for (const c of left) {
       if (!c.picture) continue;
       // A window drawn inside another closing one is already in that one's copy.
-      const inside = left.some((o) => o !== c && o.scrim?.contains(c.scrim));
+      const inside = left.some((o) => o !== c && o.frame?.contains(c.frame));
       if (!inside) showPicture(c.picture);
     }
   });
@@ -130,9 +151,9 @@ export function resumeAt(elapsed: number): CSSProperties | undefined {
  * strength first: that is the one thing here that asks for computed style, and
  * only of the elements still moving.
  */
-function takePicture(scrim: HTMLElement): Picture {
-  const node = scrim.cloneNode(true) as HTMLElement;
-  const from = [scrim, ...scrim.querySelectorAll<HTMLElement>('*')];
+function takePicture(frame: HTMLElement, kind: FrameKind): Picture {
+  const node = frame.cloneNode(true) as HTMLElement;
+  const from = [frame, ...frame.querySelectorAll<HTMLElement>('*')];
   const to = [node, ...node.querySelectorAll<HTMLElement>('*')];
   const scrolls: Picture['scrolls'] = [];
   from.forEach((el, i) => {
@@ -146,24 +167,50 @@ function takePicture(scrim: HTMLElement): Picture {
       copy.classList.remove(...MOTION_IN);
       copy.style.removeProperty('animation-delay');
       copy.style.opacity = opacity;
-      if (transform !== 'none') copy.style.transform = transform;
+      // A menu's copy is placed by the box it was seen in, transform and all.
+      if (kind === 'window' && transform !== 'none') copy.style.transform = transform;
     }
     for (const a of [...copy.attributes]) {
       if (IDENTITY.test(a.name)) copy.removeAttribute(a.name);
     }
   });
-  return { node, scrolls };
+  if (kind === 'menu') placeWhereItStood(node, frame);
+  return { node, kind, scrolls };
 }
 
-function showPicture({ node, scrolls }: Picture): void {
-  node.classList.add(...FADING);
+/**
+ * A window's scrim is fixed to the screen, so its copy stands where it stood.
+ * A menu is placed against its parent, and its copy will not have that parent:
+ * a React parent is no place to leave a stray node. So it is fixed where it was
+ * seen, and what its classes meant relative to the parent is taken off.
+ */
+function placeWhereItStood(copy: HTMLElement, menu: HTMLElement): void {
+  const { left, top, width, height } = menu.getBoundingClientRect();
+  Object.assign(copy.style, {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    right: 'auto',
+    bottom: 'auto',
+    width: `${width}px`,
+    height: `${height}px`,
+    minWidth: '0px',
+    maxWidth: 'none',
+    maxHeight: 'none',
+    margin: '0px',
+    zIndex: MENU_COPY_LAYER,
+  });
+}
+
+function showPicture({ node, kind, scrolls }: Picture): void {
+  node.classList.add(...FADING[kind]);
   node.setAttribute(FADING_COPY, '');
   node.setAttribute('aria-hidden', 'true');
   node.setAttribute('inert', '');
   const remove = () => node.remove();
   node.addEventListener('animationend', remove, { once: true });
   // A tab in the background may hold the event back; the copy still goes.
-  window.setTimeout(remove, MOTION_MS.dialogOut * 2);
+  window.setTimeout(remove, FADE_MS[kind] * 2);
   document.body.append(node);
   for (const [el, top, left] of scrolls) {
     el.scrollTop = top;

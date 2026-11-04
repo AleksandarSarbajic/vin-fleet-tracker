@@ -1446,6 +1446,9 @@ function LoadEditor({
         <DialogFrame
           className="fixed inset-0 z-[60] grid place-items-center bg-scrim p-6"
           panelClassName="w-[420px] border border-line-hair bg-surface-overlay p-4 shadow-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Discard changes?"
         >
           <h3 className="font-cond text-[15px] font-semibold uppercase tracking-[.06em] text-text">
             Discard changes?

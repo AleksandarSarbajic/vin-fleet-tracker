@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react';
 import { useFocusTrap, useReturnFocus } from '@/components/edit/useModalChrome';
-import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { DialogFrame } from './DialogFrame';
 
 /**
  * The one overlay layer (§14.5).
@@ -84,7 +84,6 @@ export function Overlay({
 }) {
   const { open, show } = useOverlay();
   const isOpen = open === name;
-  const reduced = useReducedMotion();
   const trap = useFocusTrap(isOpen);
   useReturnFocus(isOpen);
 
@@ -111,13 +110,10 @@ export function Overlay({
   if (!isOpen) return null;
 
   return (
-    <div
-      className={`fixed inset-0 z-30 grid place-items-center bg-scrimOverlay p-6 ${
-        // `animate-`, not `transition-`: a transition needs two renders with
-        // different values and this element has one — it did not exist a
-        // frame ago. The transition class here was a no-op.
-        reduced ? '' : 'animate-overlay'
-      }`}
+    <DialogFrame
+      className="fixed inset-0 z-30 grid place-items-center bg-scrimOverlay p-6"
+      panelClassName={`max-h-full ${width} max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal`}
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label={label}
@@ -129,12 +125,7 @@ export function Overlay({
         if (event.target === event.currentTarget) show(null);
       }}
     >
-      <div
-        ref={trap}
-        className={`max-h-full ${width} max-w-full overflow-auto border border-line-hair bg-surface-overlay shadow-modal`}
-      >
-        {children}
-      </div>
-    </div>
+      {children}
+    </DialogFrame>
   );
 }

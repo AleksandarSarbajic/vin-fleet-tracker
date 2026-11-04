@@ -1,8 +1,6 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditStopModal } from './EditStopModal';
@@ -220,28 +218,4 @@ describe('a confirm opens with motion (§12.148)', () => {
     expect(scrim.className).toContain('animate-scrim-in');
     expect(panelOf(scrim).className).toContain('animate-dialog-in');
   });
-});
-
-describe('the seven dialogs of step 1 draw through DialogFrame (§12.148)', () => {
-  /**
-   * A hand-rolled scrim would open with no motion and leave no background,
-   * and nothing else would notice. Each file names its frames, and none may
-   * draw a `bg-scrim` div of its own.
-   */
-  const FRAMES: Record<string, number> = {
-    'EditStopModal.tsx': 3, // reading panel, editor, Discard changes
-    'ClearStopConfirm.tsx': 1,
-    'ReassignConfirm.tsx': 1,
-    'ReopenConfirm.tsx': 1,
-    'PreviousLoadQuestion.tsx': 1,
-    'ReachedStopQuestion.tsx': 1,
-  };
-
-  for (const [file, count] of Object.entries(FRAMES)) {
-    it(`${file}: ${count} frame${count === 1 ? '' : 's'}, and no scrim of its own`, () => {
-      const source = readFileSync(join(__dirname, file), 'utf8');
-      expect(source.match(/<DialogFrame\b/g) ?? []).toHaveLength(count);
-      expect(source).not.toMatch(/<div[^>]*\bbg-scrim\b/);
-    });
-  }
 });

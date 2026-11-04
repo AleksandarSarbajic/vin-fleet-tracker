@@ -9,6 +9,7 @@ import { CHIP_INK, chipCounts, chipLabel } from '../FilterChips';
 import type { FilterKey } from '../FilterChips';
 import { FleetHealthStrip } from '../FleetHealthStrip';
 import { MORE_KEYS } from './PhoneTiles';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * §12.96, stage 1 — "More": every filter the tiles do not carry, the Today
@@ -41,80 +42,85 @@ export function PhoneMoreSheet({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-40 md:hidden">
-      <button
-        type="button"
-        aria-label="Close filters"
-        tabIndex={-1}
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full bg-scrim"
-      />
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label="More filters"
-        data-phone-more-sheet=""
-        tabIndex={-1}
-        className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto border-t border-line-control bg-surface-raised pb-3 outline-none"
-      >
-        <div className="flex h-14 items-center justify-between px-4">
-          <h2 className="font-cond text-[15px] font-semibold uppercase tracking-[.08em] text-text">
-            Filters
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 min-w-11 border border-line-control px-4 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text"
-          >
-            Done
-          </button>
-        </div>
+    <DialogFrame
+      className="fixed inset-0 z-40 md:hidden"
+      panelClassName="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto border-t border-line-control bg-surface-raised pb-3 outline-none origin-bottom"
+      panelRef={panel}
+      panelProps={{
+        role: 'dialog',
+        'aria-modal': true,
+        'aria-label': "More filters",
+        'data-phone-more-sheet': '',
+        tabIndex: -1,
+      }}
+      backdrop={
+        // A full-screen button: it must never lift or shrink (§12.148).
+        <button
+          type="button"
+          aria-label="Close filters"
+          tabIndex={-1}
+          onClick={onClose}
+          data-no-press=""
+          className="absolute inset-0 h-full w-full bg-scrim"
+        />
+      }
+    >
+      <div className="flex h-14 items-center justify-between px-4">
+        <h2 className="font-cond text-[15px] font-semibold uppercase tracking-[.08em] text-text">
+          Filters
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-11 min-w-11 border border-line-control px-4 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text"
+        >
+          Done
+        </button>
+      </div>
 
-        <div className="grid grid-cols-2 gap-2 px-4">
-          {MORE_KEYS.map((key) => (
+      <div className="grid grid-cols-2 gap-2 px-4">
+        {MORE_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={chips.has(key)}
+            onClick={() => onToggle(key)}
+            className={`flex h-11 items-center justify-between gap-2 border px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] ${CHIP_INK[key]} ${
+              chips.has(key) ? '!border-accent bg-surface-overlay' : ''
+            }`}
+          >
+            <span className="truncate">{chipLabel(key)}</span>
+            <span className="font-sans text-[14px] tabular-nums">{counts[key]}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 border-t border-line-soft px-4 pt-3">
+        <FleetHealthStrip health={health} />
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 border-t border-line-soft px-4 pt-3">
+        <span className="font-cond text-[12px] uppercase tracking-[.11em] text-text-muted">
+          Density
+        </span>
+        <div className="flex gap-2" role="group" aria-label="Row density">
+          {DENSITIES.map((option) => (
             <button
-              key={key}
+              key={option}
               type="button"
-              aria-pressed={chips.has(key)}
-              onClick={() => onToggle(key)}
-              className={`flex h-11 items-center justify-between gap-2 border px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] ${CHIP_INK[key]} ${
-                chips.has(key) ? '!border-accent bg-surface-overlay' : ''
+              aria-pressed={option === density}
+              onClick={() => onDensity(option)}
+              className={`h-11 border px-4 font-cond text-[13px] uppercase tracking-[.08em] ${
+                option === density
+                  ? 'border-accent bg-surface-overlay text-text'
+                  : 'border-line-soft text-text-muted'
               }`}
             >
-              <span className="truncate">{chipLabel(key)}</span>
-              <span className="font-sans text-[14px] tabular-nums">{counts[key]}</span>
+              {option}
             </button>
           ))}
         </div>
-
-        <div className="mt-4 border-t border-line-soft px-4 pt-3">
-          <FleetHealthStrip health={health} />
-        </div>
-
-        <div className="mt-4 flex items-center gap-3 border-t border-line-soft px-4 pt-3">
-          <span className="font-cond text-[12px] uppercase tracking-[.11em] text-text-muted">
-            Density
-          </span>
-          <div className="flex gap-2" role="group" aria-label="Row density">
-            {DENSITIES.map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-pressed={option === density}
-                onClick={() => onDensity(option)}
-                className={`h-11 border px-4 font-cond text-[13px] uppercase tracking-[.08em] ${
-                  option === density
-                    ? 'border-accent bg-surface-overlay text-text'
-                    : 'border-line-soft text-text-muted'
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

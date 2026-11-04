@@ -10,6 +10,7 @@ import {
   type TruckList,
 } from '@/lib/truck-lists';
 import { useFocusTrap } from '@/components/edit/useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * §12.90 — "Add to list…" from the bulk bar: the checked trucks into a list
@@ -81,101 +82,98 @@ export function AddToListModal({
   }, [onClose]);
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="flex max-h-full w-[460px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label="Add to list"
     >
-      <div
-        ref={trap}
-        className="flex max-h-full w-[460px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            Add {trucks.length} {trucks.length === 1 ? 'truck' : 'trucks'} to a list
-          </h2>
-          <p className="mt-0.5 truncate font-sans text-small tabular-nums text-text-mutedOnOverlay">
-            {labels}
-          </p>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          Add {trucks.length} {trucks.length === 1 ? 'truck' : 'trucks'} to a list
+        </h2>
+        <p className="mt-0.5 truncate font-sans text-small tabular-nums text-text-mutedOnOverlay">
+          {labels}
+        </p>
+      </div>
 
-        <fieldset className="min-h-0 flex-1 overflow-auto border-0 p-4">
-          <legend className="sr-only">Which list</legend>
-          {lists.map((l) => (
-            <label
-              key={l.id}
-              className="flex items-center gap-2 py-1 text-body text-text"
-            >
-              <input
-                type="radio"
-                name="add-to-list"
-                checked={target === l.id}
-                onChange={() => setTarget(l.id)}
-              />
-              <span className="truncate">{l.name}</span>
-              <span className="shrink-0 text-small tabular-nums text-text-mutedOnOverlay">
-                · {l.truckIds.length} {l.truckIds.length === 1 ? 'truck' : 'trucks'}
-              </span>
-            </label>
-          ))}
-          <label className="flex items-center gap-2 py-1 text-body text-text">
+      <fieldset className="min-h-0 flex-1 overflow-auto border-0 p-4">
+        <legend className="sr-only">Which list</legend>
+        {lists.map((l) => (
+          <label
+            key={l.id}
+            className="flex items-center gap-2 py-1 text-body text-text"
+          >
             <input
               type="radio"
               name="add-to-list"
-              checked={target === 'new'}
-              onChange={() => setTarget('new')}
+              checked={target === l.id}
+              onChange={() => setTarget(l.id)}
             />
-            New list…
+            <span className="truncate">{l.name}</span>
+            <span className="shrink-0 text-small tabular-nums text-text-mutedOnOverlay">
+              · {l.truckIds.length} {l.truckIds.length === 1 ? 'truck' : 'trucks'}
+            </span>
           </label>
-          {target === 'new' ? (
-            <input
-              autoFocus
-              value={name}
-              maxLength={LIST_NAME_MAX}
-              onChange={(e) => {
-                setName(e.target.value);
-                setProblem(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void confirm();
-                }
-              }}
-              aria-label="New list name"
-              placeholder="Name the new list"
-              className="ml-6 mt-1 h-9 w-[calc(100%-1.5rem)] border border-line-hair bg-surface-sunken px-2 text-body text-text placeholder:text-text-muted"
-            />
-          ) : null}
-          {problem ? (
-            <p
-              role="alert"
-              className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
-            >
-              {problem}
-            </p>
-          ) : null}
-        </fieldset>
+        ))}
+        <label className="flex items-center gap-2 py-1 text-body text-text">
+          <input
+            type="radio"
+            name="add-to-list"
+            checked={target === 'new'}
+            onChange={() => setTarget('new')}
+          />
+          New list…
+        </label>
+        {target === 'new' ? (
+          <input
+            autoFocus
+            value={name}
+            maxLength={LIST_NAME_MAX}
+            onChange={(e) => {
+              setName(e.target.value);
+              setProblem(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void confirm();
+              }
+            }}
+            aria-label="New list name"
+            placeholder="Name the new list"
+            className="ml-6 mt-1 h-9 w-[calc(100%-1.5rem)] border border-line-hair bg-surface-sunken px-2 text-body text-text placeholder:text-text-muted"
+          />
+        ) : null}
+        {problem ? (
+          <p
+            role="alert"
+            className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
+          >
+            {problem}
+          </p>
+        ) : null}
+      </fieldset>
 
-        <div className="flex justify-end gap-2.5 border-t border-line-hair bg-surface-raised px-4 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={target === null || busy}
-            onClick={() => void confirm()}
-            className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
-          >
-            {busy ? 'Adding…' : 'Add to list'}
-          </button>
-        </div>
+      <div className="flex justify-end gap-2.5 border-t border-line-hair bg-surface-raised px-4 py-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={target === null || busy}
+          onClick={() => void confirm()}
+          className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+        >
+          {busy ? 'Adding…' : 'Add to list'}
+        </button>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

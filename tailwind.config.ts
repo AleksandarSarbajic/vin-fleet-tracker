@@ -52,9 +52,10 @@ const config: Config = {
         chip: ms(MOTION_MS.chip),
         'toast-in': ms(MOTION_MS.toastIn),
         'toast-out': ms(MOTION_MS.toastOut),
-        overlay: ms(MOTION_MS.overlay),
         'dialog-in': ms(MOTION_MS.dialogIn),
         'dialog-out': ms(MOTION_MS.dialogOut),
+        'menu-in': ms(MOTION_MS.menuIn),
+        'menu-out': ms(MOTION_MS.menuOut),
       },
       transitionTimingFunction: {
         flash: EASING.flash,
@@ -100,6 +101,13 @@ const config: Config = {
           '60%': { opacity: '1' },
           to: { opacity: '1', transform: 'none' },
         },
+        'menu-in': {
+          from: {
+            opacity: '0',
+            transform: `translateY(-${MOTION_SHAPE.menuDropPx}px) scale(${MOTION_SHAPE.menuFromScale})`,
+          },
+          to: { opacity: '1', transform: 'none' },
+        },
         /** No `from`: a copy fades from where it stands, full strength or not. */
         'fade-away': { to: { opacity: '0' } },
       },
@@ -107,9 +115,6 @@ const config: Config = {
         flash: `flash-decay ${ms(MOTION_MS.flash)} ${EASING.flash} forwards`,
         'toast-in': `toast-in ${ms(MOTION_MS.toastIn)} ${EASING.toast} both`,
         'toast-out': `toast-out ${ms(MOTION_MS.toastOut)} ${EASING.toast} forwards`,
-        // Opacity only, 120ms. No scale and no slide: these open over a list
-        // that may be moving, and a panel that also moves reads as a jump.
-        overlay: `fade-in ${ms(MOTION_MS.overlay)} linear both`,
         // §14.4's chip flip, as the pair it is: the outgoing chip fades out
         // over the same 160ms the incoming one fades in. The WIDTH snaps —
         // the outgoing copy is out of flow, so it cannot animate the layout.
@@ -126,6 +131,8 @@ const config: Config = {
         'scrim-in': `fade-in ${ms(MOTION_MS.dialogIn)} linear backwards`,
         // The fading copy of a closed window: removed when this ends.
         'window-out': `fade-away ${ms(MOTION_MS.dialogOut)} linear forwards`,
+        'menu-in': `menu-in ${ms(MOTION_MS.menuIn)} ${EASING.dialog} backwards`,
+        'menu-out': `fade-away ${ms(MOTION_MS.menuOut)} linear forwards`,
       },
       /**
        * §14.4's density pair. The row heights are a token rather than a

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { IDS, TRUCK_NUMBERS, resetWorld } from './fixtures';
+import { SIZES, onPhone } from './phone-helpers';
 
 /**
  * §12.148 in a real browser: the real CSS, the real timing, and the real
@@ -92,10 +93,12 @@ async function recordOpening(page: Page) {
       };
     };
     const look = () => {
-      const panel = document.querySelector('[role="dialog"] > .animate-dialog-in');
+      const panel = document.querySelector('.animate-dialog-in');
       if (panel && !w.__opening.panel) w.__opening.panel = read(panel);
-      const scrim = document.querySelector('[role="dialog"].animate-scrim-in');
+      const scrim = document.querySelector('.animate-scrim-in');
       if (scrim && !w.__opening.scrim) w.__opening.scrim = read(scrim);
+      const menu = document.querySelector('.animate-menu-in');
+      if (menu && !w.__opening.menu) w.__opening.menu = read(menu);
     };
     new MutationObserver(look).observe(document.body, {
       subtree: true,
@@ -442,6 +445,280 @@ test('the copy shows what was on screen: typed text, a select choice, the scroll
   expect(result.realDialogs).toBe(0);
   expect(result.clickReachesRow).toBe(true);
   await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+});
+
+const WINDOW = {
+  panel: {
+    name: 'dialog-in',
+    duration: '0.22s',
+    timing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    fill: 'backwards',
+  },
+  scrim: { name: 'fade-in', duration: '0.22s', timing: 'linear', fill: 'backwards' },
+};
+const MENU = {
+  menu: {
+    name: 'menu-in',
+    duration: '0.18s',
+    timing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    fill: 'backwards',
+  },
+};
+const copies = (page: Page) => page.locator('[data-dialog-fading]');
+
+/** What a copy looks like the task after its window or menu closes. */
+const copyJustClosed = (page: Page, button?: string) =>
+  page.evaluate(async (name) => {
+    if (name) {
+      [...document.querySelectorAll('button')]
+        .find((b) => b.textContent?.trim() === name)!
+        .click();
+    } else {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const copy = document.querySelector<HTMLElement>('[data-dialog-fading]');
+    return copy
+      ? {
+          fade: getComputedStyle(copy).animationName,
+          duration: getComputedStyle(copy).animationDuration,
+          position: getComputedStyle(copy).position,
+          clicks: getComputedStyle(copy).pointerEvents,
+          hasWords: (copy.textContent ?? '').trim().length > 0,
+        }
+      : null;
+  }, button);
+
+test.describe('every window opens at Medium, and fades when it closes', () => {
+  const windows: [string, (page: Page) => Promise<void>][] = [
+    ['the command palette', (page) => page.keyboard.press('Control+k')],
+    ['the shortcut sheet', (page) => page.keyboard.press('?')],
+    [
+      'the bulk modal',
+      async (page) => {
+        await page
+          .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.chicago}` })
+          .check();
+        await page
+          .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.dallas}` })
+          .check();
+        await page.getByRole('button', { name: 'Force status…' }).click();
+      },
+    ],
+    [
+      'the add-to-list modal',
+      async (page) => {
+        await page
+          .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.chicago}` })
+          .check();
+        await page
+          .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.dallas}` })
+          .check();
+        await page.getByRole('button', { name: 'Add to list…' }).click();
+      },
+    ],
+  ];
+
+  for (const [name, open] of windows) {
+    test(name, async ({ page }) => {
+      await page.goto('/');
+      const opening = await recordOpening(page);
+      await open(page);
+      await expect.poll(opening).toEqual(WINDOW);
+      await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+      // The bulk modal has no Esc of its own (phase 3bb's report): Cancel closes it.
+      const button = name === 'the bulk modal' ? 'Cancel' : undefined;
+      expect(await copyJustClosed(page, button)).toEqual({
+        fade: 'fade-away',
+        duration: '0.14s',
+        position: 'fixed',
+        clicks: 'none',
+        hasWords: true,
+      });
+      await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+      await expect(copies(page)).toHaveCount(0);
+    });
+  }
+
+  test('the tour', async ({ page }) => {
+    await page.goto('/');
+    await page.keyboard.press('?');
+    const sheet = page.locator('[role="dialog"]');
+    await expect(sheet).toBeVisible();
+    const opening = await recordOpening(page);
+    await page.getByRole('button', { name: 'Take the tour again' }).click();
+    // A different window: an opening of its own, not a continuation.
+    await expect.poll(opening).toEqual(WINDOW);
+  });
+
+  test('the palette giving way to the edit modal opens the modal', async ({ page }) => {
+    await page.goto('/');
+    await page.keyboard.press('Control+k');
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+    const opening = await recordOpening(page);
+    await page.keyboard.type(String(TRUCK_NUMBERS.chicago));
+    await page.keyboard.press('Enter');
+    await rowOf(page, IDS.truckChicago).waitFor();
+    await page.keyboard.press('Enter');
+    await expect(editModal(page, TRUCK_NUMBERS.chicago)).toBeVisible();
+    await expect.poll(opening).toEqual(WINDOW);
+    await expect(copies(page)).toHaveCount(0);
+  });
+
+  test('Discard changes says what it is', async ({ page }) => {
+    await page.goto('/');
+    const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+    await modal.getByRole('tabpanel').getByLabel('Street address').fill('Typed');
+    const opening = await recordOpening(page);
+    await page.keyboard.press('Escape');
+    const discard = page.getByRole('dialog', { name: 'Discard changes?' });
+    await expect(discard).toBeVisible();
+    await expect(discard).toHaveAttribute('aria-modal', 'true');
+    await expect.poll(opening).toEqual(WINDOW);
+  });
+});
+
+test.describe('every menu and dropdown opens at Medium, and fades when it closes', () => {
+  const closes = async (page: Page) => {
+    await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+    const copy = await copyJustClosed(page);
+    expect(copy).toEqual({
+      fade: 'fade-away',
+      duration: '0.1s',
+      position: 'fixed',
+      clicks: 'none',
+      hasWords: true,
+    });
+    await expect(copies(page)).toHaveCount(0);
+  };
+
+  test('the account menu', async ({ page }) => {
+    await page.goto('/');
+    const opening = await recordOpening(page);
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible();
+    await expect.poll(opening).toEqual(MENU);
+    await closes(page);
+    await expect(page.getByRole('menu', { name: 'Account' })).toHaveCount(0);
+  });
+
+  test('the scope menu, a fixed popover, comes back in the same place', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const opening = await recordOpening(page);
+    await page.locator('[aria-controls], [aria-haspopup="menu"]').first().click();
+    const menu = page.locator('[data-views-menu]');
+    await expect(menu).toBeVisible();
+    await expect.poll(opening).toEqual(MENU);
+    await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+    const stood = await menu.boundingBox();
+    const seen = await page.evaluate(async () => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const b = document.querySelector('[data-dialog-fading]')?.getBoundingClientRect();
+      return b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null;
+    });
+    expect(seen).toEqual(stood);
+  });
+
+  test('the driver dropdown in the edit window fades above the window', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+    await expect(panelOf(modal)).not.toHaveClass(/animate-/);
+    const opening = await recordOpening(page);
+    await modal.getByRole('combobox').first().click();
+    await expect(page.getByRole('listbox')).toBeVisible();
+    await expect.poll(opening).toEqual(MENU);
+    await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+    // A click on the window's own heading closes the list and lands.
+    const hit = await page.evaluate(async () => {
+      const heading = document.querySelector('[role="dialog"] h2')!;
+      heading.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const copy = document.querySelector<HTMLElement>('[data-dialog-fading]')!;
+      const b = copy.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return {
+        zIndex: Number(getComputedStyle(copy).zIndex),
+        listGone: document.querySelector('[role="listbox"]') === null,
+        clickGoesThrough: top !== null && !copy.contains(top),
+      };
+    });
+    expect(hit.zIndex).toBeGreaterThan(60);
+    expect(hit.listGone).toBe(true);
+    expect(hit.clickGoesThrough).toBe(true);
+    await expect(copies(page)).toHaveCount(0);
+  });
+
+  test('the week picker on the history page', async ({ page }) => {
+    await page.goto('/history');
+    const trigger = page.getByRole('button', { name: /choose a week$/ });
+    await trigger.waitFor();
+    const opening = await recordOpening(page);
+    await trigger.click();
+    await expect(page.getByRole('dialog', { name: 'Choose a week' })).toBeVisible();
+    await expect.poll(opening).toEqual(MENU);
+  });
+});
+
+test.describe('on a phone', () => {
+  const size = SIZES[3]!;
+
+  test('the truck sheet opens at Medium from the bottom, and its backdrop never moves', async ({
+    browser,
+  }) => {
+    const { context, page } = await onPhone(browser, size);
+    try {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto('/');
+      const card = page.locator(`[data-phone-card="${IDS.truckChicago}"]`);
+      await card.waitFor();
+      const opening = await recordOpening(page);
+      await card.tap();
+      const sheet = page.locator('[data-truck-sheet]');
+      await expect(sheet).toBeVisible();
+      await expect.poll(opening).toEqual(WINDOW);
+      await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+      expect(await sheet.getAttribute('role')).toBe('dialog');
+
+      const backdrop = page.getByRole('button', { name: 'Close the truck sheet' });
+      const box = (await backdrop.boundingBox())!;
+      await page.mouse.move(box.x + 8, box.y + 8);
+      await page.mouse.down();
+      expect(await backdrop.evaluate((el) => getComputedStyle(el).transform)).toBe(
+        'none',
+      );
+      await page.mouse.up();
+      await expect(sheet).toHaveCount(0);
+      await expect(copies(page)).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('the filters sheet opens at Medium', async ({ browser }) => {
+    const { context, page } = await onPhone(browser, size);
+    try {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto('/');
+      const more = page.getByRole('button', { name: /^More filters/ });
+      await more.waitFor();
+      const opening = await recordOpening(page);
+      await more.tap();
+      await expect(page.locator('[data-phone-more-sheet]')).toBeVisible();
+      await expect.poll(opening).toEqual(WINDOW);
+    } finally {
+      await context.close();
+    }
+  });
 });
 
 test.describe('under reduced motion', () => {

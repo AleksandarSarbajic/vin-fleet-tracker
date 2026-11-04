@@ -16,6 +16,7 @@ import {
   type IsoWeek,
 } from '@/lib/history-week';
 import { PAD } from './HistoryTable';
+import { PopFrame } from '@/components/overlay/PopFrame';
 
 /**
  * §12.101 — the toolbar: ‹ This week › and the range, which opens a month
@@ -227,7 +228,7 @@ function WeekPicker({
         </svg>
       </button>
       {open ? (
-        <div
+        <PopFrame
           role="dialog"
           aria-label="Choose a week"
           className="absolute left-0 top-[calc(100%+6px)] z-30 w-[288px] border border-line-tag bg-surface-overlay p-3 shadow-modal"
@@ -285,7 +286,7 @@ function WeekPicker({
               className="h-8 border border-line-rule bg-surface-base px-2 font-sans text-[12px] text-text [color-scheme:dark]"
             />
           </label>
-        </div>
+        </PopFrame>
       ) : null}
     </div>
   );
