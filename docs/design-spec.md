@@ -10556,6 +10556,9 @@ copy would fade out behind the window it was drawn in.
   a transform cannot reach.
 - A pseudo-element keeps the hit area under the pointer while a button moves: a
   press at its very edge still clicks, and a lift cannot flicker.
+- **A popover is placed from something that does not move.** The scope menu
+  measures the bordered row its button sits in, not the button: during a click the
+  button is at 96%, and under a resting pointer it is lifted 1px.
 
 **Reduced motion.** No opening, no copy, no lift, no press. The grey bar stays:
 it is a state, not motion, and simply appears. The global rule in `globals.css`

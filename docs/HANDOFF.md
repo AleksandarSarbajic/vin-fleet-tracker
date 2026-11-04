@@ -10198,6 +10198,76 @@ left out fails 1.
 5. **Still open from 3ba:** the formatter's stash, and ECC's `stop:format-typecheck`
    hook. Recommended: `git stash drop`, and the hook off for this repo.
 
+### Phase 3bb, before the push: the scope menu's place, and one full e2e with motion on (2026-11-04)
+
+Alex held the push for two things. **Still NOT pushed.**
+
+**1. The scope menu opens at its button's resting edge (`90a5efc`).** `SavedViews.tsx`
+read the button's own rect during the click, while the button was pressed. It now
+measures the bordered row the button sits in (`[data-scope]`, `[data-phone-scope]`),
+which nothing presses, and takes the inside of its 1px border. No timer, and the
+button keeps its press. Four cases in `dialog-motion.spec.ts`, seen failing first at
+1920: a real mouse click put the menu 3.09px right of its edge; Space the same,
+because Space presses the button while held; V with the pointer resting on the button
+1px high, from the lift. Enter passed before and after, as the control.
+
+**2. One full e2e with motion on for every spec.** `contextOptions` flipped,
+uncommitted, restored. Run `2026-11-04T15-14-42-877Z` at `90a5efc`, no test changed,
+`--update-snapshots=none`: **287 passed, 9 failed, 1 did not run** (20.7 min).
+`phone-signout` did not run because it depends on chromium passing; run alone with
+motion on, it passes. A throwaway check confirmed the flip reaches both the `page`
+fixture and `browser.newContext`. **None of the 9 is a bug a person would see. No app
+change came from this step, and no baseline was re-saved.**
+
+The control for the first three rows below: the same tests and baselines with motion
+on, in temporary copies with one added line that waits for the opening to end. All pass.
+
+| Failure | What happened | Would a person see it? |
+|---|---|---|
+| `desktop-baseline`, `7f` | The trace shows "element is not stable" three times on Pick up, then a retry whose scroll moved the form 141px | No: robot only. A real mouse click mid-opening lands and scrolls nothing (`dialog-motion.spec.ts`) |
+| `history-phone`, account row 44px | Read 42.24 during the opening: 44 × 96%. It settles at 44 | No: robot read |
+| `phone`, truck sheet, all 6 sizes | "Fits" and the button heights read during the opening, e.g. Close 43 | No: robot read |
+| `desktop-baseline`, `5-scope-menu`, 6 widths | **Not timing:** still differs with the opening over, and after 3s | No, see below |
+
+**`5-scope-menu` is the one that is not robot timing, and it is not fixed.** With motion
+on, the menu's picture at rest differs from the baseline: 1,971 to 2,651 pixels by
+Playwright's count, all inside the menu. Where measured, on the All trucks row, the
+shift is 1 CSS px, at 1x and at 2x. At 1440, reduced has its ground on pixel rows
+104-135, name 115-123, count 116-124; motion on has ground 105-136, name 116-124, count
+116-124. Measured:
+
+- Layout is identical: same `top`, `left` and box on all 24 elements, by mouse and by
+  key. Computed styles differ only in transition settings and the animation duration.
+- The opening animation is the only cause: with it removed and motion still on, the
+  menu is identical to reduced motion. So is a forced repaint after settling.
+- It is not `90a5efc`: on the default config all six `desktop at` baselines pass with it.
+- Hovering a row keeps its text on the same pixel rows. Its ground comes back 1px higher
+  when the pointer leaves, during its own fade. Under reduced motion nothing changes.
+
+Not known: **why** the raster keeps those rows. A half-pixel `top` (42.5) was my first
+guess, but 2x has no half pixel there and still differs. All of this was measured in
+Playwright's Chromium, not on a real screen with a GPU. What it means: the baselines are
+reduced-motion pictures, and this one menu differs by about 1px for people with motion
+on. Left alone. Rounding the menu's `top` and `left` might remove it, untested, and could
+mean re-saving those baselines, so that is Alex's call if he ever wants it.
+
+**Checks.** `npm run check`: 223 files, 4133 tests. The forbidden-files grep printed
+nothing. `dialog-motion.spec.ts` alone on the default config,
+`2026-11-04T15-53-51-045Z`: 38 passed, including sign-in setup. The default full e2e was
+not re-run, per Alex's rule: no app code changed beyond step 1. `package.json` and
+`e2e/__screenshots__` are untouched.
+
+**Open items for the next phase, Alex's answers. None built:**
+
+1. **The three left-out windows go onto frames** (truck list editor, timeline window,
+   phone history): yes, after his live look.
+2. **Bulk modal Esc:** yes.
+3. **Discard is not usable by keyboard.** The key handler at `EditStopModal.tsx:1005`
+   does not check `discarding`, so while it is open Esc does nothing, Tab cannot reach
+   its buttons, typing edits the form behind it, and Cmd/Ctrl+Enter saves. Next phase:
+   focus goes to Keep editing, Tab stays inside, Esc means Keep editing, and
+   Cmd/Ctrl+Enter does nothing while it is open.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
