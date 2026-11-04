@@ -1343,6 +1343,71 @@ test.describe('hover and press', () => {
     await expect.poll(() => row.evaluate(transformOf)).toBe('none');
   });
 
+  /**
+   * A row's press answers as fast as a button's, and lets go as slowly. Read from
+   * the transition itself as it starts, in the page: at 60ms a round trip could
+   * miss it. With the pointer still on the row, and with it moved off.
+   */
+  test.describe('a row presses in 60ms and lets go in 180ms', () => {
+    const logTimings = (row: Locator) =>
+      row.evaluate((el) => {
+        const w = window as unknown as { __press: number[] };
+        w.__press = [];
+        el.addEventListener('transitionrun', (event) => {
+          const e = event as TransitionEvent;
+          if (e.target !== el || e.pseudoElement !== '' || e.propertyName !== 'transform') {
+            return;
+          }
+          const running = el
+            .getAnimations()
+            .find((a) => (a as CSSTransition).transitionProperty === 'transform');
+          w.__press.push(Number(running?.effect?.getComputedTiming().duration));
+        });
+      });
+    const timings = (page: Page) =>
+      page.evaluate(() => (window as unknown as { __press: number[] }).__press);
+
+    test('let go with the pointer still on the row', async ({ page }) => {
+      await page.goto('/');
+      const row = rowOf(page, IDS.truckDallas);
+      const box = (await row.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await logTimings(row);
+      await page.mouse.down();
+      await expect.poll(() => timings(page)).toEqual([60]);
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
+      await page.mouse.up();
+      await expect.poll(() => timings(page)).toEqual([60, 180]);
+    });
+
+    test('let go with the pointer moved off', async ({ page }) => {
+      await page.goto('/');
+      const row = rowOf(page, IDS.truckDallas);
+      const box = (await row.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await logTimings(row);
+      await page.mouse.down();
+      await expect.poll(() => timings(page)).toEqual([60]);
+      await page.mouse.move(2, 2);
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
+      await page.mouse.up();
+      await expect.poll(() => timings(page)).toEqual([60, 180]);
+    });
+
+    test('its hit area grows on the same 60ms', async ({ page }) => {
+      await page.goto('/');
+      const row = rowOf(page, IDS.truckDallas);
+      const box = (await row.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      expect(
+        await row.evaluate((el) => getComputedStyle(el, '::before').animationDuration),
+      ).toBe('0.06s');
+      await page.mouse.move(2, 2);
+      await page.mouse.up();
+    });
+  });
+
   test('pressing a control in a row does not press the row', async ({ page }) => {
     await page.goto('/');
     const row = rowOf(page, IDS.truckDallas);

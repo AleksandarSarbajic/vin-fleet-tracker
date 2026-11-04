@@ -251,6 +251,8 @@
     [data-row-id]:active:not(:has(button:active, a:active, input:active)) {
       --press: theme('scale.press-flat');
       transform: scale(var(--press));
+      transition-duration: theme('transitionDuration.ground'), theme('transitionDuration.ground'),
+        theme('transitionDuration.ground'), theme('transitionDuration.press-in');
     }
 
     /*
@@ -272,8 +274,7 @@
       border: 0 solid transparent;
       border-left-width: inherit;
       border-bottom-width: inherit;
-      /* The row's press runs at the length above, not at a button's press-in. */
-      animation: hit-area-press-row theme('transitionDuration.press-out')
+      animation: hit-area-press-row theme('transitionDuration.press-in')
         theme('transitionTimingFunction.dialog') backwards;
     }
   }
@@ -323,8 +324,13 @@
    * uses, and a selected row has that rail instead.
    */
   @media (hover: hover) {
+    /*
+     * The ground only. A single value here would also set the transform's length,
+     * for the whole press and release, since the pointer is on the row for both.
+     */
     [data-row-id]:hover {
-      transition-duration: theme('transitionDuration.hover');
+      transition-duration: theme('transitionDuration.hover'), theme('transitionDuration.hover'),
+        theme('transitionDuration.hover'), theme('transitionDuration.press-out');
     }
 
     [data-row-id]:not([aria-selected='true'])::after {

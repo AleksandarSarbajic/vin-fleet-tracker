@@ -10581,9 +10581,9 @@ copy would fade out behind the window it was drawn in.
     borders can be uneven. That leaves out one corner pixel at the top right and one
     at the bottom left of an even 1px border: a press on those two pixels misses.
   - It grows with the press, the same length on the same curve, because at the
-    first frame nothing has shrunk yet. A row's press runs at `press-out` (180ms), a
-    button's at `press-in` (60ms). Under a mouse a button's hit area is already there
-    at the lift's height, and goes on from there.
+    first frame nothing has shrunk yet. A row's press and a button's both run at
+    `press-in` (60ms), and both let go at `press-out` (180ms). Under a mouse a button's
+    hit area is already there at the lift's height, and goes on from there.
   - A row has one only while the row itself is pressed. Above 1085px a row's last
     12px are the Split handle's grab margin, not the row.
 - **A popover is placed from something that does not move.** The scope menu

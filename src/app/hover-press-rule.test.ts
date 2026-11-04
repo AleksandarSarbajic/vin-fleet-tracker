@@ -34,6 +34,25 @@ describe('hover and press (§12.148)', () => {
     expect(moving[0]!.selector).toContain(':active');
   });
 
+  it('a row presses at press-in and lets go at press-out, like a button', () => {
+    const pressed = onRow.find(
+      (r) => r.selector.includes(':active') && !r.selector.includes('::') && moves(r.body),
+    );
+    expect(pressed?.body).toContain("theme('transitionDuration.press-in')");
+    const released = onRow.find(
+      (r) => !r.selector.includes(':active') && r.body.includes('transition-property'),
+    );
+    expect(released?.body).toContain("theme('transitionDuration.press-out')");
+    // Hover has no say over the transform's length: it would be a third speed.
+    const atHover = onRow.filter(
+      (r) => r.selector.includes(':hover') && !r.selector.includes('::'),
+    );
+    for (const rule of atHover) {
+      const durations = rule.body.match(/transition-duration:[^;]*;/)?.[0] ?? '';
+      expect(durations, rule.selector).toContain("theme('transitionDuration.press-out')");
+    }
+  });
+
   it('the row keeps its grey hover bar, on a pseudo-element beside it', () => {
     const bar = onRow.find(
       (r) => r.selector.includes('::after') && r.body.includes('width'),
