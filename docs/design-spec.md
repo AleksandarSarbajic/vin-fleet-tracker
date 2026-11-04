@@ -10554,8 +10554,23 @@ copy would fade out behind the window it was drawn in.
   or its own `translate` (the copy button would jump), a full-screen tap to close
   (`inset-0`, `data-no-press`), everything inside the map, and inline links, which
   a transform cannot reach.
-- A pseudo-element keeps the hit area under the pointer while a button moves: a
-  press at its very edge still clicks, and a lift cannot flicker.
+- A pseudo-element keeps the hit area under the pointer while a thing moves: a
+  press at its very edge still lands, and a lift cannot flicker. **It covers the
+  resting box and not a pixel beyond,** because anything further makes the scroller
+  around it grow, and the scrollbars appear (3bb's live bug, `inset: -4px` on a row).
+  So its reach is never a fixed distance:
+  - It is a share of the size, worked out from the press's own scale, or from the
+    lift for a lift.
+  - It inherits the border widths on the side it grows away from, because offsets
+    count from the padding box. A button has two, one anchored at each corner, since
+    borders can be uneven. That leaves out one corner pixel at the top right and one
+    at the bottom left of an even 1px border: a press on those two pixels misses.
+  - It grows with the press, the same length on the same curve, because at the
+    first frame nothing has shrunk yet. A row's press runs at `press-out` (180ms), a
+    button's at `press-in` (60ms). Under a mouse a button's hit area is already there
+    at the lift's height, and goes on from there.
+  - A row has one only while the row itself is pressed. Above 1085px a row's last
+    12px are the Split handle's grab margin, not the row.
 - **A popover is placed from something that does not move.** The scope menu
   measures the bordered row its button sits in, not the button: during a click the
   button is at 96%, and under a resting pointer it is lifted 1px.

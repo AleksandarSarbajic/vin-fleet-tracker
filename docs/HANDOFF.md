@@ -10268,6 +10268,109 @@ not re-run, per Alex's rule: no app code changed beyond step 1. `package.json` a
    focus goes to Keep editing, Tab stays inside, Esc means Keep editing, and
    Cmd/Ctrl+Enter does nothing while it is open.
 
+### Phase 3bb, live fix: pressing a row made both list scrollbars appear (2026-11-04)
+
+Alex found it on the live board, measured the cause, and asked for this alone, ahead of
+the next phase: the three open items above are not touched. **NOT pushed.**
+
+**The cause.** 3bb's hit areas had fixed outward insets: `-4px` on a pressed row, `-6px`
+on a pressed button, and a 2px bottom offset under a lift. Past the resting box they make
+the scroller grow, and `overflow-y-auto` then scrolls sideways too. Reproduced on the
+board: 4px sideways on the first frame of a press, then 3 and 2. The last row also went
+3px down.
+
+**The fix, in `globals.css` only.** A hit area covers the resting box and not a pixel
+beyond. No `overflow-hidden`, no per-component patch, no JS, no timer. Rows, buttons, menu
+items and phone cards keep their press and lift, and rows still have no transform on
+hover. It took three things that a corrected inset alone would not have done:
+
+1. **A share, not a distance.** What a press takes depends on the size, so the reach is a
+   percentage worked out from the press's own scale: `(1 - 1/scale) / 2`. The lift uses
+   its own token.
+2. **The border.** Offsets count from the padding box, so `inset: 0` leaves the border out,
+   and a press on it misses on release. The pseudo-element inherits the border widths on
+   the side it grows away from. A button needs two, one anchored at each corner, because
+   borders are often uneven: rows and phone cards are 3px left and 1px below; `List`,
+   `Satellite`, `Arrived`, `No appt` are 1px on one side. A centred one would go past on the
+   thin side. A row needs one, since it has borders on only two sides.
+3. **The first frames.** At frame one nothing has shrunk yet, so a hit area already at full
+   reach sticks out for a few frames: the same bug, as a flash. So it grows with the press:
+   a keyframe from the thing's own box, the same length on the same curve. Under a mouse a
+   button's hit area is already there at the lift's height, and transitions on from there.
+
+**Found on the way:**
+
+- **A row's press runs 180ms, a button's 60ms.** `[data-row-id][data-row-id]` gives the
+  transform `press-out`, and the row's `:active` never switches to `press-in`. My first
+  version assumed 60 and overshot for 1px; a frame log showed the two clocks. The hit area
+  now follows the row's real 180ms. **Not changed:** it looks unintended, and matching
+  buttons is a one-line change. Alex's call.
+- **A real gap in 3bb, now closed:** the `-4px` did not reach past the 3px border plus the
+  2.15px shrink, so a press on a row's far-left pixel selected nothing.
+- **My first version broke something, now fixed and tested:** a quick tap on the bottom
+  pixel row of a lifted button missed, because the press restarted the hit area and dropped
+  the pixel under the lift. The old `-6px` covered it, so this test passes on 3bb's CSS too.
+- **Above 1085px a row has no right edge to press:** its last 12px are the Split handle's
+  grab margin. Correct by design, so the row's edge tests run at 1024, list only.
+- **The board is virtualized,** so straight after a scroll the last row in the DOM is only
+  the last one drawn so far. The tests wait for the real one.
+
+**What it leaves behind.** Two pixels: **on an even 1px border, a press on the top-right or
+bottom-left corner pixel misses,** because each of the two pseudo-elements covers its own
+two sides. All other pixels and corners tested land: buttons with no border, even and uneven
+borders; rows; and quick taps. Two calculated amounts that no measurement shows: a hit area can fall about
+0.04px short of a bordered button's outer edge, and mid-press it can stick out about 0.06px
+on a 300px button.
+
+**Measured with throwaway specs, on every frame, no tolerance, on the final CSS:**
+
+- The real board at 1100, 1280, 1366, 1440, 1536, 1680, 1920 and 2560, at 1x and 2x, a middle
+  and the last row, including the fractional 819.59px and 921.59px panes: no change in
+  16 of 16. (Measured before the tap rule, which does not apply to rows.)
+- A flush button in a scroller at fractional positions and sizes, 96 combinations: **0**.
+- Mutations, each alone and reverted: without the animation 6 growth tests fail; without the
+  inherited borders 3 edge tests fail.
+- All of it in Playwright's Chromium only, not on a real screen, Safari or Firefox.
+
+**Tests.** `dialog-motion.spec.ts` gains 20, from 37 to 57. Against 3bb's CSS **10 failed**:
+the row's left edge and 9 growth checks. Passing there too: the other edge presses (they must
+keep passing), the quick tap, and two controls, the menu's corner delete button and the real
+`FCFS`, which are not flush. Nothing real sits within 16px of the edit window's scroll edge, so
+that check places a button flush in its corner with no border, an even one and an uneven one,
+and asserts it is there. A test that passes because nothing was at the edge tests nothing.
+`hover-press-rule.test.ts` gains 6, so a fixed outward inset cannot come back unnoticed.
+
+**Could anything else 3bb added make a scroller grow? No, read for that class of fault:**
+
+| Added in 3bb | Can it stick out? | Checked by |
+|---|---|---|
+| Press scale, buttons and rows | No: only shrinks | Read |
+| Lift, `translateY(-1px)` | No: up only, and the top is not scrollable | Read; the pin, the flush buttons |
+| Row hover bar | No: on the row's own 3px border | Read; the row tests include hover |
+| `transition-*`, the reduced-motion rule | No: no size | Read |
+| Tailwind tokens `scale`, `translate`, `opacity` | No: values only | Read |
+| `menu-in`, `translateY(-4px) scale(.96)` | No: shrinks toward its origin, and rises | Read; driver dropdown inside the edit window |
+| `dialog-in`, `translateY(8px) scale(.96)` | **Yes, by design:** a window under 400px tall goes below its resting box for the first frames | Safe only because every framed window sits in a `fixed inset-0` scrim with no scrollbars |
+| `fade-away` and the fading copy | No: opacity, and `position: fixed` | Read |
+
+Every scroller on the page was read on every frame during: scope menu, account menu, palette,
+shortcut sheet, driver dropdown, the edit window, a confirm over it, and both phone sheets at
+320x568 and 667x375. Motion changed none. Two did change, a confirm's content and a phone
+list's first paint, and both change the same way under reduced motion. Read but not run: the
+bulk and add-to-list modals, the tour, the week picker, the other confirms, and closing.
+
+**Checks.** `npm run check`: 223 files, 4139 tests. The forbidden-files grep printed nothing.
+`dialog-motion.spec.ts` alone on the default config, `2026-11-04T17-29-21-099Z`: 58 passed,
+including sign-in setup. **Not run:** the full e2e with motion on. These rules only exist with
+motion on, and the default suite runs reduced.
+
+**Questions for Alex:**
+
+1. **Push?** The fix is ready. Your live look on the board is the real check.
+2. **The two corner pixels on a 1px border.** Recommended: leave them. Closing them takes
+   knowing the border's width, which CSS cannot read.
+3. **A row's press at 180ms against a button's 60ms.** Recommended: look at it live first.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
