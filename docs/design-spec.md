@@ -10506,15 +10506,16 @@ curve did not change. Opacity and transform only.
 
 **Where.** Windows: the edit modal (its reading panel and its editor), the six
 confirms over it, the bulk and add-to-list modals, the palette, shortcut sheet
-and tour, and both phone sheets (from the bottom). Menus: the account menu, the
+and tour, the truck list editor, the timeline window, and the four phone sheets
+(from the bottom): truck, filters, and the history page's load details and week
+chooser. Menus: the account menu, the
 scope menu, the driver dropdown, the week picker. Hover and press: every button
 and button-like link.
 
-**Left out, still at once:** the truck list editor, the timeline window and the
-phone history, which were not in Alex's list; `frames-guard.test.ts` names them
-and fails on any other full-screen scrim. Native selects (Load status, Window,
-Facility time zone) open as the operating system draws them; CSS cannot reach
-them.
+**Left out:** nothing we draw, since phase 3bc put the last three windows on
+frames. `frames-guard.test.ts` names every frame and fails on any full-screen scrim
+drawn by hand. Native selects (Load status, Window, Facility time zone) open as the
+operating system draws them; CSS cannot reach them.
 
 **Nothing is left on the window.** The animation fills backwards only, and its
 class comes off when it ends: no transform and no opacity of its own. A transform

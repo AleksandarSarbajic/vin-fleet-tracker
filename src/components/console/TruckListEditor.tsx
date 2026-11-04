@@ -13,6 +13,7 @@ import {
   type TruckList,
 } from '@/lib/truck-lists';
 import { useFocusTrap } from '@/components/edit/useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 
 /**
  * §12.90 — create or edit a shared truck list.
@@ -147,225 +148,222 @@ export function TruckListEditor({
   const title = editing ? `Edit list — ${editing.name}` : 'New list';
 
   return (
-    <div
+    <DialogFrame
       className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
+      panelClassName="flex max-h-full w-[600px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
+      panelProps={{ 'data-list-editor': '' }}
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div
-        ref={trap}
-        data-list-editor=""
-        className="flex max-h-full w-[600px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="border-b border-line-soft px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            {title}
-          </h2>
-          <p className="mt-0.5 text-small text-text-mutedOnOverlay">
-            Shared — every dispatcher sees this list and can use it.
-          </p>
-        </div>
+      <div className="border-b border-line-soft px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          {title}
+        </h2>
+        <p className="mt-0.5 text-small text-text-mutedOnOverlay">
+          Shared — every dispatcher sees this list and can use it.
+        </p>
+      </div>
 
-        <div className="min-h-0 flex-1 overflow-auto p-4">
-          <label className="block">
-            <span className="mb-1 block text-small text-text-secondary">Name</span>
-            <input
-              data-initial-focus=""
-              value={name}
-              maxLength={LIST_NAME_MAX}
-              disabled={!canEdit}
-              onChange={(e) => {
-                setName(e.target.value);
-                setProblem(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void save();
-                }
-              }}
-              placeholder="Bob's trucks"
-              aria-label="List name"
-              className="h-10 w-full border border-line-hair bg-surface-sunken px-2.5 text-body text-text placeholder:text-text-muted"
-            />
-          </label>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <label className="block">
+          <span className="mb-1 block text-small text-text-secondary">Name</span>
+          <input
+            data-initial-focus=""
+            value={name}
+            maxLength={LIST_NAME_MAX}
+            disabled={!canEdit}
+            onChange={(e) => {
+              setName(e.target.value);
+              setProblem(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void save();
+              }
+            }}
+            placeholder="Bob's trucks"
+            aria-label="List name"
+            className="h-10 w-full border border-line-hair bg-surface-sunken px-2.5 text-body text-text placeholder:text-text-muted"
+          />
+        </label>
 
-          <div className="mt-4">
-            <div className="mb-1 flex items-baseline justify-between">
-              <span className="text-small text-text-secondary">Trucks</span>
-              <span
-                data-list-count=""
-                className="font-sans text-small tabular-nums text-text"
-              >
-                {finalIds.length} {finalIds.length === 1 ? 'truck' : 'trucks'}
-                {overCap ? ` — at most ${LIST_TRUCK_CAP}` : ''}
-              </span>
-            </div>
-            {sorted.length > 0 ? (
-              <ul className="flex flex-wrap gap-1.5" aria-label="Trucks in this list">
-                {sorted.map((id) => {
-                  const t = byId.get(id);
-                  const label = labelOf(byId, id);
-                  return (
-                    <li
-                      key={id}
-                      className="flex items-center gap-1 border border-line-hair bg-surface-raised py-0.5 pl-2 pr-1 font-sans text-small tabular-nums text-text"
-                    >
-                      {label}
-                      {t && !t.active ? (
-                        <span className="text-text-mutedOnOverlay"> · inactive</span>
-                      ) : null}
-                      <button
-                        type="button"
-                        disabled={!canEdit}
-                        aria-label={`Remove truck ${label}`}
-                        onClick={() => setMembers((m) => m.filter((x) => x !== id))}
-                        className="px-1 text-text-muted hover:text-status-late-fg"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="text-small text-text-mutedOnOverlay">
-                {parsed.fresh.length > 0
-                  ? `The ${parsed.fresh.length} typed below are added when you save.`
-                  : 'No trucks yet.'}
-              </p>
-            )}
+        <div className="mt-4">
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="text-small text-text-secondary">Trucks</span>
+            <span
+              data-list-count=""
+              className="font-sans text-small tabular-nums text-text"
+            >
+              {finalIds.length} {finalIds.length === 1 ? 'truck' : 'trucks'}
+              {overCap ? ` — at most ${LIST_TRUCK_CAP}` : ''}
+            </span>
           </div>
-
-          {canEdit ? (
-            <div className="mt-4">
-              <label className="block">
-                <span className="mb-1 block text-small text-text-secondary">
-                  Add trucks by number — separated by commas, spaces or periods
-                </span>
-                <textarea
-                  value={pasted}
-                  onChange={(e) => {
-                    setPasted(e.target.value);
-                    setProblem(null);
-                  }}
-                  aria-label="Truck numbers to add"
-                  placeholder="113, 116, 124"
-                  className="h-16 w-full border border-line-hair bg-surface-sunken p-2 font-sans text-body tabular-nums text-text placeholder:text-text-muted"
-                />
-              </label>
-              <PasteSummary parsed={parsed} />
-              <div className="mt-2 flex gap-2">
-                {parsed.fresh.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMembers((m) => [...m, ...parsed.fresh]);
-                      setPasted('');
-                    }}
-                    className="h-8 border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
+          {sorted.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5" aria-label="Trucks in this list">
+              {sorted.map((id) => {
+                const t = byId.get(id);
+                const label = labelOf(byId, id);
+                return (
+                  <li
+                    key={id}
+                    className="flex items-center gap-1 border border-line-hair bg-surface-raised py-0.5 pl-2 pr-1 font-sans text-small tabular-nums text-text"
                   >
-                    Add {parsed.fresh.length}
-                  </button>
-                ) : null}
-                {checkedFresh.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setMembers((m) => [...m, ...checkedFresh])}
-                    className="h-8 border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
-                  >
-                    Add the {checkedFresh.length} checked{' '}
-                    {checkedFresh.length === 1 ? 'row' : 'rows'}
-                  </button>
-                ) : null}
-              </div>
-            </div>
+                    {label}
+                    {t && !t.active ? (
+                      <span className="text-text-mutedOnOverlay"> · inactive</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      aria-label={`Remove truck ${label}`}
+                      onClick={() => setMembers((m) => m.filter((x) => x !== id))}
+                      className="px-1 text-text-muted hover:text-status-late-fg"
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           ) : (
-            <p className="mt-4 text-small text-text-mutedOnOverlay">
-              Only dispatchers and admins can change lists.
+            <p className="text-small text-text-mutedOnOverlay">
+              {parsed.fresh.length > 0
+                ? `The ${parsed.fresh.length} typed below are added when you save.`
+                : 'No trucks yet.'}
             </p>
           )}
+        </div>
 
-          {problem ? (
-            <div
-              role="alert"
-              className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
-            >
-              {problem}
-              {conflict ? (
+        {canEdit ? (
+          <div className="mt-4">
+            <label className="block">
+              <span className="mb-1 block text-small text-text-secondary">
+                Add trucks by number — separated by commas, spaces or periods
+              </span>
+              <textarea
+                value={pasted}
+                onChange={(e) => {
+                  setPasted(e.target.value);
+                  setProblem(null);
+                }}
+                aria-label="Truck numbers to add"
+                placeholder="113, 116, 124"
+                className="h-16 w-full border border-line-hair bg-surface-sunken p-2 font-sans text-body tabular-nums text-text placeholder:text-text-muted"
+              />
+            </label>
+            <PasteSummary parsed={parsed} />
+            <div className="mt-2 flex gap-2">
+              {parsed.fresh.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setName(conflict.name);
-                    setMembers(conflict.truckIds);
-                    setBaseVersion(conflict.version);
+                    setMembers((m) => [...m, ...parsed.fresh]);
                     setPasted('');
-                    setConflict(null);
-                    setProblem(null);
                   }}
-                  className="ml-2 underline"
+                  className="h-8 border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
                 >
-                  Reload the current list
+                  Add {parsed.fresh.length}
+                </button>
+              ) : null}
+              {checkedFresh.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setMembers((m) => [...m, ...checkedFresh])}
+                  className="h-8 border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
+                >
+                  Add the {checkedFresh.length} checked{' '}
+                  {checkedFresh.length === 1 ? 'row' : 'rows'}
                 </button>
               ) : null}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          <p className="mt-4 text-small text-text-mutedOnOverlay">
+            Only dispatchers and admins can change lists.
+          </p>
+        )}
 
-        <div className="flex items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
-          <div>
-            {editing && canEdit ? (
-              confirmDelete ? (
-                <span className="flex items-center gap-2 text-body text-text">
-                  Delete “{editing.name}” for everyone?
-                  <button
-                    type="button"
-                    onClick={() => void remove()}
-                    className="h-8 border border-status-late-bd bg-status-late-bg px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
-                  >
-                    Delete list
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(false)}
-                    className="h-8 px-2 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-                  >
-                    Keep it
-                  </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={gone}
-                  className="h-10 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45"
-                >
-                  Delete list…
-                </button>
-              )
+        {problem ? (
+          <div
+            role="alert"
+            className="mt-3 border border-status-late-bd bg-status-late-bg px-3 py-2 text-body text-status-late-fg"
+          >
+            {problem}
+            {conflict ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setName(conflict.name);
+                  setMembers(conflict.truckIds);
+                  setBaseVersion(conflict.version);
+                  setPasted('');
+                  setConflict(null);
+                  setProblem(null);
+                }}
+                className="ml-2 underline"
+              >
+                Reload the current list
+              </button>
             ) : null}
           </div>
-          <div className="flex gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={!canEdit || busy || overCap || nameEmpty || gone}
-              className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
-            >
-              {busy ? 'Saving…' : editing ? 'Save list' : 'Create list'}
-            </button>
-          </div>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t border-line-hair bg-surface-raised px-4 py-3">
+        <div>
+          {editing && canEdit ? (
+            confirmDelete ? (
+              <span className="flex items-center gap-2 text-body text-text">
+                Delete “{editing.name}” for everyone?
+                <button
+                  type="button"
+                  onClick={() => void remove()}
+                  className="h-8 border border-status-late-bd bg-status-late-bg px-3 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
+                >
+                  Delete list
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="h-8 px-2 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+                >
+                  Keep it
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                disabled={gone}
+                className="h-10 border border-status-late-bd px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg hover:bg-status-late-bg disabled:opacity-45"
+              >
+                Delete list…
+              </button>
+            )
+          ) : null}
+        </div>
+        <div className="flex gap-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!canEdit || busy || overCap || nameEmpty || gone}
+            className="h-10 bg-accent px-4 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover disabled:opacity-45"
+          >
+            {busy ? 'Saving…' : editing ? 'Save list' : 'Create list'}
+          </button>
         </div>
       </div>
-    </div>
+    </DialogFrame>
   );
 }
 

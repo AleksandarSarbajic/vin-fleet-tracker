@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useFocusTrap, useReturnFocus } from '@/components/edit/useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 import { useTruckTimeline } from '@/hooks/useTruckTimeline';
 import { timeInZone, windowEnd } from '@/lib/format';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
@@ -99,7 +100,7 @@ export function TruckTimeline({
   const now = Date.now();
 
   return (
-    <div
+    <DialogFrame
       /*
        * §12.96, stage 3. Below 768px the grid's one column is held to the
        * screen: left to itself the track grew to the 620px panel, and the
@@ -107,6 +108,8 @@ export function TruckTimeline({
        * the login card's defect (stage 1). `min(620px, 100%)` now holds.
        */
       className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6 max-md:grid-cols-[minmax(0,1fr)] max-md:p-3"
+      panelClassName="flex max-h-full w-[620px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
+      panelRef={trap}
       role="dialog"
       aria-modal="true"
       aria-label={`Timeline for truck ${truckLabel}`}
@@ -114,70 +117,65 @@ export function TruckTimeline({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div
-        ref={trap}
-        className="flex max-h-full w-[620px] max-w-full flex-col border border-line-hair bg-surface-overlay shadow-modal"
-      >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line-hair px-4 py-3">
-          <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
-            Truck {truckLabel} — timeline
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 border border-line-hair px-3 py-1 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover max-md:h-11 max-md:min-w-11"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          {isPending ? (
-            <p className="py-8 text-center text-body text-text-mutedOnOverlay">
-              Loading…
-            </p>
-          ) : isError ? (
-            <p role="alert" className="py-8 text-center text-body text-status-late-fg">
-              The timeline could not be loaded.
-            </p>
-          ) : loads.length === 0 ? (
-            <p className="py-8 text-center text-body text-text-mutedOnOverlay">
-              Nothing on this truck in the last 24 hours, and nothing ahead of it.
-            </p>
-          ) : (
-            loads.map((load) => (
-              <section key={load.loadId} className="mb-4 last:mb-0">
-                <h3 className="mb-2 flex items-baseline gap-2 border-b border-line-soft pb-1 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-                  <span className="text-text-secondary">
-                    {/* §12.21: blank means blank, and it says so. */}
-                    {load.loadNumber ?? 'Load — no number given'}
-                  </span>
-                  <span>{load.loadStatus.toLowerCase().replace(/_/g, ' ')}</span>
-                </h3>
-                {load.stops.map((stop) => (
-                  <StopCard
-                    key={stop.stopId}
-                    stop={stop}
-                    dispatchTz={dispatchTz}
-                    now={now}
-                    isCurrent={stop.stopId === current}
-                  />
-                ))}
-              </section>
-            ))
-          )}
-        </div>
-
-        {/*
-          §12.15, said out loud. The deferred History is the surface that
-          would carry an undo; a timeline that stayed silent about having none
-          invites exactly the question the deferral was meant to close.
-        */}
-        <p className="shrink-0 border-t border-line-hair px-4 py-2 font-sans text-small text-text-mutedOnOverlay">
-          A record, not a control — nothing here can be undone from this screen.
-        </p>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line-hair px-4 py-3">
+        <h2 className="font-cond text-[17px] font-semibold uppercase leading-[1.1] tracking-[.06em] text-text">
+          Truck {truckLabel} — timeline
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 border border-line-hair px-3 py-1 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover max-md:h-11 max-md:min-w-11"
+        >
+          Close
+        </button>
       </div>
-    </div>
+
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+        {isPending ? (
+          <p className="py-8 text-center text-body text-text-mutedOnOverlay">
+            Loading…
+          </p>
+        ) : isError ? (
+          <p role="alert" className="py-8 text-center text-body text-status-late-fg">
+            The timeline could not be loaded.
+          </p>
+        ) : loads.length === 0 ? (
+          <p className="py-8 text-center text-body text-text-mutedOnOverlay">
+            Nothing on this truck in the last 24 hours, and nothing ahead of it.
+          </p>
+        ) : (
+          loads.map((load) => (
+            <section key={load.loadId} className="mb-4 last:mb-0">
+              <h3 className="mb-2 flex items-baseline gap-2 border-b border-line-soft pb-1 font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
+                <span className="text-text-secondary">
+                  {/* §12.21: blank means blank, and it says so. */}
+                  {load.loadNumber ?? 'Load — no number given'}
+                </span>
+                <span>{load.loadStatus.toLowerCase().replace(/_/g, ' ')}</span>
+              </h3>
+              {load.stops.map((stop) => (
+                <StopCard
+                  key={stop.stopId}
+                  stop={stop}
+                  dispatchTz={dispatchTz}
+                  now={now}
+                  isCurrent={stop.stopId === current}
+                />
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+
+      {/*
+        §12.15, said out loud. The deferred History is the surface that
+        would carry an undo; a timeline that stayed silent about having none
+        invites exactly the question the deferral was meant to close.
+      */}
+      <p className="shrink-0 border-t border-line-hair px-4 py-2 font-sans text-small text-text-mutedOnOverlay">
+        A record, not a control — nothing here can be undone from this screen.
+      </p>
+    </DialogFrame>
   );
 }
 

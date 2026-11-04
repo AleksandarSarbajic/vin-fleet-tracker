@@ -22,6 +22,9 @@ const WINDOWS: Record<string, number> = {
   'console/AddToListModal.tsx': 1,
   'console/phone/TruckSheet.tsx': 1,
   'console/phone/PhoneMoreSheet.tsx': 1,
+  'console/TruckListEditor.tsx': 1,
+  'console/TruckTimeline.tsx': 1,
+  'history/PhoneHistory.tsx': 2, // the load sheet, the week chooser
 };
 
 const MENUS: Record<string, number> = {
@@ -31,12 +34,8 @@ const MENUS: Record<string, number> = {
   'history/HistoryToolbar.tsx': 1,
 };
 
-/** Not in Alex's list for phase 3bb: they still open and close at once. */
-const LEFT_OUT = [
-  'console/TruckListEditor.tsx',
-  'console/TruckTimeline.tsx',
-  'history/PhoneHistory.tsx',
-];
+/** Nothing, since phase 3bc. A new scrim goes on a frame; this list stays empty. */
+const LEFT_OUT: string[] = [];
 
 const walk = (dir: string): string[] =>
   readdirSync(dir).flatMap((name) => {

@@ -1,5 +1,6 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { IDS, TRUCK_NUMBERS, resetWorld } from './fixtures';
+import { HISTORY_NOW, seedHistory } from './history-seed';
 import { SIZES, onPhone } from './phone-helpers';
 
 /**
@@ -970,6 +971,187 @@ test.describe('the reorder bar never moves a row', () => {
     expect(before.x + before.width).toBeLessThanOrEqual(line.x + line.width);
     const box = (await bar(page).boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(line.x);
+  });
+});
+
+test.describe('the three windows that came last, on frames like the rest', () => {
+  /** How many times an opening began: one each, whatever re-renders after it. */
+  const countOpenings = (page: Page) =>
+    page.evaluate(() => {
+      const w = window as unknown as { __openings: number };
+      w.__openings = 0;
+      let was = false;
+      const look = () => {
+        const now = document.querySelector('.animate-dialog-in') !== null;
+        if (now && !was) w.__openings += 1;
+        was = now;
+      };
+      new MutationObserver(look).observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    });
+  const openings = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __openings: number }).__openings);
+
+  /** Closed, and read one task later: gone at once, and a copy nothing can use. */
+  const closeAndReadCopy = (page: Page, button?: string) =>
+    page.evaluate(async (name) => {
+      if (name) {
+        [...document.querySelectorAll<HTMLElement>('[role="dialog"] button')]
+          .find((b) => b.textContent?.trim() === name)!
+          .click();
+      } else {
+        (document.activeElement ?? document.body).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const copy = document.querySelector<HTMLElement>('[data-dialog-fading]');
+      if (!copy) return null;
+      const b = copy.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return {
+        realDialogs: document.querySelectorAll('[role="dialog"]').length,
+        fade: getComputedStyle(copy).animationName,
+        duration: getComputedStyle(copy).animationDuration,
+        clicks: getComputedStyle(copy).pointerEvents,
+        inert: copy.hasAttribute('inert'),
+        hidden: copy.getAttribute('aria-hidden'),
+        identity: copy.querySelectorAll(
+          '[id],[role],[name],[for],[tabindex],[aria-label],[aria-modal],[data-list-editor],[data-load-sheet]',
+        ).length,
+        clickGoesThrough: top !== null && !copy.contains(top),
+        hasWords: (copy.textContent ?? '').trim().length > 0,
+      };
+    }, button);
+
+  const A_COPY_NOTHING_CAN_USE = {
+    realDialogs: 0,
+    fade: 'fade-away',
+    duration: '0.14s',
+    clicks: 'none',
+    inert: true,
+    hidden: 'true',
+    identity: 0,
+    clickGoesThrough: true,
+    hasWords: true,
+  };
+
+  test('the truck list editor', async ({ page }) => {
+    await page.goto('/');
+    const opening = await recordOpening(page);
+    await countOpenings(page);
+    await page.locator('[data-scope] [aria-haspopup="menu"]').click();
+    await page.getByRole('menuitem', { name: 'New list…' }).click();
+    const editor = page.getByRole('dialog', { name: 'New list' });
+    await expect(editor).toBeVisible();
+    await expect.poll(opening).toMatchObject({ panel: WINDOW.panel, scrim: WINDOW.scrim });
+    await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+    // Its focus, as before: the name field. Typing re-renders it, and replays nothing.
+    await expect(editor.getByLabel('List name')).toBeFocused();
+    await page.keyboard.type('Night shift');
+    await expect(editor.getByLabel('List name')).toHaveValue('Night shift');
+    expect(await openings(page)).toBe(1);
+    expect(await closeAndReadCopy(page)).toEqual(A_COPY_NOTHING_CAN_USE);
+    await expect(copies(page)).toHaveCount(0);
+  });
+
+  test('the timeline window', async ({ page }) => {
+    await page.goto('/');
+    await rowOf(page, IDS.truckChicago).click();
+    const opening = await recordOpening(page);
+    await countOpenings(page);
+    const button = page.getByRole('button', { name: 'Timeline' });
+    await button.click();
+    const timeline = page.getByRole('dialog', { name: /Timeline for truck 101/ });
+    await expect(timeline).toBeVisible();
+    await expect.poll(opening).toEqual(WINDOW);
+    // Its read lands after it opens: a re-render, which replays nothing.
+    await expect(timeline.getByText('Loading…')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+    expect(await openings(page)).toBe(1);
+    await expect(timeline.getByRole('button', { name: 'Close' })).toBeFocused();
+
+    expect(await closeAndReadCopy(page)).toEqual(A_COPY_NOTHING_CAN_USE);
+    // Focus was back at once, on what opened it.
+    await expect(button).toBeFocused();
+    await expect(copies(page)).toHaveCount(0);
+
+    // A press on the scrim still closes it: its handler came along to the frame.
+    await button.click();
+    await expect(timeline).toBeVisible();
+    await page.mouse.click(4, 4);
+    await expect(timeline).toHaveCount(0);
+  });
+
+  test.describe('the phone history', () => {
+    const size = SIZES[3]!;
+
+    async function openPhoneHistory(browser: Browser) {
+      await seedHistory();
+      const { context, page } = await onPhone(browser, size);
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.clock.setFixedTime(HISTORY_NOW);
+      await page.goto('/history?week=2026-W40');
+      await page.locator('[data-history-phone]').waitFor();
+      return { context, page };
+    }
+
+    test('the load sheet', async ({ browser }) => {
+      const { context, page } = await openPhoneHistory(browser);
+      try {
+        const opening = await recordOpening(page);
+        await countOpenings(page);
+        const load = page.locator('[data-phone-load]').first();
+        await load.tap();
+        const sheet = page.locator('[data-load-sheet]');
+        await expect(sheet).toBeVisible();
+        await expect.poll(opening).toEqual(WINDOW);
+        await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+        expect(await openings(page)).toBe(1);
+        // Its role, its name and its focus, on the panel as before.
+        await expect(sheet).toHaveAttribute('role', 'dialog');
+        await expect(sheet).toHaveAttribute('aria-modal', 'true');
+        await expect(sheet).toBeFocused();
+        expect(await closeAndReadCopy(page, 'Close')).toEqual(A_COPY_NOTHING_CAN_USE);
+        await expect(load).toBeFocused();
+        await expect(copies(page)).toHaveCount(0);
+
+        // And its tap to close, which must not lift or shrink.
+        await load.tap();
+        await expect(sheet).toBeVisible();
+        await page.getByRole('button', { name: 'Close the load details' }).click({
+          position: { x: 4, y: 4 },
+        });
+        await expect(sheet).toHaveCount(0);
+      } finally {
+        await context.close();
+      }
+    });
+
+    test('the week chooser', async ({ browser }) => {
+      const { context, page } = await openPhoneHistory(browser);
+      try {
+        const opening = await recordOpening(page);
+        await countOpenings(page);
+        await page
+          .locator('[data-phone-week]')
+          .getByRole('button', { name: /Choose a week/ })
+          .tap();
+        const chooser = page.getByRole('dialog', { name: 'Choose a week' });
+        await expect(chooser).toBeVisible();
+        await expect.poll(opening).toEqual(WINDOW);
+        await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
+        expect(await openings(page)).toBe(1);
+        expect(await closeAndReadCopy(page, 'Close')).toEqual(A_COPY_NOTHING_CAN_USE);
+        await expect(copies(page)).toHaveCount(0);
+      } finally {
+        await context.close();
+      }
+    });
   });
 });
 

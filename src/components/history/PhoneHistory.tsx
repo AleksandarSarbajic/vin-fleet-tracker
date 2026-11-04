@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { HeaderSync } from '@/components/console/HeaderStatus';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
+import { DialogFrame } from '@/components/overlay/DialogFrame';
 import { BRAND } from '@/lib/brand';
 import { ENTRY_STATUS_LABEL, type HistoryEntry, type HistoryRow, type HistoryWeekView } from '@/lib/history';
 import { rangeLabel, weekTag, type IsoWeek } from '@/lib/history-week';
@@ -442,50 +443,59 @@ function LoadSheet({ entry, onClose }: { entry: HistoryEntry; onClose: () => voi
   useReturnFocus(true);
   useEffect(() => panel.current?.focus(), [entry.key]);
   return (
-    <div className="fixed inset-0 z-40 md:hidden">
-      <button type="button" aria-label="Close the load details" tabIndex={-1} onClick={onClose} className="absolute inset-0 h-full w-full bg-scrim" />
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={entry.tip.title}
-        data-load-sheet=""
-        tabIndex={-1}
-        className="absolute inset-x-0 bottom-0 flex max-h-[calc(100dvh-12px)] flex-col gap-3 overflow-y-auto overscroll-contain border-t border-line-tag bg-surface-overlay px-4 pb-5 pt-2 outline-none"
-      >
-        <span aria-hidden="true" className="h-1 w-9 shrink-0 self-center bg-line-grip" />
-        <div className="flex items-baseline justify-between gap-2.5">
-          <span className="font-sans text-[18px] font-semibold text-text">{entry.tip.title}</span>
-          <span className={`inline-flex items-center gap-[5px] font-cond text-[13px] font-semibold uppercase leading-none tracking-[.08em] ${STATUS_INK[entry.status]}`}>
-            <StatusIcon status={entry.status} size={13} />
-            {ENTRY_STATUS_LABEL[entry.status]}
-          </span>
-        </div>
-        <div className="font-sans text-[15px] font-medium leading-[1.4] text-text">{entry.tip.route}</div>
-        {entry.tip.stops.map((stop, k) => (
-          <div key={k} className="flex flex-col gap-[5px] border-t border-line-hair pt-2.5">
-            <span className="font-cond text-[12px] font-semibold uppercase leading-none tracking-[.1em] text-text-secondary">
-              {stop.kind} · {stop.place}
-            </span>
-            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] font-sans text-[14px] leading-[1.4]">
-              <span className="text-text-secondary">Arrived</span>
-              <span className="text-text">{stop.arrived}</span>
-              <span className="text-text-secondary">Departed</span>
-              <span className="text-text">{stop.departed}</span>
-            </div>
-          </div>
-        ))}
-        {entry.tip.missing ? <div className="font-sans text-[13px] leading-[1.4] text-text-secondary">{entry.tip.missing}</div> : null}
-        <div className="border-t border-line-hair pt-2.5 font-sans text-[13px] text-text-secondary">{entry.tip.meta}</div>
+    <DialogFrame
+      className="fixed inset-0 z-40 md:hidden"
+      panelClassName="absolute inset-x-0 bottom-0 flex max-h-[calc(100dvh-12px)] origin-bottom flex-col gap-3 overflow-y-auto overscroll-contain border-t border-line-tag bg-surface-overlay px-4 pb-5 pt-2 outline-none"
+      panelRef={panel}
+      panelProps={{
+        role: 'dialog',
+        'aria-modal': true,
+        'aria-label': entry.tip.title,
+        'data-load-sheet': '',
+        tabIndex: -1,
+      }}
+      backdrop={
         <button
           type="button"
+          aria-label="Close the load details"
+          tabIndex={-1}
           onClick={onClose}
-          className="h-11 shrink-0 border border-line-tag bg-transparent font-cond text-[14px] font-semibold uppercase leading-none tracking-[.08em] text-text"
-        >
-          Close
-        </button>
+          className="absolute inset-0 h-full w-full bg-scrim"
+        />
+      }
+    >
+      <span aria-hidden="true" className="h-1 w-9 shrink-0 self-center bg-line-grip" />
+      <div className="flex items-baseline justify-between gap-2.5">
+        <span className="font-sans text-[18px] font-semibold text-text">{entry.tip.title}</span>
+        <span className={`inline-flex items-center gap-[5px] font-cond text-[13px] font-semibold uppercase leading-none tracking-[.08em] ${STATUS_INK[entry.status]}`}>
+          <StatusIcon status={entry.status} size={13} />
+          {ENTRY_STATUS_LABEL[entry.status]}
+        </span>
       </div>
-    </div>
+      <div className="font-sans text-[15px] font-medium leading-[1.4] text-text">{entry.tip.route}</div>
+      {entry.tip.stops.map((stop, k) => (
+        <div key={k} className="flex flex-col gap-[5px] border-t border-line-hair pt-2.5">
+          <span className="font-cond text-[12px] font-semibold uppercase leading-none tracking-[.1em] text-text-secondary">
+            {stop.kind} · {stop.place}
+          </span>
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] font-sans text-[14px] leading-[1.4]">
+            <span className="text-text-secondary">Arrived</span>
+            <span className="text-text">{stop.arrived}</span>
+            <span className="text-text-secondary">Departed</span>
+            <span className="text-text">{stop.departed}</span>
+          </div>
+        </div>
+      ))}
+      {entry.tip.missing ? <div className="font-sans text-[13px] leading-[1.4] text-text-secondary">{entry.tip.missing}</div> : null}
+      <div className="border-t border-line-hair pt-2.5 font-sans text-[13px] text-text-secondary">{entry.tip.meta}</div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="h-11 shrink-0 border border-line-tag bg-transparent font-cond text-[14px] font-semibold uppercase leading-none tracking-[.08em] text-text"
+      >
+        Close
+      </button>
+    </DialogFrame>
   );
 }
 
@@ -504,30 +514,40 @@ function WeekSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-40 md:hidden">
-      <button type="button" aria-label="Close the week chooser" tabIndex={-1} onClick={onClose} className="absolute inset-0 h-full w-full bg-scrim" />
-      <div role="dialog" aria-modal="true" aria-label="Choose a week" className="absolute inset-x-0 bottom-0 flex flex-col gap-3 border-t border-line-tag bg-surface-overlay px-4 pb-5 pt-3">
-        <span className="font-cond text-[15px] font-semibold uppercase tracking-[.1em] text-text">Choose a week</span>
-        <label className="flex flex-col gap-1.5 font-sans text-[13px] text-text-secondary">
-          Jump to a date
-          <input
-            type="date"
-            min={firstDayIso}
-            max={todayIso}
-            aria-label="Jump to a date"
-            onChange={(event) => {
-              if (event.target.value) onPick(event.target.value);
-            }}
-            className="h-11 border border-line-rule bg-surface-base px-3 font-sans text-[15px] text-text [color-scheme:dark]"
-          />
-        </label>
-        <button type="button" onClick={onThisWeek} className={`${BUTTON} font-cond text-[14px] font-semibold uppercase tracking-[.08em]`}>
-          This week
-        </button>
-        <button type="button" onClick={onClose} className={`${BUTTON} font-cond text-[14px] font-semibold uppercase tracking-[.08em]`}>
-          Close
-        </button>
-      </div>
-    </div>
+    <DialogFrame
+      className="fixed inset-0 z-40 md:hidden"
+      panelClassName="absolute inset-x-0 bottom-0 flex origin-bottom flex-col gap-3 border-t border-line-tag bg-surface-overlay px-4 pb-5 pt-3"
+      panelProps={{ role: 'dialog', 'aria-modal': true, 'aria-label': 'Choose a week' }}
+      backdrop={
+        <button
+          type="button"
+          aria-label="Close the week chooser"
+          tabIndex={-1}
+          onClick={onClose}
+          className="absolute inset-0 h-full w-full bg-scrim"
+        />
+      }
+    >
+      <span className="font-cond text-[15px] font-semibold uppercase tracking-[.1em] text-text">Choose a week</span>
+      <label className="flex flex-col gap-1.5 font-sans text-[13px] text-text-secondary">
+        Jump to a date
+        <input
+          type="date"
+          min={firstDayIso}
+          max={todayIso}
+          aria-label="Jump to a date"
+          onChange={(event) => {
+            if (event.target.value) onPick(event.target.value);
+          }}
+          className="h-11 border border-line-rule bg-surface-base px-3 font-sans text-[15px] text-text [color-scheme:dark]"
+        />
+      </label>
+      <button type="button" onClick={onThisWeek} className={`${BUTTON} font-cond text-[14px] font-semibold uppercase tracking-[.08em]`}>
+        This week
+      </button>
+      <button type="button" onClick={onClose} className={`${BUTTON} font-cond text-[14px] font-semibold uppercase tracking-[.08em]`}>
+        Close
+      </button>
+    </DialogFrame>
   );
 }
