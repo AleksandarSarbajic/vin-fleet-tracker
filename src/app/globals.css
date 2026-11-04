@@ -124,7 +124,14 @@
     *::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
+      /*
+       * A true 0, not 0.01ms. Elements default to `transition-property: all`,
+       * so any duration above nothing made every element "transition" every
+       * property for one frame: a colour, a padding or a popup's position read
+       * straight after a change was the old one. Animations keep their 0.01ms
+       * because code waits on `animationend`; nothing waits on `transitionend`.
+       */
+      transition-duration: 0s !important;
       scroll-behavior: auto !important;
     }
   }

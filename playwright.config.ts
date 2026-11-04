@@ -98,6 +98,16 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
+    /*
+     * §12.148. Reduced motion by default, for every browser context a spec
+     * opens. The robot does not wait the way a person does: its first click
+     * can land while a window is still opening, it finds the target "not
+     * stable", retries, and its scroll-into-view moved the edit form 141px
+     * under baseline 7f. A spec about something else should not depend on how
+     * fast an opening is. The specs that check motion turn it back on with
+     * `test.use({ contextOptions: { reducedMotion: 'no-preference' } })`.
+     */
+    contextOptions: { reducedMotion: 'reduce' },
   },
 
   projects: [

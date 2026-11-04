@@ -12,6 +12,9 @@ import { IDS, TRUCK_NUMBERS, resetWorld } from './fixtures';
  * is there.
  */
 
+// The one spec about motion: the suite's default is reduced (playwright.config.ts).
+test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
 test.beforeEach(async () => {
   await resetWorld();
 });
@@ -69,41 +72,66 @@ async function watchMotion(page: Page) {
     );
 }
 
+/**
+ * The computed animation of an opening, read in the page at the instant its
+ * class lands. A handle from Playwright could not do this: the reading panel
+ * can give way to the editor between finding an element and asking about it,
+ * and a detached element computes to nothing.
+ */
+async function recordOpening(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __opening: Record<string, Record<string, string>> };
+    w.__opening = {};
+    const read = (el: Element) => {
+      const cs = getComputedStyle(el);
+      return {
+        name: cs.animationName,
+        duration: cs.animationDuration,
+        timing: cs.animationTimingFunction,
+        fill: cs.animationFillMode,
+      };
+    };
+    const look = () => {
+      const panel = document.querySelector('[role="dialog"] > .animate-dialog-in');
+      if (panel && !w.__opening.panel) w.__opening.panel = read(panel);
+      const scrim = document.querySelector('[role="dialog"].animate-scrim-in');
+      if (scrim && !w.__opening.scrim) w.__opening.scrim = read(scrim);
+    };
+    new MutationObserver(look).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  });
+  return () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __opening: Record<string, Record<string, string>> })
+          .__opening,
+    );
+}
+
 test('the edit modal opens with motion, from the tokens, and leaves nothing on itself', async ({
   page,
 }) => {
   await page.goto('/');
   await rowOf(page, IDS.truckChicago).click();
-
-  const scrimSeen = page.waitForSelector('[role="dialog"].animate-scrim-in', { state: 'attached' });
-  const panelSeen = page.waitForSelector('[role="dialog"] > .animate-dialog-in', {
-    state: 'attached',
-  });
+  const opening = await recordOpening(page);
   await page.keyboard.press('Enter');
 
-  const animation = (el: Element) => {
-    const cs = getComputedStyle(el);
-    return {
-      name: cs.animationName,
-      duration: cs.animationDuration,
-      timing: cs.animationTimingFunction,
-      fill: cs.animationFillMode,
-    };
-  };
-  expect(await (await panelSeen).evaluate(animation)).toEqual({
-    name: 'dialog-in',
-    duration: '0.15s',
-    timing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-    fill: 'backwards',
-  });
-  expect(await (await scrimSeen).evaluate(animation)).toEqual({
-    name: 'fade-in',
-    duration: '0.15s',
-    timing: 'linear',
-    fill: 'backwards',
+  const modal = editModal(page, TRUCK_NUMBERS.chicago);
+  await expect(modal).toBeVisible();
+  expect(await opening()).toEqual({
+    panel: {
+      name: 'dialog-in',
+      duration: '0.15s',
+      timing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      fill: 'backwards',
+    },
+    scrim: { name: 'fade-in', duration: '0.15s', timing: 'linear', fill: 'backwards' },
   });
 
-  const modal = editModal(page, TRUCK_NUMBERS.chicago);
   const panel = panelOf(modal);
   // The class comes off when the opening ends …
   await expect(panel).not.toHaveClass(/animate-/);
@@ -144,7 +172,10 @@ test('closing never waits: the dialog, the focus, the next click and the next ke
       // One task: React's commit and the fade's microtask, nothing longer.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const box = rowB.getBoundingClientRect();
-      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
       return {
         dialogs: document.querySelectorAll('[role="dialog"]').length,
         fading: document.querySelectorAll('[data-dialog-fading]').length,
@@ -187,7 +218,9 @@ test('reopening during the fade: the old background goes at once, and the new mo
     // Focus is back on the row: Enter opens it again, mid-fade.
     key('Enter');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const scrim = document.querySelector(`[role="dialog"][aria-label$="load for truck ${truck}"]`);
+    const scrim = document.querySelector(
+      `[role="dialog"][aria-label$="load for truck ${truck}"]`,
+    );
     const panel = scrim?.firstElementChild as HTMLElement | null;
     return {
       fadingBefore,
@@ -226,13 +259,19 @@ test('a confirm over the modal opens with motion, and closing it gives the modal
   // The modal under it was not replayed.
   await expect(panelOf(modal)).not.toHaveClass(/animate-/);
   await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
-  expect(await seen()).toEqual(['animate-dialog-in', 'animate-scrim-in', 'fading background']);
+  expect(await seen()).toEqual([
+    'animate-dialog-in',
+    'animate-scrim-in',
+    'fading background',
+  ]);
 });
 
 test.describe('under reduced motion', () => {
-  test.use({ reducedMotion: 'reduce' });
+  test.use({ contextOptions: { reducedMotion: 'reduce' } });
 
-  test('the modal opens and closes with no motion and no fading background', async ({ page }) => {
+  test('the modal opens and closes with no motion and no fading background', async ({
+    page,
+  }) => {
     await page.goto('/');
     const seen = await watchMotion(page);
     const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
