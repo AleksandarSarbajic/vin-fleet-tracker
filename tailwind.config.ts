@@ -1,5 +1,5 @@
 import type { Config } from 'tailwindcss';
-import { EASING, MOTION_MS, palette } from './src/design/tokens';
+import { EASING, MOTION_MS, MOTION_SHAPE, palette } from './src/design/tokens';
 
 /**
  * Type, spacing and motion from design-spec §2, §3 and §8.3. The colours live
@@ -89,12 +89,19 @@ const config: Config = {
         'fade-out': { from: { opacity: '1' }, to: { opacity: '0' } },
         /**
          * §12.148. Opacity and transform only, and the `to` is the panel's
-         * own resting state: no transform at all.
+         * own resting state: no transform at all. Readable early: fully opaque
+         * by 60%, while the settle finishes.
          */
         'dialog-in': {
-          from: { opacity: '0', transform: 'scale(.98)' },
+          from: {
+            opacity: '0',
+            transform: `translateY(${MOTION_SHAPE.dialogRisePx}px) scale(${MOTION_SHAPE.dialogFromScale})`,
+          },
+          '60%': { opacity: '1' },
           to: { opacity: '1', transform: 'none' },
         },
+        /** No `from`: a copy fades from where it stands, full strength or not. */
+        'fade-away': { to: { opacity: '0' } },
       },
       animation: {
         flash: `flash-decay ${ms(MOTION_MS.flash)} ${EASING.flash} forwards`,
@@ -117,8 +124,8 @@ const config: Config = {
          */
         'dialog-in': `dialog-in ${ms(MOTION_MS.dialogIn)} ${EASING.dialog} backwards`,
         'scrim-in': `fade-in ${ms(MOTION_MS.dialogIn)} linear backwards`,
-        // The fading copy of a closed dialog's background: removed when this ends.
-        'scrim-out': `fade-out ${ms(MOTION_MS.dialogOut)} linear forwards`,
+        // The fading copy of a closed window: removed when this ends.
+        'window-out': `fade-away ${ms(MOTION_MS.dialogOut)} linear forwards`,
       },
       /**
        * §14.4's density pair. The row heights are a token rather than a

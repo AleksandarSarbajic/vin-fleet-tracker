@@ -10,7 +10,12 @@ import {
   type Ref,
 } from 'react';
 import { MOTION_MS } from '@/design/tokens';
-import { frameMounted, frameUnmounted, prefersReducedMotion, resumeAt } from './dialog-motion';
+import {
+  frameMounted,
+  frameUnmounted,
+  prefersReducedMotion,
+  resumeAt,
+} from './dialog-motion';
 
 type Props = Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children' | 'style'> & {
   /** The scrim's classes, exactly as the dialog drew them before §12.148. */
@@ -19,19 +24,32 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children' | 'st
   panelClassName: string;
   /** The focus trap's container, as before. */
   panelRef?: Ref<HTMLDivElement>;
+  /**
+   * Frames that stand in for one another: a frame replacing one of its family
+   * in the same commit continues that opening. Leave it out and every mount is
+   * an opening of its own.
+   */
+  family?: string | undefined;
   children: ReactNode;
 };
 
 /**
- * §12.148. A dialog's scrim and panel. It opens with motion — the scrim fades
- * in, the panel fades in growing from 98% — once per opening, and leaves
- * nothing on either element when that ends. Closing is the dialog's own
- * unmount, at once; the background's fade is `dialog-motion.ts`'s business.
+ * §12.148. A window's scrim and panel. It opens with motion — the scrim fades
+ * in, the panel fades in rising and growing — once per opening, and leaves
+ * nothing on either element when that ends. Closing is the window's own
+ * unmount, at once; the fading copy is `dialog-motion.ts`'s business.
  *
  * Every other attribute (role, aria-*, data-*) goes on the scrim, where each
  * dialog already had it.
  */
-export function DialogFrame({ className, panelClassName, panelRef, children, ...scrim }: Props) {
+export function DialogFrame({
+  className,
+  panelClassName,
+  panelRef,
+  family,
+  children,
+  ...scrim
+}: Props) {
   const scrimRef = useRef<HTMLDivElement>(null);
   const [owner] = useState(() => ({}));
   /** When this frame's opening began. Set once; StrictMode's re-run keeps it. */
@@ -43,7 +61,7 @@ export function DialogFrame({ className, panelClassName, panelRef, children, ...
   // panel is never seen at full strength and then made to fade in.
   useLayoutEffect(() => {
     const now = performance.now();
-    const began = frameMounted(owner, now);
+    const began = frameMounted(owner, now, family);
     if (openedAt.current === null) {
       openedAt.current = began;
       const elapsed = now - began;
@@ -51,8 +69,8 @@ export function DialogFrame({ className, panelClassName, panelRef, children, ...
     }
     const node = scrimRef.current;
     const opening = openedAt.current;
-    return () => frameUnmounted(owner, node, opening);
-  }, [owner]);
+    return () => frameUnmounted(owner, node, opening, family);
+  }, [owner, family]);
 
   /** The panel's own animation only; one inside it bubbles here too. */
   const ended = (event: AnimationEvent<HTMLDivElement>) => {
@@ -69,7 +87,9 @@ export function DialogFrame({ className, panelClassName, panelRef, children, ...
     >
       <div
         ref={panelRef}
-        className={entering === null ? panelClassName : `${panelClassName} animate-dialog-in`}
+        className={
+          entering === null ? panelClassName : `${panelClassName} animate-dialog-in`
+        }
         style={style}
         onAnimationEnd={ended}
       >

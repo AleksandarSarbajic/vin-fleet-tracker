@@ -232,13 +232,22 @@ export const MOTION_MS = {
   /** Shorter than `toastIn` on purpose: a dismissal must never feel stuck. */
   toastOut: 120,
   overlay: 120,
-  /** §12.148. A dialog's opening: the scrim fades in, the panel grows from 98%. */
-  dialogIn: 150,
+  /** §12.148. A window's opening: the scrim fades in, the panel rises and grows. */
+  dialogIn: 220,
   /**
-   * §12.148. The fading copy of a closed dialog's background. Shorter than
-   * `dialogIn` for the toast's reason; the dialog itself is already gone.
+   * §12.148. The fading copy of a closed window. Shorter than `dialogIn` for
+   * the toast's reason; the window itself is already gone.
    */
-  dialogOut: 100,
+  dialogOut: 140,
+} as const;
+
+/**
+ * §12.148. The distances and sizes of that motion, beside its durations and for
+ * the same reason: the keyframes are built from them, and a test can name them.
+ */
+export const MOTION_SHAPE = {
+  dialogFromScale: 0.96,
+  dialogRisePx: 8,
 } as const;
 
 /**
@@ -249,13 +258,15 @@ export const MOTION_MS = {
  */
 export const FLASH_TAG_MS = 60_000;
 
-/** Fast, then settling. Everything that arrives decelerates the same way. */
-const ARRIVE = 'cubic-bezier(.2,.8,.2,1)';
-
 export const EASING = {
   /** Jumps, then decays: the flash is at full ground on frame one. */
   flash: 'cubic-bezier(.2,0,0,1)',
-  toast: ARRIVE,
-  /** §12.148. The toast's curve, so a dialog and a toast arrive alike. */
-  dialog: ARRIVE,
+  toast: 'cubic-bezier(.2,.8,.2,1)',
+  /**
+   * §12.148, and softer than the toast's on purpose. That curve does 68% of its
+   * motion in the first fifth of the time: at 150ms and 2% an opening read as a
+   * snap, which is how 3ba looked like no change at all. This one does 50%,
+   * so the time a window takes is time you can see, with no slow start.
+   */
+  dialog: 'cubic-bezier(.22,.61,.36,1)',
 } as const;

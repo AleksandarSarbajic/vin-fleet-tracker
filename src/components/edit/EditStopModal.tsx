@@ -213,6 +213,7 @@ function ReadingPanel({
   return (
     <DialogFrame
       className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+      family="edit-load"
       panelClassName="flex w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
       role="dialog"
       aria-modal="true"
@@ -1060,6 +1061,7 @@ function LoadEditor({
     <>
       <DialogFrame
         className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
+        family="edit-load"
         panelClassName="flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
         panelRef={trap}
         role="dialog"

@@ -11,7 +11,7 @@ import { fleetRow } from '@/test/fleet-row';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { loadReadKey } from '@/hooks/useLoadRead';
 import { loadReadFor, primeLoadRead } from '@/test/load-read';
-import { FADING_BACKGROUND } from '@/components/overlay/dialog-motion';
+import { FADING_COPY } from '@/components/overlay/dialog-motion';
 import { MOTION_MS } from '@/design/tokens';
 import type { PreviewSide } from '@/server/reassign';
 
@@ -39,7 +39,9 @@ beforeEach(() => {
     fetchedAt: '2026-09-18T12:00:00.000Z',
   } as FleetResponse);
   // The load read never answers: a test that wants the editor primes it.
-  globalThis.fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+  globalThis.fetch = vi.fn(
+    () => new Promise<Response>(() => {}),
+  ) as unknown as typeof fetch;
   now = 1_000;
   vi.spyOn(performance, 'now').mockImplementation(() => now);
 });
@@ -47,7 +49,7 @@ beforeEach(() => {
 afterEach(async () => {
   act(() => root?.unmount());
   await settle();
-  document.querySelectorAll(`[${FADING_BACKGROUND}]`).forEach((n) => n.remove());
+  document.querySelectorAll(`[${FADING_COPY}]`).forEach((n) => n.remove());
   container?.remove();
   root = null;
   container = null;
@@ -79,10 +81,13 @@ const answerRead = () =>
 
 const scrims = () => Array.from(container!.querySelectorAll<HTMLElement>('.bg-scrim'));
 const panelOf = (scrim: HTMLElement) => scrim.firstElementChild as HTMLElement;
-const backgrounds = () => document.querySelectorAll<HTMLElement>(`[${FADING_BACKGROUND}]`);
+const copies = () => document.querySelectorAll<HTMLElement>(`[${FADING_COPY}]`);
 
 const setValue = (el: HTMLInputElement, text: string) => {
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )?.set;
   setter?.call(el, text);
   el.dispatchEvent(new Event('input', { bubbles: true }));
 };
@@ -130,10 +135,10 @@ describe('the edit modal opens once (§12.148)', () => {
     expect(scrim!.className).not.toContain('animate-');
     expect(panelOf(scrim!).className).not.toContain('animate-');
     await settle();
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
   });
 
-  it('a remount (Reload, a landed save) does not replay it or fade a background', async () => {
+  it('a remount (Reload, a landed save) does not replay it or leave a copy', async () => {
     primeLoadRead(client, ROW);
     await act(async () => root!.render(modal('a')));
     expect(panelOf(scrims()[0]!).className).toContain('animate-dialog-in');
@@ -142,12 +147,12 @@ describe('the edit modal opens once (§12.148)', () => {
     expect(scrims()).toHaveLength(1);
     expect(panelOf(scrims()[0]!).className).not.toContain('animate-');
     await settle();
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
   });
 });
 
 describe('the Discard confirm (§12.148)', () => {
-  it('opens with motion over the modal, and its background fades when it closes', async () => {
+  it('opens with motion over the modal, and a copy of it fades when it closes', async () => {
     primeLoadRead(client, ROW);
     await act(async () => root!.render(modal()));
     // The modal's own opening has ended (happy-dom never says so itself).
@@ -160,7 +165,9 @@ describe('the Discard confirm (§12.148)', () => {
     await act(async () => buttonNamed('Cancel').click());
 
     expect(container!.textContent).toContain('Discard changes?');
-    const confirm = scrims().find((s) => (s.textContent ?? '').includes('Discard changes?'))!;
+    const confirm = scrims().find((s) =>
+      (s.textContent ?? '').includes('Discard changes?'),
+    )!;
     expect(confirm.className).toContain('z-[60]');
     expect(panelOf(confirm).className).toContain('animate-dialog-in');
 
@@ -170,9 +177,10 @@ describe('the Discard confirm (§12.148)', () => {
     expect(scrims()).toHaveLength(1);
     expect(panelOf(scrims()[0]!).className).not.toContain('animate-');
     await settle();
-    const fading = backgrounds();
+    const fading = copies();
     expect(fading).toHaveLength(1);
     expect(fading[0]!.className).toContain('z-[60]');
+    expect(fading[0]!.textContent).toContain('Discard changes?');
   });
 });
 
@@ -206,7 +214,9 @@ describe('a confirm opens with motion (§12.148)', () => {
         }),
       ),
     );
-    const scrim = container!.querySelector<HTMLElement>('[aria-label="Confirm reassignment"]')!;
+    const scrim = container!.querySelector<HTMLElement>(
+      '[aria-label="Confirm reassignment"]',
+    )!;
     expect(scrim.className).toContain('animate-scrim-in');
     expect(panelOf(scrim).className).toContain('animate-dialog-in');
   });

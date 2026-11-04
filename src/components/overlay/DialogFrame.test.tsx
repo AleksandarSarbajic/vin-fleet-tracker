@@ -3,13 +3,13 @@ import { act, StrictMode, useRef, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogFrame } from './DialogFrame';
-import { FADING_BACKGROUND } from './dialog-motion';
+import { FADING_COPY } from './dialog-motion';
 import { MOTION_MS } from '@/design/tokens';
 import { useFocusTrap } from '@/components/edit/useModalChrome';
 
 /**
- * §12.148. A dialog opens with motion once, leaves nothing on itself after,
- * and closes without waiting: what fades is an empty copy of its background.
+ * §12.148. A window opens with motion once, leaves nothing on itself after,
+ * and closes without waiting: what fades is a copy of it nothing can use.
  *
  * happy-dom runs no CSS animations, so an `animationend` is dispatched by
  * hand where a test needs the opening to have finished.
@@ -30,7 +30,7 @@ beforeEach(() => {
 afterEach(async () => {
   act(() => root?.unmount());
   await settle();
-  document.querySelectorAll(`[${FADING_BACKGROUND}]`).forEach((n) => n.remove());
+  document.querySelectorAll(`[${FADING_COPY}]`).forEach((n) => n.remove());
   container?.remove();
   root = null;
   container = null;
@@ -44,11 +44,20 @@ const settle = () => new Promise<void>((resolve) => queueMicrotask(resolve));
 const SCRIM = 'fixed inset-0 z-50 grid place-items-center bg-scrim p-6';
 const PANEL = 'w-[560px] bg-surface-overlay';
 
-function Frame({ label = 'Test dialog', children }: { label?: string; children?: ReactNode }) {
+function Frame({
+  label = 'Test dialog',
+  family,
+  children,
+}: {
+  label?: string;
+  family?: string;
+  children?: ReactNode;
+}) {
   return (
     <DialogFrame
       className={SCRIM}
       panelClassName={PANEL}
+      family={family}
       role="dialog"
       aria-modal="true"
       aria-label={label}
@@ -58,18 +67,24 @@ function Frame({ label = 'Test dialog', children }: { label?: string; children?:
   );
 }
 
-/** Two different component types, so swapping one for the other remounts. */
+/** Different component types, so swapping one for another remounts. */
 function First() {
-  return <Frame label="First" />;
+  return <Frame label="First" family="one window" />;
 }
 function Second() {
-  return <Frame label="Second" />;
+  return <Frame label="Second" family="one window" />;
+}
+function Palette() {
+  return <Frame label="Palette" />;
+}
+function Modal() {
+  return <Frame label="Modal" />;
 }
 
 const render = (node: ReactNode) => act(() => root!.render(node));
 const scrim = () => container!.querySelector<HTMLElement>('[role="dialog"]')!;
 const panel = () => scrim().firstElementChild as HTMLElement;
-const backgrounds = () => document.querySelectorAll<HTMLElement>(`[${FADING_BACKGROUND}]`);
+const copies = () => document.querySelectorAll<HTMLElement>(`[${FADING_COPY}]`);
 const finishOpening = () =>
   act(() => {
     panel().dispatchEvent(new Event('animationend', { bubbles: true }));
@@ -162,7 +177,7 @@ describe('opening (§12.148)', () => {
     expect(panel().className).not.toContain('animate-');
   });
 
-  it('opens with motion once under StrictMode, and leaves no background behind', async () => {
+  it('opens with motion once under StrictMode, and leaves no copy behind', async () => {
     render(
       <StrictMode>
         <Frame />
@@ -170,7 +185,7 @@ describe('opening (§12.148)', () => {
     );
     await settle();
     expect(panel().className).toContain('animate-dialog-in');
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
   });
 });
 
@@ -193,12 +208,39 @@ describe('a frame that replaces another plays the same opening (§12.148)', () =
     expect(panel().className).not.toContain('animate-');
   });
 
-  it('leaves no fading background, because nothing closed', async () => {
+  it('leaves no copy, because nothing closed', async () => {
     render(<First />);
     now += MOTION_MS.dialogIn * 10;
     render(<Second />);
     await settle();
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
+  });
+
+  it('a different window in the same commit is an opening of its own, and the old one leaves nothing', async () => {
+    render(<Palette />);
+    now += 5_000;
+    render(<Modal />);
+    expect(scrim().getAttribute('aria-label')).toBe('Modal');
+    expect(panel().className).toContain('animate-dialog-in');
+    expect(panel().style.animationDelay).toBe('');
+    await settle();
+    expect(copies()).toHaveLength(0);
+  });
+
+  it('what else closed in that commit still fades: a confirm over the replaced frame', async () => {
+    render(
+      <>
+        <First />
+        <Frame label="Confirm">confirm</Frame>
+      </>,
+    );
+    now += 5_000;
+    render(<Second />);
+    expect(scrim().getAttribute('aria-label')).toBe('Second');
+    expect(panel().className).not.toContain('animate-');
+    await settle();
+    expect(copies()).toHaveLength(1);
+    expect(copies()[0]!.textContent).toBe('confirm');
   });
 
   it('is a fresh opening when the first closed in an earlier commit', async () => {
@@ -227,7 +269,12 @@ describe('closing never waits (§12.148)', () => {
     function Trapping() {
       const trap = useFocusTrap(true);
       return (
-        <DialogFrame className={SCRIM} panelClassName={PANEL} panelRef={trap} role="dialog">
+        <DialogFrame
+          className={SCRIM}
+          panelClassName={PANEL}
+          panelRef={trap}
+          role="dialog"
+        >
           <button type="button" data-initial-focus="">
             Inside
           </button>
@@ -242,69 +289,153 @@ describe('closing never waits (§12.148)', () => {
     before.remove();
   });
 
-  it('fades an empty copy of the background, which nothing can use', async () => {
+  it('fades a copy of the whole window, which nothing can use', async () => {
+    render(
+      <Frame>
+        <label htmlFor="f" id="l">
+          Field
+        </label>
+        <input id="f" name="f" data-initial-focus="" tabIndex={0} aria-label="Field" />
+      </Frame>,
+    );
+    render(null);
+    await settle();
+    expect(copies()).toHaveLength(1);
+    const copy = copies()[0]!;
+    expect(copy.parentElement).toBe(document.body);
+    // Every word as it stood …
+    expect(copy.textContent).toBe('Field');
+    expect(copy.firstElementChild?.classList).toContain('w-[560px]');
+    // … and nothing that can be used or found.
+    expect(copy.getAttribute('aria-hidden')).toBe('true');
+    expect(copy.hasAttribute('inert')).toBe(true);
+    expect(copy.classList).toContain('pointer-events-none');
+    expect(copy.classList).toContain('animate-window-out');
+    expect(copy.hasAttribute('role')).toBe(false);
+    expect(copy.hasAttribute('aria-label')).toBe(false);
+    expect(copy.hasAttribute('aria-modal')).toBe(false);
+    expect(
+      copy.querySelectorAll(
+        '[id],[name],[for],[tabindex],[aria-label],[data-initial-focus]',
+      ),
+    ).toHaveLength(0);
+    // The same layer and ground as the window it stands in for.
+    expect(copy.classList).toContain('z-50');
+    expect(copy.classList).toContain('bg-scrim');
+    // The opening's classes do not come along, or the copy would open again.
+    expect(copy.outerHTML).not.toContain('animate-scrim-in');
+    expect(copy.outerHTML).not.toContain('animate-dialog-in');
+  });
+
+  it('carries over what cloning does not: a select choice and a scroll position', async () => {
+    render(
+      <Frame>
+        <select aria-label="Status" defaultValue="a">
+          <option value="a">A</option>
+          <option value="b">B</option>
+        </select>
+        <div data-scroller="" style={{ height: 10, overflow: 'auto' }}>
+          <div style={{ height: 100 }} />
+        </div>
+      </Frame>,
+    );
+    container!.querySelector('select')!.selectedIndex = 1;
+    container!.querySelector<HTMLElement>('[data-scroller]')!.scrollTop = 30;
+    render(null);
+    await settle();
+    const copy = copies()[0]!;
+    expect(copy.querySelector('select')!.selectedIndex).toBe(1);
+    const scroller = copy.firstElementChild!.children[1] as HTMLElement;
+    expect(scroller.scrollTop).toBe(30);
+  });
+
+  it('closed mid-opening, fades from where it stood, not from full strength', async () => {
+    render(<Frame />);
+    const real = getComputedStyle;
+    vi.spyOn(globalThis, 'getComputedStyle').mockImplementation((el) =>
+      (el as HTMLElement).classList.contains('animate-dialog-in') ||
+      (el as HTMLElement).classList.contains('animate-scrim-in')
+        ? ({
+            opacity: '0.4',
+            transform: (el as HTMLElement).classList.contains('animate-dialog-in')
+              ? 'matrix(0.98, 0, 0, 0.98, 0, 4)'
+              : 'none',
+          } as CSSStyleDeclaration)
+        : real(el),
+    );
+    render(null);
+    await settle();
+    const copy = copies()[0]!;
+    expect(copy.style.opacity).toBe('0.4');
+    expect(copy.style.transform).toBe('');
+    const inner = copy.firstElementChild as HTMLElement;
+    expect(inner.style.opacity).toBe('0.4');
+    expect(inner.style.transform).toBe('matrix(0.98, 0, 0, 0.98, 0, 4)');
+  });
+
+  it('a window that had settled carries no frozen style', async () => {
+    render(<Frame />);
+    finishOpening();
+    render(null);
+    await settle();
+    const copy = copies()[0]!;
+    expect(copy.style.opacity).toBe('');
+    expect((copy.firstElementChild as HTMLElement).style.transform).toBe('');
+  });
+
+  it('removes the copy when its fade ends', async () => {
     render(<Frame />);
     render(null);
     await settle();
-    const fading = backgrounds();
-    expect(fading).toHaveLength(1);
-    const layer = fading[0]!;
-    expect(layer.parentElement).toBe(document.body);
-    expect(layer.childElementCount).toBe(0);
-    expect(layer.textContent).toBe('');
-    expect(layer.getAttribute('aria-hidden')).toBe('true');
-    expect(layer.hasAttribute('inert')).toBe(true);
-    expect(layer.hasAttribute('role')).toBe(false);
-    expect(layer.hasAttribute('aria-label')).toBe(false);
-    expect(layer.classList).toContain('pointer-events-none');
-    expect(layer.classList).toContain('animate-scrim-out');
-    // The same layer and ground as the scrim it stands in for.
-    expect(layer.classList).toContain('z-50');
-    expect(layer.classList).toContain('bg-scrim');
-    expect(layer.className).not.toContain('animate-scrim-in');
+    copies()[0]!.dispatchEvent(new Event('animationend'));
+    expect(copies()).toHaveLength(0);
   });
 
-  it('removes the fading background when its fade ends', async () => {
-    render(<Frame />);
-    render(null);
-    await settle();
-    backgrounds()[0]!.dispatchEvent(new Event('animationend'));
-    expect(backgrounds()).toHaveLength(0);
-  });
-
-  it('removes the fading background even if its fade never reports ending', async () => {
+  it('removes the copy even if its fade never reports ending', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     render(<Frame />);
     render(null);
     await settle();
-    expect(backgrounds()).toHaveLength(1);
+    expect(copies()).toHaveLength(1);
     vi.advanceTimersByTime(MOTION_MS.dialogOut * 2);
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
   });
 
-  it('leaves one fading background when several dialogs close together', async () => {
+  it('leaves a copy of each when several windows close together', async () => {
     render(
       <>
-        <Frame label="Under" />
-        <Frame label="Over" />
+        <Frame label="Under">under</Frame>
+        <Frame label="Over">over</Frame>
       </>,
     );
     render(null);
     await settle();
-    expect(backgrounds()).toHaveLength(1);
+    expect([...copies()].map((c) => c.textContent)).toEqual(['under', 'over']);
+  });
+
+  it('a window drawn inside another closing one is not faded twice', async () => {
+    render(
+      <Frame label="Outer">
+        <Frame label="Inner">inner</Frame>
+      </Frame>,
+    );
+    render(null);
+    await settle();
+    expect(copies()).toHaveLength(1);
+    expect(copies()[0]!.textContent).toBe('inner');
   });
 });
 
 describe('reopening during the fade (§12.148)', () => {
-  it('removes the old background at once, and the new dialog opens normally', async () => {
+  it('removes the old copy at once, and the new window opens normally', async () => {
     render(<First />);
     render(null);
     await settle();
-    expect(backgrounds()).toHaveLength(1);
+    expect(copies()).toHaveLength(1);
 
     now += MOTION_MS.dialogOut / 2;
     render(<Second />);
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
     expect(container!.querySelectorAll('.bg-scrim')).toHaveLength(1);
     expect(panel().className).toContain('animate-dialog-in');
     expect(panel().style.animationDelay).toBe('');
@@ -319,11 +450,11 @@ describe('reduced motion (§12.148, §8.3)', () => {
     expect(panel().className).not.toContain('animate-');
   });
 
-  it('leaves no fading background on close', async () => {
+  it('leaves no copy on close', async () => {
     reduceMotion();
     render(<Frame />);
     render(null);
     await settle();
-    expect(backgrounds()).toHaveLength(0);
+    expect(copies()).toHaveLength(0);
   });
 });

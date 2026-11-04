@@ -54,7 +54,7 @@ async function watchMotion(page: Page) {
       )) {
         w.__motionSeen.push(
           el.hasAttribute('data-dialog-fading')
-            ? 'fading background'
+            ? 'fading copy'
             : (el.className.match(/animate-(dialog|scrim)-in/)?.[0] ?? '?'),
         );
       }
@@ -125,11 +125,11 @@ test('the edit modal opens with motion, from the tokens, and leaves nothing on i
   expect(await opening()).toEqual({
     panel: {
       name: 'dialog-in',
-      duration: '0.15s',
-      timing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      duration: '0.22s',
+      timing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
       fill: 'backwards',
     },
-    scrim: { name: 'fade-in', duration: '0.15s', timing: 'linear', fill: 'backwards' },
+    scrim: { name: 'fade-in', duration: '0.22s', timing: 'linear', fill: 'backwards' },
   });
 
   const panel = panelOf(modal);
@@ -201,7 +201,7 @@ test('closing never waits: the dialog, the focus, the next click and the next ke
   await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
 });
 
-test('reopening during the fade: the old background goes at once, and the new modal opens normally', async ({
+test('reopening during the fade: the old copy goes at once, and the new modal opens normally', async ({
   page,
 }) => {
   await page.goto('/');
@@ -259,17 +259,195 @@ test('a confirm over the modal opens with motion, and closing it gives the modal
   // The modal under it was not replayed.
   await expect(panelOf(modal)).not.toHaveClass(/animate-/);
   await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
-  expect(await seen()).toEqual([
-    'animate-dialog-in',
-    'animate-scrim-in',
-    'fading background',
-  ]);
+  expect(await seen()).toEqual(['animate-dialog-in', 'animate-scrim-in', 'fading copy']);
+});
+
+/**
+ * The read arrives once, then it is in hand: the second opening is the editor
+ * from its first frame, with no reading panel to give way.
+ */
+async function openAndClose(page: Page) {
+  const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+  await modal.getByRole('tabpanel').waitFor();
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+}
+
+/**
+ * Opens the editor and holds it 20% of the way through its opening, so what
+ * happens "during the opening" cannot depend on how fast a robot is. In the
+ * page, in one task, for the same reason.
+ */
+const openAndHold = (page: Page) =>
+  page.evaluate(async () => {
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const running = document
+      .getAnimations()
+      .filter((a) =>
+        ((a.effect as KeyframeEffect).target as Element | null)?.closest(
+          '[role="dialog"]',
+        ),
+      );
+    for (const a of running) {
+      a.pause();
+      a.currentTime = 44;
+    }
+    const pickUp = [...document.querySelectorAll('[role="dialog"] button')].find(
+      (b) => b.textContent?.trim() === 'Pick up',
+    )!;
+    const box = pickUp.getBoundingClientRect();
+    return {
+      held: running.length,
+      x: box.left + box.width / 2,
+      y: box.top + box.height / 2,
+    };
+  });
+
+const afterTheClick = (page: Page) =>
+  page.evaluate(() => ({
+    top: document.querySelector<HTMLElement>('[data-edit-scroll]')!.scrollTop,
+    pressed: [...document.querySelectorAll('[role="dialog"] button')]
+      .find((b) => b.textContent?.trim() === 'Pick up')!
+      .getAttribute('aria-pressed'),
+    stillOpening: document.querySelector('.animate-dialog-in') !== null,
+  }));
+
+test('a real mouse click during the 220ms opening lands, and scrolls nothing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await openAndClose(page);
+  const at = await openAndHold(page);
+  expect(at.held).toBeGreaterThanOrEqual(2);
+  await page.mouse.click(at.x, at.y);
+  expect(await afterTheClick(page)).toEqual({
+    top: 0,
+    pressed: 'true',
+    stillOpening: true,
+  });
+});
+
+test('the same click at full speed, with nothing held, lands too', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await openAndClose(page);
+  await page.keyboard.press('Enter');
+  const box = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('[role="dialog"] button')]
+      .find((x) => x.textContent?.trim() === 'Pick up')!
+      .getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+  });
+  await page.mouse.click(box.x, box.y);
+  const after = await afterTheClick(page);
+  expect(after.top).toBe(0);
+  expect(after.pressed).toBe('true');
+});
+
+test('closed mid-opening, the copy fades from where it stood', async ({ page }) => {
+  await page.goto('/');
+  await openAndClose(page);
+  await openAndHold(page);
+  const result = await page.evaluate(async () => {
+    const scrim = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const panel = scrim.firstElementChild as HTMLElement;
+    const stood = {
+      scrim: getComputedStyle(scrim).opacity,
+      panel: getComputedStyle(panel).opacity,
+      transform: getComputedStyle(panel).transform,
+    };
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const copy = document.querySelector<HTMLElement>('[data-dialog-fading]')!;
+    const inner = copy.firstElementChild as HTMLElement;
+    return {
+      stood,
+      copy: {
+        scrim: copy.style.opacity,
+        panel: inner.style.opacity,
+        transform: inner.style.transform,
+      },
+      fade: getComputedStyle(copy).animationName,
+      duration: getComputedStyle(copy).animationDuration,
+      gone: document.querySelectorAll('[role="dialog"]').length === 0,
+    };
+  });
+  expect(Number(result.stood.panel)).toBeLessThan(1);
+  expect(result.stood.transform).not.toBe('none');
+  expect(result.copy).toEqual(result.stood);
+  expect(result.fade).toBe('fade-away');
+  expect(result.duration).toBe('0.14s');
+  expect(result.gone).toBe(true);
+});
+
+test('the copy shows what was on screen: typed text, a select choice, the scroll', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 720 });
+  await page.goto('/');
+  const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+  await expect(panelOf(modal)).not.toHaveClass(/animate-/);
+  await modal
+    .getByRole('tabpanel')
+    .getByLabel('Street address')
+    .fill('Typed before closing');
+  await modal.getByLabel('Load status').selectOption({ index: 1 });
+  const status = await modal.getByLabel('Load status').inputValue();
+  const scrolled = await modal.locator('[data-edit-scroll]').evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    return el.scrollTop;
+  });
+  expect(scrolled).toBeGreaterThan(0);
+  await page.keyboard.press('Escape');
+  await page.getByText('Discard changes?').waitFor();
+
+  const result = await page.evaluate(async (rowId) => {
+    const discard = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Discard',
+    )!;
+    discard.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const copies = [...document.querySelectorAll<HTMLElement>('[data-dialog-fading]')];
+    const editor = copies.find((c) => c.classList.contains('z-40'))!;
+    const row = document.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`)!;
+    const r = row.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      copies: copies.length,
+      typed: [...editor.querySelectorAll('input')].some(
+        (i) => i.value === 'Typed before closing',
+      ),
+      select: [...editor.querySelectorAll('select')].map((s) => s.value),
+      scroll: [...editor.querySelectorAll('*')].map((e) => e.scrollTop).find(Boolean),
+      identity: editor.querySelectorAll(
+        '[id],[role],[name],[for],[tabindex],[aria-label]',
+      ).length,
+      realDialogs: document.querySelectorAll('[role="dialog"]').length,
+      clickReachesRow: hit !== null && row.contains(hit),
+    };
+  }, IDS.truckChicago);
+
+  expect(result.copies).toBe(2);
+  expect(result.typed).toBe(true);
+  expect(result.select).toContain(status);
+  expect(result.scroll).toBe(scrolled);
+  expect(result.identity).toBe(0);
+  expect(result.realDialogs).toBe(0);
+  expect(result.clickReachesRow).toBe(true);
+  await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
 });
 
 test.describe('under reduced motion', () => {
   test.use({ contextOptions: { reducedMotion: 'reduce' } });
 
-  test('the modal opens and closes with no motion and no fading background', async ({
+  test('the modal opens and closes with no motion and no fading copy', async ({
     page,
   }) => {
     await page.goto('/');
@@ -278,7 +456,7 @@ test.describe('under reduced motion', () => {
     await page.keyboard.press('Escape');
     await expect(modal).toBeHidden();
     // No wait needed: an opening class lands as the modal mounts, and a
-    // fading background in the microtask after it closes, both before this.
+    // fading copy in the microtask after it closes, both before this.
     expect(await seen()).toEqual([]);
     await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
   });
