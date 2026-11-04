@@ -1126,7 +1126,12 @@ is dirty.
 - **Save disabled** while any field is invalid or an override lacks a reason.
   `opacity: .45`.
 - Errors are **field-level** — under their own field, never a summary banner.
-- `Esc` raises the **discard confirm**, not a silent close.
+- `Esc` raises the **discard confirm**, not a silent close. While it is open the
+  keyboard is its (`DiscardConfirm.tsx`, phase 3bc): focus starts on **Keep
+  editing**, Tab stays inside, Esc means Keep editing and focus goes back to where
+  it was in the form. Cmd/Ctrl+Enter does nothing, and no other key reaches the form
+  or the board behind it, or `G H` would leave the page with the question unanswered.
+  Enter and Space work the focused button; the browser's own keys stay the browser's.
 - `Cmd/Ctrl` + `Enter` saves.
 - Focus trap; dirty-state guard.
 - Zod schema shared client and server; **the server re-validates everything.**

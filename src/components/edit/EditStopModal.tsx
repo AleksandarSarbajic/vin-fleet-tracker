@@ -32,6 +32,7 @@ import {
   type ClearStatus,
   type SaveAnswer,
 } from '@/lib/clear-stop';
+import { DiscardConfirm } from './DiscardConfirm';
 import { useFocusTrap } from './useModalChrome';
 import {
   addBlocked,
@@ -1001,7 +1002,7 @@ function LoadEditor({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // §12.88. A confirm step owns Enter and Esc while it is open.
-      if (clearing || asking || reachedAsk) return;
+      if (clearing || asking || reachedAsk || discarding) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -1015,7 +1016,7 @@ function LoadEditor({
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [asking, clearing, onClose, preview, reachedAsk, save, unsaved.length]);
+  }, [asking, clearing, discarding, onClose, preview, reachedAsk, save, unsaved.length]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -1443,36 +1444,11 @@ function LoadEditor({
       ) : null}
 
       {discarding ? (
-        <DialogFrame
-          className="fixed inset-0 z-[60] grid place-items-center bg-scrim p-6"
-          panelClassName="w-[420px] border border-line-hair bg-surface-overlay p-4 shadow-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Discard changes?"
-        >
-          <h3 className="font-cond text-[15px] font-semibold uppercase tracking-[.06em] text-text">
-            Discard changes?
-          </h3>
-          <p className="mt-1.5 text-body text-text-secondary">
-            {unsaved.join(', ')} would be lost.
-          </p>
-          <div className="mt-4 flex justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={() => setDiscarding(false)}
-              className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
-            >
-              Keep editing
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-10 border border-status-late-bd bg-status-late-bg px-4 font-cond text-micro uppercase tracking-[.09em] text-status-late-fg"
-            >
-              Discard
-            </button>
-          </div>
-        </DialogFrame>
+        <DiscardConfirm
+          unsaved={unsaved}
+          onKeep={() => setDiscarding(false)}
+          onDiscard={onClose}
+        />
       ) : null}
     </>
   );

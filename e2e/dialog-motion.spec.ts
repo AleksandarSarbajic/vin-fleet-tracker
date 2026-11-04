@@ -581,6 +581,147 @@ test.describe('every window opens at Medium, and fades when it closes', () => {
   });
 });
 
+test.describe('Discard changes? by keyboard', () => {
+  /** The caret in a field of a dirty form, and Esc has raised the confirm. */
+  async function openDiscard(page: Page) {
+    await page.goto('/');
+    const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+    const street = modal.getByRole('tabpanel').getByLabel('Street address');
+    await street.fill('Typed before asking');
+    await page.keyboard.press('Escape');
+    const discard = page.getByRole('dialog', { name: 'Discard changes?' });
+    await expect(discard).toBeVisible();
+    return {
+      modal,
+      street,
+      discard,
+      keep: discard.getByRole('button', { name: 'Keep editing' }),
+      remove: discard.getByRole('button', { name: 'Discard' }),
+    };
+  }
+
+  test('focus goes to Keep editing, and Tab stays inside, both ways round', async ({
+    page,
+  }) => {
+    const { keep, remove } = await openDiscard(page);
+    await expect(keep).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(remove).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(keep).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(remove).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(keep).toBeFocused();
+  });
+
+  test('Esc means Keep editing, and focus goes back where it was in the form', async ({
+    page,
+  }) => {
+    const { modal, street, discard } = await openDiscard(page);
+    await page.keyboard.press('Escape');
+    await expect(discard).toBeHidden();
+    await expect(modal).toBeVisible();
+    await expect(street).toBeFocused();
+    await expect(street).toHaveValue('Typed before asking');
+    // And the caret is really there: the next key types.
+    await page.keyboard.press('End');
+    await page.keyboard.type('!');
+    await expect(street).toHaveValue('Typed before asking!');
+  });
+
+  for (const combo of ['Meta+Enter', 'Control+Enter']) {
+    test(`${combo} does nothing: nothing is saved, and the confirm stays`, async ({
+      page,
+    }) => {
+      const { modal, street, discard, keep } = await openDiscard(page);
+      const writes: string[] = [];
+      page.on('request', (request) => {
+        // Ours only: the map posts its own telemetry whenever it likes.
+        const { origin, pathname } = new URL(request.url());
+        if (request.method() !== 'GET' && origin === new URL(page.url()).origin) {
+          writes.push(pathname);
+        }
+      });
+      await page.keyboard.press(combo);
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+      expect(writes).toEqual([]);
+      await expect(discard).toBeVisible();
+      await expect(keep).toBeFocused();
+      await expect(modal).toBeVisible();
+      await expect(street).toHaveValue('Typed before asking');
+    });
+  }
+
+  test('typing reaches nothing: not the form, and not the board behind it', async ({
+    page,
+  }) => {
+    const { street, discard, keep } = await openDiscard(page);
+    const compact = page.getByRole('group', { name: 'Row density' });
+    const pressedBefore = await compact
+      .getByRole('button')
+      .evaluateAll((all) => all.map((b) => b.getAttribute('aria-pressed')));
+    const url = page.url();
+    const lateChip = page.locator('button', { hasText: /^Late/ }).first();
+    const lateBefore = await lateChip.getAttribute('aria-pressed');
+
+    // Letters, the density key, a filter key, search, a page jump, the sheet. No
+    // space: that is a key the focused button answers, like Enter (tested below).
+    await page.keyboard.type('xyzd1/gh?');
+    await page.keyboard.press('Control+k');
+
+    await expect(discard).toBeVisible();
+    await expect(keep).toBeFocused();
+    await expect(street).toHaveValue('Typed before asking');
+    expect(page.url()).toBe(url);
+    expect(await lateChip.getAttribute('aria-pressed')).toBe(lateBefore);
+    expect(
+      await compact
+        .getByRole('button')
+        .evaluateAll((all) => all.map((b) => b.getAttribute('aria-pressed'))),
+    ).toEqual(pressedBefore);
+    // One window at a time: neither the palette nor the sheet came up behind it.
+    await expect(page.locator('[role="dialog"]')).toHaveCount(2);
+  });
+
+  test('Enter and Space work the button with focus', async ({ page }) => {
+    const { modal, street, discard, keep } = await openDiscard(page);
+    await page.keyboard.press('Enter');
+    await expect(discard).toBeHidden();
+    await expect(street).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(keep).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(discard).toBeHidden();
+    await expect(street).toBeFocused();
+    await expect(modal).toBeVisible();
+  });
+
+  test('Discard by keyboard closes everything, and focus goes back to the row', async ({
+    page,
+  }) => {
+    const { modal, discard, remove } = await openDiscard(page);
+    await page.keyboard.press('Tab');
+    await expect(remove).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(discard).toBeHidden();
+    await expect(modal).toBeHidden();
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await expect(rowOf(page, IDS.truckChicago)).toBeFocused();
+  });
+
+  test('the mouse works as it does', async ({ page }) => {
+    const { modal, discard, keep, remove } = await openDiscard(page);
+    await keep.click();
+    await expect(discard).toBeHidden();
+    await expect(modal).toBeVisible();
+    await page.keyboard.press('Escape');
+    await remove.click();
+    await expect(modal).toBeHidden();
+  });
+});
+
 test.describe('every menu and dropdown opens at Medium, and fades when it closes', () => {
   const closes = async (page: Page) => {
     await expect(page.locator('.animate-menu-in')).toHaveCount(0);

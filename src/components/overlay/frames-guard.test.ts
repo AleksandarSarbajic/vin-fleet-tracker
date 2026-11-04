@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(__dirname, '..');
 
 const WINDOWS: Record<string, number> = {
-  'edit/EditStopModal.tsx': 3, // reading panel, editor, Discard changes
+  'edit/EditStopModal.tsx': 2, // reading panel, editor
+  'edit/DiscardConfirm.tsx': 1,
   'edit/ClearStopConfirm.tsx': 1,
   'edit/ReassignConfirm.tsx': 1,
   'edit/ReopenConfirm.tsx': 1,
@@ -73,8 +74,7 @@ describe('every window and menu draws through its frame (§12.148)', () => {
   });
 
   it('the Discard confirm says what it is', () => {
-    const source = readFileSync(join(ROOT, 'edit/EditStopModal.tsx'), 'utf8');
-    const discard = source.slice(source.indexOf('{discarding ? ('));
+    const discard = readFileSync(join(ROOT, 'edit/DiscardConfirm.tsx'), 'utf8');
     expect(discard).toMatch(/role="dialog"/);
     expect(discard).toMatch(/aria-modal="true"/);
     expect(discard).toMatch(/aria-label="Discard changes\?"/);
