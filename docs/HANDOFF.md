@@ -71,6 +71,13 @@ was `2099542`. Its deploy is not checked here.
 edit modal and its six confirms open with motion, and their background fades
 when they close (§12.148). Alex looks at it live before step 2. See "Phase
 3ba" below.
+**Update at the start of 3bb (2026-11-04): 3ba is pushed**: origin's master
+was `d42d374`, deployed to production at 2026-11-03 20:38 UTC, with the new
+animations in the live stylesheet (checked). Alex looked: "too subtle".
+**3bb: NOT pushed** (2026-11-04): Medium everywhere: windows, menus, hover and
+press, and the whole window fades on close (§12.148). e2e runs with reduced
+motion by default, and under the preference a transition is a true 0. See
+"Phase 3bb" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10107,6 +10114,89 @@ session that edits a file (question 4).
    were not Prettier-clean before 3ba either. Separately: keep ECC's
    `stop:format-typecheck` hook on for this repo, or turn it off?
    Recommended: off here, or the next phase will open with the same diff.
+
+### Phase 3bb: Medium everywhere, and the whole window fades on close (2026-11-04)
+
+Alex saw 3ba live: "I can't see any difference." He asked for a page to click
+before any change: `.taste-skill/motion/index.html`, git-ignored, invented data
+(its build compiles the real Tailwind config, and "Today" reads the real
+tokens). **His pick: 2 Medium, window fade on, keep the grey hover bar.** Built
+in the design session, in his order. **NOT pushed.** Built on `d42d374`, which
+was `origin/master`, with a clean tree.
+
+**Why 3ba looked like nothing.** It was deployed and correct. The curve I chose
+did 68% of its motion in the first 30ms, 87% by 52ms, across 2% of the size.
+
+**Commits, in Alex's order:**
+
+- `98a98b9`: step 1, e2e reduced motion by default, a true 0 under the preference;
+- `f869d45`: step 2, windows at Medium, the soft curve as its own token, the
+  window fade, `family`;
+- `05fa9c2`: step 3, menus and dropdowns, the bulk and add-to-list modals, both
+  phone sheets, the palette, shortcut sheet and tour, Discard's role and label;
+- `504c3b1`: step 4, hover and press, the grey bar;
+- one docs commit: §12.148, the notes at §8.3 and §14.4, this section.
+
+**Which specs went back to normal motion: only `dialog-motion.spec.ts`.** Alex's
+rule was to keep a spec on normal motion if reduced motion changed a baseline;
+none did, and **no baseline was re-saved**.
+
+**Found while building:**
+
+1. **The real cause of 15 failures was one number.** Switching the default failed
+   15 tests: 10 in `map-popup`, 2 in `assignments-baseline`, and one each in
+   `desktop-baseline`, `history-print` and `phone`. All from
+   `transition-duration: 0.01ms` in the reduced-motion rule. With
+   `transition-property: all` by default, every element transitioned every property
+   for a frame, so anything read right after a change was the old value. Set to a
+   true 0, all of them pass with no spec switched back (69 of 69). **This was a real
+   bug for anyone with Reduce Motion on:** a click on the driver picker did not
+   open it, and a map popup was placed from a stale measurement. Nothing listens
+   for `transitionend`; animations keep 0.01ms because code waits on `animationend`.
+2. **The two timing-dependent 3ba tests.** 7f: a robot's click landed during the
+   opening, Playwright found it "not stable", and its retry's scroll moved the form
+   141px. Reduced motion by default removes that. "Opens with motion" grabbed the
+   reading panel just as the editor replaced it; it now reads the animation in the
+   page at the instant the class lands.
+3. **The replacement rule needed a `family`.** With the palette on a frame, 3ba's
+   rule would have opened the edit modal with no motion, as a "replacement".
+4. **A blanket hover rule would have broken three things:** the copy button keeps
+   its place by its own `-translate-y-1/2` and would have jumped; the phone sheets'
+   and phone history's full-screen tap to close would have shrunk; and an inline
+   link cannot take a transform, so its press's hit area would have spread across
+   the page. All left out, and each checked in a browser.
+5. **Not fixed, not asked for:** the bulk modal has no Esc at all; Discard now has
+   its role and label, but focus still stays in the form under it; the truck list
+   editor, timeline window and phone history still open at once, and do not remove
+   a fading copy; native selects cannot animate.
+6. **What reduced motion by default gives up.** Only `dialog-motion.spec.ts` now runs
+   with motion, so an ordinary flow is no longer exercised with it. That spec covers
+   each surface's opening and closing.
+7. **A slip, corrected.** I chained a commit to an e2e run, so `05fa9c2`'s first form
+   went in with one failing motion test (my test sent Esc to the bulk modal). Fixed
+   and amended, unpushed, before step 4.
+
+**Tests.** Step 2 and 3 were written first and seen failing (9, then 11). Real mouse
+click during the 220ms opening, the number Alex asked for: **it lands and scrolls
+nothing**, held 20% of the way through and at full speed. Mutations, each alone and
+reverted: a zero transform on a row at hover fails 2 guard tests; `sticky` no longer
+left out fails 1.
+
+**e2e.** The one full run, at `504c3b1`, `2026-11-04T14-30-19-921Z`: **293 passed, 0 failed, 0 flaky** (20.1 min), up from 265. Every screenshot baseline matched at threshold 0 and 0 pixels, and `git diff d42d374 HEAD -- e2e/__screenshots__` is empty. The three server errors in its log are the same three as before this phase: `route-failure-sentry.spec.ts`'s deliberate injections and a `ratecon read failed` from the reader's failure test.
+
+**Checks.** `npm run check` at `504c3b1`: 223 files and 4133 tests (217 and 4066 before 3ba, 219 and 4098 after it). The forbidden-files grep printed nothing. `package.json` is untouched: no new dependency.
+
+**Questions for Alex:**
+
+1. **Push 3bb?** Everything a dispatcher touches now moves. Your call under "Do not
+   push".
+2. **Look at it live.** If Medium is right, this thread is done.
+3. **The three left out** (truck list editor, timeline window, phone history): same
+   motion? Recommended: yes, it is the same one-line move for each.
+4. **The bulk modal's Esc, and focus into Discard?** Recommended: yes to both, small
+   and separate.
+5. **Still open from 3ba:** the formatter's stash, and ECC's `stop:format-typecheck`
+   hook. Recommended: `git stash drop`, and the hook off for this repo.
 
 ## Next
 

@@ -714,8 +714,9 @@ would not read (`2h`).
 | Map pan on selection | **150ms** |
 | Everything else | **Nothing else animates** |
 
-*(Superseded in part by §12.148: a dialog opens with motion, and its
-background fades away when it closes. The rest of this table stands.)*
+*(Superseded in part by §12.148: windows and menus open with motion, a copy of
+them fades when they close, and buttons respond to hover and press. The rest of
+this table stands.)*
 
 Under `prefers-reduced-motion`: **all of it becomes 0ms** and the map
 **jumps rather than pans**. The marker→row link becomes a static highlight.
@@ -10466,82 +10467,115 @@ names it from `LAYOUT_NAME`:
   separated by spaces** ("555 010 0100") as well as its earlier shapes (Alex,
   3ay). The phone still only marks where the street ends; it is never read.
 
-## 12.148 Dialogs open with motion, and close without waiting
+## 12.148 Windows and menus open with motion, and close without waiting
 
-Phase 3ba, step 1 (Alex, 2026-11-03). **Supersedes in part** §8.3's
-"Everything else: nothing else animates" and §14.4's "whole motion budget":
-a dialog now opens with motion, and its background fades away when it
-closes. Everything else in both stays as written.
+Phases 3ba and 3bb (Alex, 2026-11-03 and 2026-11-04). **Supersedes in part**
+§8.3's "Everything else: nothing else animates" and §14.4's "whole motion
+budget". Everything else in both stays as written.
 
-**Where, in step 1.** The edit modal (its reading panel and its editor) and
-the six confirms over it: Discard changes, Clear stop, Reassign, Reopen,
-Previous load still open, Stop already reached. Step 2 comes after Alex has
-seen step 1 live: menus and dropdowns, the bulk and add-to-list modals, and
-the phone sheet. The palette, cheat sheet and tour join the same motion
-then. Until then they keep §14.4's 120ms fade.
+3ba's first numbers, 150ms from 98% on the toast's curve, read as no change at
+all live: that curve does 68% of its motion in the first fifth of the time.
+Alex clicked three strengths in a mock and picked **Medium, with the window
+fading on close**. These are its numbers, all tokens in `tokens.ts`:
 
-**Opening.** The scrim fades in, and the panel fades in while it grows from
-98% to full size, in place. 150ms (`dialogIn`), decelerating
-(`EASING.dialog`, the toast's curve). Opacity and transform only. It grows
-and does not slide, for the overlay rule's reason (`tailwind.config.ts`): a
-panel that moves over a list that may be moving reads as a jump.
+| | Opens or responds | Closes or lets go |
+|---|---|---|
+| **Window** | 220ms, from 96%, 8px rise, `EASING.dialog`; fully opaque by 60%. Scrim fades in, linear. | At once; a copy fades, 140ms |
+| **Menu, dropdown** | 180ms, from 96%, 4px drop, from the corner it hangs from | At once; a copy fades, 100ms |
+| **Hover** | 160ms; a button lifts 1px | |
+| **Press** | 60ms, to 96% | 180ms |
+| **Press, long or listed** | 60ms, to 99.5%, no lift: rows, menu items, full-width buttons, phone cards | 180ms |
+| **Row at hover** | A grey bar, `text.muted` at 80%, on the left edge. **No transform.** | |
 
-**Nothing is left on the window.** The animation fills backwards only, and
-its class comes off when it ends. The panel ends with no transform and no
-opacity of its own. A transform left on it would make the panel the
-containing block for anything fixed inside it (Reopen's confirm is drawn
-inside the edit modal's panel). It would also skew anything that measures
-itself against the screen. The one measurement taken while the panel is
-still growing, the editor's opening focus (§12.119), compares two boxes
-inside the panel. They grow together, so its answer does not change.
+`EASING.dialog` is `cubic-bezier(.22,.61,.36,1)`, its own token; the toast's
+curve did not change. Opacity and transform only.
 
-**It plays once per opening.** A dialog animates when it opens and at no
-other time. A frame that replaces another in the same commit continues that
-opening instead of starting one:
+**Where.** Windows: the edit modal (its reading panel and its editor), the six
+confirms over it, the bulk and add-to-list modals, the palette, shortcut sheet
+and tour, and both phone sheets (from the bottom). Menus: the account menu, the
+scope menu, the driver dropdown, the week picker. Hover and press: every button
+and button-like link.
 
-- the reading panel giving way to the editor;
-- the editor's remount after a save lands (§12.127);
-- the console's remount of the modal on Reload.
+**Left out, still at once:** the truck list editor, the timeline window and the
+phone history, which were not in Alex's list; `frames-guard.test.ts` names them
+and fails on any other full-screen scrim. Native selects (Load status, Window,
+Facility time zone) open as the operating system draws them; CSS cannot reach
+them.
 
-If the opening is still under way, the replacement takes it up where it
-stood. If it has finished, the replacement simply appears. A re-render
-never replays it, whether a poll or a fresh preview in an open Reassign
-confirm.
+**Nothing is left on the window.** The animation fills backwards only, and its
+class comes off when it ends: no transform and no opacity of its own. A transform
+left on a panel would make it the containing block for anything fixed inside it
+(Reopen's confirm is drawn inside the edit modal's panel), and would skew anything
+that measures itself against the screen. The one measurement taken while the
+panel is still moving, the editor's opening focus (§12.119), compares two boxes
+inside the panel; they move together, so its answer does not change.
 
-**Only what the dispatcher does.** Each of the seven opens because of a
-click, a key or a Save, sometimes after the server's answer to that Save.
-None opens because of a poll. Nothing moves when data refreshes on its own:
-rows, lists, re-sorts and new rows keep §8.3's and §14.4's rules.
+**It plays once per opening.** A window animates when it opens and at no other
+time. A frame that replaces one of its own `family` in the same commit continues
+that opening: the reading panel giving way to the editor, the editor's remount
+after a save lands (§12.127), the console's remount on Reload. If the opening is
+under way the replacement takes it up where it stood; if it has finished, the
+replacement simply appears. A different window is not a replacement: the palette
+giving way to the edit modal opens the modal. A re-render never replays anything,
+whether a poll, a fresh preview in an open Reassign confirm, or typing in a filter.
 
-**Closing never waits.** The dialog closes as it always has: removed at
-once, focus returned at once, and the next click and key land at once. What
-fades is a copy of its background only, over 100ms (`dialogOut`), then
-removed. It is an empty layer: `aria-hidden`, `inert`, `pointer-events:
-none`, with no words and no controls. It cannot be clicked, read aloud or
-found by a test.
+**Only what the dispatcher does.** Every surface here opens because of a click,
+a key or a Save, sometimes after the server's answer to that Save. The one
+exception is the tour, which opens by itself on a first visit. Nothing moves
+when data refreshes on its own: rows, lists, re-sorts, new rows and the row flash
+keep §8.3's and §14.4's rules. Row ground keeps its 120ms, except under the
+pointer.
 
-- **Reopening during the fade.** A dialog that opens removes any fading
-  background at once and then opens normally. There are never two
-  backgrounds.
-- **Several closing together** leave one fading background. Discard, for
-  example, closes its confirm and the modal at once.
+**Closing never waits.** The window closes as it always has: removed at once,
+focus returned at once, and the next click and key land at once. What fades is a
+copy, taken as it leaves: every word as it stood, with typed text, a select's
+choice and the scroll position. Nothing can use or find it: `aria-hidden`,
+`inert`, `pointer-events: none`, every id, role, name, label and data attribute
+stripped. It stands in `body`, so nothing lingers in a React parent. A menu's
+copy is fixed where the menu was seen and sits above any window, or a dropdown's
+copy would fade out behind the window it was drawn in.
 
-**Reduced motion.** No opening motion and no fading background. The global
-rule in `globals.css` stays as a second line.
+- **Closed mid-opening,** the copy fades from where it stood, not from full
+  strength.
+- **Reopening during the fade.** Anything that opens removes every copy at once
+  and then opens normally. There are never two backgrounds.
+- **Several closing together** each leave a copy (Discard closes its confirm and
+  the modal), except one drawn inside another, which is already in that copy.
+- **What closes in the commit a window opens fresh** leaves nothing, for the same
+  reason. What closes as a frame is replaced by its family still fades: a confirm
+  over an editor that remounts.
 
-**Tokens.** `MOTION_MS.dialogIn` 150 and `MOTION_MS.dialogOut` 100, plus
-`EASING.dialog`. Tailwind animations: `dialog-in`, `scrim-in` and
-`scrim-out`. No component spells a millisecond figure. They are CSS
-keyframes, because a transition cannot run on an element that has just
-appeared. No animation library (Alex: "CSS only" means no library).
+**Hover and press** live in one place, `globals.css`, so these hold everywhere:
 
-**One component.** `DialogFrame` (`src/components/overlay/DialogFrame.tsx`)
-draws the scrim and the panel. The timing rules live beside it in
-`dialog-motion.ts`, so a dialog built on it cannot ship without them.
+- **A row never moves on hover:** no transform on it, not even a zero one. It
+  presses by 0.5% while held; pressing a control in the row presses the control.
+- **Nothing holding a fixed popover or a sticky element gets a transform.**
+- **Left out of the movement:** a button that keeps its place by `sticky`, `fixed`
+  or its own `translate` (the copy button would jump), a full-screen tap to close
+  (`inset-0`, `data-no-press`), everything inside the map, and inline links, which
+  a transform cannot reach.
+- A pseudo-element keeps the hit area under the pointer while a button moves: a
+  press at its very edge still clicks, and a lift cannot flicker.
 
-**Known gap until step 2.** The windows not yet on `DialogFrame` do not
-remove a fading background when they open. One of them opened within 100ms
-of a close shows what is left of the fade under its own scrim.
+**Reduced motion.** No opening, no copy, no lift, no press. The grey bar stays:
+it is a state, not motion, and simply appears. The global rule in `globals.css`
+makes every transition a **true 0**. It was 0.01ms, which made every element
+"transition" every property for a frame, since elements default to
+`transition-property: all`: a click on the driver picker did not open it, and a
+map popup was placed from a stale measurement. Animations keep 0.01ms, because
+code waits on `animationend`.
+
+**In the tests.** e2e runs with reduced motion by default
+(`playwright.config.ts`), because a robot's click can land during an opening,
+find its target "not stable", and move the form with its retry's scroll. Only
+`dialog-motion.spec.ts` turns motion back on.
+
+**One component each.** `DialogFrame` and `PopFrame`
+(`src/components/overlay/`), with `useOpening` for what they share and
+`dialog-motion.ts` for the rules that span frames, so a surface built on them
+cannot ship without these. Keyframes, not transitions, for an opening: a
+transition cannot run on an element that has just appeared. No animation library
+(Alex: "CSS only" means no library).
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
@@ -10938,9 +10972,9 @@ transitionTimingFunction: { flash: 'cubic-bezier(.2,0,0,1)',
 
 ### The whole motion budget
 
-*(Superseded in part by §12.148: the edit modal and its confirms open with
-motion, and their background fades away when they close. The rows below
-stand.)*
+*(Superseded in part by §12.148: windows and menus open with motion, a copy of
+them fades when they close, and buttons respond to hover and press. "Overlays:
+opacity only, 120ms" below is replaced by it. The other rows stand.)*
 
 | | |
 |---|---|
