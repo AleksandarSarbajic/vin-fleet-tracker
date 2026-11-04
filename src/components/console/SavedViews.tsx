@@ -102,7 +102,13 @@ export function ScopeMenu({
     /** On a phone: never taller than the room below the button (§12.96). */
     maxHeight?: number;
   } | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
+  /**
+   * §12.148. What the menu is placed from: the bordered row the button sits in,
+   * not the button. During a click the button is pressed to 96%, and under a
+   * resting pointer it is lifted 1px; its own rect moves with both. Nothing
+   * presses this row, and the button fills it inside its 1px border.
+   */
+  const frame = useRef<HTMLDivElement>(null);
   const [find, setFind] = useState('');
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
@@ -128,16 +134,19 @@ export function ScopeMenu({
   useReturnFocus(open);
 
   const toggle = useCallback(() => {
-    const rect = trigger.current?.getBoundingClientRect();
-    if (rect) {
+    const row = frame.current;
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      const left = rect.left + row.clientLeft;
+      const bottom = rect.top + row.clientTop + row.clientHeight;
       // §12.96, stage 4: on a phone, as wide as the screen allows and never
       // taller than it — 360px ran off 320 and 360, clipping "Save current view…".
       const width = phone ? Math.min(MENU_WIDTH, window.innerWidth - 16) : MENU_WIDTH;
-      const top = rect.bottom + 4;
+      const top = bottom + 4;
       setAnchor({
         top,
         // Kept on screen when the button sits near the right edge.
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+        left: Math.max(8, Math.min(left, window.innerWidth - width - 8)),
         width,
         ...(phone ? { maxHeight: window.innerHeight - top - 8 } : {}),
       });
@@ -248,6 +257,7 @@ export function ScopeMenu({
       className={phone ? 'relative flex min-w-0 flex-1' : 'relative flex shrink-0'}
     >
       <div
+        ref={frame}
         {...(phone ? { 'data-phone-scope': '' } : { 'data-scope': '' })}
         // 46px on a phone: 44px of button inside the 1px border.
         className={`flex ${phone ? 'h-[46px] flex-1' : 'h-8'} min-w-0 items-stretch border ${
@@ -256,7 +266,6 @@ export function ScopeMenu({
       >
         <button
           type="button"
-          ref={trigger}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={open ? menuId : undefined}

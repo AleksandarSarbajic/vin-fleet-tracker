@@ -810,6 +810,78 @@ test.describe('hover and press', () => {
     await expect(button).toHaveAttribute('aria-pressed', 'true');
   });
 
+  /**
+   * The menu is fixed, and placed from a measurement taken during the click. By
+   * then a mouse has the button at 96%, so the measurement has to come from
+   * something the press does not move. Each case holds the press until it has
+   * landed: how fast a robot lets go must not decide whether this can fail.
+   */
+  test.describe('the scope menu opens at the resting edge of its button', () => {
+    const scopeButton = (page: Page) =>
+      page.locator('[data-scope] [aria-haspopup="menu"]');
+
+    /** Where the button stands with nothing on it: no press and no lift. */
+    const resting = async (page: Page) => {
+      await page.goto('/');
+      const button = scopeButton(page);
+      await button.waitFor();
+      expect(await button.evaluate(transformOf)).toBe('none');
+      return (await button.boundingBox())!;
+    };
+
+    const pressLanded = (page: Page) =>
+      expect
+        .poll(async () => scaleOf(await scopeButton(page).evaluate(transformOf)))
+        .toBeCloseTo(0.96, 3);
+
+    const expectMenuAt = async (
+      page: Page,
+      rest: { x: number; y: number; height: number },
+    ) => {
+      const menu = page.locator('[data-views-menu]');
+      await expect(menu).toBeVisible();
+      await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+      const box = (await menu.boundingBox())!;
+      expect(box.x).toBeCloseTo(rest.x, 1);
+      expect(box.y).toBeCloseTo(rest.y + rest.height + 4, 1);
+    };
+
+    test('a real mouse click, and the button keeps its press', async ({ page }) => {
+      const rest = await resting(page);
+      await page.mouse.move(rest.x + rest.width / 2, rest.y + rest.height / 2);
+      await page.mouse.down();
+      await pressLanded(page);
+      await page.mouse.up();
+      await expectMenuAt(page, rest);
+    });
+
+    test('Enter on the focused button', async ({ page }) => {
+      const rest = await resting(page);
+      await scopeButton(page).focus();
+      await page.keyboard.press('Enter');
+      await expectMenuAt(page, rest);
+    });
+
+    test('Space on the focused button, which presses it while held', async ({ page }) => {
+      const rest = await resting(page);
+      await scopeButton(page).focus();
+      await page.keyboard.down(' ');
+      await pressLanded(page);
+      await page.keyboard.up(' ');
+      await expectMenuAt(page, rest);
+    });
+
+    test('V, with the pointer resting on the button and lifting it', async ({ page }) => {
+      const rest = await resting(page);
+      await page.mouse.move(rest.x + rest.width / 2, rest.y + rest.height / 2);
+      await expect
+        .poll(() => scopeButton(page).evaluate(transformOf))
+        .toBe('matrix(1, 0, 0, 1, 0, -1)');
+      await page.keyboard.press('v');
+      await expectMenuAt(page, rest);
+    });
+  });
+
   test('hover does not flicker on the bottom edge of a lifting button', async ({
     page,
   }) => {
