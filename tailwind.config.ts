@@ -56,7 +56,17 @@ const config: Config = {
         'dialog-out': ms(MOTION_MS.dialogOut),
         'menu-in': ms(MOTION_MS.menuIn),
         'menu-out': ms(MOTION_MS.menuOut),
+        hover: ms(MOTION_MS.hover),
+        'press-in': ms(MOTION_MS.pressIn),
+        'press-out': ms(MOTION_MS.pressOut),
       },
+      // §12.148. Read by globals.css's hover and press rules through theme().
+      scale: {
+        press: String(MOTION_SHAPE.pressScale),
+        'press-flat': String(MOTION_SHAPE.flatPressScale),
+      },
+      translate: { lift: `-${MOTION_SHAPE.hoverLiftPx}px` },
+      opacity: { 'row-bar': String(MOTION_SHAPE.rowBarOpacity) },
       transitionTimingFunction: {
         flash: EASING.flash,
         toast: EASING.toast,

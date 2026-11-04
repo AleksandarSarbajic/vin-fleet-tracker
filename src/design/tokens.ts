@@ -241,6 +241,11 @@ export const MOTION_MS = {
   /** §12.148. A menu or a dropdown, smaller, so quicker than a window. */
   menuIn: 180,
   menuOut: 100,
+  /** §12.148. Grounds and lifts under a pointer. */
+  hover: 160,
+  /** §12.148. A press answers at once and lets go slowly. */
+  pressIn: 60,
+  pressOut: 180,
 } as const;
 
 /**
@@ -253,6 +258,12 @@ export const MOTION_SHAPE = {
   menuFromScale: 0.96,
   /** A menu hangs from what opened it, so it drops into place, not rises. */
   menuDropPx: 4,
+  pressScale: 0.96,
+  /** A row, a menu item, anything long: 4% of a wide thing is a lot. */
+  flatPressScale: 0.995,
+  hoverLiftPx: 1,
+  /** The row's grey hover bar, in `text.muted`. */
+  rowBarOpacity: 0.8,
 } as const;
 
 /**

@@ -721,6 +721,215 @@ test.describe('on a phone', () => {
   });
 });
 
+test.describe('hover and press', () => {
+  const pseudo = (el: Element) => {
+    const cs = getComputedStyle(el, '::after');
+    return { opacity: Number(cs.opacity), width: cs.width };
+  };
+  const transformOf = (el: Element) => getComputedStyle(el).transform;
+  const chip = (page: Page) => page.locator('button', { hasText: /^Late/ }).first();
+  const scaleOf = (matrix: string) =>
+    Number(matrix.match(/matrix\(([^,]+)/)?.[1] ?? 'NaN');
+
+  test('a row never moves on hover: no transform at all, and the grey bar shows', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const row = rowOf(page, IDS.truckDallas);
+    await row.hover();
+    await expect.poll(() => row.evaluate(pseudo)).toEqual({ opacity: 0.8, width: '3px' });
+    // Not even a zero one: translateX(0) would compute to a matrix, not to none.
+    expect(await row.evaluate(transformOf)).toBe('none');
+  });
+
+  test('a selected row has no hover bar: its accent rail says enough', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const row = rowOf(page, IDS.truckDallas);
+    await row.click();
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await row.hover();
+    expect(await row.evaluate((el) => getComputedStyle(el, '::after').content)).toBe(
+      'none',
+    );
+  });
+
+  test('a row shrinks only while pressed, and the click lands', async ({ page }) => {
+    await page.goto('/');
+    const row = rowOf(page, IDS.truckDallas);
+    const box = (await row.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect
+      .poll(async () => scaleOf(await row.evaluate(transformOf)))
+      .toBeCloseTo(0.995, 3);
+    await page.mouse.up();
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => row.evaluate(transformOf)).toBe('none');
+  });
+
+  test('pressing a control in a row does not press the row', async ({ page }) => {
+    await page.goto('/');
+    const row = rowOf(page, IDS.truckDallas);
+    const box = (await row.locator('input[type="checkbox"]').boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    // Long enough for a press to have shown, had there been one.
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
+    expect(await row.evaluate(transformOf)).toBe('none');
+    await page.mouse.up();
+  });
+
+  test('a button lifts 1px on hover and shrinks to 96% on press', async ({ page }) => {
+    await page.goto('/');
+    const button = chip(page);
+    await button.hover();
+    await expect
+      .poll(() => button.evaluate(transformOf))
+      .toBe('matrix(1, 0, 0, 1, 0, -1)');
+    await page.mouse.down();
+    await expect
+      .poll(async () => scaleOf(await button.evaluate(transformOf)))
+      .toBeCloseTo(0.96, 3);
+    await page.mouse.up();
+    await page.mouse.move(2, 2);
+    await expect.poll(() => button.evaluate(transformOf)).toBe('none');
+  });
+
+  test('a press at the very edge of a button still clicks', async ({ page }) => {
+    await page.goto('/');
+    const button = chip(page);
+    const box = (await button.boundingBox())!;
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect
+      .poll(async () => scaleOf(await button.evaluate(transformOf)))
+      .toBeCloseTo(0.96, 3);
+    await page.mouse.up();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('hover does not flicker on the bottom edge of a lifting button', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const button = chip(page);
+    const box = (await button.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height - 1);
+    const flips = await button.evaluate(async (el) => {
+      const seen: boolean[] = [];
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise(requestAnimationFrame);
+        seen.push(el.matches(':hover'));
+      }
+      return seen.filter((v, i) => i > 0 && v !== seen[i - 1]).length;
+    });
+    expect(flips).toBe(0);
+  });
+
+  test('a menu item does not lift, and presses by 0.5%', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    const item = page.getByRole('menuitem', { name: 'Sign out' });
+    await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+    await item.hover();
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 220)));
+    expect(await item.evaluate(transformOf)).toBe('none');
+    const box = (await item.boundingBox())!;
+    await page.mouse.down();
+    await expect
+      .poll(async () => scaleOf(await item.evaluate(transformOf)))
+      .toBeCloseTo(0.995, 3);
+    // Let go off the item, so this test signs nobody out.
+    await page.mouse.move(box.x - 40, box.y - 200);
+    await page.mouse.up();
+  });
+
+  test('what a transform would break never gets one', async ({ page }) => {
+    await page.goto('/');
+    const kinds = [
+      'sticky top-0',
+      'fixed left-[300px] top-[300px]',
+      'absolute top-[320px] left-[320px] -translate-y-1/2',
+      'absolute inset-0',
+      'a',
+    ];
+    const held = await page.evaluate((list) => {
+      const results: string[] = [];
+      for (const cls of list) {
+        const b = document.createElement('button');
+        b.textContent = 'x';
+        if (cls === 'a') b.setAttribute('data-no-press', '');
+        else b.className = cls;
+        b.setAttribute('data-probe', cls);
+        document.body.append(b);
+        results.push(cls);
+      }
+      return results;
+    }, kinds);
+    expect(held).toHaveLength(kinds.length);
+    for (const cls of kinds) {
+      const b = page.locator(`[data-probe="${cls}"]`);
+      const box = (await b.boundingBox())!;
+      await page.mouse.move(box.x + 2, box.y + 2);
+      await page.mouse.down();
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
+      const own = await b.evaluate(transformOf);
+      // The copy button's kind keeps its own translate: never scaled, never lifted further.
+      if (cls.includes('translate')) expect(scaleOf(own), cls).toBe(1);
+      else expect(own, cls).toBe('none');
+      await page.mouse.up();
+    }
+  });
+
+  test('nothing that moves holds a fixed popover or a sticky element', async ({
+    page,
+  }) => {
+    const offenders = () =>
+      page.evaluate(() => {
+        const out: string[] = [];
+        for (const el of document.querySelectorAll('button, a[href], [data-row-id]')) {
+          for (const inner of el.querySelectorAll('*')) {
+            const { position } = getComputedStyle(inner);
+            if (position === 'fixed' || position === 'sticky') {
+              out.push(`${el.tagName} ${el.textContent?.slice(0, 20)} holds ${position}`);
+            }
+          }
+        }
+        return out;
+      });
+    await page.goto('/');
+    await rowOf(page, IDS.truckChicago).waitFor();
+    expect(await offenders()).toEqual([]);
+    await page.locator('[aria-controls], [aria-haspopup="menu"]').first().click();
+    await expect(page.locator('[data-views-menu]')).toBeVisible();
+    expect(await offenders()).toEqual([]);
+    await page.keyboard.press('Escape');
+    await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+    expect(await offenders()).toEqual([]);
+  });
+
+  test.describe('under reduced motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } });
+
+    test('nothing lifts or shrinks, and the bar is simply there', async ({ page }) => {
+      await page.goto('/');
+      // The row first: pressing the chip filters this row away.
+      const row = rowOf(page, IDS.truckDallas);
+      await row.hover();
+      expect(await row.evaluate(pseudo)).toEqual({ opacity: 0.8, width: '3px' });
+      expect(await row.evaluate(transformOf)).toBe('none');
+      const button = chip(page);
+      await button.hover();
+      expect(await button.evaluate(transformOf)).toBe('none');
+      await page.mouse.down();
+      expect(await button.evaluate(transformOf)).toBe('none');
+      await page.mouse.up();
+    });
+  });
+});
+
 test.describe('under reduced motion', () => {
   test.use({ contextOptions: { reducedMotion: 'reduce' } });
 

@@ -114,6 +114,123 @@
     outline-offset: 2px;
   }
 
+  /*
+   * §12.148, hover and press, at Medium. On everything clickable at once rather
+   * than in each component, and in one place so these rules hold everywhere:
+   *
+   *   - A row never moves on hover: no transform on it, not even a zero one.
+   *   - Nothing holding a fixed popover or a sticky element gets a transform.
+   *     A transform would make it the containing block for what is inside it.
+   *   - The row flash, polls and re-sorts are not touched.
+   *
+   * Left out: a button with a place it keeps by `sticky`, `fixed` or its own
+   * `translate` (the copy button), a full-screen tap to close (`inset-0`,
+   * `data-no-press`), and everything inside the map. An inline link is left out
+   * too: a transform does nothing to it, and the press's hit area would then
+   * be measured against some far ancestor.
+   *
+   * The `::after` keeps the hit area under the pointer while the button moves
+   * away from it: a press at the very edge still clicks, and a lift cannot
+   * flicker. It relies on the transform, which makes the button its containing
+   * block, so it only exists while there is one.
+   */
+  @media (prefers-reduced-motion: no-preference) {
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *) {
+      transition-property: transform, color, background-color, border-color, opacity;
+      transition-duration: theme('transitionDuration.press-out'), theme('transitionDuration.hover'),
+        theme('transitionDuration.hover'), theme('transitionDuration.hover'),
+        theme('transitionDuration.hover');
+      transition-timing-function: theme('transitionTimingFunction.dialog'), linear, linear, linear,
+        linear;
+    }
+
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active {
+      transform: scale(theme('scale.press'));
+      transition-duration: theme('transitionDuration.press-in'), theme('transitionDuration.hover'),
+        theme('transitionDuration.hover'), theme('transitionDuration.hover'),
+        theme('transitionDuration.hover');
+    }
+
+    /* A long or listed thing does not shrink by 4%: that is 30px on a wide one. */
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):is([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):active {
+      transform: scale(theme('scale.press-flat'));
+    }
+
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+    }
+
+    @media (hover: hover) {
+      :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:not(:active) {
+        transform: translateY(theme('translate.lift'));
+      }
+
+      :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:not(:active)::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        bottom: calc(theme('translate.lift') - 1px);
+      }
+    }
+
+    /*
+     * Doubled, to outrank the row's own `transition-colors`. Only for the press:
+     * the ground keeps its duration, so nothing a poll changes moves differently.
+     */
+    [data-row-id][data-row-id] {
+      transition-property: color, background-color, border-color, transform;
+      transition-duration: theme('transitionDuration.ground'), theme('transitionDuration.ground'),
+        theme('transitionDuration.ground'), theme('transitionDuration.press-out');
+      transition-timing-function: linear, linear, linear, theme('transitionTimingFunction.dialog');
+    }
+
+    /* Pressing a control in the row presses the control, not the row. */
+    [data-row-id]:active:not(:has(button:active, a:active, input:active)) {
+      transform: scale(theme('scale.press-flat'));
+    }
+
+    /* Under its cells, so a double-click on the status chip still finds the chip. */
+    [data-row-id]:active::before {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      z-index: -1;
+    }
+  }
+
+  /*
+   * The row's grey hover bar: a state, not motion, so it stays under reduced
+   * motion, where it simply appears. A pseudo-element, so the row itself has
+   * nothing on it at hover. It sits on the 3px left border the selection rail
+   * uses, and a selected row has that rail instead.
+   */
+  @media (hover: hover) {
+    [data-row-id]:hover {
+      transition-duration: theme('transitionDuration.hover');
+    }
+
+    [data-row-id]:not([aria-selected='true'])::after {
+      content: '';
+      position: absolute;
+      left: -3px;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: theme('colors.text.muted');
+      opacity: 0;
+      transform: scaleY(0.4);
+      transition: opacity theme('transitionDuration.hover') linear,
+        transform theme('transitionDuration.hover') theme('transitionTimingFunction.dialog');
+    }
+
+    [data-row-id]:not([aria-selected='true']):hover::after {
+      opacity: theme('opacity.row-bar');
+      transform: none;
+    }
+  }
+
   /* Spec §8.3: 120ms ground/selection, 150ms map pan, and §14.4's and
      §12.148's lists; nothing else. Under reduced motion all of it becomes 0ms
      and the map jumps. A dialog does not rely on this rule alone: it skips
