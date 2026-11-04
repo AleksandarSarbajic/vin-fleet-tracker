@@ -682,6 +682,10 @@ export function Console({
       if (isTypingTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (editingId) return;
+      // Phase 3bc. This listens first, in the capture phase on window, so with focus
+      // on a button it would clear the rows behind a window and the window's own Esc
+      // would never run. The bulk modal is asking about these very rows.
+      if (document.querySelector('[aria-modal="true"]')) return;
       if ((event.key === 'x' || event.key === 'X') && selectedId) {
         event.preventDefault();
         bulk.toggle(selectedId, event.shiftKey);

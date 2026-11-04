@@ -528,9 +528,7 @@ test.describe('every window opens at Medium, and fades when it closes', () => {
       await open(page);
       await expect.poll(opening).toEqual(WINDOW);
       await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
-      // The bulk modal has no Esc of its own (phase 3bb's report): Cancel closes it.
-      const button = name === 'the bulk modal' ? 'Cancel' : undefined;
-      expect(await copyJustClosed(page, button)).toEqual({
+      expect(await copyJustClosed(page)).toEqual({
         fade: 'fade-away',
         duration: '0.14s',
         position: 'fixed',
@@ -541,6 +539,55 @@ test.describe('every window opens at Medium, and fades when it closes', () => {
       await expect(copies(page)).toHaveCount(0);
     });
   }
+
+  test('the bulk modal: Esc does what Cancel does, and the rows stay checked', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const checkbox = (truck: number) =>
+      page.getByRole('checkbox', { name: `Select truck ${truck}` });
+    await checkbox(TRUCK_NUMBERS.chicago).check();
+    await checkbox(TRUCK_NUMBERS.dallas).check();
+    const force = page.getByRole('button', { name: 'Force status…' });
+    const modal = page.locator('[role="dialog"]');
+
+    const cancel = modal.getByRole('button', { name: 'Cancel' });
+    for (const close of [
+      () => page.keyboard.press('Escape'),
+      () => cancel.click(),
+      // With focus on a button: the board's own Esc, for checked rows, listens first.
+      async () => {
+        await cancel.focus();
+        await page.keyboard.press('Escape');
+      },
+    ]) {
+      await force.click();
+      await expect(modal).toBeVisible();
+      await close();
+      await expect(modal).toHaveCount(0);
+      await expect(checkbox(TRUCK_NUMBERS.chicago)).toBeChecked();
+      await expect(checkbox(TRUCK_NUMBERS.dallas)).toBeChecked();
+      await expect(force).toBeFocused();
+    }
+  });
+
+  test('the add-to-list modal: Esc from a button closes it, and the rows stay checked', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const checkbox = (truck: number) =>
+      page.getByRole('checkbox', { name: `Select truck ${truck}` });
+    await checkbox(TRUCK_NUMBERS.chicago).check();
+    await checkbox(TRUCK_NUMBERS.dallas).check();
+    await page.getByRole('button', { name: 'Add to list…' }).click();
+    const modal = page.locator('[role="dialog"]');
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Cancel' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    await expect(checkbox(TRUCK_NUMBERS.chicago)).toBeChecked();
+    await expect(checkbox(TRUCK_NUMBERS.dallas)).toBeChecked();
+  });
 
   test('the tour', async ({ page }) => {
     await page.goto('/');

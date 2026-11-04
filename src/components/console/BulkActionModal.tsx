@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_EXPIRY,
@@ -106,6 +106,18 @@ export function BulkActionModal({
       setBusy(false);
     }
   }
+
+  /** Phase 3bc. Exactly Cancel: it is never disabled, so neither is this. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
 
   const canSubmit =
     stopIds.length > 0 &&
