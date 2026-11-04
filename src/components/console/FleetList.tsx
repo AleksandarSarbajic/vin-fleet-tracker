@@ -9,7 +9,6 @@ import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
-import { useResortHold } from '@/hooks/useResortHold';
 import { EmptyList } from './EmptyList';
 import type { EmptyAction, EmptyState } from '@/lib/empty-state';
 
@@ -82,8 +81,6 @@ interface Props {
    */
   empty: EmptyState | null;
   onEmptyAction: (action: EmptyAction) => void;
-  drift: number;
-  onResort: () => void;
   onSelect: (id: string) => void;
   /** §12.48: double-click a row to edit, the mouse form of Enter. */
   /** §12.94. Null below the editing width: a row then opens nothing. */
@@ -108,8 +105,6 @@ export function FleetList({
   query,
   empty,
   onEmptyAction,
-  drift,
-  onResort,
   onSelect,
   onEdit,
 }: Props) {
@@ -160,20 +155,8 @@ export function FleetList({
 
   const headers = columns === 8 ? HEADERS_8 : HEADERS_6;
 
-  /**
-   * §14.5's re-sort hold. Tracked here rather than per row: `mouseenter` on
-   * thirty rows is thirty listeners to answer one question about the panel.
-   */
-  const [pointerOver, setPointerOver] = useState(false);
-  const holdResort = useResortHold(drift, pointerOver, checked.size);
-
   return (
-    <div
-      ref={panelRef}
-      className="flex min-h-0 min-w-0 flex-col"
-      onMouseEnter={() => setPointerOver(true)}
-      onMouseLeave={() => setPointerOver(false)}
-    >
+    <div ref={panelRef} className="flex min-h-0 min-w-0 flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {/* Sticky INSIDE the scroller, so it survives every scroll position. */}
         <div
@@ -248,16 +231,6 @@ export function FleetList({
               />
             ))}
           </div>
-        ) : null}
-
-        {drift > 0 && !holdResort ? (
-          <button
-            type="button"
-            onClick={onResort}
-            className="sticky top-7 z-[1] flex w-full items-center justify-center gap-2 border-b border-line-hair bg-surface-overlay py-1.5 font-cond text-micro uppercase tracking-[.08em] text-accent"
-          >
-            {drift} {drift === 1 ? 'row would' : 'rows would'} reorder — click to sort
-          </button>
         ) : null}
 
         {/*

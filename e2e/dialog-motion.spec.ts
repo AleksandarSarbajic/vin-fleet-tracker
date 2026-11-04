@@ -722,6 +722,210 @@ test.describe('Discard changes? by keyboard', () => {
   });
 });
 
+test.describe('the reorder bar never moves a row', () => {
+  const bar = (page: Page) =>
+    page.getByRole('button', { name: /rows? would reorder — click to sort/i });
+  const rows = (page: Page) => page.locator('[data-row-id]');
+
+  /** A list long enough to be a list, and its rows in place. */
+  async function openLongBoard(page: Page, width = 1440) {
+    // Due now, so the health strip has a stop today and draws its bar.
+    await resetWorld({ extraTrucks: 20, appointmentUtc: new Date() });
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    await rows(page).first().waitFor();
+    return (await rows(page).last().getAttribute('data-row-id'))!;
+  }
+
+  /** The next poll says the row drawn last is the most urgent on the board. */
+  async function driftOnNextPoll(page: Page, id: string) {
+    await page.route('**/api/fleet', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as {
+        fleet: { id: string; status: string; apptAt: string | null }[];
+      };
+      for (const row of body.fleet) {
+        if (row.id === id) {
+          row.status = 'LATE';
+          row.apptAt = '2020-01-01T00:00:00.000Z';
+        }
+      }
+      await route.fulfill({ response, json: body });
+    });
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  }
+
+  type Tops = { __tops: Record<string, number[]>; __stop: boolean };
+
+  /** Every row's top, on every frame, from before the poll until after the bar. */
+  const watchRowTops = (page: Page) =>
+    page.evaluate(() => {
+      const w = window as unknown as Tops;
+      w.__tops = {};
+      w.__stop = false;
+      const read = () => {
+        for (const row of document.querySelectorAll('[data-row-id]')) {
+          const id = row.getAttribute('data-row-id')!;
+          const top = row.getBoundingClientRect().top;
+          const seen = (w.__tops[id] ??= []);
+          if (!seen.includes(top)) seen.push(top);
+        }
+        if (!w.__stop) requestAnimationFrame(read);
+      };
+      read();
+    });
+
+  const rowsThatMoved = (page: Page) =>
+    page.evaluate(() => {
+      const w = window as unknown as Tops;
+      w.__stop = true;
+      return Object.values(w.__tops).filter((tops) => tops.length > 1);
+    });
+
+  const rowUnder = (page: Page, x: number, y: number) =>
+    page.evaluate(
+      ([px, py]) =>
+        document
+          .elementFromPoint(px!, py!)
+          ?.closest('[data-row-id]')
+          ?.getAttribute('data-row-id') ?? null,
+      [x, y],
+    );
+
+  /*
+   * 15s, past the old hold's 10: were the hold ever back, this waits for the bar
+   * and then fails on the row that moved, which is the point, and not on the wait.
+   */
+  const SHOWN = { timeout: 15_000 };
+
+  test('drift appears with the pointer on the list: every row keeps its top on every frame', async ({
+    page,
+  }) => {
+    const last = await openLongBoard(page);
+    const target = (await rows(page).nth(3).boundingBox())!;
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+    await watchRowTops(page);
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    // Some frames with the bar up, so a late shift would be seen.
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(await rowsThatMoved(page)).toEqual([]);
+  });
+
+  test('a click aimed at a row before the bar appeared lands on that row', async ({
+    page,
+  }) => {
+    const last = await openLongBoard(page);
+    const target = rows(page).nth(3);
+    const id = (await target.getAttribute('data-row-id'))!;
+    const box = (await target.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    expect(await rowUnder(page, x, y)).toBe(id);
+    await page.mouse.click(x, y);
+    await expect(rowOf(page, id)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('two rows checked: the bar shows, and nothing moves', async ({ page }) => {
+    const last = await openLongBoard(page);
+    await page
+      .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.chicago}` })
+      .check();
+    await page
+      .getByRole('checkbox', { name: `Select truck ${TRUCK_NUMBERS.dallas}` })
+      .check();
+    await page.mouse.move(1, 1);
+    await watchRowTops(page);
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    expect(await rowsThatMoved(page)).toEqual([]);
+  });
+
+  test('rows move only when it is clicked, and then it goes', async ({ page }) => {
+    const last = await openLongBoard(page);
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    await expect(bar(page)).toHaveText(/^\d+ rows would reorder — click to sort$/i);
+    expect(await rows(page).first().getAttribute('data-row-id')).not.toBe(last);
+    await bar(page).click();
+    await expect(rows(page).first()).toHaveAttribute('data-row-id', last);
+    await expect(bar(page)).toHaveCount(0);
+  });
+
+  test('it stands in the toolbar line, outside the scroller', async ({ page }) => {
+    const last = await openLongBoard(page);
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    const inScroller = await bar(page).evaluate(
+      (el) => el.closest('.overflow-y-auto') !== null,
+    );
+    expect(inScroller).toBe(false);
+  });
+
+  /** The list pane at this width, by the split the page reads on load. */
+  async function atListWidth(page: Page, width: number) {
+    const viewport = 1086;
+    await page.addInitScript(
+      (pct) => window.localStorage.setItem('ft.splitPct', String(pct)),
+      (width / viewport) * 100,
+    );
+    return openLongBoard(page, viewport);
+  }
+
+  const toolbarLine = (page: Page) =>
+    bar(page).locator('xpath=ancestor::div[contains(@class,"h-8")][1]');
+
+  const measureLine = (line: Locator) =>
+    line.evaluate((el) => ({
+      width: Math.round(el.getBoundingClientRect().width),
+      overflows: el.scrollWidth > el.clientWidth,
+    }));
+
+  /** Split.tsx's LIST_MIN_PX: the narrowest a drag can leave it. */
+  test('at the narrowest list pane it fits: the strip gives way, Density stays', async ({
+    page,
+  }) => {
+    const last = await atListWidth(page, 560);
+    const density = page.getByRole('group', { name: 'Row density' });
+    const before = (await density.boundingBox())!;
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    expect(await measureLine(toolbarLine(page))).toEqual({ width: 560, overflows: false });
+
+    const box = (await bar(page).boundingBox())!;
+    const after = (await density.boundingBox())!;
+    expect(after).toEqual(before);
+    expect(box.x + box.width).toBeLessThanOrEqual(after.x);
+    // Same words, whole: it is the strip that gives way.
+    expect(await bar(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const strip = toolbarLine(page).locator(':scope > div').first();
+    const stripBox = (await strip.boundingBox())!;
+    expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(box.x);
+    // Its bar narrows and is still there, and the strip's own edge holds it in.
+    const meter = (await strip.locator('span[aria-hidden="true"]').boundingBox())!;
+    expect(meter.width).toBeGreaterThan(40);
+    expect(meter.x + meter.width).toBeLessThanOrEqual(stripBox.x + stripBox.width);
+  });
+
+  /** A split stored on a wider window: nothing clamps it on load. */
+  test('under the minimum too, Density is whole and inside the line', async ({ page }) => {
+    const last = await atListWidth(page, 320);
+    const density = page.getByRole('group', { name: 'Row density' });
+    const before = (await density.boundingBox())!;
+    await driftOnNextPoll(page, last);
+    await expect(bar(page)).toBeVisible(SHOWN);
+    expect(await measureLine(toolbarLine(page))).toEqual({ width: 320, overflows: false });
+    expect(await density.boundingBox()).toEqual(before);
+    const line = (await toolbarLine(page).boundingBox())!;
+    expect(before.x + before.width).toBeLessThanOrEqual(line.x + line.width);
+    const box = (await bar(page).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(line.x);
+  });
+});
+
 test.describe('every menu and dropdown opens at Medium, and fades when it closes', () => {
   const closes = async (page: Page) => {
     await expect(page.locator('.animate-menu-in')).toHaveCount(0);

@@ -166,14 +166,3 @@ export function flashView(
       : null,
   };
 }
-
-/**
- * §14.5's re-sort hold. Ten seconds is the designer's number, and it is a
- * ceiling rather than a delay: the hold ends the moment the pointer leaves
- * the list or the last check is cleared, and this is only how long it may
- * last if neither ever happens.
- *
- * Not in `MOTION_MS` because it is not motion — nothing animates for ten
- * seconds. It is how long an offer waits for the cursor to be somewhere else.
- */
-export const RESORT_HOLD_MS = 10_000;

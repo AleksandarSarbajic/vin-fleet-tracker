@@ -1070,7 +1070,13 @@ export function Console({
               list={
                 <div className="flex h-full min-h-0 flex-col">
                   {/* §14.5: the strip is read with the list, not the header. */}
-                  <ListToolbar density={density} onDensity={setDensity} health={health} />
+                  <ListToolbar
+                    density={density}
+                    onDensity={setDensity}
+                    health={health}
+                    drift={drift}
+                    onResort={resort}
+                  />
                   {/* §12.96: below 768px the cards stand in for it. `contents`
                       gives the wrapper no box of its own at 768 and up. */}
                   <div className="contents max-md:hidden">
@@ -1098,8 +1104,6 @@ export function Console({
                       query={query}
                       empty={empty}
                       onEmptyAction={onEmptyAction}
-                      drift={drift}
-                      onResort={resort}
                       onSelect={select}
                       onEdit={editingAllowed ? openEditor : null}
                     />

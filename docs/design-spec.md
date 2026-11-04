@@ -519,9 +519,9 @@ last** (§12.4).
 **The list does not re-sort on refresh.** Order is computed on load, on filter
 change, and on explicit user action only. Status colours, ETAs and positions
 update **in place**; rows never move under a click. When the computed order
-has drifted, a pill appears at the top of the scroller — `6 rows would
-reorder` — and clicking it re-sorts. This is also what makes the `2h`
-status-change toast safe: the row has already recoloured, but it has not
+has drifted, a bar appears in the toolbar line above the list — `6 rows would
+reorder` — and clicking it re-sorts (phase 3bc, §12.4). This is also what makes
+the `2h` status-change toast safe: the row has already recoloured, but it has not
 moved.
 
 Other sorts offered in the list header (`2a`, `3c`): `Urgency` (default,
@@ -797,10 +797,11 @@ Grid rows: `34px` panel header · list body · `30px` footer bar.
   `Groups collapse — click a group head`.
 - **Body**: scrolls, `min-height: 0`, column header sticky inside it.
   **Virtualize with TanStack Virtual regardless of current fleet size.**
-- **Stale-sort pill**: when the computed order has drifted from the displayed
-  order, a pill sits at the top of the scroller reading `N rows would
-  reorder`. Clicking it re-sorts. See §5.6 — **the list never re-sorts on its
-  own.**
+- **Stale-sort bar**: when the computed order has drifted from the displayed
+  order, a bar in the toolbar line above the list reads `N rows would reorder —
+  click to sort`. Clicking it re-sorts. It stands outside the scroller, so its
+  appearing moves no row (phase 3bc, §12.4). See §5.6 — **the list never re-sorts
+  on its own.**
 - **Next stop** is the lowest `stops.sequence` with no `departed_at`. A truck
   holding two loads takes the **earliest deadline across both**, and the row
   shows the load number so it is clear which one (§12.13).
@@ -1436,10 +1437,18 @@ The deeper rule: **sort order is computed on load, on filter change, and on
 explicit user action only.** Status colours, ETAs and positions update **in
 place**. Rows never move under a click.
 
-When the computed order has drifted from the displayed order, a pill appears
-at the top of the scroller — `N rows would reorder` — and clicking it
-re-sorts. This also resolves the `2h` toast case: `1246 slipped to At risk`
-recolours the row and the marker without moving anything.
+When the computed order has drifted from the displayed order, a bar appears in
+the toolbar line above the list (`ListToolbar`) — `N rows would reorder — click
+to sort` — and clicking it re-sorts. This also resolves the `2h` toast case: `1246
+slipped to At risk` recolours the row and the marker without moving anything.
+
+**The offer moves nothing either (phase 3bc).** It used to sit in flow at the top of
+the scroller, so each time it appeared every row went down by its height: 23.5px on
+a 44px row, so a click aimed at the upper half of a row selected the row above.
+The toolbar line has a fixed height, so now it appears at once, whatever the pointer
+is doing, and rows move when it is clicked and at no other time. It sits to the left
+of Density, which keeps its place. At the narrowest list pane, 560px, the health
+strip gives way: its text goes first, then its bar narrows in proportion.
 
 See §5.6 and §9.2.
 
@@ -11015,7 +11024,7 @@ wanted the same pixels.
 | Collision | Rule |
 |---|---|
 | **Flash vs checked ground** | Both tint the row. Flash wins for its 1.6s, then the row settles to `row.checked`. Checked state is carried by the tick, so nothing is lost while the ground is borrowed. |
-| **Re-sort under the cursor** | A flip re-sorts the row, and with a flash that is legible. But while the pointer is over the list, or 2+ rows are checked, re-sort is **held (max 10s)** so a click never lands on a row that just moved. The flash and toast still fire in place. |
+| **Re-sort under the cursor** | *(Not built: see "The re-sort hold" below; phase 3bc removed what was left of it.)* A flip re-sorts the row, and with a flash that is legible. But while the pointer is over the list, or 2+ rows are checked, re-sort is **held (max 10s)** so a click never lands on a row that just moved. The flash and toast still fire in place. |
 | **Bulk bar vs fold footer** | The same 44px slot. The bar replaces the footer while 2+ are checked, and keeps the one fact that mattered — the problems-below-the-fold count — at its right end. |
 | **Pinned vs urgency groups** | Above 40 trucks (`3d`) the pinned block sits above the first group header. Pinned trucks are **removed from their group, not duplicated**, and the group count reads "Late 4 · +1 pinned". Cap of 5 so the block never pushes the problem set below the fold. |
 | **Pin vs checkbox vs copy** | Three per-row affordances, three different cells: checkbox in its own column, pin after the truck number, copy at the right edge of `Next stop` and the load cell, **on hover only**. None shares a hit area; none widens a fixed column. |
@@ -11035,12 +11044,15 @@ order is computed on mount, on a filter or search change, and on explicit user
 action — **a poll never moves a row**. The hazard is already impossible, by a
 stronger mechanism than a timer.
 
-What survives is the *offer*. The "3 rows would reorder" pill appears in flow
-at the top of the list the moment drift becomes non-zero, and everything below
-shifts down by its height — the same defect with a smaller displacement. So
-the hold applies to the pill, on the same two conditions and the same ten
-seconds (`src/hooks/useResortHold.ts`). If §12.4 is ever relaxed, the rule is
-already here and only its subject changes.
+What survived for a while was the *offer*. The "3 rows would reorder" pill appeared
+in flow at the top of the list, and everything below shifted down by its height: the
+same defect with a smaller displacement. So a hook held the pill back on the same
+two conditions and for the same ten seconds. That only moved the shift: with the
+pointer still on the list after ten seconds, the rows went down under it anyway.
+
+**Phase 3bc removed the cause and the hook with it.** The offer now stands in the
+toolbar line above the list (§12.4), so nothing moves when it appears and there is
+nothing left to hold. If §12.4 is ever relaxed, this rule has to be written again.
 
 **The toast has a third neighbour the brief did not see.** §14.5 moves the
 toast to the map's top-right because the bulk bar takes bottom-left. The map's

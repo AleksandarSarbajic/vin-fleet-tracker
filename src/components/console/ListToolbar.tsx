@@ -16,15 +16,26 @@ import type { FleetHealth } from '@/server/health';
  *
  * **Interpretation** for the control itself: 5b shows density in this bar but
  * drew no control, so it follows the segmented pattern the chips already use.
+ *
+ * Phase 3bc. "N rows would reorder" stands here and not in the list, because
+ * this line has a fixed height and sits outside the scroller: the offer can
+ * appear on any poll, under a pointer on its way to a row, and no row moves for
+ * it (§12.4). Rows move when it is clicked and at no other time. It sits to the
+ * left of Density, so Density keeps its place, and the strip gives way.
  */
 export function ListToolbar({
   density,
   onDensity,
   health,
+  drift,
+  onResort,
 }: {
   density: Density;
   onDensity: (density: Density) => void;
   health: FleetHealth;
+  /** How many rows would move if the list were sorted now. */
+  drift: number;
+  onResort: () => void;
 }) {
   return (
     <div /*
@@ -34,7 +45,22 @@ export function ListToolbar({
        */
       // §12.96: below 768px the Today summary and density are in the phone's More sheet.
       className="flex h-8 items-center justify-between gap-3 border-b border-line-soft bg-surface-base px-2 max-md:hidden">
-      <FleetHealthStrip health={health} />
+      <FleetHealthStrip health={health} giveWay={drift > 0} />
+
+      {/*
+        The strip takes all the shrinking it can before this takes any (its factor is
+        far larger), and only then does this truncate. A split stored on a wider window
+        can leave the pane under its 560px, and Density stays whole even then.
+      */}
+      {drift > 0 ? (
+        <button
+          type="button"
+          onClick={onResort}
+          className="ml-auto h-[26px] min-w-0 truncate border border-line-soft bg-surface-overlay px-2 font-cond text-micro uppercase tracking-[.08em] text-accent"
+        >
+          {drift} {drift === 1 ? 'row would' : 'rows would'} reorder — click to sort
+        </button>
+      ) : null}
 
       <div className="flex shrink-0 items-center gap-2">
         <span className="font-cond text-micro uppercase tracking-[.11em] text-text-muted">

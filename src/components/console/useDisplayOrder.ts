@@ -11,7 +11,7 @@ export interface DisplayOrder {
   ordered: FleetRow[];
   /** How many rows would move if the order were recomputed now. */
   drift: number;
-  /** Adopt the recomputed order — what the "N rows would reorder" pill does. */
+  /** Adopt the recomputed order — what the "N rows would reorder" bar does. */
   resort: () => void;
 }
 
@@ -24,7 +24,7 @@ export interface DisplayOrder {
  *
  * That forces order to live apart from data: this holds an array of ids, and
  * a poll only refreshes the values behind them. When the recomputed order
- * differs, `drift` is non-zero and the UI offers the pill.
+ * differs, `drift` is non-zero and the toolbar offers the bar.
  */
 export function useDisplayOrder(
   rows: FleetRow[],

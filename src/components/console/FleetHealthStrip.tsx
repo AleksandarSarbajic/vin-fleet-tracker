@@ -31,11 +31,31 @@ const FILL: Record<Segment, string> = {
   remaining: 'border border-status-neutral-bd',
 };
 
-export function FleetHealthStrip({ health }: { health: FleetHealth }) {
+export function FleetHealthStrip({
+  health,
+  giveWay = false,
+}: {
+  health: FleetHealth;
+  /**
+   * Phase 3bc. The toolbar is short of room while the reorder bar is up: the line
+   * of text goes first, then the bar narrows, still in proportion, then the strip.
+   * Only then, so it is the same as ever on a board with nothing to re-sort.
+   *
+   * By large shrink factors and not small ones: once the others have gone as far
+   * as they can, factors that add up to less than 1 take only that share of what
+   * is left, and the line would overflow.
+   */
+  giveWay?: boolean;
+}) {
   const bar = healthBar(health);
 
   return (
-    <div className="flex min-w-0 items-center gap-2" title={bar.label}>
+    <div
+      className={`flex min-w-0 items-center gap-2${
+        giveWay ? ' shrink-[1000] overflow-hidden' : ''
+      }`}
+      title={bar.label}
+    >
       <span className="shrink-0 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
         Today
       </span>
@@ -48,7 +68,9 @@ export function FleetHealthStrip({ health }: { health: FleetHealth }) {
       {bar.total > 0 ? (
         <span
           aria-hidden="true"
-          className="flex h-[6px] w-[88px] shrink-0 overflow-hidden bg-surface-raised"
+          className={`flex h-[6px] w-[88px] overflow-hidden bg-surface-raised ${
+            giveWay ? 'min-w-0 shrink' : 'shrink-0'
+          }`}
         >
           {bar.segments.map((segment) => (
             <span
@@ -66,7 +88,11 @@ export function FleetHealthStrip({ health }: { health: FleetHealth }) {
         </span>
       ) : null}
 
-      <span className="truncate font-sans text-small tabular-nums text-text-secondary">
+      <span
+        className={`truncate font-sans text-small tabular-nums text-text-secondary${
+          giveWay ? ' shrink-[1000]' : ''
+        }`}
+      >
         {healthText(bar, health)}
       </span>
     </div>
