@@ -882,6 +882,333 @@ test.describe('hover and press', () => {
     });
   });
 
+  /**
+   * The same promise on every side of a resting box, half a pixel in, which is
+   * the middle of the first pixel: on a bordered thing that is the border itself,
+   * which a hit area measured from the padding box would miss.
+   */
+  test.describe('a press at the very edge lands, on every side', () => {
+    const sides: [
+      string,
+      (b: { x: number; y: number; width: number; height: number }) => [number, number],
+    ][] = [
+      ['left', (b) => [b.x + 0.5, b.y + b.height / 2]],
+      ['right', (b) => [b.x + b.width - 0.5, b.y + b.height / 2]],
+      ['top', (b) => [b.x + b.width / 2, b.y + 0.5]],
+      ['bottom', (b) => [b.x + b.width / 2, b.y + b.height - 0.5]],
+    ];
+
+    for (const [side, at] of sides) {
+      test(`a bordered button, on its ${side} edge`, async ({ page }) => {
+        await page.goto('/');
+        const button = chip(page);
+        const [x, y] = at((await button.boundingBox())!);
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await expect
+          .poll(async () => scaleOf(await button.evaluate(transformOf)))
+          .toBeCloseTo(0.96, 3);
+        await page.mouse.up();
+        await expect(button).toHaveAttribute('aria-pressed', 'true');
+      });
+
+      /*
+       * Below 1086px, because that is where a row has four edges: above it the
+       * last 12px of a row are the Split handle's grab margin, not the row.
+       */
+      test(`a row, on its ${side} edge`, async ({ page }) => {
+        await page.setViewportSize({ width: 1024, height: 700 });
+        await page.goto('/');
+        await page.getByRole('button', { name: 'Hide map' }).click();
+        const row = rowOf(page, IDS.truckDallas);
+        await row.waitFor();
+        const [x, y] = at((await row.boundingBox())!);
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await expect
+          .poll(async () => scaleOf(await row.evaluate(transformOf)))
+          .toBeCloseTo(0.995, 3);
+        await page.mouse.up();
+        await expect(row).toHaveAttribute('aria-selected', 'true');
+      });
+    }
+  });
+
+  /**
+   * A tap is over before anything has moved, with the button already up 1px under
+   * the pointer. The hit area must not lose that pixel when the press begins.
+   */
+  test('a quick tap on the bottom edge of a lifted button lands', async ({ page }) => {
+    await page.goto('/');
+    const button = chip(page);
+    const box = (await button.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height - 0.5);
+    await expect
+      .poll(() => button.evaluate(transformOf))
+      .toBe('matrix(1, 0, 0, 1, 0, -1)');
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  /**
+   * A scroller that grows shows its scrollbars. Read on every frame, in the page,
+   * from before the gesture until after it, because a scrollbar that flashes for
+   * the first frames of a press is the same bug. No tolerance: one pixel is a
+   * scrollbar.
+   */
+  test.describe('a press or a hover never makes a scroller grow', () => {
+    type Watched = { __sizes: string[]; __stop: boolean };
+
+    const watch = (scroller: Locator) =>
+      scroller.evaluate((el) => {
+        const w = window as unknown as Watched;
+        w.__sizes = [];
+        w.__stop = false;
+        const read = () => {
+          w.__sizes.push(
+            `${el.scrollWidth}x${el.scrollHeight} in ${el.clientWidth}x${el.clientHeight}`,
+          );
+          if (!w.__stop) requestAnimationFrame(read);
+        };
+        read();
+        return w.__sizes[0]!;
+      });
+
+    const seen = (page: Page) =>
+      page.evaluate(() => {
+        const w = window as unknown as Watched;
+        w.__stop = true;
+        return [...new Set(w.__sizes)];
+      });
+
+    /**
+     * Hover, press, and off it before letting go, since a click would select or
+     * pin. Then the same at full speed, where the lift and the press overlap.
+     */
+    async function gesture(
+      page: Page,
+      target: Locator,
+      how: { press: number; lifts: boolean; away?: [number, number] },
+    ) {
+      const box = (await target.boundingBox())!;
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const [awayX, awayY] = how.away ?? [1, 1];
+      const atRest = () => expect.poll(() => target.evaluate(transformOf)).toBe('none');
+
+      await page.mouse.move(x, y);
+      if (how.lifts) {
+        await expect
+          .poll(() => target.evaluate(transformOf))
+          .toBe('matrix(1, 0, 0, 1, 0, -1)');
+      }
+      await page.mouse.down();
+      await expect
+        .poll(async () => scaleOf(await target.evaluate(transformOf)))
+        .toBeCloseTo(how.press, 3);
+      await page.mouse.move(awayX, awayY);
+      await page.mouse.up();
+      await atRest();
+
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(awayX, awayY);
+      await page.mouse.up();
+      await atRest();
+    }
+
+    async function expectNoGrowth(
+      page: Page,
+      scroller: Locator,
+      target: Locator,
+      how: { press: number; lifts: boolean; away?: [number, number] },
+    ) {
+      const rest = await watch(scroller);
+      await gesture(page, target, how);
+      expect(await seen(page)).toEqual([rest]);
+    }
+
+    const boardRows = (page: Page) => page.locator('[data-row-id]');
+    const boardScroller = (page: Page) =>
+      boardRows(page)
+        .first()
+        .locator('xpath=ancestor::div[contains(@class,"overflow-y-auto")][1]');
+
+    async function openBoard(page: Page) {
+      await resetWorld({ extraTrucks: 20 });
+      await page.setViewportSize({ width: 1440, height: 700 });
+      await page.goto('/');
+      await boardRows(page).first().waitFor();
+      const scroller = boardScroller(page);
+      // The list must really scroll, or its last row is not at any edge.
+      expect(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
+        true,
+      );
+      return scroller;
+    }
+
+    const toBottom = (scroller: Locator) =>
+      scroller.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+
+    /**
+     * A test that passes because nothing was at the edge has tested nothing. It
+     * polls because the board is virtualized: straight after a scroll, the last
+     * row in the DOM is only the last one drawn so far.
+     */
+    const expectAtTheBottomEdge = (scroller: Locator, target: Locator) =>
+      expect
+        .poll(async () => {
+          const s = (await scroller.boundingBox())!;
+          const t = (await target.boundingBox())!;
+          return Math.abs(s.y + s.height - (t.y + t.height));
+        })
+        .toBeLessThan(1);
+
+    test('the board, a middle row', async ({ page }) => {
+      const scroller = await openBoard(page);
+      const row = boardRows(page).nth(8);
+      await row.scrollIntoViewIfNeeded();
+      await expectNoGrowth(page, scroller, row, { press: 0.995, lifts: false });
+    });
+
+    test('the board, the last row', async ({ page }) => {
+      const scroller = await openBoard(page);
+      await toBottom(scroller);
+      const row = boardRows(page).last();
+      await expectAtTheBottomEdge(scroller, row);
+      await expectNoGrowth(page, scroller, row, { press: 0.995, lifts: false });
+    });
+
+    test('the board, the pin button inside a middle row', async ({ page }) => {
+      const scroller = await openBoard(page);
+      const row = boardRows(page).nth(8);
+      await row.scrollIntoViewIfNeeded();
+      const pin = row.getByRole('button', { name: /^(Un)?[Pp]in truck/ });
+      await expectNoGrowth(page, scroller, pin, { press: 0.96, lifts: true });
+    });
+
+    test('the board, the pin button inside the last row', async ({ page }) => {
+      const scroller = await openBoard(page);
+      await toBottom(scroller);
+      await expectAtTheBottomEdge(scroller, boardRows(page).last());
+      const pin = boardRows(page)
+        .last()
+        .getByRole('button', { name: /^(Un)?[Pp]in truck/ });
+      await expectNoGrowth(page, scroller, pin, { press: 0.96, lifts: true });
+    });
+
+    /** A real scrolling menu: enough saved views to fill the scope menu's list. */
+    async function openLongViewList(page: Page) {
+      await page.addInitScript(() => {
+        const views = Array.from({ length: 24 }, (_, i) => ({
+          id: `view-${i}`,
+          name: `View ${i}`,
+          query: `q${i}`,
+          chips: [],
+        }));
+        window.localStorage.setItem('ft.views', JSON.stringify(views));
+      });
+      await page.goto('/');
+      await page.locator('[data-scope] [aria-haspopup="menu"]').click();
+      await expect(page.locator('[data-views-menu]')).toBeVisible();
+      await expect(page.locator('.animate-menu-in')).toHaveCount(0);
+      const list = page.locator('[data-view-list]');
+      expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await toBottom(list);
+      return list;
+    }
+
+    test('a scrolling menu, the button at its bottom edge', async ({ page }) => {
+      const list = await openLongViewList(page);
+      const last = list.getByRole('menuitem', { name: /^View 23/ });
+      await expectAtTheBottomEdge(list, last);
+      await expectNoGrowth(page, list, last, { press: 0.995, lifts: false });
+    });
+
+    test('a scrolling menu, the delete button in its bottom corner', async ({ page }) => {
+      const list = await openLongViewList(page);
+      const remove = list.locator('button').last();
+      await expectNoGrowth(page, list, remove, { press: 0.995, lifts: false });
+    });
+
+    /**
+     * Nothing real sits within 16px of this scroller's edge today, so nothing real
+     * can fail here: a button is placed flush in its bottom right corner, with
+     * no border, an even one and an uneven one.
+     */
+    for (const [name, style] of [
+      ['no border', 'border:0'],
+      ['an even border', 'border:1px solid'],
+      ['an uneven border', 'border:0;border-left:3px solid;border-top:1px solid'],
+    ] as const) {
+      test(`the edit window's scroll area, a button in its corner with ${name}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1440, height: 700 });
+        await page.goto('/');
+        const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+        await modal.getByRole('tabpanel').waitFor();
+        await expect(panelOf(modal)).not.toHaveClass(/animate-/);
+        const scroller = modal.locator('[data-edit-scroll]');
+        await scroller.evaluate((el, css) => {
+          const probe = document.createElement('button');
+          probe.type = 'button';
+          probe.textContent = 'At the edge';
+          probe.setAttribute('data-edge-probe', '');
+          probe.style.cssText = `display:block;margin-left:auto;padding:8px 40px;${css}`;
+          el.append(probe);
+          el.scrollTop = el.scrollHeight;
+        }, style);
+        const probe = scroller.locator('[data-edge-probe]');
+        await expectAtTheBottomEdge(scroller, probe);
+        const heading = (await modal.locator('h2').first().boundingBox())!;
+        await expectNoGrowth(page, scroller, probe, {
+          press: 0.96,
+          lifts: true,
+          away: [heading.x + 4, heading.y + 4],
+        });
+      });
+    }
+
+    test("the edit window's scroll area, the real button nearest its edge", async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 700 });
+      await page.goto('/');
+      const modal = await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+      await modal.getByRole('tabpanel').waitFor();
+      await expect(panelOf(modal)).not.toHaveClass(/animate-/);
+      const heading = (await modal.locator('h2').first().boundingBox())!;
+      await expectNoGrowth(
+        page,
+        modal.locator('[data-edit-scroll]'),
+        modal.locator('button', { hasText: /^FCFS$/ }),
+        { press: 0.96, lifts: true, away: [heading.x + 4, heading.y + 4] },
+      );
+    });
+
+    test('a phone card, the last in its scrolling list', async ({ browser }) => {
+      await resetWorld({ extraTrucks: 20 });
+      const { context, page } = await onPhone(browser, SIZES[3]!);
+      try {
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        await page.goto('/');
+        const list = page.locator('[data-phone-cards]');
+        await page.locator('[data-phone-card]').first().waitFor();
+        expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+        await toBottom(list);
+        const card = page.locator('[data-phone-card]').last();
+        await expectAtTheBottomEdge(list, card);
+        await expectNoGrowth(page, list, card, { press: 0.995, lifts: false });
+      } finally {
+        await context.close();
+      }
+    });
+  });
+
   test('hover does not flicker on the bottom edge of a lifting button', async ({
     page,
   }) => {

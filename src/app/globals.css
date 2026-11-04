@@ -129,9 +129,26 @@
    * too: a transform does nothing to it, and the press's hit area would then
    * be measured against some far ancestor.
    *
-   * The `::after` keeps the hit area under the pointer while the button moves
-   * away from it: a press at the very edge still clicks, and a lift cannot
-   * flicker. It relies on the transform, which makes the button its containing
+   * The hit area. While a thing moves away from the pointer, a pseudo-element
+   * keeps what it left: a press at the very edge still lands, and a lift cannot
+   * flicker. It covers the RESTING box and not a pixel beyond, because anything
+   * further makes the scroller around it grow, and the scrollbars appear. So:
+   *
+   *   - A fixed inset cannot do it: what a press takes is a share of the size.
+   *     Its reach is a percentage from the press's own token, the one that
+   *     lands exactly on the resting edge once the scale is applied.
+   *   - Percentages count from the padding box, so the border is out of reach.
+   *     The pseudo-element inherits the border widths on the side it grows
+   *     away from, which adds exactly them. It takes two for a button, one
+   *     anchored at each corner, because its borders can be uneven (a phone
+   *     card has 3px on the left and 1px below) and a centred one would go
+   *     past on the thin side. What that leaves out is the far corner of each
+   *     border: one pixel on a 1px border.
+   *   - It grows WITH the press, the same length on the same curve. At the first
+   *     frame the thing has not shrunk yet, so a hit area already at full reach
+   *     would stick out for a frame or two: the same scrollbars, as a flash.
+   *
+   * All of it relies on the transform, which makes the thing its containing
    * block, so it only exists while there is one.
    */
   @media (prefers-reduced-motion: no-preference) {
@@ -145,7 +162,8 @@
     }
 
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active {
-      transform: scale(theme('scale.press'));
+      --press: theme('scale.press');
+      transform: scale(var(--press));
       transition-duration: theme('transitionDuration.press-in'), theme('transitionDuration.hover'),
         theme('transitionDuration.hover'), theme('transitionDuration.hover'),
         theme('transitionDuration.hover');
@@ -153,13 +171,36 @@
 
     /* A long or listed thing does not shrink by 4%: that is 30px on a wide one. */
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):is([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):active {
-      transform: scale(theme('scale.press-flat'));
+      --press: theme('scale.press-flat');
+    }
+
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::before,
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::after {
+      --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
+      content: '';
+      position: absolute;
+      box-sizing: content-box;
+      width: calc(100% / var(--press));
+      height: calc(100% / var(--press));
+      border: 0 solid transparent;
+    }
+
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::before {
+      right: var(--reach);
+      bottom: var(--reach);
+      border-left-width: inherit;
+      border-top-width: inherit;
+      animation: hit-area-press-before theme('transitionDuration.press-in')
+        theme('transitionTimingFunction.dialog') backwards;
     }
 
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::after {
-      content: '';
-      position: absolute;
-      inset: -6px;
+      left: var(--reach);
+      top: var(--reach);
+      border-right-width: inherit;
+      border-bottom-width: inherit;
+      animation: hit-area-press-after theme('transitionDuration.press-in')
+        theme('transitionTimingFunction.dialog') backwards;
     }
 
     @media (hover: hover) {
@@ -170,8 +211,28 @@
       :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:not(:active)::after {
         content: '';
         position: absolute;
-        inset: 0;
-        bottom: calc(theme('translate.lift') - 1px);
+        left: 0;
+        top: 0;
+        box-sizing: content-box;
+        width: 100%;
+        height: calc(100% - theme('translate.lift'));
+        border: 0 solid transparent;
+        border-right-width: inherit;
+        border-bottom-width: inherit;
+        animation: hit-area-lift theme('transitionDuration.press-out')
+          theme('transitionTimingFunction.dialog') backwards;
+      }
+
+      /*
+       * Pressed from a lift, the hit area is already there at the lift's height,
+       * and goes on from wherever that is. Starting again from the button's box
+       * would drop the pixel below it, and a quick tap on it would miss.
+       */
+      :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:active::after {
+        animation: none;
+        transition-property: left, top, width, height;
+        transition-duration: theme('transitionDuration.press-in');
+        transition-timing-function: theme('transitionTimingFunction.dialog');
       }
     }
 
@@ -188,15 +249,70 @@
 
     /* Pressing a control in the row presses the control, not the row. */
     [data-row-id]:active:not(:has(button:active, a:active, input:active)) {
-      transform: scale(theme('scale.press-flat'));
+      --press: theme('scale.press-flat');
+      transform: scale(var(--press));
     }
 
-    /* Under its cells, so a double-click on the status chip still finds the chip. */
-    [data-row-id]:active::before {
+    /*
+     * Under its cells, so a double-click on the status chip still finds the chip.
+     * One is enough here: a row's only borders are on the left and below, so it
+     * is anchored at the opposite corner. Only while the row itself is pressed:
+     * pressing a control leaves the row unscaled, and this would then stick out.
+     */
+    [data-row-id]:active:not(:has(button:active, a:active, input:active))::before {
+      --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
       content: '';
       position: absolute;
-      inset: -4px;
       z-index: -1;
+      right: var(--reach);
+      top: var(--reach);
+      box-sizing: content-box;
+      width: calc(100% / var(--press));
+      height: calc(100% / var(--press));
+      border: 0 solid transparent;
+      border-left-width: inherit;
+      border-bottom-width: inherit;
+      /* The row's press runs at the length above, not at a button's press-in. */
+      animation: hit-area-press-row theme('transitionDuration.press-out')
+        theme('transitionTimingFunction.dialog') backwards;
+    }
+  }
+
+  /*
+   * How a hit area starts: on its own thing's box, reaching nothing yet. No `to`:
+   * each ends on the reach its rule worked out. Keyframes because a pseudo-element
+   * that has only just appeared has no earlier value to transition from.
+   */
+  @keyframes hit-area-press-before {
+    from {
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  @keyframes hit-area-press-after {
+    from {
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  @keyframes hit-area-press-row {
+    from {
+      right: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  @keyframes hit-area-lift {
+    from {
+      height: 100%;
     }
   }
 
