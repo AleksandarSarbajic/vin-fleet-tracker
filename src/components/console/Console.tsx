@@ -48,6 +48,7 @@ import { useRowFlash } from '@/hooks/useRowFlash';
 import { FetchErrorBanner } from './FetchErrorBanner';
 import { emptyState, type EmptyAction } from '@/lib/empty-state';
 import { useFleetHealth } from '@/hooks/useFleetHealth';
+import { useWindowRow } from '@/hooks/useWindowRow';
 import type { FleetHealth } from '@/server/health';
 import { flashView, type RowFlashView } from '@/lib/flash';
 import { can } from '@/lib/roles';
@@ -465,15 +466,8 @@ export function Console({
   usePrefetchLoadRead(editingAllowed ? selectedRow : null);
   useHoverPrefetchLoadRead(rows, editingAllowed);
 
-  const timelineRow = useMemo(
-    () => (timelineId ? (rows.find((r) => r.id === timelineId) ?? null) : null),
-    [timelineId, rows],
-  );
-
-  const editingRow = useMemo(
-    () => (editingId ? (rows.find((r) => r.id === editingId) ?? null) : null),
-    [editingId, rows],
-  );
+  const timelineRow = useWindowRow(timelineId, all);
+  const editingRow = useWindowRow(editingId, all);
 
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
   const { ordered, drift, resort } = useDisplayOrder(
@@ -506,7 +500,9 @@ export function Console({
       if (event.key === 'Enter') {
         const focused = (event.target as HTMLElement | null)?.closest?.('[data-row-id]');
         const targetId = focused?.getAttribute('data-row-id') ?? selectedId;
-        if (!targetId) return;
+        // Only a truck the board shows. A selection can outlive its row (a poll moved
+        // the truck out of the chip), and a window opens on any truck in the fleet.
+        if (!targetId || !rows.some((row) => row.id === targetId)) return;
         event.preventDefault();
         if (targetId !== selectedId) select(targetId);
         openEditor(targetId);
@@ -531,7 +527,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ordered, selectedId, select, query, editingId, openEditor]);
+  }, [ordered, rows, selectedId, select, query, editingId, openEditor]);
 
   /**
    * §14 feature 6. Which rows changed since the last poll.
