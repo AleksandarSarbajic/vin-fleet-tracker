@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
 import type { TruckList } from '@/lib/truck-lists';
 import { chipLabel } from './FilterChips';
@@ -165,7 +165,7 @@ export function ScopeMenu({
       if (event.key !== 'v' && event.key !== 'V') return;
       if (isTypingTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (open || document.querySelector('[aria-modal="true"]')) return;
+      if (open || isWindowOpen()) return;
       event.preventDefault();
       toggle();
     };

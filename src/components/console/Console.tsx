@@ -32,7 +32,7 @@ import { useDisplayOrder } from './useDisplayOrder';
 import { useChipFilters } from './useChipFilters';
 import { useSavedViews, viewChips } from './useSavedViews';
 import { refusalMessage, type SavedView } from '@/lib/views';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 import { OverlayProvider } from '@/components/overlay/OverlayLayer';
 import { ShortcutSheet } from '@/components/overlay/ShortcutSheet';
 import { CommandPalette } from '@/components/overlay/CommandPalette';
@@ -490,8 +490,9 @@ export function Console({
       // contenteditable.
       if (isTypingTarget(event.target)) return;
       // The modal owns the keyboard while it is open — Esc there raises the
-      // discard confirm rather than clearing the console's selection.
-      if (editingId) return;
+      // discard confirm rather than clearing the console's selection. `editingId`
+      // as well as the guard: it is set a moment before the window is drawn.
+      if (editingId || isWindowOpen()) return;
 
       /**
        * §12.46. The ONLY Enter handler. The row no longer has one.
@@ -685,7 +686,7 @@ export function Console({
       // Phase 3bc. This listens first, in the capture phase on window, so with focus
       // on a button it would clear the rows behind a window and the window's own Esc
       // would never run. The bulk modal is asking about these very rows.
-      if (document.querySelector('[aria-modal="true"]')) return;
+      if (isWindowOpen()) return;
       if ((event.key === 'x' || event.key === 'X') && selectedId) {
         event.preventDefault();
         bulk.toggle(selectedId, event.shiftKey);

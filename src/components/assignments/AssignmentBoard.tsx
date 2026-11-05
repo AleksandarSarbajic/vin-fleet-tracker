@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import type { Role } from '@/lib/roles';
 import { can } from '@/lib/roles';
 import { CONFLICT_HEADLINE, type AssignmentConflict } from '@/lib/assignments';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 import type { AssignmentBoard as Board } from '@/server/assignments';
 import { DriverSelect, type DriverSelectHandle } from './DriverSelect';
 import { DriverName, NoEldTag } from '@/components/DriverName';
@@ -294,7 +294,14 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
   /** Cmd/Ctrl+Enter saves, as everywhere else that writes (§8.1). */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && dirty && mayEdit && !saving) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'Enter' &&
+        dirty &&
+        mayEdit &&
+        !saving &&
+        !isWindowOpen()
+      ) {
         e.preventDefault();
         void save();
       }
@@ -390,7 +397,7 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
   /** "/" focuses the search, as on the console (§8.1), unless typing elsewhere. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === '/' && !isTypingTarget(event.target)) {
+      if (event.key === '/' && !isTypingTarget(event.target) && !isWindowOpen()) {
         event.preventDefault();
         searchField.current?.focus();
       }

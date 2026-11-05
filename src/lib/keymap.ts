@@ -46,6 +46,42 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return el.closest('[contenteditable]:not([contenteditable="false"])') !== null;
 }
 
+/**
+ * The one window guard: is a window open, so the board's keys are not the board's
+ * to answer?
+ *
+ * `isTypingTarget` alone let them through whenever focus was on a BUTTON in a
+ * window. `G H` behind the edit window left the page with the typed work in it and
+ * no question, and "gh" is in ordinary words. `⌘K` and `?` opened a second window
+ * underneath the first and took the focus into it.
+ *
+ * It reads the page rather than any one component's state, so a window nobody here
+ * has heard of counts the moment it is drawn. What it reads is `aria-modal`, which
+ * every `DialogFrame` carries (`window-keys-guard.test.ts` holds them to it):
+ *
+ * - **A menu is not a window.** It has no `aria-modal`, and the board's keys work
+ *   around it as they always did.
+ * - **The fading copy does not count.** `dialog-motion.ts` strips its `aria-*`, so
+ *   keys work again the moment a window closes, not when its copy has faded.
+ * - **A window nobody can see does not count.** The phone sheets are `md:hidden` and
+ *   stay mounted, so one left open and widened past 768 is still in the document,
+ *   marked modal, with no way to close it. Counted, it would kill every shortcut on
+ *   the board with nothing on the screen. Where `checkVisibility` is missing (Safari
+ *   before 17.4) a window counts as seen: the hidden sheet is the rare case.
+ *
+ * The guard goes INSIDE a handler, never around its registration: `phone.spec.ts`
+ * holds the phone to the same number of listeners as the desktop.
+ *
+ * A window's own keys never ask this. A press that CLOSES a window is the one thing
+ * it cannot see: the close lands in a microtask, before the next listener runs, so
+ * that press has to be stopped by the window that took it.
+ */
+export function isWindowOpen(): boolean {
+  return [...document.querySelectorAll('[aria-modal="true"]')].some(
+    (el) => typeof el.checkVisibility !== 'function' || el.checkVisibility(),
+  );
+}
+
 /** Which surface a binding belongs to, and the order groups are shown in. */
 export const KEY_GROUPS = ['list', 'filters', 'search', 'overlays', 'pages'] as const;
 export type KeyGroup = (typeof KEY_GROUPS)[number];

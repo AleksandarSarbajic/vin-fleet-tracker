@@ -7,7 +7,7 @@ import {
   writeDensity,
   type Density,
 } from '@/lib/density';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 
 /**
  * §14, feature 5. The density preference, its `D` binding and its storage.
@@ -43,7 +43,7 @@ export function useDensity(): {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'd' && event.key !== 'D') return;
-      if (isTypingTarget(event.target)) return;
+      if (isTypingTarget(event.target) || isWindowOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       event.preventDefault();
       toggle();

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 
 /** How long after G the second key still counts. */
 const WINDOW_MS = 1_500;
@@ -22,6 +22,11 @@ export function useGoKeys(targets: { h?: () => void; b?: () => void }): void {
     let armedAt = 0;
     const onKey = (event: KeyboardEvent) => {
       if (window.matchMedia('(max-width: 767px)').matches) return;
+      // First, and it disarms: a G from before this window must not count once it closes.
+      if (isWindowOpen()) {
+        armedAt = 0;
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
       if (key === 'g') {

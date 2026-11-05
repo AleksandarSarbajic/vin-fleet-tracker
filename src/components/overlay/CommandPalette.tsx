@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { isWindowOpen } from '@/lib/keymap';
 import { Overlay, useOverlay } from './OverlayLayer';
 import {
   ACTION,
@@ -85,12 +86,16 @@ export function CommandPalette<T extends PaletteTruck>({
       if (event.key !== 'k' && event.key !== 'K') return;
       if (!event.metaKey && !event.ctrlKey) return;
       event.preventDefault();
+      // §14.5: the layer's own windows give way to it, so ⌘K during the tour ends the
+      // tour. Any other window keeps it: the palette would open underneath, with the
+      // focus in it, and a jump from there would lose what is typed in the window.
+      if (open === null && isWindowOpen()) return;
       // Toggling, so the same keystroke that opened it closes it.
       show(isOpen ? null : 'palette');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, show]);
+  }, [isOpen, open, show]);
 
   /** Every opening starts from an empty box, never from last time's query. */
   useEffect(() => {

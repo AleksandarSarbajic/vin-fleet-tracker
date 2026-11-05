@@ -30,7 +30,7 @@ import {
 } from '@/lib/history-week';
 import { boardReturnHref } from '@/lib/board-return';
 import { httpErrorFrom } from '@/lib/http-error';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 import { markHistorySeen } from '@/lib/whats-new';
 import { HistoryLists } from './HistoryLists';
 import { BeforeRecords, EmptyWeek, LoadingRows, WeekError } from './HistoryStates';
@@ -104,6 +104,7 @@ export function HistoryPage({
       // No keyboard handling on a phone (§12.96): the listener stays, inert.
       if (window.matchMedia('(max-width: 767px)').matches) return;
       if (event.key !== '/' || event.metaKey || event.ctrlKey || isTypingTarget(event.target)) return;
+      if (isWindowOpen()) return;
       event.preventDefault();
       filter.current?.focus();
     };

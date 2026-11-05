@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PIN_CAP, readPinned, togglePin, writePinned } from '@/lib/pinned';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 
 /**
  * §14 feature 4. The pin list, its `P` binding and its storage.
@@ -47,7 +47,7 @@ export function usePinned(selectedId: string | null): {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'p' && event.key !== 'P') return;
-      if (isTypingTarget(event.target)) return;
+      if (isTypingTarget(event.target) || isWindowOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (!selectedId) return;
       event.preventDefault();

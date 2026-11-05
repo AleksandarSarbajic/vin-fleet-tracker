@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import type { Status } from '@/lib/status';
-import { isTypingTarget } from '@/lib/keymap';
+import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 
 /**
  * design-spec §9.1, §12.8, §12.9.
@@ -165,7 +165,7 @@ export function FilterChips({
   /** §8.1: 1–7 toggle, 0 resets to All; 8 is Drivers only (§12.78). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (isTypingTarget(event.target)) return;
+      if (isTypingTarget(event.target) || isWindowOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === '0') {

@@ -6,6 +6,7 @@ import {
   KEY_GROUPS,
   bindingsIn,
   isTypingTarget,
+  isWindowOpen,
   type Binding,
 } from '@/lib/keymap';
 import { Overlay, useOverlay } from './OverlayLayer';
@@ -81,14 +82,15 @@ export function ShortcutSheet() {
    * every other layout.
    *
    * `?` inside the palette types a "?" (§14.5), so the binding stands down
-   * whenever any overlay is already open; Esc closes those.
+   * whenever any window but this sheet is open; Esc closes those. Behind the edit
+   * window it would open underneath it and take the focus.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== '?') return;
       if (isTypingTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (open !== null && open !== 'shortcuts') return;
+      if (open !== 'shortcuts' && isWindowOpen()) return;
       event.preventDefault();
       toggle('shortcuts');
     };

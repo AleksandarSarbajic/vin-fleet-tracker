@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogFrame } from './DialogFrame';
 import { FADING_COPY } from './dialog-motion';
+import { isWindowOpen } from '@/lib/keymap';
 import { MOTION_MS } from '@/design/tokens';
 import { useFocusTrap } from '@/components/edit/useModalChrome';
 
@@ -325,6 +326,15 @@ describe('closing never waits (§12.148)', () => {
     // The opening's classes do not come along, or the copy would open again.
     expect(copy.outerHTML).not.toContain('animate-scrim-in');
     expect(copy.outerHTML).not.toContain('animate-dialog-in');
+  });
+
+  it('the copy is no window: the board has its keys back while it fades', async () => {
+    act(() => root!.render(<Frame />));
+    expect(isWindowOpen()).toBe(true);
+    act(() => root!.render(null));
+    await settle();
+    expect(copies()).toHaveLength(1);
+    expect(isWindowOpen()).toBe(false);
   });
 
   it('carries over what cloning does not: a select choice and a scroll position', async () => {

@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { FILTER_KEYS } from '@/components/console/FilterChips';
-import { KEYMAP, KEY_GROUPS, GROUP_LABEL, bindingsIn, isTypingTarget } from './keymap';
+import {
+  KEYMAP,
+  KEY_GROUPS,
+  GROUP_LABEL,
+  bindingsIn,
+  isTypingTarget,
+  isWindowOpen,
+} from './keymap';
 
 /**
  * §14.1. The registry exists so the cheat sheet cannot drift from the
@@ -38,6 +45,57 @@ describe('the typing guard (§14.3)', () => {
     expect(isTypingTarget(el('<button>Edit</button>'))).toBe(false);
     expect(isTypingTarget(el('<tr data-row-id="x"><td>1</td></tr>'))).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe('the window guard', () => {
+  const draw = (html: string) => {
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    document.body.append(host);
+    return host;
+  };
+
+  afterEach(() => document.body.replaceChildren());
+
+  it('is false with nothing open', () => {
+    draw('<button>Edit</button>');
+    expect(isWindowOpen()).toBe(false);
+  });
+
+  it('is true while a window is open, and false once it is gone', () => {
+    const host = draw('<div role="dialog" aria-modal="true"><button>Close</button></div>');
+    expect(isWindowOpen()).toBe(true);
+    host.remove();
+    expect(isWindowOpen()).toBe(false);
+  });
+
+  it('counts a window whose panel carries the mark, as the phone sheets do', () => {
+    draw('<div class="fixed"><div role="dialog" aria-modal="true"></div></div>');
+    expect(isWindowOpen()).toBe(true);
+  });
+
+  it('a menu is not a window, and neither is a dialog that says it is not modal', () => {
+    draw('<div role="menu"></div><div role="dialog"></div><div aria-modal="false"></div>');
+    expect(isWindowOpen()).toBe(false);
+  });
+
+  it('does not count a window nobody can see: a phone sheet at desktop width', () => {
+    draw('<div style="display: none"><div role="dialog" aria-modal="true"></div></div>');
+    expect(isWindowOpen()).toBe(false);
+  });
+
+  it('a hidden window does not hide a real one', () => {
+    draw('<div style="display: none"><div aria-modal="true"></div></div>');
+    draw('<div aria-modal="true"></div>');
+    expect(isWindowOpen()).toBe(true);
+  });
+
+  it('where the browser cannot say, a window counts as seen', () => {
+    const host = draw('<div style="display: none"><div aria-modal="true"></div></div>');
+    const sheet = host.querySelector('[aria-modal]');
+    Object.defineProperty(sheet, 'checkVisibility', { value: undefined });
+    expect(isWindowOpen()).toBe(true);
   });
 });
 
