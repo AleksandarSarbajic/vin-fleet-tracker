@@ -37,6 +37,10 @@ describe('the numbers of the new motion (§12.149)', () => {
     expect(MOTION_MS.map).toBe(150);
   });
 
+  it('rows glide in 260ms', () => {
+    expect(MOTION_MS.rowGlide).toBe(260);
+  });
+
   it('the curve is the windows’ curve', () => {
     expect(EASING.dialog).toBe('cubic-bezier(.22,.61,.36,1)');
   });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
@@ -10,6 +10,7 @@ import { BulkBar } from './BulkBar';
 import { BulkBarSlot } from './BulkBarSlot';
 import { openBoardOnce } from './board-opening';
 import { landSelection, slideSelection } from './selection-slide';
+import { createRowGlide } from './row-glide';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -38,7 +39,25 @@ const HEADERS_8 = [
 const HEADERS_6 = ['Truck', 'Driver', 'Next stop', 'Appt', 'Status'] as const;
 const RIGHT_ALIGNED = new Set(['Appt', 'ETA', 'Status']);
 
+/**
+ * §12.149. A class, for the one thing only a class can do: run just before React changes
+ * the page. Where a row is drawn has to be read then, and a row leaving the drawn window
+ * has to be copied then. In a layout effect it is already gone.
+ */
+class BeforeCommit extends Component<{ cause: string; onCause: () => void }> {
+  override getSnapshotBeforeUpdate(previous: { cause: string }): null {
+    if (previous.cause !== this.props.cause) this.props.onCause();
+    return null;
+  }
+  override componentDidUpdate(): void {}
+  override render(): null {
+    return null;
+  }
+}
+
 interface Props {
+  /** §12.149. Changes when rows are to glide to their new places, and at no other time. */
+  glideCause: string;
   rows: FleetRow[];
   /** Reference instant for every age on a row — see TruckRow. */
   fetchedAt: string | null;
@@ -91,6 +110,7 @@ interface Props {
 }
 
 export function FleetList({
+  glideCause,
   rows,
   fetchedAt,
   feedStale,
@@ -159,6 +179,14 @@ export function FleetList({
     [rows, virtualizer],
   );
 
+  /* §12.149. Rows glide when a cause is named, and only then. */
+  const [glide] = useState(() =>
+    createRowGlide(
+      () => scrollRef.current,
+      () => bodyRef.current,
+    ),
+  );
+
   /** §12.149. In the commit that changes it, ahead of the frame that would show it. */
   const lastDrawnSelection = useRef(selectedId);
   useLayoutEffect(() => {
@@ -166,8 +194,11 @@ export function FleetList({
     lastDrawnSelection.current = selectedId;
     const box = scrollRef.current;
     if (!box || was === selectedId) return;
-    if (was && selectedId) slideSelection(box, was, selectedId);
+    // Selected during a glide, it just appears: the rows are on their way somewhere else.
+    if (was && selectedId && !glide.isMoving()) slideSelection(box, was, selectedId);
     else landSelection(box);
+    // Rows are drawn by the commit that changes it, so this runs with them in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   const lastSelected = useRef<string | null>(null);
@@ -176,10 +207,31 @@ export function FleetList({
     lastSelected.current = selectedId;
   }, [selectedId, scrollToId]);
 
+  const idsBefore = useRef<string[]>([]);
+  useLayoutEffect(() => {
+    if (scrollRef.current) landSelection(scrollRef.current);
+    glide.run(
+      rows.map((r) => r.id),
+      ROW_HEIGHT[density],
+    );
+    // The cause alone. Everything else that changes a row's place must not start one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glideCause]);
+  useLayoutEffect(() => {
+    idsBefore.current = rows.map((r) => r.id);
+    glide.checkTargets();
+  });
+
   const headers = columns === 8 ? HEADERS_8 : HEADERS_6;
 
   return (
     <div ref={panelRef} className="flex min-h-0 min-w-0 flex-col">
+      <BeforeCommit
+        cause={glideCause}
+        onCause={() =>
+          glide.capture(new Set(items.map((item) => String(item.key))), idsBefore.current)
+        }
+      />
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto">
         {/* Sticky INSIDE the scroller, so it survives every scroll position. */}
         <div
@@ -268,6 +320,11 @@ export function FleetList({
         {/* The body dims as a whole: the schedule is not to be trusted. */}
         <div
           ref={bodyRef}
+          onPointerDownCapture={(event) => glide.pressed(event.nativeEvent)}
+          onClick={(event) => {
+            const id = glide.clicked(event.nativeEvent);
+            if (id) onSelect(id);
+          }}
           style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
           className={feedStale ? 'opacity-[.72]' : ''}
         >

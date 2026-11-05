@@ -266,6 +266,8 @@ export const MOTION_MS = {
   boardOpenGapMax: 20,
   /** §12.149. The selected row's ground, from the row it was on. */
   selectionSlide: 180,
+  /** §12.149. Rows going to their new places, on a chip, a list or the reorder bar. */
+  rowGlide: 260,
 } as const;
 
 /**

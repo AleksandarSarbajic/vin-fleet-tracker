@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import { compareFleet, type SortMode } from '@/lib/fleet-order';
 
@@ -13,6 +13,8 @@ export interface DisplayOrder {
   drift: number;
   /** Adopt the recomputed order — what the "N rows would reorder" bar does. */
   resort: () => void;
+  /** Counts `resort`, so a glide can name the reorder bar as its cause (§12.149). */
+  resorts: number;
 }
 
 /**
@@ -25,6 +27,10 @@ export interface DisplayOrder {
  * That forces order to live apart from data: this holds an array of ids, and
  * a poll only refreshes the values behind them. When the recomputed order
  * differs, `drift` is non-zero and the toolbar offers the bar.
+ *
+ * The new order is adopted while rendering rather than in an effect (§12.149), so
+ * the commit a chip changes holds the whole of its change. In an effect there was a
+ * commit between, with the rows that left gone and the rows that came not yet there.
  */
 export function useDisplayOrder(
   rows: FleetRow[],
@@ -39,25 +45,24 @@ export function useDisplayOrder(
     [rows, mode],
   );
 
-  const [displayed, setDisplayed] = useState<string[]>(computed);
-  const lastReset = useRef(resetKey);
+  const [held, setHeld] = useState({ displayed: computed, resetKey });
+  const [resorts, setResorts] = useState(0);
 
-  useEffect(() => {
-    if (lastReset.current !== resetKey) {
-      lastReset.current = resetKey;
-      setDisplayed(computed);
-      return;
+  let displayed = held.displayed;
+  if (held.resetKey !== resetKey) {
+    displayed = computed;
+    setHeld({ displayed, resetKey });
+  } else {
+    const known = new Set(displayed);
+    // Trucks that appeared since the last sort go to the end rather than
+    // reshuffling everything; trucks that vanished drop out.
+    const kept = displayed.filter((id) => byId.has(id));
+    const added = computed.filter((id) => !known.has(id));
+    if (added.length > 0 || kept.length !== displayed.length) {
+      displayed = [...kept, ...added];
+      setHeld({ displayed, resetKey });
     }
-    setDisplayed((current) => {
-      const known = new Set(current);
-      // Trucks that appeared since the last sort go to the end rather than
-      // reshuffling everything; trucks that vanished drop out.
-      const kept = current.filter((id) => byId.has(id));
-      const added = computed.filter((id) => !known.has(id));
-      if (added.length === 0 && kept.length === current.length) return current;
-      return [...kept, ...added];
-    });
-  }, [computed, resetKey, byId]);
+  }
 
   const ordered = useMemo(
     () => displayed.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])),
@@ -73,7 +78,10 @@ export function useDisplayOrder(
     return moved;
   }, [computed, displayed]);
 
-  const resort = useCallback(() => setDisplayed(computed), [computed]);
+  const resort = useCallback(() => {
+    setHeld((was) => ({ ...was, displayed: computed }));
+    setResorts((n) => n + 1);
+  }, [computed]);
 
-  return { ordered, drift, resort };
+  return { ordered, drift, resort, resorts };
 }

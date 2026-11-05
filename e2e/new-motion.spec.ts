@@ -29,6 +29,7 @@ const OPEN_GAP_MAX_MS = 20;
 const SELECT_MS = 180;
 const MAP_MS = 450;
 const ZOOM_MS = 150;
+const GLIDE_MS = 260;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -208,6 +209,27 @@ async function record<T>(page: Page, read: () => T) {
       const w = window as unknown as { __rec: unknown[]; __recStop: boolean };
       w.__recStop = true;
       return w.__rec as T[];
+    });
+}
+
+/** A second recorder alongside the first, for a test that reads two things. */
+async function record2<T>(page: Page, read: () => T) {
+  await page.evaluate(`(() => {
+    const read = ${read.toString()};
+    window.__rec2 = [];
+    window.__rec2Stop = false;
+    const tick = () => {
+      if (window.__rec2Stop) return;
+      window.__rec2.push(read());
+      requestAnimationFrame(tick);
+    };
+    tick();
+  })()`);
+  return () =>
+    page.evaluate(() => {
+      const w = window as unknown as { __rec2: unknown[]; __rec2Stop: boolean };
+      w.__rec2Stop = true;
+      return w.__rec2 as T[];
     });
 }
 
@@ -2227,4 +2249,1105 @@ test.describe('step 6, the popup after a long pan', () => {
       await expect.poll(clear, { timeout: 10_000 }).toEqual({ inside: true, under: 0 });
     });
   }
+});
+
+/** A third late, a third at risk and a third on time, in the API's order. */
+const mixed = (rows: FleetRowLike[]) => {
+  const third = Math.ceil(rows.length / 3);
+  rows.forEach((row, i) => {
+    const status = i < third ? 'LATE' : i < third * 2 ? 'AT_RISK' : 'ON_TIME';
+    row.status = status;
+    row.computed = status;
+  });
+};
+
+/** A list in urgency order, late first, and every one of its rows at rest. */
+async function openMixed(page: Page, trucks = 33, viewport = { width: 1440, height: 900 }) {
+  await resetWorld({ extraTrucks: trucks - 3 });
+  await page.setViewportSize(viewport);
+  await page.goto('/');
+  await page.locator('[data-row-id]').first().waitFor();
+  await pollWith(page, mixed);
+  await page.keyboard.press('1');
+  await page.keyboard.press('0');
+  await expect.poll(() => stillMoving(page)).toBe(0);
+  await quiet(page);
+}
+
+type Tops = Record<string, number>;
+const topsFrame = () => {
+  const tops: Record<string, number> = {};
+  for (const row of document.querySelectorAll('[data-row-id]')) {
+    // A pinned row has no wrapper of its own.
+    const wrapper = row.parentElement as HTMLElement;
+    tops[row.getAttribute('data-row-id')!] = (wrapper.style.transform ? wrapper : row).getBoundingClientRect().top;
+  }
+  return tops;
+};
+/**
+ * Each row's place in the list on this frame, how long its flight is, and when. A row can
+ * only be judged against its own flight: the same step is a jump on a short trip and
+ * nothing on a long one.
+ */
+type Flying = { at: number; rows: Record<string, { y: number; trip: number }> };
+const flyingFrame = (): Flying => {
+  const scroller = document.querySelector('[data-row-id]')?.closest('.overflow-y-auto');
+  const rows: Flying['rows'] = {};
+  if (scroller) {
+    const offset = scroller.getBoundingClientRect().top - scroller.scrollTop;
+    for (const row of document.querySelectorAll('[data-row-id]')) {
+      const wrapper = row.parentElement as HTMLElement;
+      const frames = wrapper
+        .getAnimations()
+        .map((a) => (a.effect as KeyframeEffect).getKeyframes())
+        .find((k) => k[0]?.transform);
+      const yOf = (t: unknown) => new DOMMatrixReadOnly(String(t)).m42;
+      rows[row.getAttribute('data-row-id')!] = {
+        y: (wrapper.style.transform ? wrapper : row).getBoundingClientRect().top - offset,
+        trip: frames ? Math.abs(yOf(frames[0]!.transform) - yOf(frames[1]!.transform)) : 0,
+      };
+    }
+  }
+  return { at: performance.now(), rows };
+};
+/**
+ * The steps no glide can make. This curve covers about a quarter of a trip in its fastest
+ * frame. A row taken up from anywhere but where it is drawn jumps by what it had left.
+ */
+const jumps = (seen: Flying[]) => {
+  const found: string[] = [];
+  for (let i = 1; i < seen.length; i += 1) {
+    const frames = (seen[i]!.at - seen[i - 1]!.at) / (1000 / 60);
+    for (const [id, now] of Object.entries(seen[i]!.rows)) {
+      const was = seen[i - 1]!.rows[id];
+      if (!was) continue;
+      const allowed = 0.3 * Math.max(now.trip, was.trip) * Math.max(1, frames) + 6;
+      const step = Math.abs(now.y - was.y);
+      if (step > allowed) found.push(`${step.toFixed(0)}px with ${allowed.toFixed(0)}px allowed`);
+    }
+  }
+  return found;
+};
+const rowsThatMoved = (seen: Tops[]) => {
+  const places = new Map<string, Set<number>>();
+  for (const frame of seen) {
+    for (const [id, top] of Object.entries(frame)) {
+      places.set(id, (places.get(id) ?? new Set()).add(top));
+    }
+  }
+  return [...places].filter(([, tops]) => tops.size > 1).map(([id]) => id);
+};
+const glidesStarted = async (page: Page) =>
+  (await started(page)).filter((s) => s.from.startsWith('translateY') && s.duration === GLIDE_MS);
+const atRest = (page: Page) =>
+  page.evaluate(() => {
+    const body = document.querySelector('[data-row-id]')?.parentElement?.parentElement as HTMLElement | undefined;
+    return {
+      animations: document
+        .getAnimations()
+        .filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+      copies: document.querySelectorAll('[data-glide-copy]').length,
+      solid: [...document.querySelectorAll('[data-row-id]')].filter((r) =>
+        r.parentElement?.classList.contains('bg-surface-base'),
+      ).length,
+      zIndex: [...document.querySelectorAll('[data-row-id]')].filter(
+        (r) => (r.parentElement as HTMLElement | null)?.style.zIndex,
+      ).length,
+      bodyOverflow: body?.style.overflow ?? '',
+      bodyIsolation: body?.style.isolation ?? '',
+      bodyMinHeight: body?.style.minHeight ?? '',
+    };
+  });
+const RESTING = {
+  animations: 0,
+  copies: 0,
+  solid: 0,
+  zIndex: 0,
+  bodyOverflow: '',
+  bodyIsolation: '',
+  bodyMinHeight: '',
+};
+/** Two frames apart, in the page, so a Playwright round trip does not outlast the glide. */
+const keysTwoFramesApart = (page: Page, keys: string[]) =>
+  page.evaluate(
+    (list) =>
+      new Promise<void>((done) => {
+        const left = [...list];
+        const next = () => {
+          const key = left.shift();
+          if (key === undefined) {
+            done();
+            return;
+          }
+          window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+          requestAnimationFrame(() => requestAnimationFrame(next));
+        };
+        next();
+      }),
+    keys,
+  );
+
+test.describe('step 7, rows glide', () => {
+  test('a chip: rows go 260ms on the curve, leavers fade, nothing grows, and nothing is left', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, topsFrame);
+    await page.keyboard.press('2');
+    // The copies while they are there: nothing can find or press one.
+    await page.locator('[data-glide-copy]').first().waitFor({ state: 'attached' });
+    const copy = await page.locator('[data-glide-copy]').first().evaluate((el) => {
+      const everything = [el, ...el.querySelectorAll('*')];
+      return {
+        inert: el.hasAttribute('inert'),
+        hidden: el.getAttribute('aria-hidden'),
+        pointer: getComputedStyle(el).pointerEvents,
+        identity: everything.flatMap((n) =>
+          [...n.attributes]
+            .map((a) => a.name)
+            .filter((a) => /^(id|name|role|tabindex|aria-(?!hidden)|data-(?!glide-copy))/.test(a)),
+        ),
+      };
+    });
+    expect(copy).toEqual({ inert: true, hidden: 'true', pointer: 'none', identity: [] });
+    await expect.poll(() => stillMoving(page)).toBe(0);
+
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(await atRest(page)).toEqual(RESTING);
+
+    const glides = await glidesStarted(page);
+    expect(glides.length).toBeGreaterThan(5);
+    expect(new Set(glides.map((g) => curve(g.easing)))).toEqual(new Set([curve(DIALOG_CURVE)]));
+    const fades = (await started(page)).filter((s) => s.from === '|1' && s.duration === GLIDE_MS);
+    expect(fades.length).toBeGreaterThan(5);
+    expect(new Set(fades.map((f) => f.easing))).toEqual(new Set(['linear']));
+
+    // The rows that stayed went up, and took more than a frame or two to get there.
+    const moved = rowsThatMoved(seen);
+    expect(moved.length).toBeGreaterThan(5);
+    const one = moved[0]!;
+    const path = seen.flatMap((f) => (f[one] === undefined ? [] : [f[one]!]));
+    expect(path.length).toBeGreaterThan(4);
+    for (let i = 1; i < path.length; i += 1) expect(path[i]!).toBeLessThanOrEqual(path[i - 1]!);
+  });
+
+  test('a list that gets shorter holds its height until the rows land: they are seen going', async ({ page }) => {
+    await openMixed(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { __scroller: Element };
+      w.__scroller = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!;
+    });
+    const before = await page.evaluate(() =>
+      (window as unknown as { __scroller: Element }).__scroller.getBoundingClientRect().bottom,
+    );
+    const frames = await record(page, () => {
+      const scroller = (window as unknown as { __scroller: Element }).__scroller;
+      const newEnd = document.querySelectorAll('[data-row-id]').length * 44;
+      const top = document.querySelector('[data-row-id]')?.parentElement?.parentElement?.getBoundingClientRect().top ?? 0;
+      return {
+        bottom: scroller.getBoundingClientRect().bottom,
+        copies: document.querySelectorAll('[data-glide-copy]').length,
+        // A copy further down than where the list will end, and inside the box that clips it:
+        // it is only there, and only seen, because of the hold and the reach.
+        below: [...document.querySelectorAll('[data-glide-copy]')].filter((c) => {
+          const r = c.getBoundingClientRect();
+          const clip = c.parentElement!.getBoundingClientRect();
+          return (
+            r.top > top + newEnd &&
+            r.bottom <= clip.bottom + 1 &&
+            r.bottom < scroller.getBoundingClientRect().bottom
+          );
+        }).length,
+      };
+    });
+    await page.keyboard.press('1');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const seen = await frames();
+    const going = seen.filter((f) => f.copies > 0);
+    expect(going.length).toBeGreaterThan(3);
+    expect(new Set(going.map((f) => f.bottom))).toEqual(new Set([before]));
+    expect(Math.max(...going.map((f) => f.below))).toBeGreaterThan(0);
+    // It lets go when they land, and the scroller is left with nothing on it.
+    expect(seen.at(-1)!.bottom).toBeLessThan(before);
+    expect(
+      await page.evaluate(() => (window as unknown as { __scroller: Element }).__scroller.getAttribute('style')),
+    ).toBeNull();
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a row from far away starts just past the edge of the view, at a sane speed', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page, 60);
+    await page.evaluate(() => {
+      (window as unknown as { __started: unknown[] }).__started = [];
+    });
+    const view = await page.evaluate(() => {
+      const body = document.querySelector('[data-row-id]')!.parentElement!.parentElement!.getBoundingClientRect();
+      const box = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.getBoundingClientRect();
+      return { top: box.top - body.top, bottom: box.bottom - body.top };
+    });
+    // Drawn rows are the top of the list. The On time rows are far below them, undrawn.
+    await page.keyboard.press('3');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const froms = (await glidesStarted(page)).map((g) => Number(/translateY\((-?[\d.]+)px\)/.exec(g.from)![1]));
+    expect(froms.length).toBeGreaterThan(5);
+    expect(Math.max(...froms)).toBeLessThanOrEqual(view.bottom + 1);
+    expect(Math.min(...froms)).toBeGreaterThanOrEqual(view.top - 44 - 1);
+  });
+
+  test('rows in flight stay under the column headers', async ({ page }) => {
+    await openMixed(page, 60);
+    // Late and On time on, so the list stays long and stays scrolled when At risk goes on.
+    await page.keyboard.press('1');
+    await page.keyboard.press('3');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    // Scrolled so the first On time row, the 21st, is under the headers (28px): it is about
+    // to go a long way, and starts where the headers stand.
+    await page.evaluate(() => {
+      document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 20 * 44 + 28 - 10;
+    });
+    await quiet(page);
+    await page.evaluate(() => {
+      const scroller = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!;
+      const header = scroller.querySelector(':scope > [role="row"]')!;
+      const box = header.getBoundingClientRect();
+      (window as unknown as { __spot: number[]; __header: Element }).__spot = [box.x + 300, box.y + box.height / 2];
+      (window as unknown as { __spot: number[]; __header: Element }).__header = header;
+    });
+    const frames = await record(page, () => {
+      const w = window as unknown as { __spot: number[]; __header: Element };
+      const top = document.elementFromPoint(w.__spot[0]!, w.__spot[1]!);
+      return {
+        moving: document.querySelectorAll('[data-row-id]').length > 0 &&
+          document.getAnimations().some((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)),
+        header: top ? w.__header.contains(top) : false,
+      };
+    });
+    await page.keyboard.press('2');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = (await frames()).filter((f) => f.moving);
+    expect(seen.length).toBeGreaterThan(5);
+    expect(seen.every((f) => f.header)).toBe(true);
+  });
+
+  test('rows in flight stay out of the pinned block', async ({ page }) => {
+    await openMixed(page);
+    await page.locator('[data-row-id]').nth(0).click();
+    await page.keyboard.press('p');
+    await expect(page.getByText(/^Pinned$/)).toBeVisible();
+    await page.mouse.move(1, 1);
+    await page.keyboard.press('Escape');
+    // At risk on hides the pinned truck, so the block goes and the list starts higher.
+    await page.keyboard.press('2');
+    await expect(page.getByText(/^Pinned$/)).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    // Off again: the block comes back, so the list starts lower, and its rows begin above
+    // their new tops, where the block now stands.
+    const frames = await record(page, () => {
+      const pinned = document.querySelector('[data-row-id]');
+      const strip = [...document.querySelectorAll('span')].find((s) => s.textContent === 'Pinned');
+      if (!pinned || !strip) return null;
+      const r = pinned.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + 300, r.y + r.height / 2);
+      return {
+        moving: document.getAnimations().some((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)),
+        own: top ? pinned.contains(top) : false,
+      };
+    });
+    await page.keyboard.press('2');
+    await expect(page.getByText(/^Pinned$/)).toBeVisible();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = (await frames()).flatMap((f) => (f && f.moving ? [f] : []));
+    expect(seen.length).toBeGreaterThan(3);
+    expect(seen.every((f) => f.own)).toBe(true);
+  });
+
+  test('a row whose place changes in flight goes there at once', async ({ page }) => {
+    await openMixed(page);
+    const frames = await record(page, () =>
+      [...document.querySelectorAll('[data-row-id]')].flatMap((r) => {
+        const wrapper = r.parentElement as HTMLElement;
+        const going = wrapper
+          .getAnimations()
+          .map((a) => (a.effect as KeyframeEffect).getKeyframes())
+          .find((k) => k[0]?.transform);
+        // A flight still headed somewhere the list no longer puts this row.
+        return going && going[1]!.transform !== wrapper.style.transform ? [r.getAttribute('data-row-id')] : [];
+      }),
+    );
+    // A density change mid-glide: every row has a new place.
+    await keysTwoFramesApart(page, ['2', 'd']);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    // One frame at most, between the commit and the effect that runs in it: in practice none.
+    expect((await frames()).flat()).toEqual([]);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('rows in flight have a solid ground, and the furthest travelled is on top', async ({ page }) => {
+    await openMixed(page);
+    const frames = await record(page, () => {
+      const flying = [...document.querySelectorAll('[data-row-id]')]
+        .map((r) => r.parentElement as HTMLElement)
+        .filter((w) => w.getAnimations().some((a) => (a.effect as KeyframeEffect).getKeyframes()[0]?.transform));
+      return flying.map((w) => ({
+        ground: getComputedStyle(w).backgroundColor,
+        z: Number(w.style.zIndex),
+      }));
+    });
+    await page.keyboard.press('2');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = (await frames()).flat();
+    expect(seen.length).toBeGreaterThan(5);
+    expect(new Set(seen.map((f) => f.ground))).toEqual(new Set(['rgb(21, 24, 27)']));
+    for (const f of seen) expect(f.z).toBeGreaterThan(0);
+  });
+
+  test('a chip off again: rows go down, and those coming back arrive', async ({ page }) => {
+    await openMixed(page);
+    await page.keyboard.press('2');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const frames = await record(page, topsFrame);
+    await page.keyboard.press('2');
+    await page.waitForTimeout(GLIDE_MS / 2);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = await frames();
+    const moved = rowsThatMoved(seen);
+    expect(moved.length).toBeGreaterThan(3);
+    const path = seen.flatMap((f) => (f[moved[0]!] === undefined ? [] : [f[moved[0]!]!]));
+    expect(path.at(-1)!).toBeGreaterThan(path[0]!);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('the reorder bar: its click glides, and only its click', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    const last = await page.locator('[data-row-id]').nth(14).getAttribute('data-row-id');
+    const before = (await glidesStarted(page)).length;
+    const frames = await record(page, topsFrame);
+    await pollWith(page, (rows) => {
+      mixed(rows);
+      const row = rows.find((r) => r.id === last)!;
+      row.status = 'LATE';
+      row.computed = 'LATE';
+    });
+    const bar = page.getByRole('button', { name: /rows? would reorder/i });
+    await bar.waitFor();
+    await quiet(page);
+    // The bar appearing moved nothing.
+    expect(rowsThatMoved(await frames())).toEqual([]);
+    expect((await glidesStarted(page)).length).toBe(before);
+
+    const stop = await watchFrames(page);
+    await bar.click();
+    await expect(bar).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect((await glidesStarted(page)).length).toBeGreaterThan(before);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a list: choosing one glides', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page, 12);
+    // These two draw last after the reload, so the list brings them up: they have to move.
+    const members = [IDS.truckChicago, IDS.truckDallas];
+    const sql = connect();
+    try {
+      const [list] = await sql<{ id: string }[]>`
+        insert into truck_lists (name) values (${'Motion list'}) returning id`;
+      for (const truck of members) {
+        await sql`insert into truck_list_members (list_id, truck_id) values (${list!.id}, ${truck})`;
+      }
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+    await page.reload();
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    await page.locator('[data-scope] [aria-haspopup="menu"]').click();
+    await page.getByRole('menuitem', { name: /Motion list/ }).click();
+    await expect.poll(async () => (await glidesStarted(page)).length).toBeGreaterThan(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a search does not glide: it would start on every key', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    const before = (await glidesStarted(page)).length;
+    await page.keyboard.press('/');
+    await page.keyboard.type('20');
+    await page.waitForURL(/[?&]q=20/);
+    await quiet(page);
+    await page.keyboard.press('Escape');
+    await page.waitForURL((url) => !url.search.includes('q='));
+    await quiet(page);
+    expect((await glidesStarted(page)).length).toBe(before);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a density change, a resize and a scroll never start one', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    const before = (await glidesStarted(page)).length;
+    await page.keyboard.press('d');
+    await quiet(page);
+    await page.setViewportSize({ width: 1300, height: 800 });
+    await quiet(page);
+    await page.evaluate(() => {
+      document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 400;
+    });
+    await quiet(page);
+    expect((await glidesStarted(page)).length).toBe(before);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a poll moves no row, on any frame', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    const before = (await glidesStarted(page)).length;
+    const frames = await record(page, topsFrame);
+    // New values, a new urgency for one, and the same trucks in the list.
+    await pollWith(page, (rows) => {
+      mixed(rows);
+      rows[20]!.status = 'LATE';
+      rows[20]!.computed = 'LATE';
+    });
+    await quiet(page);
+    await pollWith(page, mixed);
+    await quiet(page);
+    expect(rowsThatMoved(await frames())).toEqual([]);
+    expect((await glidesStarted(page)).length).toBe(before);
+  });
+
+  test('a poll that changes who is in the list snaps: no glide, no in-between', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    await page.keyboard.press('1');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const before = (await glidesStarted(page)).length;
+    const first = await page.locator('[data-row-id]').first().getAttribute('data-row-id');
+    const second = await page.locator('[data-row-id]').nth(1).getAttribute('data-row-id');
+    const startTop = (await page.locator(`[data-row-id="${second}"]`).boundingBox())!.y;
+    const frames = await record(page, topsFrame);
+    // The first late truck stops being late, so it leaves the chip.
+    await pollWith(page, (rows) => {
+      mixed(rows);
+      const row = rows.find((r) => r.id === first)!;
+      row.status = 'ON_TIME';
+      row.computed = 'ON_TIME';
+    });
+    await expect(page.locator(`[data-row-id="${first}"]`)).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const seen = await frames();
+    const path = [...new Set(seen.flatMap((f) => (f[second!] === undefined ? [] : [f[second!]!])))];
+    expect(path).toEqual([startTop, startTop - 44]);
+    expect((await glidesStarted(page)).length).toBe(before);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('five chips in a row: every row goes from where it is drawn, and none jumps', async ({ page }) => {
+    await openMixed(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, flyingFrame);
+    await keysTwoFramesApart(page, ['2', '3', '2', '1', '2']);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(seen.length).toBeGreaterThan(10);
+    expect(jumps(seen)).toEqual([]);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a scroll during a glide stays right', async ({ page }) => {
+    await openMixed(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, flyingFrame);
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: '3', bubbles: true, cancelable: true }));
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop += 80;
+              done();
+            }),
+          );
+        }),
+    );
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(jumps(seen)).toEqual([]);
+    // Each row where the list says it belongs.
+    const off = await page.evaluate(() => {
+      const scroller = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!;
+      const body = document.querySelector('[data-row-id]')!.parentElement!.parentElement!;
+      const top = body.getBoundingClientRect().top;
+      return [...scroller.querySelectorAll('[data-row-id]')].filter((r) => {
+        const wrapper = r.parentElement as HTMLElement;
+        const y = new DOMMatrixReadOnly(wrapper.style.transform).m42;
+        return Math.abs(wrapper.getBoundingClientRect().top - top - y) > 0.5;
+      }).length;
+    });
+    expect(off).toBe(0);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('scrolled to the end, a chip that shortens the list: rows are seen going, and nothing grows', async ({ page }) => {
+    await openMixed(page);
+    await page.evaluate(() => {
+      const scroller = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!;
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    await quiet(page);
+    const stop = await watchFrames(page);
+    await page.keyboard.press('1');
+    const going = await page.locator('[data-glide-copy]').first().evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const view = el.parentElement!.parentElement!.getBoundingClientRect();
+      return r.bottom > view.top && r.top < view.bottom;
+    });
+    expect(going).toBe(true);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('the reorder bar works mid-glide', async ({ page }) => {
+    await openMixed(page);
+    // A late row that the next poll says is the most urgent of them: the bar's offer.
+    const row = await page.locator('[data-row-id]').nth(8).getAttribute('data-row-id');
+    // A poll held back, to land in the middle of a chip's glide and offer the bar there.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => {};
+    const atTheDoor = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    await page.unroute('**/api/fleet');
+    await page.route('**/api/fleet', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { fleet: FleetRowLike[] };
+      mixed(body.fleet);
+      for (const r of body.fleet as (FleetRowLike & { apptAt?: string })[]) {
+        if (r.id === row) r.apptAt = '2020-01-01T00:00:00.000Z';
+      }
+      reached();
+      await held;
+      await route.fulfill({ response, json: body });
+    });
+    const answered = page.waitForResponse('**/api/fleet');
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await atTheDoor;
+    const frames = await record(page, flyingFrame);
+    await page.keyboard.press('1');
+    release();
+    await answered;
+    const bar = page.getByRole('button', { name: /rows? would reorder/i });
+    await bar.waitFor();
+    const moving = await page.evaluate(() =>
+      document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    );
+    await bar.click();
+    await expect(bar).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    expect(jumps(await frames())).toEqual([]);
+    expect(moving).toBeGreaterThan(0);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('pinned rows stay put, and the rows below do not jump when the block changes height', async ({ page }) => {
+    await logAnimations(page);
+    await openMixed(page);
+    await page.locator('[data-row-id]').nth(0).click();
+    await page.keyboard.press('p');
+    await expect(page.getByText(/^Pinned$/)).toBeVisible();
+    await quiet(page);
+    const pinned = await page.locator('[aria-selected="true"][data-row-id]').getAttribute('data-row-id');
+    const before = (await page.locator(`[data-row-id="${pinned}"]`).boundingBox())!.y;
+    await page.mouse.move(1, 1);
+    const frames = await record(page, topsFrame);
+    const flying = await record2(page, flyingFrame);
+    // Off the late chip's rows: the pinned truck is late, so this hides it and the block.
+    await page.keyboard.press('2');
+    await expect(page.getByText(/^Pinned$/)).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const seen = await frames();
+    // Its row was never animated: there one frame, gone the next.
+    const path = [...new Set(seen.flatMap((f) => (f[pinned!] === undefined ? [] : [f[pinned!]!])))];
+    expect(path).toEqual([before]);
+    expect(jumps(await flying())).toEqual([]);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('selecting during a glide: the highlight just appears', async ({ page }) => {
+    await openMixed(page);
+    await page.locator('[data-row-id]').nth(1).click();
+    await quiet(page);
+    await page.mouse.move(1, 1);
+    await quiet(page);
+    await page.keyboard.press('1');
+    await page.keyboard.press('ArrowDown');
+    const slid = await page.evaluate(() => document.querySelectorAll('[data-selection-slide]').length);
+    expect(slid).toBe(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+  });
+
+  test('under reduced motion: rows are simply in their new places, with no copies', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logAnimations(page);
+    await openMixed(page);
+    const frames = await record(page, () => document.querySelectorAll('[data-glide-copy]').length);
+    await page.keyboard.press('2');
+    await quiet(page);
+    await page.keyboard.press('2');
+    await quiet(page);
+    expect(Math.max(...(await frames()))).toBe(0);
+    expect(await started(page)).toEqual([]);
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+});
+
+/**
+ * The hardest one. In the demo only 12 of 16 presses during a glide selected the pressed
+ * row: 2 hit a gap, and on 2 the row changed during the press.
+ *
+ * A real mouse. What the press came down on is read in the page, in the capture phase,
+ * at the instant it arrives, along with how far into the glide that really was.
+ */
+test.describe('the press during a glide', () => {
+  type Press = {
+    at: number | null;
+    hit: string | null;
+    gap: boolean;
+    /** Every row as near as the nearest: rows arriving can stand exactly level. */
+    nearest: string[];
+    moving: 'up' | 'down' | 'still' | 'none';
+    place: 'first' | 'last' | 'middle' | 'none';
+    target: string;
+    /** How far the row under the pointer moved between the press and the release. */
+    drift: number | null;
+  };
+  type Tally = Press & { time: number; hold: number; selected: string | null; ok: boolean };
+
+  const listenForPresses = (page: Page) =>
+    page.addInitScript(() => {
+      const w = window as unknown as { __press: Press | null; __held: { el: Element; top: number } | null };
+      w.__press = null;
+      w.__held = null;
+      /** The rows in view, and those as near as the nearest. A row has to be drawn to count. */
+      const rowsInView = () => {
+        const scroller = document.querySelector('[data-row-id]')?.closest('.overflow-y-auto');
+        const view = scroller?.getBoundingClientRect();
+        return [...document.querySelectorAll('[data-row-id]')]
+          .map((r) => ({ id: r.getAttribute('data-row-id')!, box: r.getBoundingClientRect() }))
+          .filter(({ box }) => view && box.bottom > view.top + 28 && box.top < view.bottom)
+          .sort((a, b) => a.box.top - b.box.top);
+      };
+      const nearestTo = (y: number) => {
+        const inView = rowsInView();
+        const distance = (box: DOMRect) => Math.max(box.top - y, y - box.bottom, 0);
+        const heightOf = (other: string) =>
+          Number((document.querySelector(`[data-row-id="${other}"]`)!.parentElement as HTMLElement).style.zIndex);
+        const closest = Math.min(...inView.map(({ box }) => distance(box)));
+        const level = inView.filter(({ box }) => Math.abs(distance(box) - closest) < 0.01);
+        // Rows arriving from past the edge can be on top of each other: the one on top.
+        const highest = Math.max(...level.map(({ id: other }) => heightOf(other)));
+        return level.filter(({ id: other }) => heightOf(other) === highest).map(({ id: other }) => other);
+      };
+      window.addEventListener(
+        'pointerup',
+        (event) => {
+          if (!w.__press || !w.__held) return;
+          w.__press.drift = Math.abs(w.__held.el.getBoundingClientRect().top - w.__held.top);
+          // Read here, with everything held: at the press itself the hold has not landed yet,
+          // and a frame's difference can flip which of two rows is nearer.
+          if (w.__press.gap) w.__press.nearest = nearestTo(event.clientY);
+        },
+        true,
+      );
+      window.addEventListener(
+        'pointerdown',
+        (event) => {
+          // The browser's own answer. `elementFromPoint` here can read a frame further on.
+          const under = event.target as Element | null;
+          const row = under?.closest?.('[data-row-id]') ?? null;
+          const anyRow = document.querySelector('[data-row-id]');
+          w.__held = row
+            ? { el: row, top: row.getBoundingClientRect().top }
+            : anyRow
+              ? { el: anyRow, top: anyRow.getBoundingClientRect().top }
+              : null;
+          const inView = rowsInView();
+          const id = row?.getAttribute('data-row-id') ?? null;
+          const glide = (row?.parentElement ?? null)
+            ?.getAnimations()
+            .map((a) => (a.effect as KeyframeEffect).getKeyframes())
+            .find((k) => k[0]?.transform);
+          const y = (t: unknown) => new DOMMatrixReadOnly(String(t)).m42;
+          const way = glide ? y(glide[0]!.transform) - y(glide[1]!.transform) : 0;
+          const any = document
+            .getAnimations()
+            .find(
+              (a) =>
+                !(a instanceof CSSTransition) &&
+                !(a instanceof CSSAnimation) &&
+                Boolean((a.effect as KeyframeEffect).getKeyframes()[0]?.transform) &&
+                (a.effect as KeyframeEffect).getTiming().duration === 260,
+            );
+          w.__press = {
+            at: any ? Number(any.currentTime) : null,
+            hit: id,
+            gap: id === null,
+            nearest: [],
+            moving: !row ? 'none' : way > 0.5 ? 'up' : way < -0.5 ? 'down' : 'still',
+            place: !id
+              ? 'none'
+              : inView[0]?.id === id
+                ? 'first'
+                : inView.at(-1)?.id === id
+                  ? 'last'
+                  : 'middle',
+            target: `${(event.target as Element)?.tagName}.${String((event.target as Element)?.className).slice(0, 44)}`,
+            drift: null,
+          };
+        },
+        true,
+      );
+    });
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const selected = (page: Page) =>
+    page.evaluate(() => document.querySelector('[data-row-id][aria-selected="true"]')?.getAttribute('data-row-id') ?? null);
+  const startGlide = (page: Page, key: string) =>
+    page.evaluate((k) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    }, key);
+  test('a real mouse, at 20, 60 and 120ms into a glide, held 16 to 150ms: the row drawn under it is the row selected', async ({ page }, info) => {
+    test.setTimeout(30 * 60_000);
+    await listenForPresses(page);
+    await openMixed(page);
+    const view = await page.evaluate(() => {
+      const r = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left };
+    });
+    const x = view.left + 300;
+    /**
+     * Each chip with where to stand for it, so the presses reach rows of every kind. The
+     * Late rows are first in the list, so they stay put when Late goes on and off; the At
+     * risk rows go up past the top rows, and back down. The first row drawn is near the
+     * top of the list, and the last near its bottom.
+     */
+    const top = view.top + 28;
+    const last = view.bottom - 4;
+    /*
+     * The toolbar above the list is 32px on a list that fits and 27px on one that does not
+     * (HANDOFF, found wrong), so the first row only stays exactly put while the list is too
+     * long for the screen before and after, and only counts while something else is moving:
+     * Late and On time on, with At risk going on and off between them.
+     */
+    const PLAN = [
+      { key: '2', y: top + 130 }, // At risk on: its rows come up through here
+      { key: '2', y: top + 130 }, // off: and go back down
+      { key: '2', y: top + 20 }, // on: the first of them, on its way to the top
+      { key: '2', y: last }, // off: rows arrive at the end of the view
+      { key: '2', y: last }, // on: its rows leave the end of the view, going up
+      { key: '2', y: top + 20 }, // off: the first of them leaves the top, going down
+      { key: '1', y: top + 200 }, // Late on
+      { key: '3', y: top + 20 }, // On time on
+      { key: '2', y: top + 20 }, // At risk on: On time moves down, the first row stays put
+      { key: '2', y: top + 20 }, // off: On time moves up, the first row stays put
+      { key: '2', y: top + 200 }, // on: the rows in the middle stay put too
+      { key: '2', y: last }, // off: On time moves up from the end of the view
+      { key: '3', y: top + 20 }, // On time off
+      { key: '1', y: last }, // Late off: back to the whole list
+    ];
+
+    const TIMES = [20, 60, 120];
+    const HOLDS = [16, 40, 80, 150];
+    const ROUNDS_PER_COMBO = 16;
+    const lateBy = new Map<number, number>(TIMES.map((t) => [t, 0]));
+    const tally: Tally[] = [];
+    let step = 0;
+
+    for (const time of TIMES) {
+      for (const hold of HOLDS) {
+        let done = 0;
+        let tries = 0;
+        while (done < ROUNDS_PER_COMBO && tries < ROUNDS_PER_COMBO * 4) {
+          tries += 1;
+          const { key, y } = PLAN[step % PLAN.length]!;
+          step += 1;
+          // Selecting a row near the end scrolls it into view. Each press starts from the top.
+          await page.evaluate(() => {
+            document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 0;
+          });
+          await page.mouse.move(x, y);
+
+          // The chip in the page, then the real press after the delay that has been landing on time.
+          const fired = startGlide(page, key);
+          await sleep(Math.max(0, time - lateBy.get(time)!));
+          await page.mouse.down();
+          await fired;
+          const pressedAt = await page.evaluate(() => (window as unknown as { __press: Press }).__press);
+          await sleep(hold);
+          await page.mouse.up();
+          const press = await page.evaluate(() => (window as unknown as { __press: Press }).__press);
+          expect(press.hit).toBe(pressedAt.hit);
+
+          // Keeps the timing honest: what landed teaches the next one.
+          if (press.at !== null) lateBy.set(time, lateBy.get(time)! + (press.at - time) * 0.4);
+          const onTime = press.at !== null && Math.abs(press.at - time) <= 18;
+
+          const expected = press.gap ? press.nearest : [press.hit!];
+          await expect
+            .poll(async () => expected.includes((await selected(page)) ?? ''), { timeout: 1_000 })
+            .toBe(true)
+            .catch(() => {});
+          const now = await selected(page);
+          await expect.poll(() => stillMoving(page), { timeout: 3_000 }).toBe(0);
+          if (onTime) {
+            done += 1;
+            tally.push({ ...press, time, hold, selected: now, ok: expected.includes(now ?? '') });
+          }
+        }
+        expect(done, `${time}ms, held ${hold}ms: presses that landed on time`).toBe(ROUNDS_PER_COMBO);
+      }
+    }
+
+    const rows = tally.reduce<
+      Record<string, { presses: number; misses: number; gaps: number; moved: number; mostMoved: number }>
+    >((table, t) => {
+      const key = `${t.time}ms, held ${t.hold}ms`;
+      const row = (table[key] ??= { presses: 0, misses: 0, gaps: 0, moved: 0, mostMoved: 0 });
+      row.presses += 1;
+      if (!t.ok) row.misses += 1;
+      if (t.gap) row.gaps += 1;
+      const drift = t.drift ?? 0;
+      if (drift > 0.5) row.moved += 1;
+      row.mostMoved = Math.max(row.mostMoved, Math.round(drift * 10) / 10);
+      return table;
+    }, {});
+    const kinds = tally.reduce<Record<string, number>>((all, t) => {
+      const kind = t.gap ? 'a gap' : t.moving;
+      all[kind] = (all[kind] ?? 0) + 1;
+      if (!t.gap) all[`place ${t.place}`] = (all[`place ${t.place}`] ?? 0) + 1;
+      all[`${kind}, ${t.place}`] = (all[`${kind}, ${t.place}`] ?? 0) + 1;
+      return all;
+    }, {});
+    const report = JSON.stringify({ rows, kinds, misses: tally.filter((t) => !t.ok) }, null, 1);
+    await info.attach('press-table', { body: report, contentType: 'application/json' });
+    process.stdout.write(`PRESS TABLE\n${report}\nEND PRESS TABLE\n`);
+
+    expect(tally.filter((t) => !t.ok)).toEqual([]);
+    // The press held it: nothing under the pointer moved from the press to the release.
+    expect(tally.filter((t) => (t.drift ?? 0) > 0.5)).toEqual([]);
+    // It tested what it claims: rows of every kind, in both places, and gaps too.
+    for (const kind of ['up', 'down', 'still', 'a gap', 'place first', 'place last']) {
+      expect(kinds[kind] ?? 0, kind).toBeGreaterThan(5);
+    }
+    for (const moving of ['up', 'down', 'still']) {
+      for (const place of ['first', 'last']) {
+        expect(kinds[`${moving}, ${place}`] ?? 0, `${moving}, ${place}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test('a press in a gap selects the nearest row drawn, never nothing', async ({ page }) => {
+    test.setTimeout(120_000);
+    await listenForPresses(page);
+    await openMixed(page);
+    const view = await page.evaluate(() => {
+      const r = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.getBoundingClientRect();
+      return { left: r.left, top: r.top, bottom: r.bottom };
+    });
+    const x = view.left + 300;
+    // At risk on: the Late rows go, and the At risk rows have not got here yet. Off: they
+    // have only just left, and the rows coming back start further down.
+    const spots = [view.top + 208, view.bottom - 120];
+    let gaps = 0;
+    for (let i = 0; i < 16; i += 1) {
+      await page.mouse.move(x, spots[i % spots.length]!);
+      const fired = startGlide(page, '2');
+      await sleep(4 + (i % 4) * 6);
+      await page.mouse.down();
+      await fired;
+      await sleep(40);
+      await page.mouse.up();
+      const press = await page.evaluate(() => (window as unknown as { __press: Press }).__press);
+      const expected = press.gap ? press.nearest : [press.hit!];
+      if (press.gap) gaps += 1;
+      await expect
+        .poll(async () => expected.includes((await selected(page)) ?? ''), { timeout: 1_000 })
+        .toBe(true);
+      await expect.poll(() => stillMoving(page), { timeout: 3_000 }).toBe(0);
+    }
+    expect(gaps).toBeGreaterThan(0);
+  });
+
+  test('press and move off: nothing is selected, and the rows go on', async ({ page }) => {
+    await openMixed(page);
+    const box = (await page.locator('[data-row-id]').nth(2).boundingBox())!;
+    await page.mouse.move(box.x + 300, box.y + 10);
+    await page.keyboard.press('1');
+    await page.mouse.down();
+    await page.mouse.move(5, 5, { steps: 3 });
+    await page.mouse.up();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await selected(page)).toBeNull();
+    expect(await atRest(page)).toEqual(RESTING);
+  });
+
+  test('a press in a gap that moves off selects nothing, and a hand’s shake still selects', async ({ page }) => {
+    test.setTimeout(120_000);
+    await listenForPresses(page);
+    await openMixed(page);
+    const view = await page.evaluate(() => {
+      const r = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.getBoundingClientRect();
+      return { left: r.left, top: r.top };
+    });
+    const x = view.left + 300;
+    // At risk on: the Late rows have gone and the At risk rows are not here yet.
+    const y = view.top + 208;
+
+    /** Only a press that really landed in a gap says anything: others are tried again. */
+    const gapPress = async (dy: number) => {
+      for (let i = 0; i < 16; i += 1) {
+        await page.mouse.move(x, y);
+        await page.keyboard.press('Escape');
+        const fired = startGlide(page, '2');
+        await sleep(6);
+        await page.mouse.down();
+        await fired;
+        await page.mouse.move(x, y + dy);
+        await page.mouse.up();
+        const press = await page.evaluate(() => (window as unknown as { __press: Press }).__press);
+        await expect.poll(() => stillMoving(page), { timeout: 3_000 }).toBe(0);
+        const now = await selected(page);
+        await startGlide(page, '2');
+        await expect.poll(() => stillMoving(page), { timeout: 3_000 }).toBe(0);
+        if (press.gap) return now;
+      }
+      throw new Error('No press landed in a gap');
+    };
+    expect(await gapPress(2)).not.toBeNull();
+    expect(await gapPress(40)).toBeNull();
+  });
+
+  /**
+   * The browser sends a click to what the press and the release have in common. A press holds
+   * everything, but the animation clock can tick over between the hit test and the hold, and
+   * at the start of a glide a frame can be a whole row. Forced here by taking the pressed
+   * row out from under the pointer in the middle of the press.
+   */
+  test('the release finds something else: the pressed row is still the row selected', async ({ page }) => {
+    await openMixed(page);
+    const row = page.locator('[data-row-id]').nth(2);
+    const id = await row.getAttribute('data-row-id');
+    const box = (await row.boundingBox())!;
+    await page.mouse.move(box.x + 300, box.y + box.height / 2);
+    await page.keyboard.press('1');
+    await page.mouse.down();
+    await page.evaluate((rowId) => {
+      const pressed = document.querySelector(`[data-row-id="${rowId}"]`) as HTMLElement;
+      pressed.style.pointerEvents = 'none';
+      (pressed.parentElement as HTMLElement).style.pointerEvents = 'none';
+    }, id);
+    await page.mouse.up();
+    await expect(page.locator(`[data-row-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('a double press opens the row under the pointer', async ({ page }) => {
+    await openMixed(page);
+    const box = (await page.locator('[data-row-id]').nth(3).boundingBox())!;
+    await page.mouse.move(box.x + 300, box.y + 20);
+    await page.keyboard.press('1');
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
+    const modal = page.getByRole('dialog', { name: /^(Edit|New) load for truck/ });
+    await modal.waitFor();
+    const title = await modal.getAttribute('aria-label');
+    const chosen = await selected(page);
+    const number = await page.locator(`[data-row-id="${chosen}"]`).evaluate((r) => r.textContent ?? '');
+    expect(number).toContain(/truck (\S+)$/.exec(title!)![1]!);
+  });
+
+  test('Space and Enter mid-glide work on the row that has focus', async ({ page }) => {
+    await openMixed(page);
+    const row = page.locator('[data-row-id]').nth(1);
+    const id = await row.getAttribute('data-row-id');
+    await row.focus();
+    await page.keyboard.press('1');
+    await page.keyboard.press(' ');
+    await expect(page.locator(`[data-row-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await page.keyboard.press('2');
+    await page.locator(`[data-row-id="${id}"]`).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog', { name: /^(Edit|New) load for truck/ })).toBeVisible();
+  });
+
+  test('X mid-glide checks the selected row', async ({ page }) => {
+    await openMixed(page);
+    const row = page.locator('[data-row-id]').nth(1);
+    await row.click();
+    const id = await row.getAttribute('data-row-id');
+    await page.keyboard.press('1');
+    await page.keyboard.press('x');
+    await expect(page.locator(`[data-row-id="${id}"] input[type="checkbox"]`)).toBeChecked();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+  });
+
+  test('a row’s own buttons work mid-glide: its checkbox checks and does not select', async ({ page }) => {
+    await openMixed(page);
+    const box = (await page.locator('[data-row-id]').nth(1).locator('input[type="checkbox"]').boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const id = await page.locator('[data-row-id]').nth(1).getAttribute('data-row-id');
+    // Late rows stay put, so the checkbox is where the pointer is, in the middle of a glide.
+    await page.keyboard.press('1');
+    const moving = await page.evaluate(() =>
+      document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    );
+    await page.mouse.down();
+    await page.mouse.up();
+    expect(moving).toBeGreaterThan(0);
+    await expect(page.locator(`[data-row-id="${id}"] input[type="checkbox"]`)).toBeChecked();
+    expect(await selected(page)).toBeNull();
+  });
+
+  test('a row’s pin works mid-glide', async ({ page }) => {
+    await openMixed(page);
+    const row = page.locator('[data-row-id]').nth(1);
+    const id = await row.getAttribute('data-row-id');
+    const number = (await row.locator('button[aria-label^="Pin truck"]').getAttribute('aria-label'))!;
+    await row.hover();
+    const pin = (await row.locator('button[aria-label^="Pin truck"]').boundingBox())!;
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2);
+    await page.keyboard.press('1');
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(page.getByRole('button', { name: number.replace('Pin', 'Unpin') })).toBeVisible();
+    expect(await selected(page)).toBeNull();
+    expect(id).not.toBeNull();
+  });
 });

@@ -470,12 +470,18 @@ export function Console({
   const editingRow = useWindowRow(editingId, all);
 
   const filtered = useMemo(() => filterRows(rows, query), [rows, query]);
-  const { ordered, drift, resort } = useDisplayOrder(
+  const { ordered, drift, resort, resorts } = useDisplayOrder(
     filtered,
     'urgency',
     // §12.4: order recomputes on a filter or search change, never on a poll.
     `${query}|${[...chips].sort().join(',')}`,
   );
+  /**
+   * §12.149. What may start a glide, by name, and all of it: a chip, a list, the reorder
+   * bar. Not the search, which would start one on every key. Nothing else can, because
+   * nothing else changes this: not a poll, a density, a resize or a scroll.
+   */
+  const glideCause = `${[...chips].sort().join(',')}|${listId ?? ''}|${resorts}`;
 
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
@@ -1089,6 +1095,7 @@ export function Console({
                       gives the wrapper no box of its own at 768 and up. */}
                   <div className="contents max-md:hidden">
                     <FleetList
+                      glideCause={glideCause}
                       density={density}
                       checked={bulk.checked}
                       onCheck={bulk.toggle}
