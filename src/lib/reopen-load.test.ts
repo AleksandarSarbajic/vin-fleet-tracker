@@ -147,6 +147,13 @@ describe('the confirm step', () => {
     ]);
   });
 
+  it('says the typed work goes, last, and nothing when there is none', () => {
+    expect(reopenLines({ ...base, unsaved: ['load number', 'city'] }).at(-1)).toBe(
+      'Unsaved edits in this form are discarded: load number, city.',
+    );
+    expect(reopenLines({ ...base, unsaved: [] })).toEqual(reopenLines(base));
+  });
+
   it('the day is named when the close was not today', () => {
     const line = reopenLines({ ...base, now: new Date('2026-10-05T15:00:00Z') })[0]!;
     expect(line).toContain('on Sat 08:04 CDT.');

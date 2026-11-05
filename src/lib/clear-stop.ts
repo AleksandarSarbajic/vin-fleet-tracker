@@ -144,10 +144,13 @@ export function confirmLines(input: {
   lines.push(
     'Not changed: the driver assignment, whether the truck is active, and its history.',
   );
-  if (input.unsaved.length > 0) {
-    lines.push(`Unsaved edits in this form are discarded: ${input.unsaved.join(', ')}.`);
-  }
+  if (input.unsaved.length > 0) lines.push(unsavedEditsLine(input.unsaved));
   return lines;
+}
+
+/** What a confirm says when answering it closes a form with typed work. */
+export function unsavedEditsLine(unsaved: readonly string[]): string {
+  return `Unsaved edits in this form are discarded: ${unsaved.join(', ')}.`;
 }
 
 /* ------------------------- previous loads (§12.92) ----------------------- */

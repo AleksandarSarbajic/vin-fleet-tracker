@@ -21,6 +21,7 @@ export function ReopenConfirm({
   truckName,
   load,
   dispatchTz,
+  unsaved,
   onBack,
   onReopened,
 }: {
@@ -28,6 +29,8 @@ export function ReopenConfirm({
   truckName: string;
   load: RecentlyClosed;
   dispatchTz: string;
+  /** What is typed in the form behind this: answering closes it. */
+  unsaved: readonly string[];
   onBack: () => void;
   onReopened: () => void;
 }) {
@@ -49,6 +52,7 @@ export function ReopenConfirm({
     late: load.late,
     dispatchTz,
     now,
+    unsaved,
   });
 
   const confirm = useCallback(async () => {

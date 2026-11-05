@@ -296,3 +296,55 @@ test('on a phone there is no way to reopen', async ({ browser }) => {
     await context.close();
   }
 });
+
+test.describe('Reopen… from a form with typed work', () => {
+  const zip = TRUCK_NUMBERS.zip;
+
+  async function typedForm(page: Page) {
+    await page.goto('/');
+    await close(page, IDS.truckAtZipStop, IDS.loadZip);
+    await page.reload();
+    await openModal(page, IDS.truckAtZipStop, zip);
+    const modal = editModal(page, zip);
+    await modal.getByLabel('Load number').fill('TYPED-NEW-LOAD');
+    return modal;
+  }
+
+  async function askToReopen(page: Page) {
+    const section = page.locator('[data-recently-closed]');
+    await section.locator('summary').click();
+    await section.getByRole('button', { name: 'Reopen…' }).click();
+    await expect(confirmStep(page)).toBeVisible();
+  }
+
+  test('the confirm says the typed work goes, Back keeps it, and Reopen takes it', async ({
+    page,
+  }) => {
+    const modal = await typedForm(page);
+    await askToReopen(page);
+    await expect(confirmStep(page)).toContainText(
+      'Unsaved edits in this form are discarded: load number.',
+    );
+
+    await confirmStep(page).getByRole('button', { name: 'Back' }).click();
+    await expect(confirmStep(page)).toHaveCount(0);
+    await expect(modal.getByLabel('Load number')).toHaveValue('TYPED-NEW-LOAD');
+
+    await page.locator('[data-recently-closed]').getByRole('button', { name: 'Reopen…' }).click();
+    await confirmStep(page).getByRole('button', { name: 'Reopen load' }).click();
+    await expect(modal).toBeHidden();
+    expect((await db103()).status).toBe('DISPATCHED');
+  });
+
+  test('nothing typed: the confirm says nothing about it, exactly as before', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await close(page, IDS.truckAtZipStop, IDS.loadZip);
+    await page.reload();
+    await openConfirm(page);
+    await expect(confirmStep(page)).not.toContainText('Unsaved');
+    await confirmStep(page).getByRole('button', { name: 'Reopen load' }).click();
+    await expect(editModal(page, zip)).toBeHidden();
+  });
+});

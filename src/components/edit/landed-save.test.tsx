@@ -66,6 +66,8 @@ let saves: (() => Response)[];
 /** `GET /api/loads/:id`, by id; each a queue like `saves`. */
 let reads: Record<string, (() => Response)[]>;
 let flip: () => Promise<Response>;
+/** `GET /api/stops/reopen`: "Recently closed on this truck". */
+let closedLoads: unknown[];
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -85,10 +87,12 @@ beforeEach(() => {
   saves = [() => landed(LOAD, RETURNED)];
   reads = {};
   flip = async () => json(200, { ok: true });
+  closedLoads = [];
   globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? '') });
     if (url === '/api/stops') return next(saves);
     if (url === '/api/trucks') return flip();
+    if (url.startsWith('/api/stops/reopen')) return json(200, { loads: closedLoads });
     if (url === '/api/assignments/preview') return json(200, PREVIEW);
     const id = url.match(/^\/api\/loads\/(.+)$/)?.[1];
     if (id) return reads[id] ? next(reads[id]) : json(404, { error: 'That load does not exist.' });
@@ -848,5 +852,45 @@ describe('leaving the page: the same condition the Discard question uses', () =>
     expect(browserWouldAsk()).toBe(true);
     await act(async () => root!.render(null));
     expect(browserWouldAsk()).toBe(false);
+  });
+});
+
+describe('Reopen… from the form: the confirm is told what is typed', () => {
+  const confirmWords = async () => {
+    await click(button('Reopen…'));
+    return document.querySelector('[data-reopen-confirm]')?.textContent ?? '';
+  };
+
+  beforeEach(() => {
+    closedLoads = [
+      {
+        loadId: LOAD,
+        loadNumber: 'VT-3AF-7',
+        close: {
+          closeAuditId: '55555555-5555-4555-8555-0000000003af',
+          closedAt: '2026-10-19T14:00:00.000Z',
+          closedByName: 'Dee Dispatcher',
+          closedStatus: 'DELIVERED',
+          statusBefore: 'DISPATCHED',
+        },
+        others: [],
+        restored: [],
+        missing: [],
+        late: [],
+      },
+    ];
+  });
+
+  it('says the typed work goes', async () => {
+    await render(NEW_LOAD);
+    await type(field('Load number', container!), 'VT-3AF-1');
+    expect(await confirmWords()).toContain(
+      'Unsaved edits in this form are discarded: load number.',
+    );
+  });
+
+  it('says nothing when nothing is typed', async () => {
+    await render(NEW_LOAD);
+    expect(await confirmWords()).not.toContain('Unsaved');
   });
 });

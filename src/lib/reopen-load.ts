@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dispatchTime } from './clear-stop';
+import { dispatchTime, unsavedEditsLine } from './clear-stop';
 import {
   ARRIVAL_DEFAULTS,
   departureCentre,
@@ -247,6 +247,8 @@ export function reopenLines(input: {
   late: readonly { place: string }[];
   dispatchTz: string;
   now: Date;
+  /** What is typed in the form this closes. Said last, as Clear stop says it. */
+  unsaved?: readonly string[];
 }): string[] {
   const { close, dispatchTz, now } = input;
   const time = dispatchTime(close.closedAt, dispatchTz, now);
@@ -285,6 +287,7 @@ export function reopenLines(input: {
     );
   }
   lines.push(NOTHING_ELSE);
+  if (input.unsaved && input.unsaved.length > 0) lines.push(unsavedEditsLine(input.unsaved));
   return lines;
 }
 

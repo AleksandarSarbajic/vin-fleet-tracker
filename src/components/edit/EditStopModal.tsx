@@ -1362,6 +1362,7 @@ function LoadEditor({
               dispatchTz={dispatchTz}
               mayEdit={mayEdit}
               lockedReason={lockedReason}
+              unsaved={unsaved}
               onReopened={onClose}
             />
           </div>

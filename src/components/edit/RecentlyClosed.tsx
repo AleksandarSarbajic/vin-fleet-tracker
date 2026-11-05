@@ -30,6 +30,7 @@ export function RecentlyClosed({
   dispatchTz,
   mayEdit,
   lockedReason,
+  unsaved,
   onReopened,
 }: {
   truckId: string;
@@ -37,6 +38,7 @@ export function RecentlyClosed({
   dispatchTz: string;
   mayEdit: boolean;
   lockedReason: string;
+  unsaved: readonly string[];
   onReopened: () => void;
 }) {
   const query = useQuery({
@@ -90,6 +92,7 @@ export function RecentlyClosed({
           truckName={truckName}
           load={confirming}
           dispatchTz={dispatchTz}
+          unsaved={unsaved}
           onBack={() => setConfirming(null)}
           onReopened={onReopened}
         />
