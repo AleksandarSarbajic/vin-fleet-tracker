@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { createElement, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KEYMAP } from '@/lib/keymap';
 import { OverlayProvider, Overlay, useOverlay } from './OverlayLayer';
 import { ShortcutSheet } from './ShortcutSheet';
@@ -60,6 +60,18 @@ describe('the cheat sheet (§14 feature 1)', () => {
     press('?');
     press('Escape');
     expect(dialogs()).toHaveLength(0);
+  });
+
+  it('the Esc that closes it ends there: the board never hears that press', () => {
+    mount(<ShortcutSheet />);
+    press('?');
+    // Registered after the sheet's, as the board's is once a poll has re-rendered it.
+    const heard = vi.fn();
+    window.addEventListener('keydown', heard, true);
+    press('Escape');
+    window.removeEventListener('keydown', heard, true);
+    expect(dialogs()).toHaveLength(0);
+    expect(heard).not.toHaveBeenCalled();
   });
 
   it('does not open while the user is typing (§14.3)', () => {

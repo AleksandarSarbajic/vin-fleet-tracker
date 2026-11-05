@@ -156,6 +156,10 @@ export function CommandPalette<T extends PaletteTruck>({
           }
           if (event.key === 'Enter') {
             event.preventDefault();
+            // With focus on a row rather than in the box, the typing guard would not
+            // hold. The palette closes before the board hears this, and the board's
+            // Enter would open the edit window on the truck just jumped to.
+            event.stopPropagation();
             const command = commands[safeCursor];
             if (command) run(command);
           }

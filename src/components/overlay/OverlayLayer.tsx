@@ -94,12 +94,18 @@ export function Overlay({
    * Capture phase: an input inside the panel may stop propagation of its own
    * Esc (the search field clears itself first), and the overlay still has to
    * close.
+   *
+   * Stopped, and at once. The close lands in a microtask, before the next listener
+   * runs, so by then `isWindowOpen` is rightly false and the board would answer this
+   * same press: it cleared the selection, or the checked rows once a poll had
+   * re-registered the board's listener behind this one.
    */
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopImmediatePropagation();
         show(null);
       }
     };

@@ -195,6 +195,17 @@ describe('running a command', () => {
     expect(container.querySelector('[aria-label="Keyboard shortcuts"]')).not.toBeNull();
   });
 
+  it('the Enter that runs a row ends there: the board never hears that press', () => {
+    render();
+    press('k', { metaKey: true });
+    const heard = vi.fn();
+    window.addEventListener('keydown', heard);
+    enter();
+    window.removeEventListener('keydown', heard);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(heard).not.toHaveBeenCalled();
+  });
+
   it('runs the row the mouse is over, not the row the cursor was on', () => {
     render();
     press('k', { metaKey: true });

@@ -87,7 +87,10 @@ export function TruckTimeline({
       if (event.key !== 'Escape') return;
       // Nothing here is unsaved, so Esc closes outright — no discard confirm,
       // which is the one thing that makes this cheaper than the edit modal.
-      event.stopPropagation();
+      // Immediate: the board's Esc for checked rows sits beside this one on window.
+      // It is spared today only because closing this re-renders Console, which
+      // removes it mid-press, and that is a reason nobody chose.
+      event.stopImmediatePropagation();
       onClose();
     };
     window.addEventListener('keydown', onKey, true);
