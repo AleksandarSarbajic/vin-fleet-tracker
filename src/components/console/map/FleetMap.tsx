@@ -217,8 +217,6 @@ export function FleetMap({
     const frame = frameRef.current;
     const popup = frame?.querySelector('.ft-popup');
     if (!map || !frame || !popup) return;
-    // A press took over from the pan that led here (§12.149). It is the dispatcher's map now.
-    if (map.dragPan.isActive()) return;
     // §12.96: on a phone the popup is not drawn (the truck sheet is). A box of
     // nothing at 0,0 would read as a popup far off the map and pan to it.
     if (popup.getBoundingClientRect().width === 0) return;
@@ -353,10 +351,16 @@ export function FleetMap({
    * §12.149, a press holds what is moving. A pan this long can be under way when someone
    * presses a marker, and a marker that moved between the press and the release is not
    * under the click any more: the click would land on bare map and clear the selection.
-   * Mapbox has no pause for it, so the pan stops where it is.
+   * Mapbox has no pause for it, so the pan stops where it is, and its landing's nudge with
+   * it: that would otherwise move the map under the press that had just stopped it.
    */
   const stopForPress = useCallback(() => {
-    mapRef.current?.getMap()?.stop();
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    clearRun.current += 1;
+    if (travelEnd.current) map.off('moveend', travelEnd.current);
+    travelEnd.current = null;
+    map.stop();
   }, []);
 
   const handleClick = useCallback(

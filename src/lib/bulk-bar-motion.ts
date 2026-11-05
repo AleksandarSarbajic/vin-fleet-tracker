@@ -1,5 +1,4 @@
 import { EASING, MOTION_MS } from '@/design/tokens';
-import { makeInert } from '@/components/overlay/dialog-motion';
 import { clearStyle, mayMove, play, whenOver } from './motion';
 
 /**
@@ -52,7 +51,8 @@ export function barClosing(slot: HTMLElement): void {
   });
   // Where it was drawn, so a bar closed on its way up goes down from there.
   const drawn = getComputedStyle(bar).transform;
-  const copy = makeInert(bar);
+  // The holder is what makes it inert: the bar itself has no id, role or label to strip.
+  const copy = bar.cloneNode(true) as HTMLElement;
   holder.append(copy);
   document.body.append(holder);
   const going = play(copy, [{ transform: drawn }, { transform: OUT_OF_THE_SLOT }], timing);

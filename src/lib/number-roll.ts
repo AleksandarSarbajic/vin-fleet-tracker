@@ -40,7 +40,7 @@ export function rollNumber(box: HTMLElement, number: HTMLElement, from: number):
   const going = play(
     copy,
     [{ transform: 'none', opacity: 1 }, { transform: `translateY(${-way * 100}%)`, opacity: 0 }],
-    { ...options, fill: 'forwards' },
+    options,
   );
 
   const end = () => {

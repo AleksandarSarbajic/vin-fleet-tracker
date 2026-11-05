@@ -1658,12 +1658,14 @@ test.describe('step 6, the selection slides', () => {
     const target = document.querySelector('[data-selection-target]');
     const selected = document.querySelector('[data-row-id][aria-selected="true"]');
     return {
+      at: performance.now(),
       count: found.length,
       y: found[0]?.getBoundingClientRect().y ?? null,
       height: found[0]?.getBoundingClientRect().height ?? null,
       target: target ? getComputedStyle(target).backgroundColor : null,
       selected: selected ? getComputedStyle(selected).backgroundColor : null,
       leftOn: selected?.getAttribute('data-row-id') ?? null,
+      selectedY: selected?.getBoundingClientRect().y ?? null,
     };
   };
   const SELECTED_GROUND = 'rgb(27, 34, 43)';
@@ -1707,6 +1709,10 @@ test.describe('step 6, the selection slides', () => {
       // Down the list, and never back.
       expect(flying[i]!.y!).toBeGreaterThanOrEqual(flying[i - 1]!.y!);
     }
+    // It arrives on the row: its last frame is within a few pixels of it, and level with it.
+    const landed = (await rowAt(page, 8).boundingBox())!;
+    expect(Math.abs(flying.at(-1)!.y! - landed.y)).toBeLessThan(6);
+    expect(flying.at(-1)!.height).toBeCloseTo(landed.height, 1);
     // The row it is going to keeps its ground back until it lands, so it is seen once.
     expect(new Set(flying.map((f) => f.target))).toEqual(new Set(['rgba(0, 0, 0, 0)']));
     expect(await rowAt(page, 8).getAttribute('data-selection-target')).toBeNull();
@@ -1747,7 +1753,7 @@ test.describe('step 6, the selection slides', () => {
     await rowAt(page, 0).click();
     await quiet(page);
     const frames = await record(page, frame);
-    // Two frames apart, in the page, so each key lands well before the last has arrived.
+    // A key on every frame, in the page, so each lands long before the last has arrived.
     await page.evaluate(
       () =>
         new Promise<void>((done) => {
@@ -1756,7 +1762,7 @@ test.describe('step 6, the selection slides', () => {
             if (left === 0) return done();
             left -= 1;
             window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
-            requestAnimationFrame(() => requestAnimationFrame(next));
+            requestAnimationFrame(next);
           };
           next();
         }),
@@ -1765,14 +1771,18 @@ test.describe('step 6, the selection slides', () => {
     await expect(page.locator(OVERLAY)).toHaveCount(0);
     const seen = await frames();
     expect(Math.max(...seen.map((f) => f.count))).toBe(1);
-    const ys = seen.flatMap((f) => (f.y === null ? [] : [f.y]));
+    const flying = seen.filter((f) => f.y !== null);
+    const ys = flying.map((f) => f.y!);
     expect(ys.length).toBeGreaterThan(3);
-    for (let i = 1; i < ys.length; i += 1) {
-      // A frame of this curve covers a quarter of what is left, and what is left stays under
-      // a few rows while keys keep coming. A retarget from anywhere but where it is drawn
-      // is a jump of the whole of that.
-      expect(Math.abs(ys[i]! - ys[i - 1]!)).toBeLessThan(60);
+    for (let i = 1; i < flying.length; i += 1) {
+      // A long frame covers more ground: each key does work beyond the highlight.
+      const frames = Math.max(1, (flying[i]!.at - flying[i - 1]!.at) / (1000 / 60));
+      expect(Math.abs(ys[i]! - ys[i - 1]!)).toBeLessThan(60 * frames);
     }
+    // Taken up from where it is drawn, it falls behind keys this fast. Taken up from the row
+    // it was last going to, it would never be more than a row behind the selected one.
+    const behind = flying.map((f) => f.selectedY! - f.y!);
+    expect(Math.max(...behind)).toBeGreaterThan(44 * 1.5);
   });
 
   test('the last row on the screen and one more: it slides, the list follows, and nothing grows', async ({ page }) => {
@@ -1796,11 +1806,14 @@ test.describe('step 6, the selection slides', () => {
     await openLong(page);
     await rowAt(page, 0).click();
     await quiet(page);
+    // Past the top of the view and still drawn, since the list draws a few beyond it: a row
+    // not drawn at all would not tell this apart from having nowhere to come from.
     await page.evaluate(() => {
-      document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 900;
+      document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 200;
     });
     await quiet(page);
-    const target = page.locator('[data-row-id]').filter({ hasNotText: /^$/ }).nth(12);
+    await expect(rowAt(page, 0)).toHaveAttribute('aria-selected', 'true');
+    const target = page.locator('[data-row-id]').nth(12);
     const frames = await record(page, frame);
     await target.click();
     await expect(target).toHaveAttribute('aria-selected', 'true');
@@ -1965,12 +1978,20 @@ test.describe('step 6, the map travels', () => {
     });
   const clearCalls = calls;
 
-  async function openSpread(page: Page) {
+  /** Further apart than a popup is wide, so a popup in flight is often off the map. */
+  const farApart = (rows: (FleetRowLike & { lat?: number; lng?: number })[]) => {
+    rows.forEach((row, i) => {
+      row.lat = 25 + (i % 2) * 22;
+      row.lng = -150 + i * 17;
+    });
+  };
+
+  async function openSpread(page: Page, place: typeof spread = spread) {
     await resetWorld({ extraTrucks: 12 });
     await page.goto('/');
     await page.locator('[data-row-id]').first().waitFor();
     await page.locator('canvas.mapboxgl-canvas').waitFor();
-    await pollWith(page, spread);
+    await pollWith(page, place);
     await quiet(page);
     await spyOnMap(page);
   }
@@ -2047,7 +2068,7 @@ test.describe('step 6, the map travels', () => {
   });
 
   test('fast arrow keys: no pile-up, and the map ends on the last row', async ({ page }) => {
-    await openSpread(page);
+    await openSpread(page, farApart);
     await selectAndLand(page, 4);
     await clearCalls(page);
     // Faster than a pan, so each key arrives in the middle of the last one's travel.
@@ -2069,16 +2090,55 @@ test.describe('step 6, the map travels', () => {
     expect(end.center![1]).toBeCloseTo(last.center![1], 3);
   });
 
-  test('a press on the map stops it there, and a drag is left alone', async ({ page }) => {
-    await openSpread(page);
+  /** A nudge is under way, and a new truck is chosen: the old nudge does not go on. */
+  test('a new selection while the last popup is being nudged: the nudge stops there', async ({ page }) => {
+    await openSpread(page, farApart);
     await selectAndLand(page, 3);
+    await clearCalls(page);
+    // Truck 103's tall popup is nudged as it lands.
+    await page.locator('[data-row-id]').nth(0).click();
+    await page.waitForFunction(
+      () => (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'panBy'),
+      undefined,
+      { polling: 'raf' },
+    );
+    await page.locator('[data-row-id]').nth(9).evaluate((el) => (el as HTMLElement).click());
+    await page.waitForTimeout(MAP_MS + 400);
+    const seen = await calls(page);
+    const last = seen.filter((c) => c.name === 'easeTo').at(-1)!;
+    const end = seen.find((c) => c.name === 'moveend' && c.at > last.at + MAP_MS - 60)!;
+    expect(seen.filter((c) => c.name === 'panBy' && c.at > last.at && c.at < end.at)).toEqual([]);
+    expect(end.center![0]).toBeCloseTo(last.center![0], 3);
+    expect(end.center![1]).toBeCloseTo(last.center![1], 3);
+  });
+
+  test('a press on the map stops it there, and a drag is left alone', async ({ page }) => {
+    await openSpread(page, farApart);
+    await selectAndLand(page, 3);
+    // Zoomed in, where the map is flat: at the fleet's zoom Mapbox draws a globe, and a far
+    // truck's popup never leaves it.
+    for (let i = 0; i < 3; i += 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await page.waitForTimeout(ZOOM_MS + 80);
+    }
+    await quiet(page);
     const map = (await page.locator('.mapboxgl-map').boundingBox())!;
     const spot = { x: map.x + 40, y: map.y + map.height - 80 };
     await page.mouse.move(spot.x, spot.y);
     await clearCalls(page);
 
     await page.locator('[data-row-id]').nth(9).evaluate((el) => (el as HTMLElement).click());
-    await page.waitForTimeout(MAP_MS / 4);
+    // Early in a long pan, with the new truck's popup still off the map: the case in which
+    // the landing, if it were still armed, would nudge the map under the press.
+    await page.waitForFunction(
+      () => {
+        const popup = document.querySelector('.ft-popup')?.getBoundingClientRect();
+        const box = document.querySelector('.mapboxgl-map')?.getBoundingClientRect();
+        return Boolean(popup && box && popup.right > box.right + 40);
+      },
+      undefined,
+      { polling: 'raf' },
+    );
     await page.mouse.down();
     const stopped = await calls(page);
     expect(stopped.map((c) => c.name)).toContain('stop');
