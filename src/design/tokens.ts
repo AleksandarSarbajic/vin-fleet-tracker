@@ -246,6 +246,8 @@ export const MOTION_MS = {
   /** §12.148. A press answers at once and lets go slowly. */
   pressIn: 60,
   pressOut: 180,
+  /** §12.149. A segment's highlight, from what was chosen to what is. */
+  segmentSlide: 180,
 } as const;
 
 /**

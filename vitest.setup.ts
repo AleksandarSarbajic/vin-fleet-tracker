@@ -19,6 +19,20 @@ import { LOCAL_HOSTS, TEST_DATABASE_URL } from './src/test/url';
 
 loadEnv({ path: '.env.local' });
 
+/**
+ * §12.149. happy-dom has an `animate()` whose animation never finishes, so anything
+ * waiting for its end would wait for ever, with an old number left in the row beside the
+ * new one. Component tests run as if there were no Web Animations; `lib/motion.test.ts`
+ * brings its own, and a real browser is `e2e/new-motion.spec.ts`.
+ */
+if (typeof Element !== 'undefined') {
+  Object.defineProperty(Element.prototype, 'animate', {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // GUARD 1: production credentials do not exist in this process.
 // ---------------------------------------------------------------------------

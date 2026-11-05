@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { resetWorld } from './fixtures';
+import { SIZES, onPhone } from './phone-helpers';
 
 /**
  * Phase 3bd, the new motion (§12.149), in a real browser with motion on and a real
@@ -10,6 +11,13 @@ import { resetWorld } from './fixtures';
  * any frame, and nothing is left when it ends.
  */
 test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+/**
+ * The numbers of §12.149, written out and not read from `tokens.ts`: a test reading the
+ * token passes whatever the token says.
+ */
+const DIALOG_CURVE = 'cubic-bezier(.22,.61,.36,1)';
+const SEGMENT_MS = 180;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -46,7 +54,8 @@ async function watchFrames(page: Page) {
       document.documentElement,
       document.body,
       ...[...document.querySelectorAll<HTMLElement>('body *')].filter((el) => {
-        if (el.closest('.mapboxgl-map')) return false;
+        // A screen reader's 1px box: what it says changes with the clock.
+        if (el.closest('.mapboxgl-map') || el.classList.contains('sr-only')) return false;
         const cs = getComputedStyle(el);
         return overflows.test(cs.overflowX) || overflows.test(cs.overflowY);
       }),
@@ -164,5 +173,317 @@ test.describe('step 1, the map toggle is a long thing', () => {
     await toggle(page).click();
     await expect(toggle(page)).not.toHaveText(name!);
     expect(await split()).toBe(before);
+  });
+});
+
+/**
+ * Whatever `read` returns, on every frame, until stopped. As a string so it runs in
+ * the page with no help from Playwright between frames.
+ */
+async function record<T>(page: Page, read: () => T) {
+  await page.evaluate(`(() => {
+    const read = ${read.toString()};
+    window.__rec = [];
+    window.__recStop = false;
+    const tick = () => {
+      if (window.__recStop) return;
+      window.__rec.push(read());
+      requestAnimationFrame(tick);
+    };
+    tick();
+  })()`);
+  return () =>
+    page.evaluate(() => {
+      const w = window as unknown as { __rec: unknown[]; __recStop: boolean };
+      w.__recStop = true;
+      return w.__rec as T[];
+    });
+}
+
+/**
+ * The page's own frames have settled. The map's first load, drawn in software here,
+ * runs frames of 200ms and more for a second or so after a page opens (measured), and a
+ * 180ms motion started in them is only a frame or two. A condition, not a wait.
+ */
+const quiet = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        let last = performance.now();
+        let calm = 0;
+        const tick = (now: number) => {
+          calm = now - last < 25 ? calm + 1 : 0;
+          last = now;
+          if (calm >= 12) done();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+
+/** A curve as the browser prints it, and as the token writes it, compared as numbers. */
+const curve = (easing: string) => easing.replace(/\s/g, '').replace(/([(,])0\./g, '$1.');
+
+/** Everything the page is still running, other than a button letting go of a press. */
+const stillMoving = (page: Page) =>
+  page.evaluate(
+    () =>
+      document
+        .getAnimations()
+        .filter(
+          (a) => !(a instanceof CSSTransition && ['--press', '--lift', 'transform'].includes(a.transitionProperty)),
+        )
+        .map((a) => (a instanceof CSSTransition ? a.transitionProperty : a.constructor.name)).length,
+  );
+
+test.describe('step 2, a segment highlight slides', () => {
+  const OVERLAY = '[data-segment-slide]';
+  const overlayFrame = () => {
+    const found = [...document.querySelectorAll('[data-segment-slide]')];
+    const w = window as unknown as { __from?: Element; __to?: Element };
+    return {
+      count: found.length,
+      x: found[0]?.getBoundingClientRect().x ?? null,
+      from: w.__from ? getComputedStyle(w.__from).backgroundColor : null,
+      to: w.__to ? getComputedStyle(w.__to).backgroundColor : null,
+    };
+  };
+
+  const expectSlid = async (page: Page, target: Locator) => {
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    await expect(target).not.toHaveAttribute('data-segment-target', '');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+  };
+
+  const groundOf = (el: Element) => {
+    const cs = getComputedStyle(el);
+    return [cs.backgroundColor, cs.borderTopColor, cs.boxShadow];
+  };
+
+  /** One gesture on one control: a real pointer, with every frame read. */
+  async function slideOnce(page: Page, from: Locator, to: Locator) {
+    const before = await page.evaluate(
+      () => document.querySelectorAll('[data-segment-slide]').length,
+    );
+    expect(before).toBe(0);
+    // The stacking context that lets it sit under the words and over the ground.
+    expect(
+      await to.evaluate((el) => {
+        const cs = getComputedStyle(el.parentElement!);
+        return cs.isolation === 'isolate' || cs.zIndex !== 'auto';
+      }),
+    ).toBe(true);
+    await from.evaluate((el) => {
+      (window as unknown as { __from: Element }).__from = el;
+    });
+    await to.evaluate((el) => {
+      (window as unknown as { __to: Element }).__to = el;
+    });
+    const stop = await watchFrames(page);
+    const frames = await record(page, overlayFrame);
+    const box = (await to.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    const timing = await page
+      .locator(OVERLAY)
+      .evaluate((el) => {
+        const [a] = el.getAnimations();
+        const t = a!.effect!.getTiming();
+        return { duration: t.duration, easing: t.easing, fill: t.fill };
+      })
+      .then((t) => ({ ...t, easing: curve(String(t.easing)) }))
+      .catch(() => null);
+    await expectSlid(page, to);
+    const seen = await frames();
+    const { frames: count, grew } = await stop();
+
+    expect(grew).toEqual([]);
+    expect(count).toBeGreaterThan(5);
+    expect(Math.max(...seen.map((f) => f.count))).toBe(1);
+    const xs = seen.flatMap((f) => (f.x === null ? [] : [f.x]));
+    // Two at least: choosing a basemap reloads the map, heavy in software, in the same moment.
+    expect(xs.length).toBeGreaterThan(1);
+    // The old ground is gone as the overlay leaves it, and the new one is there as it
+    // lands: neither fades on its own beside the overlay. A hover can show on `from`.
+    const flying = seen.filter((f) => f.count === 1);
+    expect(new Set(flying.map((f) => f.to))).toEqual(new Set(['rgba(0, 0, 0, 0)']));
+    const landed = seen.slice(seen.map((f) => f.count).lastIndexOf(1) + 1);
+    expect(new Set(landed.map((f) => f.to)).size).toBe(1);
+    expect(flying[0]!.from).toBe(flying.at(-1)!.from);
+    const direction = Math.sign(xs[xs.length - 1]! - xs[0]!);
+    expect(direction).not.toBe(0);
+    for (let i = 1; i < xs.length; i += 1) {
+      // It only ever goes one way, and it never goes back.
+      expect(Math.sign(xs[i]! - xs[i - 1]!) * direction).toBeGreaterThanOrEqual(0);
+    }
+    expect(timing).toEqual({
+      duration: SEGMENT_MS,
+      easing: curve(DIALOG_CURVE),
+      fill: 'auto',
+    });
+  }
+
+  test('the density control: slides, lands, and leaves nothing', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const comfortable = page.locator('[data-segment="comfortable"]');
+    const compact = page.locator('[data-segment="compact"]');
+    const restingLook = await comfortable.evaluate(groundOf);
+    await slideOnce(page, comfortable, compact);
+    await expect(compact).toHaveAttribute('aria-pressed', 'true');
+    await page.mouse.move(1, 1);
+    await expect.poll(() => compact.evaluate(groundOf)).toEqual(restingLook);
+    await expect(compact).not.toHaveAttribute('style', /./);
+  });
+
+  test('the basemap control: slides, lands, and leaves nothing', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const dark = page.locator('[data-segment="dark"]');
+    const satellite = page.locator('[data-segment="satellite"]');
+    await slideOnce(page, dark, satellite);
+    await expect(satellite).toHaveAttribute('aria-pressed', 'true');
+    await expect(satellite).not.toHaveAttribute('style', /./);
+  });
+
+  test('the phone tabs: slide, land, and leave nothing', async ({ browser }) => {
+    const { context, page } = await onPhone(browser, SIZES[3]!);
+    try {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto('/');
+      const list = page.locator('[data-phone-tab="list"]');
+      const map = page.locator('[data-phone-tab="map"]');
+      await map.waitFor();
+      await quiet(page);
+      await slideOnce(page, list, map);
+      await expect(map).toHaveAttribute('aria-selected', 'true');
+      await expect(map).not.toHaveAttribute('style', /./);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('a second choice takes it up from where it is drawn, with no pile-up', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const frames = await record(page, overlayFrame);
+    const comfortable = (await page.locator('[data-segment="comfortable"]').boundingBox())!;
+    const compact = (await page.locator('[data-segment="compact"]').boundingBox())!;
+    const distance = Math.abs(compact.x - comfortable.x);
+    // In the page, two frames apart, so the second lands well before the first arrives:
+    // Playwright's own round trips can outlast most of 180ms and hide a jump.
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          document.querySelector<HTMLElement>('[data-segment="compact"]')!.click();
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLElement>('[data-segment="comfortable"]')!.click();
+              done();
+            }),
+          );
+        }),
+    );
+    await expect(page.locator('[data-segment="comfortable"]')).toHaveAttribute('aria-pressed', 'true');
+    await expectSlid(page, page.locator('[data-segment="comfortable"]'));
+    const seen = await frames();
+    expect(Math.max(...seen.map((f) => f.count))).toBe(1);
+    const xs = seen.flatMap((f) => (f.x === null ? [] : [f.x]));
+    for (let i = 1; i < xs.length; i += 1) {
+      // A frame of this curve covers a quarter of the way at most, at its fastest.
+      expect(Math.abs(xs[i]! - xs[i - 1]!)).toBeLessThan(distance * 0.35);
+    }
+  });
+
+  test('D pressed five times fast: one overlay at a time, and the choice is the last', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const frames = await record(page, overlayFrame);
+    for (let i = 0; i < 5; i += 1) await page.keyboard.press('d');
+    await expect(page.locator('[data-segment="compact"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    expect(Math.max(...(await frames()).map((f) => f.count))).toBe(1);
+  });
+
+  test('a press holds it until it ends', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const compact = (await page.locator('[data-segment="compact"]').boundingBox())!;
+    await page.mouse.click(compact.x + 8, compact.y + 8);
+    await page.mouse.move(400, 12);
+    await page.mouse.down();
+    const time = () =>
+      page.locator(OVERLAY).evaluate((el) => el.getAnimations()[0]!.currentTime as number);
+    const first = await time();
+    expect(first).toBeLessThan(SEGMENT_MS);
+    await page.waitForTimeout(250);
+    expect(await time()).toBe(first);
+    await page.mouse.up();
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+  });
+
+  test('a stored choice does not slide on load, nor when the page comes back', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('ft.density', 'compact');
+      window.localStorage.setItem('ft.basemap', 'satellite');
+      const w = window as unknown as { __slides: number };
+      w.__slides = 0;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          for (const n of r.addedNodes) {
+            if (n instanceof HTMLElement && n.hasAttribute('data-segment-slide')) w.__slides += 1;
+          }
+        }
+      }).observe(document, { subtree: true, childList: true });
+    });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect(page.locator('[data-segment="compact"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-segment="satellite"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.locator('[data-history-summary]').waitFor();
+    await page.keyboard.press('g');
+    await page.keyboard.press('b');
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect(page.locator('[data-segment="compact"]')).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(() => (window as unknown as { __slides: number }).__slides)).toBe(0);
+  });
+
+  test('a filter chip never slides: it is multi-select', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const frames = await record(page, overlayFrame);
+    await page.keyboard.press('1');
+    await page.keyboard.press('2');
+    await page.keyboard.press('0');
+    await quiet(page);
+    expect(Math.max(...(await frames()).map((f) => f.count))).toBe(0);
+  });
+
+  test('under reduced motion: no overlay, no animation, and the choice is at once', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const frames = await record(page, () => ({
+      overlays: document.querySelectorAll('[data-segment-slide]').length,
+      animations: document.getAnimations().filter((a) => !(a instanceof CSSAnimation)).length,
+    }));
+    await page.locator('[data-segment="compact"]').click();
+    await expect(page.locator('[data-segment="compact"]')).toHaveAttribute('aria-pressed', 'true');
+    // Read past the end of where a slide would be. Stopping here read nothing at all.
+    await quiet(page);
+    const seen = await frames();
+    expect(seen.length).toBeGreaterThan(10);
+    expect(Math.max(...seen.map((f) => f.overlays))).toBe(0);
+    expect(Math.max(...seen.map((f) => f.animations))).toBe(0);
   });
 });

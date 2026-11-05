@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -26,4 +26,17 @@ describe('the reduced-motion rule (§8.3)', () => {
     expect(rule).toMatch(/animation-duration:\s*0\.01ms\s*!important/);
   });
 
+  /**
+   * The rule above is CSS, and a Web Animation does not read it: `el.animate()` runs
+   * at full length under reduced motion. So there is one place that may call it, and
+   * that place asks first (`lib/motion.ts`, whose tests hold the asking).
+   */
+  it('nothing outside lib/motion.ts starts a Web Animation', () => {
+    const src = join(__dirname, '..');
+    const offenders = readdirSync(src, { recursive: true, encoding: 'utf8' })
+      .filter((p) => /\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p))
+      .filter((p) => /\.animate\(/.test(readFileSync(join(src, p), 'utf8')))
+      .map((p) => relative('', p));
+    expect(offenders).toEqual(['lib/motion.ts']);
+  });
 });

@@ -1,5 +1,8 @@
 import type { CSSProperties } from 'react';
 import { MOTION_MS } from '@/design/tokens';
+import { prefersReducedMotion } from '@/lib/motion';
+
+export { prefersReducedMotion };
 
 /**
  * §12.148, the timing rules behind `DialogFrame` and `PopFrame`.
@@ -46,18 +49,6 @@ const FADE_MS: Record<FrameKind, number> = {
 const MENU_COPY_LAYER = '70';
 /** What would let anything find the copy instead of the real thing. */
 const IDENTITY = /^(id|name|for|role|tabindex|autofocus|aria-.*|data-.*)$/;
-
-/**
- * Read at the moment it matters, not through `useReducedMotion`: that hook
- * learns the preference in a passive effect, after a frame's layout effect
- * has already decided whether to animate.
- */
-export function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 /** A window fills the screen; a menu hangs from something. */
 export type FrameKind = 'window' | 'menu';

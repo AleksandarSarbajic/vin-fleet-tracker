@@ -561,7 +561,7 @@ export function Console({
   const { data: health } = useFleetHealth(initialHealth);
 
   /** §14 feature 5. Persisted, and bound to D. */
-  const { density, setDensity } = useDensity();
+  const { density, ready: densityReady, setDensity } = useDensity();
 
   /**
    * §14 feature 2. A second cursor over the same list: `selectedId` drives
@@ -1079,6 +1079,7 @@ export function Console({
                   {/* §14.5: the strip is read with the list, not the header. */}
                   <ListToolbar
                     density={density}
+                    densityReady={densityReady}
                     onDensity={setDensity}
                     health={health}
                     drift={drift}

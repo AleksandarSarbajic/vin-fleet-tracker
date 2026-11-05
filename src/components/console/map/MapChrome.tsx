@@ -1,5 +1,6 @@
 'use client';
 
+import { useSegmentSlide } from '@/hooks/useSegmentSlide';
 import { STATUSES, type Status } from '@/lib/status';
 import { STATUS_LABEL } from '@/lib/status';
 import { elapsed } from '@/lib/format';
@@ -215,13 +216,19 @@ const BASEMAP_LABEL: Record<Basemap, string> = { dark: 'Map', satellite: 'Satell
  */
 export function BasemapToggle({
   basemap,
+  ready = true,
   onChange,
 }: {
   basemap: Basemap;
+  /** False until the stored basemap has been read (`useSegmentSlide`). */
+  ready?: boolean;
   onChange: (basemap: Basemap) => void;
 }) {
+  const segments = useSegmentSlide<HTMLDivElement>(basemap, ready);
+
   return (
     <div
+      ref={segments}
       role="group"
       aria-label="Basemap"
       data-map-control
@@ -233,6 +240,7 @@ export function BasemapToggle({
           <button
             key={option}
             type="button"
+            data-segment={option}
             aria-pressed={active}
             onClick={() => onChange(option)}
             className={`flex h-8 items-center px-3 font-cond text-micro uppercase tracking-[.08em] transition-colors duration-ground max-md:h-11 max-md:min-w-11 max-md:justify-center ${

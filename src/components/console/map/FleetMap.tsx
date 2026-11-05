@@ -395,7 +395,7 @@ export function FleetMap({
         className="group/map relative min-h-0 flex-1 max-md:overflow-hidden"
       >
         <ZoomControl onZoom={zoom} />
-        <BasemapToggle basemap={basemap} onChange={setBasemap} />
+        <BasemapToggle basemap={basemap} ready={basemapReady} onChange={setBasemap} />
         <MarkerKey open={keyOpen} onToggle={() => setKeyOpen((was) => !was)} />
         {/*
           Not mounted until the stored basemap has been read. Mounting at the

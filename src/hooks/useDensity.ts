@@ -19,12 +19,19 @@ import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
  */
 export function useDensity(): {
   density: Density;
+  /** False until the stored value has been read: a choice nobody just made. */
+  ready: boolean;
   setDensity: (density: Density) => void;
   toggle: () => void;
 } {
   const [density, setState] = useState<Density>('comfortable');
 
-  useEffect(() => setState(readDensity()), []);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setState(readDensity());
+    setReady(true);
+  }, []);
 
   const setDensity = useCallback((next: Density) => {
     setState(next);
@@ -52,5 +59,5 @@ export function useDensity(): {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggle]);
 
-  return { density, setDensity, toggle };
+  return { density, ready, setDensity, toggle };
 }

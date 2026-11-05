@@ -317,6 +317,16 @@
   }
 
   /*
+   * §12.149. A segment's overlay is on its way here: its look arrives with it, and
+   * the attribute comes off when it lands.
+   */
+  [data-segment-target] {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /*
    * The row's grey hover bar: a state, not motion, so it stays under reduced
    * motion, where it simply appears. A pseudo-element, so the row itself has
    * nothing on it at hover. It sits on the 3px left border the selection rail

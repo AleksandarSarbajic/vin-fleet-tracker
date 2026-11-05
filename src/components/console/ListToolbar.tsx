@@ -1,6 +1,7 @@
 'use client';
 
 import { DENSITIES, type Density } from '@/lib/density';
+import { useSegmentSlide } from '@/hooks/useSegmentSlide';
 import { FleetHealthStrip } from './FleetHealthStrip';
 import type { FleetHealth } from '@/server/health';
 
@@ -25,18 +26,23 @@ import type { FleetHealth } from '@/server/health';
  */
 export function ListToolbar({
   density,
+  densityReady = true,
   onDensity,
   health,
   drift,
   onResort,
 }: {
   density: Density;
+  /** False until the stored density has been read (`useSegmentSlide`). */
+  densityReady?: boolean;
   onDensity: (density: Density) => void;
   health: FleetHealth;
   /** How many rows would move if the list were sorted now. */
   drift: number;
   onResort: () => void;
 }) {
+  const segments = useSegmentSlide<HTMLDivElement>(density, densityReady);
+
   return (
     <div /*
        * h-8 (32px), not h-7 (28px). The bar was sized around an 18px control;
@@ -71,13 +77,19 @@ export function ListToolbar({
           `flex`, so the two buttons shared an edge and read as one cramped
           block rather than a segmented pair.
         */}
-        <div className="flex items-center gap-1.5" role="group" aria-label="Row density">
+        <div
+          ref={segments}
+          className="relative isolate flex items-center gap-1.5"
+          role="group"
+          aria-label="Row density"
+        >
           {DENSITIES.map((option) => {
             const active = option === density;
             return (
               <button
                 key={option}
                 type="button"
+                data-segment={option}
                 aria-pressed={active}
                 onClick={() => onDensity(option)}
                 /*

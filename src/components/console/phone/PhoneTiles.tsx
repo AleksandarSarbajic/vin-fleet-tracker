@@ -1,6 +1,7 @@
 'use client';
 
 import type { FleetRow } from '@/server/fleet-query';
+import { useSegmentSlide } from '@/hooks/useSegmentSlide';
 import { chipCounts, type FilterKey } from '../FilterChips';
 import type { HeaderNote } from '../ConsoleHeader';
 
@@ -55,6 +56,7 @@ export function PhoneTiles({
   const counts = chipCounts(rows);
   const all = rows.filter((r) => r.active).length;
   const moreOn = MORE_KEYS.filter((k) => chips.has(k)).length;
+  const segments = useSegmentSlide<HTMLDivElement>(pane);
 
   return (
     <div
@@ -111,15 +113,17 @@ export function PhoneTiles({
 
       {/* §12.96, stage 2. List first; the map stays mounted behind its tab. */}
       <div
+        ref={segments}
         role="tablist"
         aria-label="Show"
-        className="col-span-4 grid grid-cols-2 [@media(max-height:480px)]:col-span-1"
+        className="relative isolate col-span-4 grid grid-cols-2 [@media(max-height:480px)]:col-span-1"
       >
         {(['list', 'map'] as const).map((p) => (
           <button
             key={p}
             type="button"
             role="tab"
+            data-segment={p}
             data-phone-tab={p}
             aria-selected={pane === p}
             onClick={() => onPane(p)}
