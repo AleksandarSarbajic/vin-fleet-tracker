@@ -523,3 +523,95 @@ test.describe('P on a selected truck', () => {
     await expect.poll(() => pinned(page)).not.toContain(IDS.truckChicago);
   });
 });
+
+test.describe("the phone's truck sheet", () => {
+  const PHONE = '3125550101';
+
+  async function sheetOnLate(page: Page) {
+    await resetWorld({ appointmentUtc: TWO_HOURS_AGO() });
+    await inTheDatabase(
+      (sql) => sql`update drivers set phone = ${PHONE} where id = ${IDS.driverAna}`,
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/?chips=late');
+    const card = page.locator(`[data-phone-card="${IDS.truckChicago}"]`);
+    await card.click();
+    const sheet = page.locator('[data-truck-sheet]');
+    await expect(sheet).toBeVisible();
+    return { card, sheet };
+  }
+
+  async function theTruckLeavesTheBoard(page: Page, card: Locator) {
+    const polled = pollShows(page, (truck) => truck?.status === 'ARRIVED');
+    await theTruckArrives();
+    await polled;
+    await page.waitForTimeout(SETTLE_MS);
+    await expect(card).toHaveCount(0);
+  }
+
+  test('stays open and stays live when its truck leaves the chip, and does not come back', async ({
+    page,
+  }) => {
+    const { card, sheet } = await sheetOnLate(page);
+    await expect(sheet).toContainText('Late');
+
+    await theTruckLeavesTheBoard(page, card);
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText('Arrived');
+
+    await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(sheet).toHaveCount(0);
+
+    const back = pollShows(page, (truck) => truck?.status === 'LATE');
+    await theArrivalIsUndone();
+    await back;
+    await expect(card).toBeVisible();
+    await page.waitForTimeout(SETTLE_MS);
+    await expect(sheet).toHaveCount(0);
+  });
+
+  test('stays on the last row it had when the truck is missing from the answer', async ({
+    page,
+  }) => {
+    const { card, sheet } = await sheetOnLate(page);
+    await page.route('**/api/fleet', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as FleetAnswer;
+      await route.fulfill({
+        response,
+        json: { ...body, fleet: body.fleet.filter((t) => t.id !== IDS.truckChicago) },
+      });
+    });
+    await expect(card).toHaveCount(0, { timeout: NO_LONGER_THAN_A_POLL });
+    await page.waitForTimeout(SETTLE_MS);
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText('101');
+  });
+
+  test('its buttons, for a truck that has left the board', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const { card, sheet } = await sheetOnLate(page);
+    await theTruckLeavesTheBoard(page, card);
+
+    // Call driver: the number the console already holds, by the truck.
+    await expect(sheet.locator('[data-call-driver]')).toHaveAttribute('href', `tel:+1${PHONE}`);
+
+    // Timeline: opens over the sheet, and closing it gives the sheet back.
+    await sheet.getByRole('button', { name: 'Timeline' }).click();
+    const timeline = timelineWindow(page);
+    await expect(timeline).toBeVisible();
+    await timeline.getByRole('button', { name: 'Close' }).click();
+    await expect(timeline).toHaveCount(0);
+    await expect(sheet).toBeVisible();
+
+    // Show on map: the sheet steps aside for the map. The map draws the board's rows,
+    // so this truck is not on it; nothing fails, and nothing brings the sheet back.
+    await sheet.getByRole('button', { name: 'Show on map' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator('[data-phone-tab="map"]')).toHaveAttribute('aria-selected', 'true');
+    await page.waitForTimeout(SETTLE_MS);
+    await expect(sheet).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+});

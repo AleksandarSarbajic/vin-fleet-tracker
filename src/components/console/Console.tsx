@@ -827,6 +827,8 @@ export function Console({
    * card's tap opens it over the list, a marker's over the map.
    */
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** Open until its user closes it, as the windows are: a poll neither closes nor reopens it. */
+  const sheetRow = useWindowRow(sheetOpen ? selectedId : null, all);
   const tapCard = useCallback(
     (id: string) => {
       select(id);
@@ -947,14 +949,14 @@ export function Console({
           onPane={showPane}
         />
         <PhoneNotes notes={headerNotes} />
-        {sheetOpen && selectedRow ? (
+        {sheetRow ? (
           <TruckSheet
-            row={selectedRow}
+            row={sheetRow}
             fetchedAt={data?.fetchedAt ?? null}
             feedStale={feedStale}
             // The number from the drivers list the console already holds, by
             // the truck its driver is on: no new data reaches the browser.
-            tel={dialableTel(drivers.find((d) => d.truckId === selectedRow.id)?.phone)}
+            tel={dialableTel(drivers.find((d) => d.truckId === sheetRow.id)?.phone)}
             onClose={() => setSheetOpen(false)}
             onTimeline={setTimelineId}
             onShowOnMap={showOnMap}
@@ -1135,7 +1137,7 @@ export function Console({
                   onEdit={editingAllowed ? openEditor : null}
                   onTimeline={setTimelineId}
                   resizeSignal={resizeSignal}
-                  sheetOpen={sheetOpen && selectedRow !== null}
+                  sheetOpen={sheetRow !== null}
                   reducedMotion={reducedMotion}
                 />
               }

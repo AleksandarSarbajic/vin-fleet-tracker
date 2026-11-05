@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fleetHealth, fleetRow, nextStop } from '@/test/fleet-row';
 import { primeLoadRead } from '@/test/load-read';
 import { stubLayout } from '@/test/layout';
+import { PHONE_MEDIA } from '@/lib/phone';
 import type { FleetResponse } from '@/hooks/useFleet';
 
 /**
@@ -258,5 +259,52 @@ describe('P on a selected truck the board is not showing', () => {
     await press('p');
     const pinned = [...document.querySelectorAll('button[aria-label="Unpin truck 101"]')];
     expect(pinned.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the phone's truck sheet", () => {
+  const realMatchMedia = window.matchMedia;
+  const sheet = () => document.querySelector('[data-truck-sheet]');
+  const tapCard = async () => {
+    await act(async () => {
+      document.querySelector<HTMLElement>(`[data-phone-card="${LATE_A.id}"]`)!.click();
+    });
+  };
+
+  beforeEach(() => {
+    window.matchMedia = ((query: string) => ({
+      matches: query === PHONE_MEDIA,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  afterEach(() => {
+    window.matchMedia = realMatchMedia;
+  });
+
+  it('stays open when the poll moves its truck out of the chip', async () => {
+    await render(['late']);
+    await tapCard();
+    expect(sheet()).not.toBeNull();
+    await poll([ARRIVED_A, LATE_B]);
+    expect(document.querySelector(`[data-phone-card="${LATE_A.id}"]`)).toBeNull();
+    expect(sheet()).not.toBeNull();
+  });
+
+  it('does not come back by itself once closed, when the truck returns', async () => {
+    await render(['late']);
+    await tapCard();
+    await poll([ARRIVED_A, LATE_B]);
+    await clickButton('Close');
+    expect(sheet()).toBeNull();
+    await poll([LATE_A, LATE_B]);
+    expect(document.querySelector(`[data-phone-card="${LATE_A.id}"]`)).not.toBeNull();
+    expect(sheet()).toBeNull();
   });
 });
