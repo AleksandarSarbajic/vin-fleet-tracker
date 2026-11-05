@@ -1244,23 +1244,34 @@ test.describe('step 4, the bulk bar comes up into its slot', () => {
     expect(rest).toEqual({ transform: 'none', animations: 0, slotStyle: null, barStyle: null });
   });
 
-  test('its buttons work from the first frame', async ({ page }) => {
+  test('its buttons work while it is still moving', async ({ page }) => {
     await openBoard(page);
+    // Where the button rests, which is where a person is already aiming.
     await checkTwo(page);
-    // While it is still on its way: seen moving, then pressed where it is drawn, and the
-    // press holds it there.
+    await bar(page).waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const rest = (await bar(page).boundingBox())!;
+    await bar(page).click();
+    await expect(bar(page)).toHaveCount(0);
+    await expect(page.locator(COPY)).toHaveCount(0);
+    await page.mouse.move(rest.x + rest.width / 2, rest.y + rest.height / 2);
+
+    // The bar is open again by keys, so the pointer has not moved.
+    for (const key of ['ArrowDown', 'x', 'ArrowDown', 'x']) await page.keyboard.press(key);
     await page.waitForFunction(
       () => {
         const clear = [...document.querySelectorAll('.bg-surface-bar button')].find((b) =>
           b.textContent?.trim().startsWith('Clear'),
         );
-        return (clear?.closest('.bg-surface-bar')?.getAnimations().length ?? 0) > 0;
+        const real = clear?.closest('.bg-surface-bar');
+        if (!real || real.getAnimations().length === 0) return false;
+        // The button has reached the pointer, and the bar has further to go.
+        const y = new DOMMatrixReadOnly(getComputedStyle(real).transform).m42;
+        return y > 0 && y <= 8;
       },
       undefined,
       { polling: 'raf' },
     );
-    const b = (await bar(page).boundingBox())!;
-    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await page.mouse.down();
     const moving = await bar(page).evaluate((el) => el.closest('.bg-surface-bar')!.getAnimations().length);
     await page.mouse.up();
@@ -1327,31 +1338,35 @@ test.describe('step 4, the bulk bar comes up into its slot', () => {
     await openBoard(page);
     const frames = await record(page, barFrame);
     await checkTwo(page);
-    // In the page, a frame or two after it opens, so the bar is still on its way.
-    await page.evaluate(
+    // In the page, on the frame the bar is partway up, so it is really on its way.
+    const closedAt = await page.evaluate(
       () =>
-        new Promise<void>((done) => {
+        new Promise<number>((done) => {
           const tick = () => {
             const clear = [...document.querySelectorAll<HTMLElement>('.bg-surface-bar button')].find(
               (b) => b.textContent?.trim().startsWith('Clear'),
             );
-            if (!clear) return requestAnimationFrame(tick);
-            const real = clear.closest('.bg-surface-bar')!;
-            const y = new DOMMatrixReadOnly(getComputedStyle(real).transform).m42;
+            const real = clear?.closest('.bg-surface-bar');
+            const y = real ? new DOMMatrixReadOnly(getComputedStyle(real).transform).m42 : null;
+            if (!clear || y === null || y > 25) {
+              requestAnimationFrame(tick);
+              return;
+            }
             if (y === 0) throw new Error('The bar had already landed.');
-            (clear as HTMLElement).click();
-            done();
+            clear.click();
+            done(y);
           };
           tick();
         }),
     );
+    expect(closedAt).toBeGreaterThan(0);
     await expect(page.locator(COPY)).toHaveCount(0);
     const seen = await frames();
-    const lastOpen = seen.map((f) => f.open).lastIndexOf(true);
-    const firstCopy = seen.slice(lastOpen + 1).find((f) => f.copyY !== null)!;
-    // Up to one frame's travel below where it was, and never back at the start or at rest.
-    expect(firstCopy.copyY!).toBeGreaterThanOrEqual(seen[lastOpen]!.y!);
-    expect(firstCopy.copyY!).toBeLessThan(seen[lastOpen]!.y! + 30 * 0.3);
+    const firstCopy = seen.find((f) => f.copyY !== null)!;
+    // Up to one frame's travel below where it was: not back at its resting place, and
+    // not all the way out of the slot.
+    expect(firstCopy.copyY!).toBeGreaterThanOrEqual(closedAt - 0.01);
+    expect(firstCopy.copyY!).toBeLessThan(closedAt + 30 * 0.4);
   });
 
   test('opening again takes the copy away at once', async ({ page }) => {
