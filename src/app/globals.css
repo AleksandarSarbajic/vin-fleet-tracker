@@ -326,6 +326,12 @@
     box-shadow: none !important;
   }
 
+  /* §12.149. The selection's overlay is on its way to this row. */
+  [data-selection-target] {
+    background-color: transparent !important;
+    border-left-color: transparent !important;
+  }
+
   /*
    * The row's grey hover bar: a state, not motion, so it stays under reduced
    * motion, where it simply appears. A pseudo-element, so the row itself has

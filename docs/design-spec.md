@@ -710,13 +710,16 @@ would not read (`2h`).
 
 | Thing | Duration |
 |---|---|
-| Ground and selection changes | **120ms ease-out** |
-| Map pan on selection | **150ms** |
-| Everything else | **Nothing else animates** |
+| Ground and selection changes | **120ms ease-out**; between two rows on screen the selection slides, 180ms (§12.149) |
+| Map pan on selection | **450ms**, Mapbox's default curve (§12.149) |
+| Other map pans: a zoom, a cluster, the nudge that clears a popup | **150ms** |
+| Everything else | See §12.148 and §12.149 |
 
-*(Superseded in part by §12.148: windows and menus open with motion, a copy of
-them fades when they close, and buttons respond to hover and press. The rest of
-this table stands.)*
+*(Superseded in part by §12.148 and §12.149: this table once said "150ms map pan,
+nothing else animates". Windows and menus open with motion, a copy of them fades
+when they close, buttons respond to hover and press, and the new motion shows what
+just happened. A poll still moves no row, and markers still do not animate between
+fixes: interpolating would draw positions we do not have.)*
 
 Under `prefers-reduced-motion`: **all of it becomes 0ms** and the map
 **jumps rather than pans**. The marker→row link becomes a static highlight.

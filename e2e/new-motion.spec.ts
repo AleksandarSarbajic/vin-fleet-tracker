@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { resetWorld } from './fixtures';
+import { IDS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 
 /**
@@ -26,6 +26,9 @@ const BAR_MS = 200;
 const OPEN_MS = 300;
 const OPEN_ROW_MS = 120;
 const OPEN_GAP_MAX_MS = 20;
+const SELECT_MS = 180;
+const MAP_MS = 450;
+const ZOOM_MS = 150;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -1637,4 +1640,531 @@ test.describe('step 5, the board opens once per page load', () => {
     await quiet(page);
     expect(await started(page)).toEqual([]);
   });
+});
+
+test.describe('step 6, the selection slides', () => {
+  const OVERLAY = '[data-selection-slide]';
+  const rowAt = (page: Page, i: number) => page.locator('[data-row-id]').nth(i);
+
+  async function openLong(page: Page) {
+    await resetWorld({ extraTrucks: 30 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+  }
+  const frame = () => {
+    const found = [...document.querySelectorAll('[data-selection-slide]')];
+    const target = document.querySelector('[data-selection-target]');
+    const selected = document.querySelector('[data-row-id][aria-selected="true"]');
+    return {
+      count: found.length,
+      y: found[0]?.getBoundingClientRect().y ?? null,
+      height: found[0]?.getBoundingClientRect().height ?? null,
+      target: target ? getComputedStyle(target).backgroundColor : null,
+      selected: selected ? getComputedStyle(selected).backgroundColor : null,
+      leftOn: selected?.getAttribute('data-row-id') ?? null,
+    };
+  };
+  const SELECTED_GROUND = 'rgb(27, 34, 43)';
+  const midpoint = async (page: Page, i: number) => {
+    const b = (await rowAt(page, i).boundingBox())!;
+    return [b.x + 300, b.y + b.height / 2] as const;
+  };
+
+  test('from one row to another: 180ms, on the curve, under the words, and nothing left', async ({ page }) => {
+    await openLong(page);
+    const [x1, y1] = await midpoint(page, 2);
+    await page.mouse.click(x1, y1);
+    await expect(rowAt(page, 2)).toHaveAttribute('aria-selected', 'true');
+    await quiet(page);
+
+    const stop = await watchFrames(page);
+    const frames = await record(page, frame);
+    const [x2, y2] = await midpoint(page, 8);
+    await page.mouse.move(x2, y2);
+    await page.mouse.down();
+    await page.mouse.up();
+    const timing = await page
+      .locator(OVERLAY)
+      .evaluate((el) => {
+        const t = el.getAnimations()[0]!.effect!.getTiming();
+        return { duration: t.duration, easing: String(t.easing) };
+      });
+    expect(timing.duration).toBe(SELECT_MS);
+    expect(curve(timing.easing)).toBe(curve(DIALOG_CURVE));
+    await expect(rowAt(page, 8)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    const flying = seen.filter((f) => f.count === 1);
+    expect(Math.max(...seen.map((f) => f.count))).toBe(1);
+    expect(flying.length).toBeGreaterThan(3);
+    for (let i = 1; i < flying.length; i += 1) {
+      // Down the list, and never back.
+      expect(flying[i]!.y!).toBeGreaterThanOrEqual(flying[i - 1]!.y!);
+    }
+    // The row it is going to keeps its ground back until it lands, so it is seen once.
+    expect(new Set(flying.map((f) => f.target))).toEqual(new Set(['rgba(0, 0, 0, 0)']));
+    expect(await rowAt(page, 8).getAttribute('data-selection-target')).toBeNull();
+    expect(await rowAt(page, 8).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(SELECTED_GROUND);
+    // The row it left has its ground off on the frame the slide begins: not a 120ms fade.
+    expect(
+      await rowAt(page, 2).evaluate((el) => el.getAnimations().filter((a) => a instanceof CSSTransition).length),
+    ).toBe(0);
+  });
+
+  test('the one it left is plain on the first frame of the slide, not fading beside it', async ({ page }) => {
+    await openLong(page);
+    const id = await rowAt(page, 2).getAttribute('data-row-id');
+    await rowAt(page, 2).click();
+    await quiet(page);
+    await page.mouse.move(1, 1);
+    await quiet(page);
+    await page.evaluate((rowId) => {
+      (window as unknown as { __old: Element }).__old = document.querySelector(`[data-row-id="${rowId}"]`)!;
+    }, id);
+    const frames = await record(page, () => {
+      const old = (window as unknown as { __old: Element }).__old;
+      return {
+        flying: document.querySelectorAll('[data-selection-slide]').length,
+        ground: getComputedStyle(old).backgroundColor,
+      };
+    });
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    const seen = (await frames()).filter((f) => f.flying > 0);
+    expect(seen.length).toBeGreaterThan(3);
+    expect(new Set(seen.map((f) => f.ground))).toEqual(new Set(['rgba(0, 0, 0, 0)']));
+  });
+
+  test('fast arrow keys: one highlight, no jump, and it ends on the last row', async ({ page }) => {
+    await openLong(page);
+    await rowAt(page, 0).click();
+    await quiet(page);
+    const frames = await record(page, frame);
+    // Two frames apart, in the page, so each key lands well before the last has arrived.
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          let left = 6;
+          const next = () => {
+            if (left === 0) return done();
+            left -= 1;
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+            requestAnimationFrame(() => requestAnimationFrame(next));
+          };
+          next();
+        }),
+    );
+    await expect(rowAt(page, 6)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    const seen = await frames();
+    expect(Math.max(...seen.map((f) => f.count))).toBe(1);
+    const ys = seen.flatMap((f) => (f.y === null ? [] : [f.y]));
+    expect(ys.length).toBeGreaterThan(3);
+    for (let i = 1; i < ys.length; i += 1) {
+      // A frame of this curve covers a quarter of what is left, and what is left stays under
+      // a few rows while keys keep coming. A retarget from anywhere but where it is drawn
+      // is a jump of the whole of that.
+      expect(Math.abs(ys[i]! - ys[i - 1]!)).toBeLessThan(60);
+    }
+  });
+
+  test('the last row on the screen and one more: it slides, the list follows, and nothing grows', async ({ page }) => {
+    await openLong(page);
+    const inView = await page.evaluate(() => {
+      const view = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.getBoundingClientRect();
+      return [...document.querySelectorAll('[data-row-id]')].filter((r) => r.getBoundingClientRect().bottom <= view.bottom).length;
+    });
+    await rowAt(page, inView - 1).click();
+    await quiet(page);
+    const id = await rowAt(page, inView).getAttribute('data-row-id');
+    const stop = await watchFrames(page);
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator(`[data-row-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+  });
+
+  test('the old row off screen: the highlight just appears', async ({ page }) => {
+    await openLong(page);
+    await rowAt(page, 0).click();
+    await quiet(page);
+    await page.evaluate(() => {
+      document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!.scrollTop = 900;
+    });
+    await quiet(page);
+    const target = page.locator('[data-row-id]').filter({ hasNotText: /^$/ }).nth(12);
+    const frames = await record(page, frame);
+    await target.click();
+    await expect(target).toHaveAttribute('aria-selected', 'true');
+    await quiet(page);
+    expect(Math.max(...(await frames()).map((f) => f.count))).toBe(0);
+  });
+
+  test('nothing selected before, or nothing after: no slide', async ({ page }) => {
+    await openLong(page);
+    const frames = await record(page, frame);
+    await rowAt(page, 3).click();
+    await quiet(page);
+    await page.mouse.move(1, 1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-row-id][aria-selected="true"]')).toHaveCount(0);
+    await quiet(page);
+    expect(Math.max(...(await frames()).map((f) => f.count))).toBe(0);
+  });
+
+  test('pinned rows slide too: into the list, out of it, and between themselves', async ({ page }) => {
+    await openLong(page);
+    for (const i of [1, 2]) {
+      await rowAt(page, i).click();
+      await page.keyboard.press('p');
+    }
+    await expect(page.getByText(/^Pinned$/)).toBeVisible();
+    await quiet(page);
+    // The two pinned rows draw first, above the list.
+    const frames = await record(page, frame);
+    const first = page.locator('[data-row-id]').nth(0);
+    await first.click();
+    await expect(first).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    const inList = page.locator('[data-row-id]').nth(6);
+    await inList.click();
+    await expect(inList).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    await first.click();
+    await expect(first).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    const seen = await frames();
+    // Each of the three moves was seen flying, as one highlight.
+    expect(seen.filter((f) => f.count === 1).length).toBeGreaterThan(6);
+    expect(Math.max(...seen.map((f) => f.count))).toBe(1);
+    await expect(first).not.toHaveAttribute('data-selection-target', '');
+    expect(await first.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(SELECTED_GROUND);
+  });
+
+  test('a press holds it until it ends', async ({ page }) => {
+    await openLong(page);
+    await rowAt(page, 0).click();
+    await quiet(page);
+    await page.keyboard.press('ArrowDown');
+    await page.mouse.move(600, 12);
+    await page.mouse.down();
+    const time = () => page.locator(OVERLAY).evaluate((el) => el.getAnimations()[0]!.currentTime as number);
+    const first = await time();
+    await page.waitForTimeout(SELECT_MS + 60);
+    expect(await time()).toBe(first);
+    await page.mouse.up();
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
+  });
+
+  test('under reduced motion: no slide, and the selection is at once', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logAnimations(page);
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await rowAt(page, 0).click();
+    await rowAt(page, 3).click();
+    await expect(rowAt(page, 3)).toHaveAttribute('aria-selected', 'true');
+    await quiet(page);
+    expect(await started(page)).toEqual([]);
+  });
+});
+
+test.describe('step 6, the map travels', () => {
+  type MapCall = {
+    at: number;
+    name: 'easeTo' | 'panBy' | 'stop' | 'moveend';
+    center?: [number, number];
+    duration?: number;
+    easing?: string;
+  };
+  /** Far apart, so a truck is not already in view and a pan has somewhere to go. */
+  const spread = (rows: (FleetRowLike & { lat?: number; lng?: number })[]) => {
+    rows.forEach((row, i) => {
+      row.lat = 30 + (i % 8) * 2.2;
+      row.lng = -115 + i * 3.1;
+    });
+  };
+
+  /**
+   * The real map, found through React, with what is asked of it written down. Only here:
+   * a pan's length and curve are arguments, and the pixels of a popup that snaps to whole
+   * pixels near the end of a pan say much less about them.
+   */
+  const spyOnMap = (page: Page) =>
+    page.evaluate(() => {
+      type Spied = {
+        getCenter(): { lat: number; lng: number };
+        on(type: string, listener: () => void): void;
+      } & Record<string, unknown>;
+      const el = document.querySelector('.mapboxgl-map') as unknown as Record<string, unknown>;
+      const key = Object.keys(el).find((k) => k.startsWith('__reactFiber'))!;
+      type Fiber = { memoizedState: Hook | null; return: Fiber | null };
+      type Hook = { memoizedState: unknown; next: Hook | null };
+      let fiber = el[key] as Fiber | null;
+      let map: Spied | null = null;
+      while (fiber && !map) {
+        let hook = fiber.memoizedState;
+        while (hook && !map) {
+          const held = hook.memoizedState as { current?: unknown; map?: unknown } | null;
+          const value = (held?.current ?? held) as { getMap?: () => Spied; map?: Spied } | null;
+          if (typeof value?.getMap === 'function') map = value.getMap();
+          else if (value?.map && typeof (value.map as Spied)['easeTo'] === 'function') map = value.map;
+          hook = hook.next;
+        }
+        fiber = fiber.return;
+      }
+      if (!map) throw new Error('No map found');
+      const w = window as unknown as { __calls: MapCall[] };
+      w.__calls = [];
+      for (const name of ['easeTo', 'panBy', 'stop'] as const) {
+        const real = map[name] as (...args: unknown[]) => unknown;
+        map[name] = function (this: unknown, ...args: unknown[]) {
+          const options = (name === 'panBy' ? args[1] : args[0]) as
+            | { center?: [number, number]; duration?: number; easing?: unknown }
+            | undefined;
+          // A panBy goes through easeTo: only what the app asked for counts.
+          const inner = (window as unknown as { __inPan?: boolean }).__inPan === true;
+          if (!(inner && name === 'easeTo')) {
+            w.__calls.push({
+              at: performance.now(),
+              name,
+              ...(Array.isArray(options?.center) ? { center: options.center } : {}),
+              ...(options?.duration === undefined ? {} : { duration: options.duration }),
+              easing: typeof options?.easing,
+            });
+          }
+          if (name === 'panBy') (window as unknown as { __inPan?: boolean }).__inPan = true;
+          try {
+            return real.apply(this, args);
+          } finally {
+            if (name === 'panBy') (window as unknown as { __inPan?: boolean }).__inPan = false;
+          }
+        };
+      }
+      const spied = map;
+      map.on('moveend', () => {
+        const c = spied.getCenter();
+        w.__calls.push({ at: performance.now(), name: 'moveend', center: [c.lng, c.lat] });
+      });
+    });
+  const calls = (page: Page) =>
+    page.evaluate(() => {
+      const w = window as unknown as { __calls: MapCall[] };
+      const seen = w.__calls;
+      w.__calls = [];
+      return seen;
+    });
+  const clearCalls = calls;
+
+  async function openSpread(page: Page) {
+    await resetWorld({ extraTrucks: 12 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await page.locator('canvas.mapboxgl-canvas').waitFor();
+    await pollWith(page, spread);
+    await quiet(page);
+    await spyOnMap(page);
+  }
+  const selectAndLand = async (page: Page, i: number) => {
+    await page.locator('[data-row-id]').nth(i).click();
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'moveend'))), { timeout: 5_000 }).toBe(true);
+    await page.waitForTimeout(ZOOM_MS + 150);
+    await quiet(page);
+  };
+  /** What the selection asked for, and where the map was when that pan ended. */
+  const travelIn = (seen: MapCall[]) => {
+    const ease = seen.find((c) => c.name === 'easeTo')!;
+    const end = seen.find((c) => c.name === 'moveend' && c.at > ease.at)!;
+    // `stop` is Mapbox's own, at the end of every ease.
+    return {
+      ease,
+      end,
+      between: seen.filter((c) => c.at > ease.at && c.at < end.at && c.name !== 'stop'),
+    };
+  };
+
+  test('a selection takes 450ms on the default curve, and ends on the truck', async ({ page }) => {
+    await openSpread(page);
+    await selectAndLand(page, 3);
+    await clearCalls(page);
+    await page.locator('[data-row-id]').nth(9).click();
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'moveend'))).toBe(true);
+    const { ease, end, between } = travelIn(await calls(page));
+    expect(ease.duration).toBe(MAP_MS);
+    expect(ease.easing).toBe('undefined');
+    expect(between).toEqual([]);
+    expect(end.at - ease.at).toBeGreaterThan(MAP_MS - 60);
+    expect(end.at - ease.at).toBeLessThan(MAP_MS + 150);
+    expect(end.center![0]).toBeCloseTo(ease.center![0], 3);
+    expect(end.center![1]).toBeCloseTo(ease.center![1], 3);
+  });
+
+  /**
+   * Found by this phase. The popup's ResizeObserver asks for the nudge too, and a new truck
+   * usually has a popup of another height. So 28ms into the pan a panBy cancelled it, and
+   * the map stopped 15 degrees short of the truck.
+   */
+  test('a popup that changes height on the way does not stop the pan', async ({ page }) => {
+    await openSpread(page);
+    // Truck 103 has a tall popup and 205 a short one: the case that was seen to fail.
+    await selectAndLand(page, 0);
+    const tall = (await page.locator('.ft-popup').boundingBox())!.height;
+    await clearCalls(page);
+    await page.locator('[data-row-id]').nth(6).click();
+    await expect.poll(async () => (await page.locator('.ft-popup').boundingBox())!.height).not.toBe(tall);
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'moveend'))).toBe(true);
+    const { ease, end, between } = travelIn(await calls(page));
+    expect(between).toEqual([]);
+    expect(end.center![0]).toBeCloseTo(ease.center![0], 3);
+    expect(end.center![1]).toBeCloseTo(ease.center![1], 3);
+  });
+
+  test('the other pans keep their 150ms: a zoom, and the nudge that clears a popup', async ({ page }) => {
+    await openSpread(page);
+    await selectAndLand(page, 0);
+    // Truck 103's popup is taller than the room above it, so it is nudged as it lands.
+    const nudges = (await calls(page)).filter((c) => c.name === 'panBy');
+    expect(nudges.length).toBeGreaterThan(0);
+    expect(new Set(nudges.map((c) => c.duration))).toEqual(new Set([ZOOM_MS]));
+
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'easeTo'))).toBe(true);
+    const zoom = (await calls(page)).find((c) => c.name === 'easeTo')!;
+    expect(zoom.duration).toBe(ZOOM_MS);
+  });
+
+  test('fast arrow keys: no pile-up, and the map ends on the last row', async ({ page }) => {
+    await openSpread(page);
+    await selectAndLand(page, 4);
+    await clearCalls(page);
+    // Faster than a pan, so each key arrives in the middle of the last one's travel.
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(30);
+    }
+    await expect(page.locator('[data-row-id]').nth(10)).toHaveAttribute('aria-selected', 'true');
+    await page.waitForTimeout(MAP_MS + 300);
+    const seen = await calls(page);
+    const eases = seen.filter((c) => c.name === 'easeTo');
+    expect(eases.length).toBe(6);
+    const last = eases.at(-1)!;
+    // Nothing else moved the map on the way, and nothing cut the last one short.
+    const firstEase = eases[0]!;
+    const end = seen.find((c) => c.name === 'moveend' && c.at > last.at + MAP_MS - 60)!;
+    expect(seen.filter((c) => c.name === 'panBy' && c.at > firstEase.at && c.at < end.at)).toEqual([]);
+    expect(end.center![0]).toBeCloseTo(last.center![0], 3);
+    expect(end.center![1]).toBeCloseTo(last.center![1], 3);
+  });
+
+  test('a press on the map stops it there, and a drag is left alone', async ({ page }) => {
+    await openSpread(page);
+    await selectAndLand(page, 3);
+    const map = (await page.locator('.mapboxgl-map').boundingBox())!;
+    const spot = { x: map.x + 40, y: map.y + map.height - 80 };
+    await page.mouse.move(spot.x, spot.y);
+    await clearCalls(page);
+
+    await page.locator('[data-row-id]').nth(9).evaluate((el) => (el as HTMLElement).click());
+    await page.waitForTimeout(MAP_MS / 4);
+    await page.mouse.down();
+    const stopped = await calls(page);
+    expect(stopped.map((c) => c.name)).toContain('stop');
+    const held = await page.locator('.ft-popup .mapboxgl-popup-tip').boundingBox();
+    await page.waitForTimeout(MAP_MS);
+    expect(await page.locator('.ft-popup .mapboxgl-popup-tip').boundingBox()).toEqual(held);
+
+    // The same press as a drag: the popup follows the pointer, and nothing fights it.
+    await page.mouse.move(spot.x + 30, spot.y - 20, { steps: 4 });
+    await page.mouse.move(spot.x + 60, spot.y - 40, { steps: 4 });
+    await page.waitForTimeout(300);
+    expect((await calls(page)).filter((c) => c.name === 'panBy')).toEqual([]);
+    await page.mouse.up();
+  });
+
+  test('under reduced motion it jumps', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openSpread(page);
+    await selectAndLand(page, 3);
+    await clearCalls(page);
+    await page.locator('[data-row-id]').nth(9).click();
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __calls: MapCall[] }).__calls.some((c) => c.name === 'easeTo'))).toBe(true);
+    expect((await calls(page)).find((c) => c.name === 'easeTo')!.duration).toBe(0);
+  });
+});
+
+test.describe('step 6, the popup after a long pan', () => {
+  const CENTRE = { lat: 39.5, lng: -95.5 };
+  const PLACES = {
+    'top-right': { dLat: 10, dLng: 9.5 },
+    top: { dLat: 6, dLng: 0 },
+    right: { dLat: 0, dLng: 12 },
+    bottom: { dLat: -6, dLng: 0 },
+    left: { dLat: 0, dLng: -12 },
+    'bottom-right': { dLat: -10, dLng: 9.5 },
+  } as const;
+
+  for (const [place, { dLat, dLng }] of Object.entries(PLACES)) {
+    test(`a truck far off to the ${place}: clear of every edge and control once it lands`, async ({ page }) => {
+      await resetWorld();
+      const sql = connect();
+      try {
+        const at = (truckId: string, lat: number, lng: number) => sql`
+          insert into positions (truck_id, lat, lng, heading, speed_mph, recorded_at, formatted_location)
+          values (${truckId}, ${lat}, ${lng}, null, 0, ${new Date()}, ${'Somewhere, KS'})`;
+        await at(IDS.truckChicago, CENTRE.lat + dLat, CENTRE.lng + dLng);
+        await at(IDS.truckDallas, CENTRE.lat, CENTRE.lng);
+        await at(IDS.truckAtZipStop, CENTRE.lat, CENTRE.lng);
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+      await page.goto('/');
+      await page.locator(`[data-row-id="${IDS.truckDallas}"]`).click();
+      await expect(page.locator('.ft-popup')).toBeVisible();
+      await page.waitForTimeout(MAP_MS + 300);
+      await page.locator(`[data-row-id="${IDS.truckChicago}"]`).click();
+
+      const clear = async () => {
+        const popup = (await page.locator('.ft-popup').boundingBox())!;
+        const map = (await page.locator('.mapboxgl-map').boundingBox())!;
+        const controls = await Promise.all(
+          [
+            page.getByRole('group', { name: 'Basemap' }),
+            page.getByRole('button', { name: 'Zoom in' }).locator('xpath=..'),
+            page.getByText('Marker key', { exact: true }).locator('xpath=..'),
+          ].map((c) => c.boundingBox()),
+        );
+        const under = controls.filter(
+          (b) =>
+            b &&
+            popup.x < b.x + b.width &&
+            b.x < popup.x + popup.width &&
+            popup.y < b.y + b.height &&
+            b.y < popup.y + popup.height,
+        ).length;
+        return {
+          inside:
+            popup.x >= map.x - 1 &&
+            popup.y >= map.y - 1 &&
+            popup.x + popup.width <= map.x + map.width + 1 &&
+            popup.y + popup.height <= map.y + map.height + 1,
+          under,
+        };
+      };
+      await expect.poll(clear, { timeout: 10_000 }).toEqual({ inside: true, under: 0 });
+    });
+  }
 });

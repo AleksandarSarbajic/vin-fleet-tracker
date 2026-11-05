@@ -31,6 +31,12 @@ describe('the numbers of the new motion (§12.149)', () => {
     expect(EASING.fade).toBe('linear');
   });
 
+  it('the selection slides in 180ms, the map travels in 450ms, other pans stay at 150ms', () => {
+    expect(MOTION_MS.selectionSlide).toBe(180);
+    expect(MOTION_MS.mapTravel).toBe(450);
+    expect(MOTION_MS.map).toBe(150);
+  });
+
   it('the curve is the windows’ curve', () => {
     expect(EASING.dialog).toBe('cubic-bezier(.22,.61,.36,1)');
   });

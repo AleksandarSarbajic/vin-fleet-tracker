@@ -41,6 +41,7 @@ import { trailDots } from '@/lib/trail';
 import { BasemapToggle, MapFooter, MarkerKey, ZoomControl } from './MapChrome';
 import { useBasemap } from '@/hooks/useBasemap';
 import { BASEMAP_STYLE } from '@/lib/basemap';
+import { MOTION_MS } from '@/design/tokens';
 
 /**
  * The map never re-renders per truck.
@@ -52,9 +53,8 @@ import { BASEMAP_STYLE } from '@/lib/basemap';
  * each source — Mapbox diffs and re-uploads internally, React renders nothing,
  * and 23 trucks cost the same as 60.
  *
- * Markers do not animate between fixes. design-spec §8.3 is "120ms ground and
- * selection, 150ms map pan, nothing else animates", and interpolating would
- * draw positions we do not have.
+ * Markers do not animate between fixes: interpolating would draw positions we do not
+ * have, and at the fleet's zoom a truck moves under a pixel per poll anyway (§12.149).
  */
 
 const PAN_MS = 150;
@@ -108,6 +108,14 @@ export function FleetMap({
   /** The map pane: the map fills it, and the controls sit on top of it. */
   const frameRef = useRef<HTMLDivElement | null>(null);
   const didFit = useRef(false);
+  /**
+   * §12.149. A selection's pan is long enough for another to start during it, and the map
+   * tells the old one's listeners that it ended. So what was waiting to nudge the popup for
+   * the last truck is dropped: it would measure a popup in flight and pan from there, and
+   * the map would stop short of the truck that is selected now.
+   */
+  const travelEnd = useRef<(() => void) | null>(null);
+  const clearRun = useRef(0);
 
   const { problem, clustered } = useMemo(
     () => splitForMap(rows, feedStale),
@@ -203,11 +211,14 @@ export function FleetMap({
    * placed — after a selection's pan, after the first fit, after a resize —
    * and never on the dispatcher's own drags, which it would fight.
    */
-  const keepPopupClear = useCallback(function clear(round = 1): void {
+  const keepPopupClear = useCallback(function clear(round = 1, run = clearRun.current): void {
+    if (run !== clearRun.current) return;
     const map = mapRef.current?.getMap();
     const frame = frameRef.current;
     const popup = frame?.querySelector('.ft-popup');
     if (!map || !frame || !popup) return;
+    // A press took over from the pan that led here (§12.149). It is the dispatcher's map now.
+    if (map.dragPan.isActive()) return;
     // §12.96: on a phone the popup is not drawn (the truck sheet is). A box of
     // nothing at 0,0 would read as a popup far off the map and pan to it.
     if (popup.getBoundingClientRect().width === 0) return;
@@ -228,14 +239,16 @@ export function FleetMap({
      * can never chase anything.
      */
     if (round < 3) {
-      if (reducedMotion) requestAnimationFrame(() => clear(round + 1));
-      else map.once('moveend', () => requestAnimationFrame(() => clear(round + 1)));
+      if (reducedMotion) requestAnimationFrame(() => clear(round + 1, run));
+      else map.once('moveend', () => requestAnimationFrame(() => clear(round + 1, run)));
     }
   }, [reducedMotion]);
 
   /** After the frame that placed the popup, so there is a box to measure. */
   const keepPopupClearSoon = useCallback(() => {
-    requestAnimationFrame(() => keepPopupClear(1));
+    clearRun.current += 1;
+    const run = clearRun.current;
+    requestAnimationFrame(() => keepPopupClear(1, run));
   }, [keepPopupClear]);
 
   const handleLoad = useCallback(() => {
@@ -299,7 +312,10 @@ export function FleetMap({
     if (!selectedRow || selectedRow.lat === null || selectedRow.lng === null) return;
     const map = mapRef.current?.getMap();
     if (!map) return;
-    const duration = reducedMotion ? 0 : PAN_MS;
+    const duration = reducedMotion ? 0 : MOTION_MS.mapTravel;
+    clearRun.current += 1;
+    if (travelEnd.current) map.off('moveend', travelEnd.current);
+    travelEnd.current = null;
     map.easeTo({ center: [selectedRow.lng, selectedRow.lat], duration });
     /**
      * Listened for AFTER `easeTo`, never before: starting an ease stops the
@@ -308,14 +324,40 @@ export function FleetMap({
      * zero-length ease has already ended by here, so it is called directly.
      */
     if (duration === 0) keepPopupClearSoon();
-    else map.once('moveend', keepPopupClearSoon);
+    else {
+      const landed = () => {
+        travelEnd.current = null;
+        keepPopupClearSoon();
+      };
+      travelEnd.current = landed;
+      map.once('moveend', landed);
+    }
     // Only the id and the request, so a position update for an
     // already-selected truck moves the marker without moving the camera.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, panRequest]);
 
+  /**
+   * A new truck's popup is usually another height, so it resizes moments into the pan
+   * that is taking the map there. A nudge then would cancel that pan and leave the map
+   * short of the truck, so a travel in flight is left alone: it nudges when it lands.
+   */
+  const popupResized = useCallback(() => {
+    if (!travelEnd.current) keepPopupClearSoon();
+  }, [keepPopupClearSoon]);
+
   /** §12.96, stage 4. The phone's folded key; any tap on the map folds it again. */
   const [keyOpen, setKeyOpen] = useState(false);
+
+  /**
+   * §12.149, a press holds what is moving. A pan this long can be under way when someone
+   * presses a marker, and a marker that moved between the press and the release is not
+   * under the click any more: the click would land on bare map and clear the selection.
+   * Mapbox has no pause for it, so the pan stops where it is.
+   */
+  const stopForPress = useCallback(() => {
+    mapRef.current?.getMap()?.stop();
+  }, []);
 
   const handleClick = useCallback(
     (event: MapMouseEvent) => {
@@ -424,6 +466,8 @@ export function FleetMap({
           initialViewState={US_FALLBACK}
           onLoad={handleLoad}
           onClick={handleClick}
+          onMouseDown={stopForPress}
+          onTouchStart={stopForPress}
           interactiveLayerIds={[
             LAYER_CLUSTER_BUBBLE,
             LAYER_CLUSTERED_POINTS,
@@ -474,7 +518,7 @@ export function FleetMap({
               onEdit={onEdit}
               onTimeline={onTimeline}
               onClose={() => onSelect(null)}
-              onResize={keepPopupClearSoon}
+              onResize={popupResized}
             />
           ) : null}
         </Map>

@@ -9,6 +9,7 @@ import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
 import { BulkBarSlot } from './BulkBarSlot';
 import { openBoardOnce } from './board-opening';
+import { landSelection, slideSelection } from './selection-slide';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -158,6 +159,17 @@ export function FleetList({
     [rows, virtualizer],
   );
 
+  /** §12.149. In the commit that changes it, ahead of the frame that would show it. */
+  const lastDrawnSelection = useRef(selectedId);
+  useLayoutEffect(() => {
+    const was = lastDrawnSelection.current;
+    lastDrawnSelection.current = selectedId;
+    const box = scrollRef.current;
+    if (!box || was === selectedId) return;
+    if (was && selectedId) slideSelection(box, was, selectedId);
+    else landSelection(box);
+  }, [selectedId]);
+
   const lastSelected = useRef<string | null>(null);
   useEffect(() => {
     if (selectedId && selectedId !== lastSelected.current) scrollToId(selectedId);
@@ -168,7 +180,7 @@ export function FleetList({
 
   return (
     <div ref={panelRef} className="flex min-h-0 min-w-0 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto">
         {/* Sticky INSIDE the scroller, so it survives every scroll position. */}
         <div
           role="row"
@@ -209,7 +221,7 @@ export function FleetList({
         */}
         {pinnedRows.length > 0 ? (
           <div className="border-b border-line-hair">
-            <div className="flex h-6 items-center gap-2 bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+            <div className="relative flex h-6 items-center gap-2 bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
               <span className="text-accent">Pinned</span>
               <span className="tabular-nums">
                 {pinnedRows.length} of {PIN_CAP}

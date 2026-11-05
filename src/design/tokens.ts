@@ -222,8 +222,13 @@ export const TRAIL_RAMP = [1, 0.75, 0.5, 0.3, 0.15] as const;
 export const MOTION_MS = {
   /** §8.3. Ground and selection. */
   ground: 120,
-  /** §8.3. Map pan; the map jumps instead under reduced motion. */
+  /** §8.3. A pan the dispatcher asked for by hand; the map jumps under reduced motion. */
   map: 150,
+  /**
+   * §12.149. The map going to a selected truck. Long enough to see which way it went,
+   * and it is Mapbox's default curve, so the pan keeps its own easing.
+   */
+  mapTravel: 450,
   /** §14.4. Flash ground decays to the resting ground over this. */
   flash: 1600,
   /** §14.4. Chip crossfade. The WIDTH snaps — only opacity is animated. */
@@ -259,6 +264,8 @@ export const MOTION_MS = {
   boardOpenRow: 120,
   /** So three rows do not take the whole 300ms. Normally the rows in view set the gap. */
   boardOpenGapMax: 20,
+  /** §12.149. The selected row's ground, from the row it was on. */
+  selectionSlide: 180,
 } as const;
 
 /**
