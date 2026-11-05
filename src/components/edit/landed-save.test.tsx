@@ -782,3 +782,71 @@ describe('Clear now (§9.5, §12.117, §12.127)', () => {
     }
   });
 });
+
+describe('leaving the page: the same condition the Discard question uses', () => {
+  const browserWouldAsk = () => {
+    const leaving = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leaving);
+    return leaving.defaultPrevented;
+  };
+  const savedRead = () =>
+    readOf(fleetRow({ ...truck, nextStop: stop({ loadVersion: RETURNED, zip: '55803' }) }));
+
+  it('does not ask with nothing typed, and Esc closes', async () => {
+    await render(EXISTING);
+    expect(browserWouldAsk()).toBe(false);
+    await esc();
+    expect(text()).not.toContain('Discard changes?');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks with something typed, and Esc asks too', async () => {
+    await render(EXISTING);
+    await type(field('ZIP'), '55803');
+    expect(browserWouldAsk()).toBe(true);
+    await esc();
+    expect(text()).toContain('Discard changes?');
+  });
+
+  it('stops asking once it is typed back to what it was', async () => {
+    await render(EXISTING);
+    await type(field('ZIP'), '55803');
+    expect(browserWouldAsk()).toBe(true);
+    await type(field('ZIP'), '55802');
+    expect(browserWouldAsk()).toBe(false);
+  });
+
+  it('does not ask for a save that landed and kept the window open, and asks for what is typed after', async () => {
+    saves = [() => landed(LOAD, RETURNED, [{ field: 'stops.0.arrivedAt', message: NO_ANCHOR }])];
+    reads[LOAD] = [() => json(200, savedRead())];
+    await render(EXISTING);
+    await type(field('ZIP'), '55803');
+    await click(button('Save'));
+    expectOnSaved(NO_ANCHOR);
+    expect(browserWouldAsk()).toBe(false);
+
+    await type(field('ZIP'), '55804');
+    expect(browserWouldAsk()).toBe(true);
+  });
+
+  /** Where a second copy of the condition would go wrong: the form is spent, not clean. */
+  it('does not ask when the save landed and the read of it failed, typed into or not', async () => {
+    saves = [() => landed(LOAD, RETURNED, [{ field: 'stops.0.arrivedAt', message: NO_ANCHOR }])];
+    reads[LOAD] = [() => json(500, { error: 'The read failed.' })];
+    await render(EXISTING);
+    await type(field('ZIP'), '55803');
+    await click(button('Save'));
+    expect(text()).toContain('The save landed, but the load could not be read again');
+    expect(browserWouldAsk()).toBe(false);
+    await type(field('ZIP'), '55804');
+    expect(browserWouldAsk()).toBe(false);
+  });
+
+  it('does not ask once the window has gone', async () => {
+    await render(EXISTING);
+    await type(field('ZIP'), '55803');
+    expect(browserWouldAsk()).toBe(true);
+    await act(async () => root!.render(null));
+    expect(browserWouldAsk()).toBe(false);
+  });
+});

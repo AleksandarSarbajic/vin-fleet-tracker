@@ -491,6 +491,24 @@ function LoadEditor({
           ],
     [active, dirty, form, initialForm, openedActive, spent],
   );
+  /**
+   * The one answer to "is there typed work to lose?". Esc and Cancel raise the Discard
+   * question on it, the banner says it, and leaving the page asks on it, so none of
+   * them can disagree about what would be lost.
+   */
+  const hasUnsaved = unsaved.length > 0;
+
+  /**
+   * Reload and closing the tab, as the Assignments board guards them. A save that
+   * landed is `spent`, so it has nothing here, and a closed window has no listener.
+   * A client navigation does not reach this: in-app Back is a known gap (HANDOFF).
+   */
+  useEffect(() => {
+    if (!hasUnsaved) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsaved]);
 
   const driverChanged = !spent && form.driverId !== initialDriverId;
 
@@ -565,7 +583,7 @@ function LoadEditor({
     !spent &&
     parsed !== null &&
     overrideErrors.length === 0 &&
-    (unsaved.length > 0 || overrideChanged) &&
+    (hasUnsaved || overrideChanged) &&
     !saving;
 
   const flags = form.stops.map((_, i) => stopFlags(form, i, nextKey));
@@ -1007,7 +1025,7 @@ function LoadEditor({
         event.preventDefault();
         event.stopPropagation();
         if (preview) setPreview(null);
-        else if (unsaved.length > 0) setDiscarding(true);
+        else if (hasUnsaved) setDiscarding(true);
         else onClose();
       } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
@@ -1016,7 +1034,7 @@ function LoadEditor({
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [asking, clearing, discarding, onClose, preview, reachedAsk, save, unsaved.length]);
+  }, [asking, clearing, discarding, hasUnsaved, onClose, preview, reachedAsk, save]);
 
   const claimedBy = useMemo(() => {
     const map = new Map<string, string>();
@@ -1129,7 +1147,7 @@ function LoadEditor({
             </div>
           ) : null}
 
-          {unsaved.length > 0 ? (
+          {hasUnsaved ? (
             <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
               Unsaved changes — {unsaved.join(', ')}.
             </p>
@@ -1377,7 +1395,7 @@ function LoadEditor({
           <div className="flex shrink-0 gap-2.5">
             <button
               type="button"
-              onClick={() => (unsaved.length > 0 ? setDiscarding(true) : onClose())}
+              onClick={() => (hasUnsaved ? setDiscarding(true) : onClose())}
               className="h-10 border border-line-hair px-4 font-cond text-micro uppercase tracking-[.09em] text-text-secondary"
             >
               Cancel
