@@ -31,6 +31,16 @@ const checkbox = (page: Page, truck: number) =>
 const editModal = (page: Page) =>
   page.getByRole('dialog', { name: /^(Edit|New) load for truck 101$/ });
 
+/**
+ * The row, and the address that follows it. That lands a moment later by itself
+ * (`router.replace`), so a reading taken before it would blame the next key.
+ */
+async function selectChicago(page: Page) {
+  await rowOf(page, IDS.truckChicago).click();
+  await expect(rowOf(page, IDS.truckChicago)).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(/[?&]truck=101\b/);
+}
+
 /** Everything a board shortcut could change, read from the page. */
 const behind = (page: Page) =>
   page.evaluate(() => {
@@ -115,7 +125,7 @@ async function nothingMovesBehind(page: Page, button: Locator, keys = BOARD_KEYS
 /** The caret in a field of a dirty form. */
 async function editWithWork(page: Page) {
   await page.goto('/');
-  await rowOf(page, IDS.truckChicago).click();
+  await selectChicago(page);
   await page.keyboard.press('Enter');
   const modal = editModal(page);
   await expect(modal).toBeVisible();
@@ -128,14 +138,14 @@ async function editWithWork(page: Page) {
 
 async function checkTwo(page: Page) {
   await page.goto('/');
-  await rowOf(page, IDS.truckChicago).click();
+  await selectChicago(page);
   await checkbox(page, TRUCK_NUMBERS.chicago).check();
   await checkbox(page, TRUCK_NUMBERS.dallas).check();
 }
 
 async function openTimeline(page: Page) {
   await page.goto('/');
-  await rowOf(page, IDS.truckChicago).click();
+  await selectChicago(page);
   await page.getByRole('button', { name: 'Timeline' }).click();
   const timeline = page.getByRole('dialog', { name: /Timeline for truck 101/ });
   await expect(timeline).toBeVisible();
@@ -195,7 +205,7 @@ test.describe('the edit window with typed work, and focus on a button', () => {
   }) => {
     await page.goto('/');
     const left = watchLeaving(page);
-    await rowOf(page, IDS.truckChicago).click();
+    await selectChicago(page);
     await expect(page.getByRole('button', { name: 'Timeline' })).toBeVisible();
     const elapsed = await page.evaluate(async () => {
       const key = (name: string) =>
@@ -255,7 +265,7 @@ test.describe('every other window, with focus on a button', () => {
 
   test('the truck list editor', async ({ page }) => {
     await page.goto('/');
-    await rowOf(page, IDS.truckChicago).click();
+    await selectChicago(page);
     await page.locator('[data-scope] [aria-haspopup="menu"]').click();
     await page.getByRole('menuitem', { name: 'New list…' }).click();
     const editor = page.getByRole('dialog', { name: 'New list' });
@@ -297,7 +307,7 @@ test.describe('every other window, with focus on a button', () => {
 
   test('the shortcut sheet: the board keys, and not its own', async ({ page }) => {
     await page.goto('/');
-    await rowOf(page, IDS.truckChicago).click();
+    await selectChicago(page);
     await page.keyboard.press('?');
     const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
     await expect(sheet).toBeVisible();
@@ -307,7 +317,7 @@ test.describe('every other window, with focus on a button', () => {
 
   test('the palette: the board keys, from a button', async ({ page }) => {
     await page.goto('/');
-    await rowOf(page, IDS.truckChicago).click();
+    await selectChicago(page);
     await page.keyboard.press('Control+k');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
@@ -425,7 +435,7 @@ test.describe("a window's own keys keep working", () => {
     page,
   }) => {
     await page.goto('/');
-    await rowOf(page, IDS.truckChicago).click();
+    await selectChicago(page);
     await page.keyboard.press('Control+k');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
