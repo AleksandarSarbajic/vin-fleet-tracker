@@ -241,7 +241,7 @@ export const MOTION_MS = {
   /** §12.148. A menu or a dropdown, smaller, so quicker than a window. */
   menuIn: 180,
   menuOut: 100,
-  /** §12.148. Grounds and lifts under a pointer. */
+  /** §12.148. A ground under a pointer. A lift takes `pressOut`. */
   hover: 160,
   /** §12.148. A press answers at once and lets go slowly. */
   pressIn: 60,

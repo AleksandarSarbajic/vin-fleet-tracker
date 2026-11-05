@@ -1878,9 +1878,10 @@ test.describe('hover and press', () => {
       const box = (await toggle.boundingBox())!;
       expect(box.x + box.width).toBe(1024);
       // Let go below it, on the map, so the toggle is not used.
+      // Phase 3bd: a long thing now, as its full width always was.
       await expectNoGrowth(page, page.locator('html'), toggle, {
-        press: 0.96,
-        lifts: true,
+        press: 0.995,
+        lifts: false,
         away: [512, 500],
       });
     });

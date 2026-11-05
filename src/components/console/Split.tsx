@@ -254,7 +254,7 @@ export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
             // Hidden, it kept the size it had; shown, it measures again.
             if (next) onResizeEnd();
           }}
-          className="flex h-8 shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent max-md:hidden"
+          className="flex h-8 w-full shrink-0 items-center justify-center border-b border-line-hair bg-surface-raised font-cond text-micro uppercase tracking-[.08em] text-accent max-md:hidden"
         >
           {mapVisible ? 'Hide map' : 'Show map'}
         </button>

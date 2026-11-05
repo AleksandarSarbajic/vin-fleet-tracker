@@ -10496,7 +10496,7 @@ fading on close**. These are its numbers, all tokens in `tokens.ts`:
 |---|---|---|
 | **Window** | 220ms, from 96%, 8px rise, `EASING.dialog`; fully opaque by 60%. Scrim fades in, linear. | At once; a copy fades, 140ms |
 | **Menu, dropdown** | 180ms, from 96%, 4px drop, from the corner it hangs from | At once; a copy fades, 100ms |
-| **Hover** | 160ms; a button lifts 1px | |
+| **Hover** | Ground 160ms; a button lifts 1px in 180ms | |
 | **Press** | 60ms, to 96% | 180ms |
 | **Press, long or listed** | 60ms, to 99.5%, no lift: rows, menu items, full-width buttons, phone cards | 180ms |
 | **Row at hover** | A grey bar, `text.muted` at 80%, on the left edge. **No transform.** | |
