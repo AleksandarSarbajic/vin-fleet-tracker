@@ -84,8 +84,10 @@ press at 60ms, and the press, lift and hit area on one clock. See "Phase 3bc" be
 **3bc follow-up: pushed** (origin at `35f399f` when follow-up 2 began; live not checked): the
 board's shortcuts stand down behind any window, through one guard in `keymap.ts`. See "Phase 3bc
 follow-up" below.
-**3bc follow-up 2: NOT pushed** (2026-11-05): a poll never closes a window. See "Phase 3bc follow-up
-2" below.
+**3bc follow-up 2: pushed** (origin at `1b432ba` when follow-up 3 began; live not checked): a poll never
+closes a window. See "Phase 3bc follow-up 2" below.
+**3bc follow-up 3: NOT pushed** (2026-11-05): Reload and closing the tab ask, Reopen says what goes, P and
+the phone's sheet follow the board. See "Phase 3bc follow-up 3" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10639,7 +10641,7 @@ One fix, no motion. **NOT pushed.** Built on `35f399f`, clean tree, level with o
 | Remove stop | **No**: one click, that stop's values, by intent | Read |
 | Typing in the moment after a save that lands with a warning | **No**: the fields stay live while the saved load is read again, then the editor reopens | Read, not run |
 | A render error | **No**: `global-error.tsx` replaces the page | Read, not run |
-| The list on screen deleted while the session has expired | **No**: that fallback's `router.replace` meets the sign-in redirect. With a good session the window stays (run) | Read, not run |
+| The list on screen deleted while the session has expired | **Wrong, corrected by follow-up 3:** run, and it cannot happen. The list poll gets a 401 first, so the board never learns the list went, and nothing navigates | Run in follow-up 3 |
 | Clear stop, PDF fill, Discard | **Yes**: Clear stop's confirm is given the unsaved list; a fill asks Replace or Keep mine | Read |
 
 Also a window that closes on a poll, with nothing typed in it: **the phone's truck sheet** (`sheetOpen && selectedRow`). Run: it closes when the truck leaves the chip and opens again by itself when it returns, the shape of claim 2. Not changed: the brief named two windows. The bulk modal, list editor and add-to-list hold no row, so a poll cannot close them: read, not run.
@@ -10662,6 +10664,85 @@ Also a window that closes on a poll, with nothing typed in it: **the phone's tru
 
 1. **Push?** Your call under "Do not push".
 2. **The console has no `beforeunload`, and Reopen… drops a typed form.** Recommended next, both small: Back, Reload and closing the tab are the widest way left to lose an edit, and `AssignmentBoard` already has the pattern. The list editor's and bulk modal's Esc lose little: recommended, leave them.
+
+### Phase 3bc follow-up 3: the last ways to lose an edit before the new motion (2026-11-05)
+
+Four small fixes, no motion. **NOT pushed.** Built on `1b432ba`, clean tree, level with origin.
+
+| Commit | Fix |
+|---|---|
+| `517d998` | Reload and closing the tab ask, while the edit window has typed work |
+| `b918f40` | Reopen says the typed work goes, before it goes |
+| `2f7af4a` | P does not pin a truck the board is not showing |
+| `4c4b22b` | The phone's truck sheet stays open until its user closes it |
+| `507473b` | A race in a test from follow-up 1 (below) |
+
+**1. The warning.** `hasUnsaved` in `LoadEditor` is the one definition: Esc, Cancel, the banner, Save and the `beforeunload` all read it. It follows `AssignmentBoard`'s pattern. It does not ask with nothing typed, for what is typed back to how it opened, after a save, after Discard, or on a spent form whose read failed.
+
+**Nothing automatic gets stuck behind it. What I found:**
+
+- **A session that ends navigates nothing.** The middleware redirects page requests only, and an API route answers 401. Run: no dialog, the window stays, Save shows an error, and the work is still there.
+- **There is no `window.location` write in the app.** The one automatic full-page navigation is Next's own: when the fetch behind a `router.replace` fails, it falls back to the browser. The only `router.replace` that can fire behind a window is the fallback for a list someone else deleted. Run, with that fetch failing: the browser asks. **Stay** keeps the work, Save saves, and the next selection moves the address, though the framework's navigation never finished. **Leave** goes. With nothing typed it goes with no question, as before. Before this phase the same blip would have lost the work with no question.
+
+**2. Reopen.** The existing confirm, the smaller of the two. Its last line now reads "Unsaved edits in this form are discarded: load number.", from one function Clear stop shares. Back keeps the work. Nothing typed: the lines are as they were.
+
+**3. P.** Run first, having only been read: **it did pin a hidden truck,** and `ft.pinned` held its id. Now `usePinned(selectedRow?.id ?? null)`, as X. On a truck the board shows, unchanged.
+
+**4. The sheet.** `useWindowRow(sheetOpen ? selectedId : null, all)`. Open until its user closes it, live, on its last row if the truck is gone. Look and motion untouched. **Its buttons, for a truck that has left the board:**
+
+| Button | What it does | How known |
+|---|---|---|
+| Close | Closes it, and it stays closed when the truck returns | Run |
+| Timeline | Opens over the sheet; closing it gives the sheet back | Run |
+| Call driver | Dials: the number is from the list the console already holds, by truck | Run: `tel:+1…` |
+| Show on map | The sheet steps aside and the map tab opens, with no error. **The truck is not on it:** the map draws the board's rows, and its pan returns early for a truck it does not have. Nothing says why | Run; the pan by reading `FleetMap.tsx:299` |
+
+**Measured, not changed: what Back does now.**
+
+| Back to | Asks? | Stay | Leave |
+|---|---|---|---|
+| An in-app page reached by client navigation (`G H`, `G B`, then Back) | **No.** `beforeunload` does not fire. Went to `/history`, window and typed work gone | | |
+| An in-app page reached by a full load | **Yes** | Stays, typed work there | Goes to `/assignments` |
+| A page outside the app | **Yes** | Stays, typed work there | Goes |
+
+**Measured, not changed: a poll under the bulk and add-to-list windows.** Three late trucks, the Late chip on, real polls.
+
+| Case | Window before | Window after | What the action touched |
+|---|---|---|---|
+| Bulk, a checked truck leaves | `3 trucks · 101 · 102 · 103` | `2 trucks · 102 · 103` | 102, 103 |
+| Bulk, every checked truck leaves | `2 trucks · 101 · 102` | `0 trucks ·`, Apply disabled, the window stays | Nothing |
+| Bulk, a truck checked earlier and hidden comes back | `2 trucks · 102 · 103` | `3 trucks · 102 · 103 · 101` | **101, 102, 103** |
+| Add to list, a checked truck leaves | `Add 3 trucks` `101 · 102 · 103` | `Add 2 trucks` `102 · 103` | 102, 103; "2 trucks added" |
+| Add to list, a hidden checked truck comes back | `Add 2 trucks` `102 · 103` | `Add 3 trucks` `102 · 103 · 101` | **101, 102, 103** |
+
+The count is true at the moment of the press: what the window says is what it does. **The found-wrong is that it changes under the dispatcher with nothing said, and the last row of each table above acts on a truck that was not in the window when it opened.**
+
+**Found wrong and not fixed:**
+
+1. **A status override draft closes with no question.** Run: Force late pressed, Esc: the window closed, no banner, no dialog. `unsaved` does not count the override, so its reason and note go too, and by the same condition Reload will not ask. §9.9's "it never closes silently" does not hold for it. This phase kept to the condition the brief named. Recommended next: small.
+2. **The bulk and add-to-list windows change under the dispatcher,** above. A truck can be acted on that was not in the window when it opened. Recommended: small, ahead of 3bd, because it writes.
+3. **In-app Back still loses the work.** Out of scope, and no history trap was built. Reaching it takes a client navigation earlier in that tab's history.
+4. **Show on map for a truck that has left the board** opens a map without it and says nothing. Leave it until it bothers someone.
+
+**Tests.** Seen failing on `1b432ba`: 7 e2e and 8 unit tests. Mutations, each alone and restored:
+
+| Mutation | Unit | e2e |
+|---|---|---|
+| No warning | 4 | 3: Reload, closing the tab, the failed `router.replace` |
+| Asks always | 3 | 2: nothing typed, typed back |
+| A second copy of the condition | 1, only after I added it | Not run |
+| Reopen's confirm not told | 1, only after I added it | 1 |
+| `usePinned(selectedId)` | 1 | 1 |
+| The sheet back on `rows` | 2 | 3 |
+
+**Slips of mine.** A second copy of the condition passed every test at first: after a warned save the editor remounts on a clean form, so `spent` only matters while the saved load is read back, or if that read fails. A unit test now holds that. Reopen's prop was held only by the e2e, so a unit test holds it in `npm run check` too. My first unit mutation run tested nothing, because zsh did not split a path list, and I reran it. A probe had a wrong selector. And last phase's table was wrong about the list fallback with an expired session: corrected above.
+
+**Checks.** `npm run check` at `507473b`: **229 files, 4220 tests** (229 and 4207 before). The forbidden-files grep printed nothing. **Full e2e on the default config:** run `2026-11-05T16-12-16-036Z` at `4c4b22b`: 424 passed, 1 failed, 1 did not run. The failure: "the palette: the board keys, from a button", from follow-up 1, a test race. The trace has Ctrl+K at 1412ms, the option focused at 1426ms and D at 1440ms, with the palette's own focus timer landing between them. Only D was affected, and nothing behind the window moved. The case now waits for that focus, a condition and not a longer wait; repeated five times, 16 passed. `phone-signout` did not run because it depends on the whole chromium project. **Run `2026-11-05T16-49-56-418Z` at `507473b`: 426 passed, 0 failed, 0 flaky** (35.2 min, up from 411 and 31.9), the machine awake. Every baseline matched, and `git diff 1b432ba HEAD -- e2e/__screenshots__ package.json drizzle src/worker` is empty. The three server errors in its log are the same three as before.
+
+**Questions for Alex:**
+
+1. **Push?** Your call under "Do not push".
+2. **The override draft, and the bulk and add-to-list windows, ahead of 3bd?** Recommended: yes, both small. The first loses typed work; the second writes to a truck that was not in the window when it opened.
 
 ## Next
 
