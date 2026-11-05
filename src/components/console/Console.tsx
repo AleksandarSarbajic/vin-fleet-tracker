@@ -683,9 +683,11 @@ export function Console({
       // on a button it would clear the rows behind a window and the window's own Esc
       // would never run. The bulk modal is asking about these very rows.
       if (isWindowOpen()) return;
-      if ((event.key === 'x' || event.key === 'X') && selectedId) {
+      // A selected truck the board is not showing: ticked unseen, it would come back
+      // checked, and a bulk action would take it along.
+      if ((event.key === 'x' || event.key === 'X') && selectedRow) {
         event.preventDefault();
-        bulk.toggle(selectedId, event.shiftKey);
+        bulk.toggle(selectedRow.id, event.shiftKey);
         return;
       }
       if (event.key === 'Escape' && bulk.count > 0) {
@@ -696,7 +698,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [bulk, selectedId, editingId]);
+  }, [bulk, selectedRow, editingId]);
 
   /* ------------------------- the header's scope (§12.91) ---------------- */
 

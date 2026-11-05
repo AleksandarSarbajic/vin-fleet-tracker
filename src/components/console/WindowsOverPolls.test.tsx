@@ -218,7 +218,7 @@ describe('the timeline', () => {
 
 /**
  * `rows` also meant "a truck the board shows". The window's lookup no longer does, so
- * Enter says it itself, or a selection nobody can see would open a window.
+ * these two say it themselves, or a selection nobody can see would act.
  */
 describe('a selected truck the board is not showing', () => {
   it('Enter does not open a window on it', async () => {
@@ -228,5 +228,15 @@ describe('a selected truck the board is not showing', () => {
     expect(rowFor('101')).toBeUndefined();
     await press('Enter');
     expect(windows()).toEqual([]);
+  });
+
+  it('X does not check it unseen', async () => {
+    await render(['late']);
+    await selectA();
+    await poll([ARRIVED_A, LATE_B]);
+    await press('x');
+    await poll([LATE_A, LATE_B]);
+    const box = rowFor('101')!.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(box?.checked).toBe(false);
   });
 });
