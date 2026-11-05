@@ -7,6 +7,7 @@ import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
+import { BulkBarSlot } from './BulkBarSlot';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -290,15 +291,17 @@ export function FleetList({
         under a cursor that is mid-click.
       */}
       {bulk.barOpen ? (
-        <BulkBar
-          rows={rows}
-          checked={checked}
-          lastVisible={lastVisible}
-          onForceStatus={bulk.onForceStatus}
-          onAddNote={bulk.onAddNote}
-          {...(bulk.onAddToList ? { onAddToList: bulk.onAddToList } : {})}
-          onClear={bulk.onClear}
-        />
+        <BulkBarSlot>
+          <BulkBar
+            rows={rows}
+            checked={checked}
+            lastVisible={lastVisible}
+            onForceStatus={bulk.onForceStatus}
+            onAddNote={bulk.onAddNote}
+            {...(bulk.onAddToList ? { onAddToList: bulk.onAddToList } : {})}
+            onClear={bulk.onClear}
+          />
+        </BulkBarSlot>
       ) : (
         <ListFooter rows={rows} firstVisible={firstVisible} lastVisible={lastVisible} />
       )}

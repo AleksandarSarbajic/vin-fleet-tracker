@@ -136,6 +136,20 @@ export function resumeAt(elapsed: number): CSSProperties | undefined {
 }
 
 /**
+ * A plain deep copy with nothing left on it that could find it: no id, role, name or
+ * label, no data attribute. For a copy that is not a window (§12.149).
+ */
+export function makeInert(el: HTMLElement): HTMLElement {
+  const copy = el.cloneNode(true) as HTMLElement;
+  for (const node of [copy, ...copy.querySelectorAll<HTMLElement>('*')]) {
+    for (const a of [...node.attributes]) {
+      if (IDENTITY.test(a.name)) node.removeAttribute(a.name);
+    }
+  }
+  return copy;
+}
+
+/**
  * A deep copy nothing can use. The browser copies a typed value and a checkbox
  * itself; a select's choice and a scroll position it does not. Closed
  * mid-opening, the copy fades from where it stood rather than jumping to full

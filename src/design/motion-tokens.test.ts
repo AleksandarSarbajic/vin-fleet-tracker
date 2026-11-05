@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EASING, MOTION_MS } from './tokens';
+import { EASING, MOTION_MS, MOTION_SHAPE } from './tokens';
 
 /**
  * §12.149. The new motion's numbers, chosen by Alex from the demo at its On setting
@@ -13,6 +13,15 @@ describe('the numbers of the new motion (§12.149)', () => {
 
   it('a count rolls in 240ms', () => {
     expect(MOTION_MS.countRoll).toBe(240);
+  });
+
+  it('a page comes up 6px in 180ms', () => {
+    expect(MOTION_MS.pageIn).toBe(180);
+    expect(MOTION_SHAPE.pageRisePx).toBe(6);
+  });
+
+  it('the bulk bar takes 200ms', () => {
+    expect(MOTION_MS.bulkBar).toBe(200);
   });
 
   it('the curve is the windows’ curve', () => {

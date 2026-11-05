@@ -20,6 +20,9 @@ const DIALOG_CURVE = 'cubic-bezier(.22,.61,.36,1)';
 const SEGMENT_MS = 180;
 const ROLL_MS = 240;
 const FLASH_MS = 1600;
+const PAGE_MS = 180;
+const RISE_PX = 6;
+const BAR_MS = 200;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -825,5 +828,579 @@ test.describe('step 3, a count rolls when it changes', () => {
     expect(seen.filter((f) => f.length > 0).length).toBeGreaterThan(3);
     expect(new Set(seen.flat())).toEqual(new Set(['1']));
     expect(await strip.locator('[data-roll]').first().evaluate((b) => b.getAttribute('style'))).toBeNull();
+  });
+});
+
+/**
+ * Every Web Animation the page starts, from before the page's own code runs: what it
+ * moves and how. A test that something never played reads this, because a frame-by-frame
+ * watch can miss what is over between two frames.
+ */
+const logAnimations = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as { __started: { from: string; duration: number; easing: string }[] };
+    w.__started = [];
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const first = (Array.isArray(frames) ? frames[0] : null) as Keyframe | null;
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      w.__started.push({
+        from: `${String(first?.['transform'] ?? '')}|${String(first?.['opacity'] ?? '')}`,
+        duration: Number(timing.duration),
+        easing: String(timing.easing ?? ''),
+      });
+      return real.call(this, frames, options);
+    };
+  });
+const started = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __started: { from: string; duration: number; easing: string }[] }).__started);
+
+test.describe('step 4, a page rises', () => {
+  const RISE = `translateY(${RISE_PX}px)|0`;
+  const rises = async (page: Page) => (await started(page)).filter((s) => s.from === RISE);
+  /** The box the template mounts, and the page in it. */
+  const riseFrame = () => {
+    const box = document.querySelector('[data-page]');
+    const inner = box?.firstElementChild;
+    const running = inner
+      ?.getAnimations()
+      .some((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation));
+    return {
+      running: Boolean(running),
+      clip: box ? getComputedStyle(box).overflow : '',
+      style: box?.getAttribute('style') ?? null,
+      opacity: inner ? Number(getComputedStyle(inner).opacity) : 1,
+      y: inner ? new DOMMatrixReadOnly(getComputedStyle(inner).transform).m42 : 0,
+    };
+  };
+  const toBoardAndBack = async (page: Page) => {
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.locator('[data-history-summary]').waitFor();
+    await quiet(page);
+  };
+  const backToBoard = async (page: Page) => {
+    await page.keyboard.press('g');
+    await page.keyboard.press('b');
+  };
+  /** The board is drawn and still rising. Checked on each frame, so it does not miss it. */
+  const midRise = (page: Page) =>
+    page.waitForFunction(
+      () =>
+        Boolean(
+          document.querySelector('[data-row-id]') &&
+            document
+              .querySelector('[data-page]')
+              ?.firstElementChild?.getAnimations()
+              .some((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)),
+        ),
+      undefined,
+      { polling: 'raf' },
+    );
+
+  test('a change of page: it fades and rises 6px in 180ms, and leaves nothing', async ({ page }) => {
+    await logAnimations(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, riseFrame);
+    await toBoardAndBack(page);
+
+    const seen = await frames();
+    const { grew, frames: count } = await stop();
+    expect(grew).toEqual([]);
+    expect(count).toBeGreaterThan(5);
+    const [only, ...more] = await rises(page);
+    expect(more).toEqual([]);
+    expect(only!.duration).toBe(PAGE_MS);
+    expect(curve(only!.easing)).toBe(curve(DIALOG_CURVE));
+
+    const rising = seen.filter((f) => f.running);
+    expect(rising.length).toBeGreaterThan(2);
+    // The box clips for as long as it rises, or 6px of page below the screen scrolls.
+    expect(new Set(rising.map((f) => f.clip))).toEqual(new Set(['clip']));
+    for (const f of rising) {
+      expect(f.y).toBeGreaterThanOrEqual(0);
+      expect(f.y).toBeLessThanOrEqual(RISE_PX);
+    }
+    const last = seen.at(-1)!;
+    expect(last).toMatchObject({ running: false, style: null, opacity: 1, y: 0 });
+    expect(await page.locator('[data-page]').evaluate((b) => b.firstElementChild!.getAttribute('style'))).toBeNull();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+  });
+
+  test('the two links that change page rise too: Assignments, and Driver history', async ({ page }) => {
+    await logAnimations(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await page.getByRole('link', { name: 'Assignments' }).click();
+    await page.waitForURL('**/assignments');
+    await expect.poll(async () => (await rises(page)).length).toBe(1);
+
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    expect(await rises(page)).toEqual([]);
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await page.locator('[data-menu-history]').click();
+    await page.waitForURL('**/history**');
+    await expect.poll(async () => (await rises(page)).length).toBe(1);
+  });
+
+  test('the first page of a load does not rise', async ({ page }) => {
+    await logAnimations(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    expect(await rises(page)).toEqual([]);
+    await page.reload();
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    expect(await rises(page)).toEqual([]);
+  });
+
+  test('?truck=, a search, a poll and a refetch never replay it, and never remount the board or the map', async ({ page }) => {
+    await logAnimations(page);
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/');
+    const row = page.locator('[data-row-id]').first();
+    await row.waitFor();
+    await page.locator('.mapboxgl-canvas').first().waitFor();
+    await quiet(page);
+    await page.evaluate(() => {
+      const mark = (el: Element | null) => {
+        (el as unknown as { __kept: boolean }).__kept = true;
+      };
+      mark(document.querySelector('[data-page]'));
+      mark(document.querySelector('[data-row-id]')!.closest('.overflow-y-auto'));
+      mark(document.querySelector('.mapboxgl-canvas'));
+    });
+    const kept = () =>
+      page.evaluate(() =>
+        ['[data-page]', '.overflow-y-auto', '.mapboxgl-canvas'].map(
+          (s) => (document.querySelector(s) as unknown as { __kept?: boolean } | null)?.__kept === true,
+        ),
+      );
+
+    await row.click();
+    await page.waitForURL(/[?&]truck=/);
+    expect(await kept()).toEqual([true, true, true]);
+
+    await pollWith(page, lateFirst(1));
+    await quiet(page);
+    expect(await kept()).toEqual([true, true, true]);
+
+    await page.keyboard.press('/');
+    await page.keyboard.type('10');
+    await page.waitForURL(/[?&]q=10/);
+    await quiet(page);
+    expect(await kept()).toEqual([true, true, true]);
+
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await quiet(page);
+    expect(await kept()).toEqual([true, true, true]);
+    expect(await rises(page)).toEqual([]);
+  });
+
+  test('a popover opened mid-rise lands where it does at rest', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const scope = page.locator('[data-scope] [aria-haspopup="menu"]');
+    const menu = page.locator('[data-views-menu]');
+    const box = (await scope.boundingBox())!;
+    await page.mouse.move(box.x + 8, box.y + 8);
+    await quiet(page);
+    await page.mouse.down();
+    await page.mouse.up();
+    await menu.waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const atRest = (await menu.boundingBox())!;
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    await toBoardAndBack(page);
+    // The pointer is already on the button, so the press lands in the rise.
+    await page.evaluate(() => {
+      const w = window as unknown as { __riseAtPress: boolean | null };
+      w.__riseAtPress = null;
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          w.__riseAtPress = Boolean(
+            document
+              .querySelector('[data-page]')
+              ?.firstElementChild?.getAnimations()
+              .some((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)),
+          );
+        },
+        { capture: true, once: true },
+      );
+    });
+    await backToBoard(page);
+    await midRise(page);
+    await page.mouse.down();
+    await page.mouse.up();
+    await menu.waitFor();
+    expect(await page.evaluate(() => (window as unknown as { __riseAtPress: boolean }).__riseAtPress)).toBe(true);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await menu.boundingBox()).toEqual(atRest);
+  });
+
+  test('a key opens one mid-rise: V, and it lands where it does at rest', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const menu = page.locator('[data-views-menu]');
+    await page.keyboard.press('v');
+    await menu.waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const atRest = (await menu.boundingBox())!;
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    await toBoardAndBack(page);
+    await backToBoard(page);
+    await midRise(page);
+    await page.keyboard.press('v');
+    await menu.waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await menu.boundingBox()).toEqual(atRest);
+  });
+
+  test('a window opened mid-rise fills the screen from its first frame', async ({ page }) => {
+    await page.goto('/');
+    const row = page.locator('[data-row-id]').first();
+    await row.waitFor();
+    await row.click();
+    await quiet(page);
+    await toBoardAndBack(page);
+    await backToBoard(page);
+    await midRise(page);
+    const frames = await record(page, () => {
+      const scrim = document.querySelector('[aria-modal="true"]');
+      if (!scrim) return null;
+      const r = scrim.getBoundingClientRect();
+      return { top: r.top, left: r.left, width: r.width, height: r.height };
+    });
+    await page.keyboard.press('Enter');
+    await page.locator('[aria-modal="true"]').first().waitFor();
+    await quiet(page);
+    const viewport = page.viewportSize()!;
+    const seen = (await frames()).filter((f) => f !== null);
+    expect(seen.length).toBeGreaterThan(3);
+    for (const f of seen) {
+      expect(f).toEqual({ top: 0, left: 0, width: viewport.width, height: viewport.height });
+    }
+  });
+
+  test('a press in the rise holds it, and the row under the pointer is the row selected', async ({ page }) => {
+    await page.goto('/');
+    const row = page.locator('[data-row-id]').first();
+    await row.waitFor();
+    const box = (await row.boundingBox())!;
+    await quiet(page);
+    await toBoardAndBack(page);
+    await page.mouse.move(box.x + 300, box.y + box.height / 2);
+    await backToBoard(page);
+    await midRise(page);
+    await page.mouse.down();
+    const time = () =>
+      page.evaluate(
+        () =>
+          document
+            .querySelector('[data-page]')
+            ?.firstElementChild?.getAnimations()
+            .find((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation))?.currentTime ?? null,
+      );
+    const first = await time();
+    expect(first).not.toBeNull();
+    await page.waitForTimeout(PAGE_MS + 60);
+    expect(await time()).toBe(first);
+    await page.mouse.up();
+    await expect(page.locator('[data-row-id]').first()).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+  });
+
+  test('Reload still asks with typed work, Discard still closes, and only then does a key change page', async ({ page }) => {
+    await logAnimations(page);
+    await page.goto('/');
+    const row = page.locator('[data-row-id]').first();
+    await row.waitFor();
+    await row.click();
+    await page.keyboard.press('Enter');
+    const modal = page.getByRole('dialog', { name: /^(Edit|New) load for truck/ });
+    await modal.waitFor();
+    await modal.getByLabel('Load number').fill('TYPED');
+
+    const asked = page.waitForEvent('dialog');
+    void page.reload().catch(() => {});
+    const stay = await asked;
+    expect(stay.type()).toBe('beforeunload');
+    await stay.dismiss();
+    await expect(modal.getByLabel('Load number')).toHaveValue('TYPED');
+
+    // Focus on a button, where the keys reach the window's guard: no page change.
+    await modal.getByRole('button', { name: 'Cancel' }).focus();
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await quiet(page);
+    expect(await rises(page)).toEqual([]);
+
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog', { name: 'Discard changes?' }).getByRole('button', { name: 'Discard' }).click();
+    await expect(modal).toHaveCount(0);
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.locator('[data-history-summary]').waitFor();
+    await expect.poll(async () => (await rises(page)).length).toBe(1);
+  });
+
+  test('under reduced motion: no rise, and the page is there at once', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logAnimations(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const frames = await record(page, riseFrame);
+    await toBoardAndBack(page);
+    expect((await frames()).some((f) => f.running)).toBe(false);
+    expect(await started(page)).toEqual([]);
+  });
+});
+
+test.describe('step 4, the bulk bar comes up into its slot', () => {
+  const BAR_FROM = 'translateY(100%)|';
+  const bar = (page: Page) => page.locator('.bg-surface-bar button', { hasText: /^Clear/ });
+  const footer = (page: Page) => page.getByText(/^Showing/);
+  const COPY = '[data-bar-copy]';
+
+  async function openBoard(page: Page) {
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+  }
+  const boxes = (page: Page) => page.locator('[data-row-id] input[type="checkbox"]');
+  /** A real press on each of two rows' checkboxes. */
+  async function checkTwo(page: Page) {
+    for (const i of [0, 1]) {
+      const b = (await boxes(page).nth(i).boundingBox())!;
+      await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    }
+  }
+  const barFrame = () => {
+    const button = [...document.querySelectorAll('.bg-surface-bar button')].find(
+      (b) => b.textContent?.trim().startsWith('Clear') && !b.closest('[data-bar-copy]'),
+    );
+    const real = button?.closest('.bg-surface-bar');
+    const slot = real?.parentElement;
+    const copy = document.querySelector('[data-bar-copy]');
+    return {
+      open: Boolean(real),
+      y: real ? new DOMMatrixReadOnly(getComputedStyle(real).transform).m42 : null,
+      clip: slot ? getComputedStyle(slot).overflow : null,
+      copies: document.querySelectorAll('[data-bar-copy]').length,
+      copyY: copy?.firstElementChild
+        ? new DOMMatrixReadOnly(getComputedStyle(copy.firstElementChild).transform).m42
+        : null,
+      footer: [...document.querySelectorAll('span, div')].some((n) =>
+        n.textContent?.trim().startsWith('Showing'),
+      ),
+    };
+  };
+
+  test('opening: 200ms on the curve, inside its slot, and nothing left', async ({ page }) => {
+    await logAnimations(page);
+    await openBoard(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, barFrame);
+    await checkTwo(page);
+    await bar(page).waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    const moved = (await started(page)).filter((s) => s.from === BAR_FROM);
+    expect(moved).toHaveLength(1);
+    expect(moved[0]!.duration).toBe(BAR_MS);
+    expect(curve(moved[0]!.easing)).toBe(curve(DIALOG_CURVE));
+    const flying = seen.filter((f) => f.open && f.y !== 0);
+    expect(flying.length).toBeGreaterThan(2);
+    expect(new Set(flying.map((f) => f.clip))).toEqual(new Set(['clip']));
+    for (let i = 1; i < flying.length; i += 1) {
+      expect(flying[i]!.y!).toBeLessThanOrEqual(flying[i - 1]!.y!);
+    }
+    const rest = await bar(page).evaluate((b) => {
+      const real = b.closest('.bg-surface-bar')!;
+      return {
+        transform: getComputedStyle(real).transform,
+        animations: real.getAnimations().length,
+        slotStyle: real.parentElement!.getAttribute('style'),
+        barStyle: real.getAttribute('style'),
+      };
+    });
+    expect(rest).toEqual({ transform: 'none', animations: 0, slotStyle: null, barStyle: null });
+  });
+
+  test('its buttons work from the first frame', async ({ page }) => {
+    await openBoard(page);
+    await checkTwo(page);
+    // While it is still on its way: seen moving, then pressed where it is drawn, and the
+    // press holds it there.
+    await page.waitForFunction(
+      () => {
+        const clear = [...document.querySelectorAll('.bg-surface-bar button')].find((b) =>
+          b.textContent?.trim().startsWith('Clear'),
+        );
+        return (clear?.closest('.bg-surface-bar')?.getAnimations().length ?? 0) > 0;
+      },
+      undefined,
+      { polling: 'raf' },
+    );
+    const b = (await bar(page).boundingBox())!;
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    const moving = await bar(page).evaluate((el) => el.closest('.bg-surface-bar')!.getAnimations().length);
+    await page.mouse.up();
+    expect(moving).toBe(1);
+    await expect(boxes(page).first()).not.toBeChecked();
+    await expect(footer(page)).toBeVisible();
+  });
+
+  test('closing never waits: the footer is back at once, and a copy nothing can use slides away', async ({ page }) => {
+    await openBoard(page);
+    await checkTwo(page);
+    await bar(page).waitFor();
+    await quiet(page);
+    const stop = await watchFrames(page);
+    const frames = await record(page, barFrame);
+    const b = (await bar(page).boundingBox())!;
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(footer(page)).toBeVisible();
+
+    // The copy, while it is there: nothing can find it, press it or read it.
+    const facts = await page.locator(COPY).evaluate((holder) => {
+      const everything = [holder, ...holder.querySelectorAll('*')];
+      const r = holder.getBoundingClientRect();
+      return {
+        inert: holder.hasAttribute('inert'),
+        hidden: holder.getAttribute('aria-hidden'),
+        pointer: getComputedStyle(holder).pointerEvents,
+        overflow: getComputedStyle(holder).overflow,
+        position: getComputedStyle(holder).position,
+        identity: everything.flatMap((n) =>
+          [...n.attributes]
+            .map((a) => a.name)
+            .filter((a) => /^(id|name|role|tabindex|aria-(?!hidden)|data-(?!bar-copy))/.test(a)),
+        ),
+        height: r.height,
+        hit: document.elementFromPoint(r.x + 40, r.y + 15)?.closest('[data-bar-copy]') !== null,
+      };
+    });
+    expect(facts).toEqual({
+      inert: true,
+      hidden: 'true',
+      pointer: 'none',
+      overflow: 'clip',
+      position: 'fixed',
+      identity: [],
+      height: 30,
+      hit: false,
+    });
+
+    await expect(page.locator(COPY)).toHaveCount(0);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(Math.max(...seen.map((f) => f.copies))).toBe(1);
+    // In the same frame the bar went, the footer was there.
+    const firstClosed = seen.findIndex((f) => !f.open);
+    expect(seen[firstClosed]!.footer).toBe(true);
+    expect(await page.evaluate(() => document.querySelectorAll('[data-bar-copy]').length)).toBe(0);
+  });
+
+  test('closed halfway up, the copy leaves from where the bar was drawn', async ({ page }) => {
+    await openBoard(page);
+    const frames = await record(page, barFrame);
+    await checkTwo(page);
+    // In the page, a frame or two after it opens, so the bar is still on its way.
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          const tick = () => {
+            const clear = [...document.querySelectorAll<HTMLElement>('.bg-surface-bar button')].find(
+              (b) => b.textContent?.trim().startsWith('Clear'),
+            );
+            if (!clear) return requestAnimationFrame(tick);
+            const real = clear.closest('.bg-surface-bar')!;
+            const y = new DOMMatrixReadOnly(getComputedStyle(real).transform).m42;
+            if (y === 0) throw new Error('The bar had already landed.');
+            (clear as HTMLElement).click();
+            done();
+          };
+          tick();
+        }),
+    );
+    await expect(page.locator(COPY)).toHaveCount(0);
+    const seen = await frames();
+    const lastOpen = seen.map((f) => f.open).lastIndexOf(true);
+    const firstCopy = seen.slice(lastOpen + 1).find((f) => f.copyY !== null)!;
+    // Up to one frame's travel below where it was, and never back at the start or at rest.
+    expect(firstCopy.copyY!).toBeGreaterThanOrEqual(seen[lastOpen]!.y!);
+    expect(firstCopy.copyY!).toBeLessThan(seen[lastOpen]!.y! + 30 * 0.3);
+  });
+
+  test('opening again takes the copy away at once', async ({ page }) => {
+    await openBoard(page);
+    await checkTwo(page);
+    await bar(page).waitFor();
+    await quiet(page);
+    const frames = await record(page, barFrame);
+    // Esc clears the checks, and a shift-free X on each row is too slow here: by hand.
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          const clear = [...document.querySelectorAll<HTMLElement>('.bg-surface-bar button')].find((b) =>
+            b.textContent?.trim().startsWith('Clear'),
+          )!;
+          clear.click();
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const [one, two] = document.querySelectorAll<HTMLInputElement>('[data-row-id] input[type="checkbox"]');
+              one!.click();
+              two!.click();
+              done();
+            }),
+          );
+        }),
+    );
+    await bar(page).waitFor();
+    await quiet(page);
+    const seen = await frames();
+    expect(seen.some((f) => f.copies === 1)).toBe(true);
+    const reopened = seen.findIndex((f, i) => i > 0 && f.open && !seen[i - 1]!.open);
+    expect(reopened).toBeGreaterThan(0);
+    expect(seen.slice(reopened).every((f) => f.copies === 0)).toBe(true);
+  });
+
+  test('under reduced motion: no slide and no copy', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logAnimations(page);
+    await openBoard(page);
+    const frames = await record(page, barFrame);
+    await checkTwo(page);
+    await bar(page).waitFor();
+    const b = (await bar(page).boundingBox())!;
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    await expect(footer(page)).toBeVisible();
+    await quiet(page);
+    const seen = await frames();
+    expect(Math.max(...seen.map((f) => f.copies))).toBe(0);
+    expect(seen.every((f) => f.y === null || f.y === 0)).toBe(true);
+    expect(await started(page)).toEqual([]);
   });
 });

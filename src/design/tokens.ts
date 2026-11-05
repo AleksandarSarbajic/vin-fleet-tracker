@@ -250,6 +250,10 @@ export const MOTION_MS = {
   segmentSlide: 180,
   /** §12.149. A count, on a poll that changed it. */
   countRoll: 240,
+  /** §12.149. A new page's fade and rise. */
+  pageIn: 180,
+  /** §12.149. The bulk bar, in and out of its slot. */
+  bulkBar: 200,
 } as const;
 
 /**
@@ -266,6 +270,8 @@ export const MOTION_SHAPE = {
   /** A row, a menu item, anything long: 4% of a wide thing is a lot. */
   flatPressScale: 0.995,
   hoverLiftPx: 1,
+  /** §12.149. A new page comes up this far. */
+  pageRisePx: 6,
   /** The row's grey hover bar, in `text.muted`. */
   rowBarOpacity: 0.8,
 } as const;

@@ -48,6 +48,10 @@ const LEFT_OUT: Record<string, { count: number; why: string }> = {
   'components/console/AccountMenu.tsx': { count: 1, why: A_MENUS_OWN },
   'components/console/SavedViews.tsx': { count: 1, why: A_MENUS_OWN },
   'components/history/HistoryToolbar.tsx': { count: 1, why: A_MENUS_OWN },
+  'components/PageRise.tsx': {
+    count: 1,
+    why: 'ends a rising page before a key can measure against it, and answers for nothing',
+  },
 };
 
 const walk = (dir: string): string[] =>
