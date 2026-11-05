@@ -2,6 +2,7 @@
 
 import { StatusChip } from '@/components/console/StatusChip';
 import {
+  DEFAULT_EXPIRY,
   EXPIRY_LABEL,
   EXPIRY_PRESETS,
   OVERRIDE_REASON_LABEL,
@@ -47,6 +48,24 @@ export interface OverrideDraft {
   expiry: ExpiryPreset;
   customDate: string;
   customTime: string;
+}
+
+/**
+ * Phase 3bd, §9.9. Whether the draft holds anything that closing the window would lose,
+ * measured against the live override it opened on. Back on Auto with Auto as the opening,
+ * it holds nothing: a reason picked on the way is hidden, and it would not be sent.
+ */
+export function overrideDraftChanged(
+  draft: OverrideDraft,
+  opened: { forcedStatus: ForcedStatus; reason: string; reasonNote: string | null } | null,
+): boolean {
+  if (draft.forced !== (opened?.forcedStatus ?? 'AUTO')) return true;
+  if (draft.forced === 'AUTO') return false;
+  return (
+    draft.reason !== (opened?.reason ?? '') ||
+    draft.reasonNote !== (opened?.reasonNote ?? '') ||
+    draft.expiry !== DEFAULT_EXPIRY
+  );
 }
 
 /** The `errors` key for a `Clear now` that did not clear (§9.5): shown in the live block. */

@@ -374,6 +374,8 @@ describe('an existing load, saved with a warning (§12.127)', () => {
 
     expect(posted()[0]!.stops[0]).toMatchObject({ override: { action: 'set', forcedStatus: 'LATE' } });
     expect(text()).toContain('could not be read again');
+    // Phase 3bd. Saved already: the draft it still holds is nothing to lose.
+    expect(text()).not.toContain('Unsaved changes');
     expect(button('Save').disabled).toBe(true);
   });
 

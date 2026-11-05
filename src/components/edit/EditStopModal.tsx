@@ -13,8 +13,13 @@ import type { ReassignPreview } from '@/server/reassign';
 import type { LoadEditResult } from '@/server/stop-edit';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { LOAD_READ_GC_MS, fetchLoadRead, loadReadKey } from '@/hooks/useLoadRead';
-import { OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
-import { CLEAR_NOW_FIELD, OverrideBlock, type OverrideDraft } from './OverrideBlock';
+import { DEFAULT_EXPIRY, OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
+import {
+  CLEAR_NOW_FIELD,
+  OverrideBlock,
+  overrideDraftChanged,
+  type OverrideDraft,
+} from './OverrideBlock';
 import { normalizeAddress } from '@/lib/address';
 import { ReassignConfirm } from './ReassignConfirm';
 import { ClearStopConfirm } from './ClearStopConfirm';
@@ -352,7 +357,7 @@ function LoadEditor({
     forced: row.override?.forcedStatus ?? 'AUTO',
     reason: row.override?.reason ?? '',
     reasonNote: row.override?.reasonNote ?? '',
-    expiry: 'PLUS_4H',
+    expiry: DEFAULT_EXPIRY,
     customDate: '',
     customTime: '',
   }));
@@ -480,9 +485,9 @@ function LoadEditor({
   /* ------------------------------ derived ------------------------------- */
 
   const dirty = useMemo(() => dirtyOf(initialForm, form, row.id), [form, initialForm, row.id]);
-  const unsaved = useMemo(
+  /** What Save would send of the form itself. §12.127: a spent form's are saved already. */
+  const formUnsaved = useMemo(
     () =>
-      // §12.127. A spent form's changes are saved: there is nothing to lose.
       spent
         ? []
         : [
@@ -490,6 +495,15 @@ function LoadEditor({
             ...(active === openedActive ? [] : ['active flag']),
           ],
     [active, dirty, form, initialForm, openedActive, spent],
+  );
+  /**
+   * Phase 3bd. The override draft is typed work as well (§9.9, "not a silent close"),
+   * but it is not always something Save can send: see `overrideChanged` below.
+   */
+  const overrideUnsaved = !spent && overrideDraftChanged(override, openedOverride);
+  const unsaved = useMemo(
+    () => (overrideUnsaved ? [...formUnsaved, 'status override'] : formUnsaved),
+    [formUnsaved, overrideUnsaved],
   );
   /**
    * The one answer to "is there typed work to lose?". Esc and Cancel raise the Discard
@@ -583,7 +597,7 @@ function LoadEditor({
     !spent &&
     parsed !== null &&
     overrideErrors.length === 0 &&
-    (hasUnsaved || overrideChanged) &&
+    (formUnsaved.length > 0 || overrideChanged) &&
     !saving;
 
   const flags = form.stops.map((_, i) => stopFlags(form, i, nextKey));

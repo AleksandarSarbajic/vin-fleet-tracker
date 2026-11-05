@@ -124,6 +124,35 @@ test.describe('leaving the page', () => {
     expect(seen).toEqual([]);
   });
 
+  /** Phase 3bd, step 0. The status override draft is typed work, by the one condition. */
+  test('Force late: Reload asks, Stay keeps it, and Esc asks too', async ({ page }) => {
+    const modal = await openEditor(page);
+    await modal.getByRole('button', { name: 'Force late' }).click();
+
+    const asked = page.waitForEvent('dialog');
+    void page.reload().catch(() => {});
+    const stay = await asked;
+    expect(stay.type()).toBe('beforeunload');
+    await stay.dismiss();
+    await expect(modal.getByRole('button', { name: 'Force late' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Discard changes?' })).toBeVisible();
+  });
+
+  test('Force late and back to Auto: Reload does not ask', async ({ page }) => {
+    const modal = await openEditor(page);
+    await modal.getByRole('button', { name: 'Force late' }).click();
+    await modal.getByRole('button', { name: 'Auto' }).click();
+    const seen = dialogsOn(page);
+    await page.reload();
+    await page.waitForTimeout(SETTLE_MS);
+    expect(seen).toEqual([]);
+  });
+
   /**
    * The session ending navigates nothing: the middleware redirects page requests only,
    * and an API route answers 401 (`middleware.ts`). So nothing can get stuck behind the
