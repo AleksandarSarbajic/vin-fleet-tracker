@@ -81,6 +81,8 @@ motion by default, and under the preference a transition is a true 0. See
 **3bc: NOT pushed** (2026-11-05): cleanup before the new motion. Discard by keyboard,
 the reorder bar in the toolbar, bulk modal Esc, the last windows on frames, a row's
 press at 60ms, and the press, lift and hit area on one clock. See "Phase 3bc" below.
+**3bc follow-up: NOT pushed** (2026-11-05): the board's shortcuts stand down behind any
+window, through one guard in `keymap.ts`. See "Phase 3bc follow-up" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10497,7 +10499,7 @@ bulk bar at 1024 and 768 (a virtualized row was not drawn), though it was at the
 1. **The board's shortcuts work behind every other window when focus is on a button. Measured:** in the edit window with
    typed work and focus on Clear stop, `G H` **left the page and the work was gone, with no question**; `D` changed the density
    behind Clear stop's confirm, the edit window and the timeline. The Discard confirm now stops this for itself. This is the one
-   to fix next: a small shared guard, and it is real data loss. Recommended before 3bd.
+   to fix next: a small shared guard, and it is real data loss. Recommended before 3bd. **Fixed: see "Phase 3bc follow-up".**
 2. **§12.148's table says a hover is 160ms; a button lifts in 180ms** (`press-out`), since 3bb. Hover strengths were out of scope.
 3. **The map toggle presses by 4%, about 41px at 1024.** It is full width by stretching, with no `w-full`, so "a long thing does not
    shrink by 4%" misses it.
@@ -10527,6 +10529,67 @@ the migrations are untouched. The three server errors in its log are the same th
 1. **Push?** Your call under "Do not push".
 2. **Fix the shortcuts behind windows first (item 1 above)?** Recommended: yes, small, ahead of 3bd, because `G H` loses typed work.
 3. **The other three found-wrong items:** recommended: leave them until they bother anyone.
+
+### Phase 3bc follow-up: board shortcuts stop working behind a window (2026-11-05)
+
+One fix, no motion. **NOT pushed.** Built on `918273c`, clean tree. Closes "Found wrong" item 1 of 3bc.
+
+| Commit | What |
+|---|---|
+| `6f8e4a5` | `isWindowOpen` in `keymap.ts`, 13 listeners asking it, `window-keys-guard.test.ts` |
+| `1ebc7de` | The press that closes a window ends there: the overlay layer's Esc, the timeline's Esc, the palette's Enter |
+| `f7ebd43`, `72e1a19` | `e2e/shortcuts-behind-windows.spec.ts`, 31 tests, and a race of mine in it |
+
+**What it was, measured on the unfixed build, focus on a button in a window:**
+
+- `G H` fetched `/history` from the edit window with typed work. "freight" typed there did the same.
+- **`1` closed the edit window, the confirm and the timeline:** the chip hid the truck, and the window goes with its row. Typed work gone, no question. Found by the per-key run, not in the brief.
+- `⌘K` opened the palette **underneath** the window (z-30 under z-40) and moved the focus into it, so typing went into a field nobody could see. `?` did the same with the sheet.
+- One Esc then closed both windows.
+- **Enter on the timeline's Close did not close it:** the board's Enter took the press, called `preventDefault` and opened the edit window.
+
+**`isWindowOpen`, one departure from the brief.** The brief said `[aria-modal="true"]` in the document. **That alone would have killed every shortcut on the board with nothing on the screen:** the phone sheets are `md:hidden` and stay mounted, so one left open and widened past 768 is still there, marked modal, with no way to close it. So it counts a window only if `checkVisibility()` says it is drawn. Where that is missing (Safari before 17.4) a window counts as seen. Mutation: the bare query fails the widened-sheet test.
+
+**What the guard cannot see: the press that closes a window.** The close lands in a microtask, before the next listener runs, so by then the guard is rightly false and the board answers the same press. Guard alone, measured: Esc on the sheet cleared the selection, and after a poll the checked rows instead (a poll re-registers the board's capture listener behind the sheet's); Enter on a palette row with focus ran the row, then opened the edit window on it. So those two stop the event where they take it.
+
+**The timeline's Esc is the same shape and never failed.** Measured why: closing it re-renders `Console`, whose capture listener is removed and re-added mid-press, and a removed listener does not run. A reason nobody chose, so it now uses `stopImmediatePropagation` too, held by a unit test that does fail without it.
+
+**Windows and menus.** A window's own keys never ask. `⌘K` and `?` ask, with their exception: `?` still closes its own sheet, and the overlay layer still gives way to `⌘K` (§14.5: `⌘K` during the tour ends the tour, on the sheet it hands over, on the palette it closes). `⌘K` keeps its `preventDefault` behind a window, so Ctrl+K does not throw focus to the address bar. A menu has no `aria-modal`, so the board's keys work around one as before. G pressed before a window opened is disarmed by any key inside it. `Console`'s arrows keep `editingId` beside the guard: it is set a moment before the window is drawn. DiscardConfirm's swallow is untouched. No listener added or removed, so `phone.spec.ts`'s count stands.
+
+**Assignments and desktop History have no window of their own.** Assignments' one question is the browser's `window.confirm`; History's two windows are phone sheets, where its listeners are inert. So their guards answer for the next window on those pages, and their two tests use a stand-in marked as `DialogFrame` marks a real one. Without the guard the stand-in saw a real `POST /api/assignments` and a focused filter.
+
+**Every keydown listener in the repo: 29 on a window or document, in 25 files.** `window-keys-guard.test.ts` counts them per file, so a new one fails even in a file already listed, and it also fails a second reader of `aria-modal` and a `DialogFrame` without the mark.
+
+| Asks the guard (13) | |
+|---|---|
+| `useGoKeys`, `useDensity`, `usePinned`, `FilterChips`, `SearchField` | G H/B, D, P, 0 to 8, / |
+| `SavedViews` (V), `Console` (arrows, Enter, Esc; X, checks' Esc) | 1 and 2 |
+| `AssignmentBoard` (Cmd/Ctrl+Enter; /), `HistoryPage` (/) | 2 and 1 |
+| `ShortcutSheet` (?), `CommandPalette` (⌘K) | with their exceptions |
+
+| Left out (16) | Why |
+|---|---|
+| `useModalChrome` | every window's Tab trap |
+| `EditStopModal` (2), `DiscardConfirm`, `ClearStopConfirm`, `ReopenConfirm`, `PreviousLoadQuestion`, `ReachedStopQuestion`, `OverlayLayer`, `BulkActionModal`, `AddToListModal`, `TruckListEditor`, `TruckTimeline` | the window's own keys, registered only while it is open |
+| `AccountMenu`, `SavedViews` (its menu), `HistoryToolbar` | a menu's own Esc, and a menu is no window |
+
+The 17 element `onKeyDown`s (`TruckRow`, `Split`, `ConsoleHeader`, `SearchField`, `HistoryTable`, `HistoryToolbar`, `StopForm`, `StopList`, `DriverSelect`, `DriverPhone`, `AddDriverInline`, `AssignmentBoard`, `SavedViews` (2), `TruckListEditor`, `AddToListModal`, `CommandPalette`) only hear a key with focus inside them, and a window takes the focus. Two windows do not, both harmless: the edit window's brief reading panel, where focus can stay on the row, only Space does anything there, and it selects the row already selected; and the phone's week chooser, where these keys are inert. Not in the guard test, which the brief scoped to window and document.
+
+**Tests.** Seen failing first: on `918273c`, 19 of the e2e and 20 of the unit tests; with the guard alone, the 3 closing-press e2e and 3 unit tests. With the guard switched off, each key answering for itself: every key fired behind the list editor, bulk modal and add-to-list, and in the edit window `d / p v ArrowDown 1`, at which point it closed. Mutations, each alone and restored, diff hash compared: bare query, a copy that keeps its `aria-*`, `useDensity` not asking, a new listener in a new file and in a listed file, a second reader, a window without the mark. All caught.
+
+**Slips of mine.** My G test passed with the disarm removed: Playwright's round trips outlasted G's 1.5s, so it tested nothing. It now runs in the page and asserts the elapsed time, and fails under that mutation. `nothingMovesBehind` stopped at its first failure, so only `D` had been seen failing; each key now answers for itself. Three wrong selectors in my first draft. And the first full run failed one case of mine: the address follows a row click a moment later (`router.replace`), and a reading taken before it blamed the keys. Each case now waits for the address, which is a condition and not a longer wait; repeated three times, 94 passed.
+
+**Checks.** `npm run check` at `72e1a19`: **227 files, 4192 tests** (225 and 4165 before). The forbidden-files grep printed nothing. **Full e2e on the default config:** run `2026-11-05T11-50-34-320Z` at `f7ebd43`: 393 passed, 1 failed (the address race above, a test fault), 1 did not run (`phone-signout`, which depends on the whole chromium project). Run `2026-11-05T12-23-47-689Z` at `72e1a19`: **395 passed, 0 failed, 0 flaky** (26.0 min, up from 364). Nothing to classify. Every baseline matched, and `git diff 918273c HEAD -- e2e/__screenshots__ package.json drizzle` is empty. The three server errors in its log are the same three as before. One guard-off evidence run sent three tests to the sign-in page and recovered with nothing else running: the hosted-auth blip, not this code, and it was rerun.
+
+**Found wrong and not fixed:**
+
+1. **A poll alone can close the edit window and lose the typed work, with no key pressed.** Measured, one throwaway test: Late chip on, editing a late truck with typed work, the truck arrives, the next poll moves it out of the chip, and **the window is gone, with no question.** The cause: `editingRow` is read from `rows`, which the chips have already filtered (`Console.tsx:473`). Reading it from `all` looks like the fix, but it was not tried. Recommended next, before 3bd: it is the same loss as `G H`, and it needs no mistake from the dispatcher. `timelineRow` has the same shape, with nothing typed in it to lose.
+2. **A phone sheet left open and widened stays mounted**, hidden, and comes back on narrowing. Harmless now the guard ignores it.
+
+**Questions for Alex:**
+
+1. **Push?** Your call under "Do not push".
+2. **Fix the poll closing the edit window next, ahead of 3bd?** Recommended: yes.
 
 ## Next
 
