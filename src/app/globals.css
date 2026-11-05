@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * §12.148. The press and the lift as values the browser animates. A transform and
+ * a hit area that each run their own transition or keyframe never quite agree;
+ * reading one number, they cannot disagree on any frame. Not inherited: nothing
+ * inside a button should restart a transition because of it, so the hit area asks
+ * for them by name (`inherit`).
+ */
+@property --press {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --lift {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
 @layer components {
   /**
    * Mapbox's own popup chrome, which ships WHITE — `.mapboxgl-popup-content`
@@ -134,9 +153,15 @@
    * flicker. It covers the RESTING box and not a pixel beyond, because anything
    * further makes the scroller around it grow, and the scrollbars appear. So:
    *
+   *   - One clock. The transform and the hit area read the same two numbers,
+   *     --press and --lift, and it is those that transition. So on every frame,
+   *     however a hover and a press overlap, the hit area is the inverse of that
+   *     frame's transform: 100% / press across, and the lift's height more. It has
+   *     no keyframe or transition of its own, because two clocks disagree for a
+   *     frame or two, and that was a scrollbar on one side and a miss on the other.
+   *     While a thing is pressed or lifted its transform is worked out from them;
+   *     with nothing on it, it goes back to `none` by a transition of its own.
    *   - A fixed inset cannot do it: what a press takes is a share of the size.
-   *     Its reach is a percentage from the press's own token, the one that
-   *     lands exactly on the resting edge once the scale is applied.
    *   - Percentages count from the padding box, so the border is out of reach.
    *     The pseudo-element inherits the border widths on the side it grows
    *     away from, which adds exactly them. It takes two for a button, one
@@ -144,29 +169,38 @@
    *     card has 3px on the left and 1px below) and a centred one would go
    *     past on the thin side. What that leaves out is the far corner of each
    *     border: one pixel on a 1px border.
-   *   - It grows WITH the press, the same length on the same curve. At the first
-   *     frame the thing has not shrunk yet, so a hit area already at full reach
-   *     would stick out for a frame or two: the same scrollbars, as a flash.
    *
    * All of it relies on the transform, which makes the thing its containing
    * block, so it only exists while there is one.
    */
   @media (prefers-reduced-motion: no-preference) {
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *) {
-      transition-property: transform, color, background-color, border-color, opacity;
-      transition-duration: theme('transitionDuration.press-out'), theme('transitionDuration.hover'),
+      --press: 1;
+      --lift: 0px;
+      transition-property: transform, --press, --lift, color, background-color, border-color, opacity;
+      transition-duration: theme('transitionDuration.press-out'), theme('transitionDuration.press-out'),
+        theme('transitionDuration.press-out'), theme('transitionDuration.hover'),
         theme('transitionDuration.hover'), theme('transitionDuration.hover'),
         theme('transitionDuration.hover');
-      transition-timing-function: theme('transitionTimingFunction.dialog'), linear, linear, linear,
-        linear;
+      transition-timing-function: theme('transitionTimingFunction.dialog'),
+        theme('transitionTimingFunction.dialog'), theme('transitionTimingFunction.dialog'), linear,
+        linear, linear, linear;
     }
 
+    /*
+     * The transform is left out of the list from here on: it follows the numbers,
+     * and a transition on it as well would run behind them, restarting every frame.
+     */
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active {
       --press: theme('scale.press');
-      transform: scale(var(--press));
-      transition-duration: theme('transitionDuration.press-in'), theme('transitionDuration.hover'),
+      --lift: 0px;
+      transform: translateY(var(--lift)) scale(var(--press));
+      transition-property: --press, --lift, color, background-color, border-color, opacity;
+      transition-duration: theme('transitionDuration.press-in'), theme('transitionDuration.press-in'),
         theme('transitionDuration.hover'), theme('transitionDuration.hover'),
-        theme('transitionDuration.hover');
+        theme('transitionDuration.hover'), theme('transitionDuration.hover');
+      transition-timing-function: theme('transitionTimingFunction.dialog'),
+        theme('transitionTimingFunction.dialog'), linear, linear, linear, linear;
     }
 
     /* A long or listed thing does not shrink by 4%: that is 30px on a wide one. */
@@ -174,65 +208,64 @@
       --press: theme('scale.press-flat');
     }
 
-    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::before,
-    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::after {
+    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::before {
+      --press: inherit;
       --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
       content: '';
       position: absolute;
       box-sizing: content-box;
+      right: var(--reach);
+      bottom: var(--reach);
       width: calc(100% / var(--press));
       height: calc(100% / var(--press));
       border: 0 solid transparent;
-    }
-
-    :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::before {
-      right: var(--reach);
-      bottom: var(--reach);
       border-left-width: inherit;
       border-top-width: inherit;
-      animation: hit-area-press-before theme('transitionDuration.press-in')
-        theme('transitionTimingFunction.dialog') backwards;
     }
 
     :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):active::after {
+      --press: inherit;
+      --lift: inherit;
+      --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
+      content: '';
+      position: absolute;
+      box-sizing: content-box;
       left: var(--reach);
       top: var(--reach);
+      width: calc(100% / var(--press));
+      height: calc((100% - var(--lift)) / var(--press));
+      border: 0 solid transparent;
       border-right-width: inherit;
       border-bottom-width: inherit;
-      animation: hit-area-press-after theme('transitionDuration.press-in')
-        theme('transitionTimingFunction.dialog') backwards;
     }
 
     @media (hover: hover) {
       :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:not(:active) {
-        transform: translateY(theme('translate.lift'));
+        --lift: theme('translate.lift');
+        transform: translateY(var(--lift)) scale(var(--press));
+        transition-property: --press, --lift, color, background-color, border-color, opacity;
+        transition-duration: theme('transitionDuration.press-out'), theme('transitionDuration.press-out'),
+          theme('transitionDuration.hover'), theme('transitionDuration.hover'),
+          theme('transitionDuration.hover'), theme('transitionDuration.hover');
+        transition-timing-function: theme('transitionTimingFunction.dialog'),
+          theme('transitionTimingFunction.dialog'), linear, linear, linear, linear;
       }
 
+      /* The same area as a press's, and for the frames as it lets go it still is one. */
       :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:not(:active)::after {
+        --press: inherit;
+        --lift: inherit;
+        --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
         content: '';
         position: absolute;
-        left: 0;
-        top: 0;
         box-sizing: content-box;
-        width: 100%;
-        height: calc(100% - theme('translate.lift'));
+        left: var(--reach);
+        top: var(--reach);
+        width: calc(100% / var(--press));
+        height: calc((100% - var(--lift)) / var(--press));
         border: 0 solid transparent;
         border-right-width: inherit;
         border-bottom-width: inherit;
-        animation: hit-area-lift theme('transitionDuration.press-out')
-          theme('transitionTimingFunction.dialog') backwards;
-      }
-
-      /*
-       * Pressed from a lift, the hit area is already there at the lift's height,
-       * and goes on from wherever that is. Starting again from the button's box
-       * would drop the pixel below it, and a quick tap on it would miss.
-       */
-      :is(button, a[href][class*='flex']):not(:disabled, [aria-disabled='true'], [data-no-press], [class*='sticky'], [class*='fixed'], [class*='translate'], [class*='inset-0'], .mapboxgl-map *):not([role='menu'] *, [role='listbox'] *, [data-views-menu] *, [role='tab'], [role='option'], [role='menuitem'], [data-phone-card], [class*='w-full']):hover:active::after {
-        animation: none;
-        transition-property: left, top, width, height;
-        transition-duration: theme('transitionDuration.press-in');
-        transition-timing-function: theme('transitionTimingFunction.dialog');
       }
     }
 
@@ -241,18 +274,23 @@
      * the ground keeps its duration, so nothing a poll changes moves differently.
      */
     [data-row-id][data-row-id] {
-      transition-property: color, background-color, border-color, transform;
+      --press: 1;
+      transition-property: color, background-color, border-color, transform, --press;
       transition-duration: theme('transitionDuration.ground'), theme('transitionDuration.ground'),
-        theme('transitionDuration.ground'), theme('transitionDuration.press-out');
-      transition-timing-function: linear, linear, linear, theme('transitionTimingFunction.dialog');
+        theme('transitionDuration.ground'), theme('transitionDuration.press-out'),
+        theme('transitionDuration.press-out');
+      transition-timing-function: linear, linear, linear, theme('transitionTimingFunction.dialog'),
+        theme('transitionTimingFunction.dialog');
     }
 
     /* Pressing a control in the row presses the control, not the row. */
     [data-row-id]:active:not(:has(button:active, a:active, input:active)) {
       --press: theme('scale.press-flat');
       transform: scale(var(--press));
+      transition-property: color, background-color, border-color, --press;
       transition-duration: theme('transitionDuration.ground'), theme('transitionDuration.ground'),
         theme('transitionDuration.ground'), theme('transitionDuration.press-in');
+      transition-timing-function: linear, linear, linear, theme('transitionTimingFunction.dialog');
     }
 
     /*
@@ -262,6 +300,7 @@
      * pressing a control leaves the row unscaled, and this would then stick out.
      */
     [data-row-id]:active:not(:has(button:active, a:active, input:active))::before {
+      --press: inherit;
       --reach: calc((1 - 1 / var(--press)) / 2 * 100%);
       content: '';
       position: absolute;
@@ -274,46 +313,6 @@
       border: 0 solid transparent;
       border-left-width: inherit;
       border-bottom-width: inherit;
-      animation: hit-area-press-row theme('transitionDuration.press-in')
-        theme('transitionTimingFunction.dialog') backwards;
-    }
-  }
-
-  /*
-   * How a hit area starts: on its own thing's box, reaching nothing yet. No `to`:
-   * each ends on the reach its rule worked out. Keyframes because a pseudo-element
-   * that has only just appeared has no earlier value to transition from.
-   */
-  @keyframes hit-area-press-before {
-    from {
-      right: 0;
-      bottom: 0;
-      width: 100%;
-      height: 100%;
-    }
-  }
-
-  @keyframes hit-area-press-after {
-    from {
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-    }
-  }
-
-  @keyframes hit-area-press-row {
-    from {
-      right: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-    }
-  }
-
-  @keyframes hit-area-lift {
-    from {
-      height: 100%;
     }
   }
 
@@ -330,7 +329,8 @@
      */
     [data-row-id]:hover {
       transition-duration: theme('transitionDuration.hover'), theme('transitionDuration.hover'),
-        theme('transitionDuration.hover'), theme('transitionDuration.press-out');
+        theme('transitionDuration.hover'), theme('transitionDuration.press-out'),
+        theme('transitionDuration.press-out');
     }
 
     [data-row-id]:not([aria-selected='true'])::after {

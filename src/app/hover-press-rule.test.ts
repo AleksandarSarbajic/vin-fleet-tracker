@@ -82,8 +82,11 @@ describe('hover and press (§12.148)', () => {
   });
 
   /*
-   * A hit area past the resting box makes the scroller around it grow, and the
-   * list's scrollbars appear (3bb's live bug: `inset: -4px` on a row).
+   * A hit area past the resting box on the right or below makes the scroller around
+   * it grow, and the list's scrollbars appear (3bb's live bug: `inset: -4px` on a
+   * row). And one on a clock of its own, a keyframe or a transition, is out of step
+   * with the transform for a frame or two: the same scrollbar, or a press that misses
+   * (phase 3bc).
    */
   describe('a hit area', () => {
     const areas = rules.filter(
@@ -91,36 +94,89 @@ describe('hover and press (§12.148)', () => {
         r.selector.includes(':active') &&
         (r.selector.includes('::before') || r.selector.includes('::after')),
     );
-    const anchored = areas.filter((r) =>
-      /\b(left|right|top|bottom): var\(--reach\)/.test(r.body),
-    );
 
-    it('has rules at all', () => {
-      expect(areas.length).toBeGreaterThanOrEqual(5);
+    it('has rules at all: a button two for a press and one for a lift, a row one', () => {
+      expect(areas.length).toBe(4);
     });
 
-    it('reaches a share from the token, never a fixed distance past the box', () => {
+    it('reaches a share worked out from the press, never a fixed inset', () => {
       for (const { selector, body } of areas) {
         expect(body, selector).not.toMatch(/\binset\s*:/);
         expect(body, selector).not.toMatch(/-\d*\.?\d+px/);
+        expect(body, selector).toContain('--reach: calc((1 - 1 / var(--press)) / 2 * 100%)');
       }
-      const reach = areas.filter((r) => r.body.includes('--reach:'));
-      expect(reach.length).toBe(2);
-      for (const { body } of reach) expect(body).toContain('var(--press)');
     });
 
-    it('grows with the press, so it does not stick out on the first frames', () => {
-      expect(anchored.length).toBe(3);
-      for (const { selector, body } of anchored) {
-        expect(body, selector).toMatch(/animation: hit-area-press-/);
+    it('has no clock of its own: it reads the numbers the transform reads', () => {
+      for (const { selector, body } of areas) {
+        expect(body, selector).toContain('--press: inherit');
+        expect(body, selector).not.toMatch(/\b(animation|transition)[a-z-]*\s*:/);
       }
-      for (const name of ['before', 'after', 'row']) {
-        expect(css).toContain(`@keyframes hit-area-press-${name}`);
+      expect(css).not.toMatch(/@keyframes hit-area/);
+    });
+
+    it('the two numbers are registered, or they could not animate, and not inherited', () => {
+      for (const [name, syntax] of [
+        ['--press', '<number>'],
+        ['--lift', '<length>'],
+      ] as const) {
+        const rule = rules.find((r) => r.selector.endsWith(`@property ${name}`));
+        expect(rule?.body, name).toContain(`syntax: '${syntax}'`);
+        expect(rule?.body, name).toContain('inherits: false');
+      }
+    });
+
+    it('what moves reads those numbers, and it is they that transition', () => {
+      const moving = rules.filter(
+        (r) =>
+          (r.selector.startsWith(':is(button') || r.selector.includes('[data-row-id]')) &&
+          !r.selector.includes('::') &&
+          moves(r.body),
+      );
+      expect(moving.length).toBe(3);
+      for (const { selector, body } of moving) {
+        expect(body, selector).toMatch(/transform: .*scale\(var\(--press\)\)/);
+        const list = body.match(/transition-property:[^;]*;/)?.[0] ?? '';
+        expect(list, selector).toContain('--press');
+        // A transition on the transform too would trail the numbers, restarting each frame.
+        expect(list, selector).not.toMatch(/\btransform\b/);
+      }
+    });
+
+    it('with nothing on it, the transform goes back by a transition of its own', () => {
+      for (const start of [':is(button', '[data-row-id][data-row-id]']) {
+        const rest = rules.find(
+          (r) =>
+            r.selector.startsWith(start) &&
+            !r.selector.includes(':active') &&
+            !r.selector.includes(':hover') &&
+            r.body.includes('transition-property'),
+        );
+        expect(rest?.body, start).toMatch(/transition-property:[^;]*\btransform\b/);
+        expect(rest?.body, start).toMatch(/transition-property:[^;]*--press/);
+      }
+    });
+
+    it('is the exact inverse of the press: no margin, no constant, no distance', () => {
+      for (const { selector, body } of areas) {
+        expect(body, selector).toMatch(/\b(left|right): var\(--reach\)/);
+        expect(body, selector).toMatch(/\b(top|bottom): var\(--reach\)/);
+        expect(body, selector).toContain('width: calc(100% / var(--press))');
+        expect(body, selector).not.toMatch(/\d+(\.\d+)?px/);
+      }
+    });
+
+    it('under a lift it reaches down by the lift, so the pixel below is not lost', () => {
+      const lifting = areas.filter((r) => r.selector.includes('::after'));
+      expect(lifting.length).toBe(2);
+      for (const { selector, body } of lifting) {
+        expect(body, selector).toContain('--lift: inherit');
+        expect(body, selector).toContain('height: calc((100% - var(--lift)) / var(--press)');
       }
     });
 
     it('covers the border too: the widths are inherited on the side it grows away from', () => {
-      for (const { selector, body } of anchored) {
+      for (const { selector, body } of areas) {
         expect(body, selector).toMatch(/border-(left|right)-width: inherit/);
         expect(body, selector).toMatch(/border-(top|bottom)-width: inherit/);
       }

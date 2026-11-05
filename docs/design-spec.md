@@ -10574,18 +10574,42 @@ copy would fade out behind the window it was drawn in.
   resting box and not a pixel beyond,** because anything further makes the scroller
   around it grow, and the scrollbars appear (3bb's live bug, `inset: -4px` on a row).
   So its reach is never a fixed distance:
-  - It is a share of the size, worked out from the press's own scale, or from the
-    lift for a lift.
+  - **One clock (phase 3bc).** `--press` and `--lift` are registered properties
+    (`@property`), and it is they that transition. The transform and the hit area
+    both read them, so on every frame the hit area is the exact inverse of that
+    frame's transform, however a hover and a press overlap. It has no keyframe or
+    transition of its own. It did in 3bb, and two clocks disagree: on the first frame
+    of a press the transform was already at .974 with the hit area still at its start.
+    On one side that missed a quick press at the edge; on the other it grew a small
+    flush button's scroller by 1px. A row's press and a button's both run at
+    `press-in` (60ms) and let go at `press-out` (180ms). With nothing on it, the
+    transform goes back to `none` by a transition of its own, so at rest there is no
+    transform at all.
+  - It is a share of the size, worked out from the press's own scale, and the lift's
+    height more under a lift.
   - It inherits the border widths on the side it grows away from, because offsets
     count from the padding box. A button has two, one anchored at each corner, since
-    borders can be uneven. That leaves out one corner pixel at the top right and one
-    at the bottom left of an even 1px border: a press on those two pixels misses.
-  - It grows with the press, the same length on the same curve, because at the
-    first frame nothing has shrunk yet. A row's press and a button's both run at
-    `press-in` (60ms), and both let go at `press-out` (180ms). Under a mouse a button's
-    hit area is already there at the lift's height, and goes on from there.
+    borders can be uneven.
   - A row has one only while the row itself is pressed. Above 1085px a row's last
     12px are the Split handle's grab margin, not the row.
+- **What remains of it,** measured in Chromium only (phase 3bc). All of it is on the
+  side of a press that misses: nothing grew a scroller in 1,036 runs on every frame.
+  - One corner pixel at the top right and one at the bottom left of an even 1px
+    border: a press on those two pixels misses.
+  - The outermost hundredths of a pixel on the right and below, once a press has
+    landed: .01px with no border, .04px with a 1px border, .03px on a row, because a
+    border shrinks with the press and a share of the padding box does not count it.
+    The left and top land from the very edge. A mouse reports whole pixels (half at
+    2x), so a pointer only stands in that sliver if the edge itself falls within it.
+    At whole and half pixels from the edge: 0 of 1,080 presses missed.
+  - Calculated, and never seen: layout rounds an offset and a size separately to
+    1/64px, so a borderless button could in principle stick out by up to that, which
+    could flip a scroller whose edge sits just under a half pixel. 400 runs at exactly
+    that alignment grew nothing, so there is no margin for it: a constant nothing
+    can show the need for is a guess.
+  - A press is worked out on the main thread, so it repaints for its 60ms. Where
+    `@property` is missing (Safari before 16.4, Firefox before 128) a press and a lift
+    jump rather than glide, and the hit area is still right. Neither browser was run.
 - **A popover is placed from something that does not move.** The scope menu
   measures the bordered row its button sits in, not the button: during a click the
   button is at 96%, and under a resting pointer it is lifted 1px.

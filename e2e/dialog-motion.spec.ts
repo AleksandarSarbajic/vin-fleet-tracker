@@ -1351,21 +1351,25 @@ test.describe('hover and press', () => {
   test.describe('a row presses in 60ms and lets go in 180ms', () => {
     const logTimings = (row: Locator) =>
       row.evaluate((el) => {
-        const w = window as unknown as { __press: number[] };
+        const w = window as unknown as { __press: number[]; __back: number[] };
         w.__press = [];
+        w.__back = [];
         el.addEventListener('transitionrun', (event) => {
           const e = event as TransitionEvent;
-          if (e.target !== el || e.pseudoElement !== '' || e.propertyName !== 'transform') {
-            return;
-          }
+          if (e.target !== el || e.pseudoElement !== '') return;
           const running = el
             .getAnimations()
-            .find((a) => (a as CSSTransition).transitionProperty === 'transform');
-          w.__press.push(Number(running?.effect?.getComputedTiming().duration));
+            .find((a) => (a as CSSTransition).transitionProperty === e.propertyName);
+          const duration = Number(running?.effect?.getComputedTiming().duration);
+          if (e.propertyName === '--press') w.__press.push(duration);
+          if (e.propertyName === 'transform') w.__back.push(duration);
         });
       });
     const timings = (page: Page) =>
       page.evaluate(() => (window as unknown as { __press: number[] }).__press);
+    /** The transform's own way back, once there is nothing on the row. */
+    const wayBack = (page: Page) =>
+      page.evaluate(() => (window as unknown as { __back: number[] }).__back);
 
     test('let go with the pointer still on the row', async ({ page }) => {
       await page.goto('/');
@@ -1378,6 +1382,7 @@ test.describe('hover and press', () => {
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
       await page.mouse.up();
       await expect.poll(() => timings(page)).toEqual([60, 180]);
+      await expect.poll(() => wayBack(page)).toEqual([180]);
     });
 
     test('let go with the pointer moved off', async ({ page }) => {
@@ -1392,17 +1397,50 @@ test.describe('hover and press', () => {
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 120)));
       await page.mouse.up();
       await expect.poll(() => timings(page)).toEqual([60, 180]);
+      await expect.poll(() => wayBack(page)).toEqual([180]);
     });
 
-    test('its hit area grows on the same 60ms', async ({ page }) => {
+    test('its hit area reads the same number as the row, on every frame', async ({
+      page,
+    }) => {
       await page.goto('/');
       const row = rowOf(page, IDS.truckDallas);
       const box = (await row.boundingBox())!;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await row.evaluate((el) => {
+        const w = window as unknown as { __frames: [string, string, string][] };
+        w.__frames = [];
+        const read = () => {
+          if (el.matches(':active')) {
+            const own = getComputedStyle(el);
+            const area = getComputedStyle(el, '::before');
+            w.__frames.push([
+              own.getPropertyValue('--press'),
+              area.getPropertyValue('--press'),
+              area.animationName,
+            ]);
+          }
+          if (w.__frames.length < 8) requestAnimationFrame(read);
+        };
+        read();
+      });
       await page.mouse.down();
-      expect(
-        await row.evaluate((el) => getComputedStyle(el, '::before').animationDuration),
-      ).toBe('0.06s');
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => (window as unknown as { __frames: unknown[] }).__frames.length,
+          ),
+        )
+        .toBe(8);
+      const frames = await page.evaluate(
+        () => (window as unknown as { __frames: [string, string, string][] }).__frames,
+      );
+      for (const [own, area, animation] of frames) {
+        expect(area).toBe(own);
+        expect(animation).toBe('none');
+      }
+      // It really moved: the frames saw the number on its way there.
+      expect(Number(frames[frames.length - 1]![0])).toBeCloseTo(0.995, 3);
       await page.mouse.move(2, 2);
       await page.mouse.up();
     });
@@ -1829,6 +1867,24 @@ test.describe('hover and press', () => {
       );
     });
 
+    /** The sweep's one real find: full width, flush with the page's right edge. */
+    test('the map toggle at 1024, the one real button flush with an edge', async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1024, height: 700 });
+      await page.goto('/');
+      const toggle = page.getByRole('button', { name: /^(Hide|Show) map$/ });
+      await toggle.waitFor();
+      const box = (await toggle.boundingBox())!;
+      expect(box.x + box.width).toBe(1024);
+      // Let go below it, on the map, so the toggle is not used.
+      await expectNoGrowth(page, page.locator('html'), toggle, {
+        press: 0.96,
+        lifts: true,
+        away: [512, 500],
+      });
+    });
+
     test('a phone card, the last in its scrolling list', async ({ browser }) => {
       await resetWorld({ extraTrucks: 20 });
       const { context, page } = await onPhone(browser, SIZES[3]!);
@@ -1846,6 +1902,316 @@ test.describe('hover and press', () => {
         await context.close();
       }
     });
+  });
+
+  /**
+   * The worst case for a hit area, built by hand: alone in a scroller of its own,
+   * flush in a corner of it, at whole and at fractional positions. Real clicks and
+   * the real stylesheet; only the elements are invented, since nothing real has to
+   * sit in that corner for this to matter one day.
+   */
+  test.describe('the press, the lift and the hit area run on one clock', () => {
+    type Place = { name: string; left: number; top: number; width: number; height: number };
+    const PLACES: Place[] = [
+      { name: 'whole pixels', left: 10, top: 100, width: 300, height: 200 },
+      { name: 'fractions', left: 10.3, top: 100.6, width: 300.47, height: 200.38 },
+    ];
+    const BORDERS: [string, string][] = [
+      ['no border', 'border:0'],
+      ['an even border', 'border:1px solid #888'],
+      ['an uneven border', 'border:0;border-left:3px solid #888;border-top:1px solid #888'],
+    ];
+    const ROW_BORDER = 'border:0;border-left:3px solid #888;border-bottom:1px solid #888';
+    type Probe = {
+      place: Place;
+      w: number;
+      h: number;
+      css: string;
+      kind?: 'button' | 'row';
+      corner?: 'end' | 'start';
+    };
+
+    const mount = (page: Page, { place, w, h, css, kind = 'button', corner = 'end' }: Probe) =>
+      page.evaluate(
+        ({ place, w, h, css, kind, corner }) => {
+          document.querySelector('[data-probe-root]')?.remove();
+          const root = document.createElement('div');
+          root.setAttribute('data-probe-root', '');
+          root.style.cssText = `position:fixed;z-index:9999;left:${place.left}px;top:${place.top}px;width:${place.width}px;height:${place.height}px;overflow:auto;background:#123`;
+          const inner = document.createElement('div');
+          inner.style.cssText = `display:flex;justify-content:flex-${corner};align-items:flex-${corner};width:100%;height:100%`;
+          const el = document.createElement(kind === 'row' ? 'div' : 'button');
+          if (kind === 'row') el.setAttribute('data-row-id', 'probe');
+          el.setAttribute('data-probe', '');
+          el.style.cssText = `position:relative;display:block;box-sizing:border-box;padding:0;margin:0;background:#456;flex:none;font-size:10px;line-height:1;width:${w}px;height:${h}px;${css}`;
+          el.textContent = 'x';
+          inner.append(el);
+          root.append(inner);
+          document.body.append(root);
+          const win = window as unknown as { __clicks: number };
+          win.__clicks = 0;
+          el.addEventListener('click', () => {
+            win.__clicks += 1;
+          });
+          const b = el.getBoundingClientRect();
+          // A scroller already overflowing at rest would prove nothing either way.
+          if (root.scrollWidth > root.clientWidth || root.scrollHeight > root.clientHeight) {
+            throw new Error('The probe overflows its scroller at rest');
+          }
+          return {
+            x: b.left,
+            y: b.top,
+            width: b.width,
+            height: b.height,
+            rest: `${root.scrollWidth}x${root.scrollHeight} in ${root.clientWidth}x${root.clientHeight}`,
+          };
+        },
+        { place, w, h, css, kind, corner },
+      );
+
+    async function openProbes(page: Page) {
+      test.setTimeout(180_000);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await rowOf(page, IDS.truckChicago).waitFor();
+    }
+
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** Every size the scroller shows, on every frame, until the gesture is over. */
+    async function sizesDuring(page: Page, gesture: () => Promise<void>) {
+      await page.evaluate(() => {
+        const w = window as unknown as { __seen: string[]; __run: object | null };
+        w.__seen = [];
+        // A loop per gesture: last time's must not come back to life.
+        const run = {};
+        w.__run = run;
+        const root = document.querySelector('[data-probe-root]')!;
+        const read = () => {
+          if (w.__run !== run) return;
+          const now = `${root.scrollWidth}x${root.scrollHeight} in ${root.clientWidth}x${root.clientHeight}`;
+          if (!w.__seen.includes(now)) w.__seen.push(now);
+          requestAnimationFrame(read);
+        };
+        read();
+      });
+      await gesture();
+      return page.evaluate(() => {
+        const w = window as unknown as { __seen: string[]; __run: object | null };
+        w.__run = null;
+        return w.__seen;
+      });
+    }
+
+    /**
+     * Arriving and pressing within the lift, held long enough for hover and press
+     * to draw frames together, and let go on the thing itself.
+     */
+    async function heldPress(page: Page, x: number, y: number, arrive: number, hold: number) {
+      await page.mouse.move(x, y);
+      if (arrive > 0) await pause(arrive);
+      await page.mouse.down();
+      await pause(hold);
+      await page.mouse.up();
+      await page.mouse.move(700, 800);
+      await pause(230);
+    }
+
+    for (const place of PLACES) {
+      for (const [border, css] of BORDERS) {
+        test(`a small button flush in the corner, held during its lift: ${place.name}, ${border}`, async ({
+          page,
+        }) => {
+          await openProbes(page);
+          const box = await mount(page, { place, w: 64, h: 20, css });
+          const grew: string[] = [];
+          for (const arrive of [0, 16, 40, 120, 170]) {
+            for (const hold of [16, 60, 120, 240]) {
+              const seen = await sizesDuring(page, () =>
+                heldPress(
+                  page,
+                  box.x + box.width / 2,
+                  box.y + box.height / 2,
+                  arrive,
+                  hold,
+                ),
+              );
+              if (seen.length > 1 || seen[0] !== box.rest) {
+                grew.push(`arrive ${arrive} hold ${hold}: ${seen.join(' then ')}`);
+              }
+            }
+          }
+          expect(grew).toEqual([]);
+        });
+      }
+
+      test(`a row flush in the corner, pressed on arrival: ${place.name}`, async ({ page }) => {
+        await openProbes(page);
+        const box = await mount(page, { place, w: 280, h: 44, css: ROW_BORDER, kind: 'row' });
+        const grew: string[] = [];
+        for (const hold of [16, 60, 120, 240]) {
+          const seen = await sizesDuring(page, () =>
+            heldPress(page, box.x + box.width / 2, box.y + box.height / 2, 0, hold),
+          );
+          if (seen.length > 1 || seen[0] !== box.rest) {
+            grew.push(`hold ${hold}: ${seen.join(' then ')}`);
+          }
+        }
+        expect(grew).toEqual([]);
+      });
+
+      /* The other corner, for symmetry: nothing here may depend on which way it grows. */
+      test(`a button flush in the top left corner grows nothing: ${place.name}`, async ({
+        page,
+      }) => {
+        await openProbes(page);
+        const box = await mount(page, {
+          place,
+          w: 64,
+          h: 20,
+          css: 'border:1px solid #888',
+          corner: 'start',
+        });
+        const seen = await sizesDuring(page, () =>
+          heldPress(page, box.x + box.width / 2, box.y + box.height / 2, 40, 120),
+        );
+        expect(seen).toEqual([box.rest]);
+      });
+
+      /**
+       * What a click has to find when it lands, on every frame of a press: the first
+       * pixel in from each side still belongs to the thing. Timing cannot hide a gap
+       * here. The press comes right on arrival, with no hover first.
+       */
+      for (const [name, probe] of [
+        ['a button with no border', { w: 64, h: 26, css: 'border:0' }],
+        ['a bordered button', { w: 120, h: 36, css: 'border:1px solid #888' }],
+        ['a wide button', { w: 280, h: 36, css: 'border:1px solid #888' }],
+        ['a row', { w: 280, h: 44, css: ROW_BORDER, kind: 'row' }],
+      ] as const) {
+        test(`every frame of a press keeps all four edges: ${name}, ${place.name}`, async ({
+          page,
+        }) => {
+          await openProbes(page);
+          const box = await mount(page, { place, ...probe });
+          const result: { pressedFrames: number; lost: string[] }[] = [];
+          for (let i = 0; i < 6; i += 1) {
+            await page.evaluate(() => {
+              const w = window as unknown as {
+                __edges: { pressedFrames: number; lost: string[] };
+                __run: object | null;
+              };
+              w.__edges = { pressedFrames: 0, lost: [] };
+              const run = {};
+              w.__run = run;
+              const el = document.querySelector('[data-probe]')!;
+              const b = el.getBoundingClientRect();
+              // Measured before anything moves: this is the resting box.
+              const points: [string, number, number][] = [
+                ['left', b.left + 0.5, b.top + b.height / 2],
+                ['right', b.right - 0.5, b.top + b.height / 2],
+                ['top', b.left + b.width / 2, b.top + 0.5],
+                ['bottom', b.left + b.width / 2, b.bottom - 0.5],
+              ];
+              const read = () => {
+                if (w.__run !== run) return;
+                if (el.matches(':active')) {
+                  w.__edges.pressedFrames += 1;
+                  for (const [side, x, y] of points) {
+                    const hit = document.elementFromPoint(x, y);
+                    if (!hit || !el.contains(hit)) {
+                      w.__edges.lost.push(
+                        `frame ${w.__edges.pressedFrames} ${side} ${getComputedStyle(el).transform}`,
+                      );
+                    }
+                  }
+                }
+                requestAnimationFrame(read);
+              };
+              read();
+            });
+            await heldPress(page, box.x + box.width / 2, box.y + box.height / 2, 0, 100);
+            result.push(
+              await page.evaluate(() => {
+                const w = window as unknown as {
+                  __edges: { pressedFrames: number; lost: string[] };
+                  __run: object | null;
+                };
+                w.__run = null;
+                return w.__edges;
+              }),
+            );
+          }
+          // A test that saw no pressed frame has tested nothing.
+          expect(result.every((r) => r.pressedFrames >= 2)).toBe(true);
+          expect(result.flatMap((r) => r.lost)).toEqual([]);
+        });
+      }
+
+      /*
+       * A mouse reports whole pixels, so the box's own first pixel is a place a real
+       * pointer stands, on the very edge, with no half pixel to spare.
+       */
+      test(`a press held on the very first pixel, left and top, lands: ${place.name}`, async ({
+        page,
+      }) => {
+        await openProbes(page);
+        const missed: string[] = [];
+        for (const [name, css] of BORDERS) {
+          const box = await mount(page, { place, w: 120, h: 36, css });
+          for (const [side, x, y] of [
+            ['left', box.x, box.y + box.height / 2],
+            ['top', box.x + box.width / 2, box.y],
+          ] as const) {
+            await page.evaluate(() => {
+              (window as unknown as { __clicks: number }).__clicks = 0;
+            });
+            await page.mouse.move(x, y);
+            await page.mouse.down();
+            await pause(120);
+            await page.mouse.up();
+            const clicks = await page.evaluate(
+              () => (window as unknown as { __clicks: number }).__clicks,
+            );
+            if (clicks !== 1) missed.push(`${name} ${side}`);
+            await page.mouse.move(700, 800);
+            await pause(190);
+          }
+        }
+        expect(missed).toEqual([]);
+      });
+
+      test(`a quick press right on arrival lands at the very edge: ${place.name}`, async ({
+        page,
+      }) => {
+        await openProbes(page);
+        const missed: string[] = [];
+        for (const [name, css] of BORDERS) {
+          const box = await mount(page, { place, w: 120, h: 36, css });
+          for (const hold of [16, 24, 40]) {
+            for (const off of [0.5, 1.5]) {
+              for (const side of ['left', 'right']) {
+                const x = side === 'left' ? box.x + off : box.x + box.width - off;
+                await page.mouse.move(700, 800);
+                await pause(190);
+                await page.evaluate(() => {
+                  (window as unknown as { __clicks: number }).__clicks = 0;
+                });
+                await page.mouse.move(x, box.y + box.height / 2);
+                await page.mouse.down();
+                await pause(hold);
+                await page.mouse.up();
+                const clicks = await page.evaluate(
+                  () => (window as unknown as { __clicks: number }).__clicks,
+                );
+                if (clicks !== 1) missed.push(`${name} ${side} +${off} held ${hold}`);
+              }
+            }
+          }
+        }
+        expect(missed).toEqual([]);
+      });
+    }
   });
 
   test('hover does not flicker on the bottom edge of a lifting button', async ({
