@@ -24,6 +24,13 @@ describe('the numbers of the new motion (§12.149)', () => {
     expect(MOTION_MS.bulkBar).toBe(200);
   });
 
+  it('the board opens in 300ms, a row in 120ms, linear, with gaps of 20ms at most', () => {
+    expect(MOTION_MS.boardOpen).toBe(300);
+    expect(MOTION_MS.boardOpenRow).toBe(120);
+    expect(MOTION_MS.boardOpenGapMax).toBe(20);
+    expect(EASING.fade).toBe('linear');
+  });
+
   it('the curve is the windows’ curve', () => {
     expect(EASING.dialog).toBe('cubic-bezier(.22,.61,.36,1)');
   });

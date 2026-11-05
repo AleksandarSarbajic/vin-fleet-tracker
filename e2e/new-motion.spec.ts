@@ -23,6 +23,9 @@ const FLASH_MS = 1600;
 const PAGE_MS = 180;
 const RISE_PX = 6;
 const BAR_MS = 200;
+const OPEN_MS = 300;
+const OPEN_ROW_MS = 120;
+const OPEN_GAP_MAX_MS = 20;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -1416,6 +1419,222 @@ test.describe('step 4, the bulk bar comes up into its slot', () => {
     const seen = await frames();
     expect(Math.max(...seen.map((f) => f.copies))).toBe(0);
     expect(seen.every((f) => f.y === null || f.y === 0)).toBe(true);
+    expect(await started(page)).toEqual([]);
+  });
+});
+
+test.describe('step 5, the board opens once per page load', () => {
+  /** Rows draw in, one after the other: opacity only, linear. */
+  const OPENING = '|0';
+  const openings = async (page: Page) =>
+    (await started(page)).filter((s) => s.from === OPENING && s.duration === OPEN_ROW_MS);
+
+  const rowsInView = (page: Page) =>
+    page.evaluate(() => {
+      const scroller = document.querySelector('[data-row-id]')!.closest('.overflow-y-auto')!;
+      const view = scroller.getBoundingClientRect();
+      return [...document.querySelectorAll('[data-row-id]')].filter((r) => {
+        const box = r.getBoundingClientRect();
+        return box.bottom > view.top && box.top < view.bottom;
+      }).length;
+    });
+
+  const logDelays = (page: Page) =>
+    page.addInitScript(() => {
+      const w = window as unknown as { __delays: number[] };
+      w.__delays = [];
+      const real = Element.prototype.animate;
+      Element.prototype.animate = function (this: Element, frames, options) {
+        if (typeof options === 'object' && options.fill === 'backwards') {
+          w.__delays.push(Number(options.delay ?? 0));
+        }
+        return real.call(this, frames, options);
+      };
+    });
+  const delays = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __delays: number[] }).__delays);
+
+  test('a long board: every row in view, 300ms in all, opacity only and linear', async ({ page }) => {
+    await logAnimations(page);
+    await logDelays(page);
+    await resetWorld({ extraTrucks: 30 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    const frames = await record(page, () =>
+      [...document.querySelectorAll('[data-row-id]')].some(
+        (r) => r.parentElement!.getAnimations().length > 0,
+      ),
+    );
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    expect(await frames()).toContain(false);
+
+    const inView = await rowsInView(page);
+    const theirs = await openings(page);
+    expect(theirs.length).toBe(inView);
+    expect(new Set(theirs.map((t) => t.duration))).toEqual(new Set([OPEN_ROW_MS]));
+    expect(new Set(theirs.map((t) => t.easing))).toEqual(new Set(['linear']));
+    const gaps = await delays(page);
+    expect(gaps).toHaveLength(inView);
+    expect(gaps[0]).toBe(0);
+    // All of it in 300ms: the last row's start, and its own 120ms.
+    expect(gaps.at(-1)! + OPEN_ROW_MS).toBeCloseTo(OPEN_MS, 5);
+    expect(gaps[1]! - gaps[0]!).toBeLessThanOrEqual(OPEN_GAP_MAX_MS);
+
+    // Nothing left on a row: only what the list itself wrote.
+    const rest = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-row-id]')].map((r) => ({
+        animations: r.parentElement!.getAnimations().length,
+        opacity: (r.parentElement as HTMLElement).style.opacity,
+      })),
+    );
+    for (const row of rest) expect(row).toEqual({ animations: 0, opacity: '' });
+  });
+
+  test('a short board: the gap has a ceiling, so three rows do not take 300ms', async ({ page }) => {
+    await logDelays(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect.poll(() => delays(page)).toEqual([0, OPEN_GAP_MAX_MS, OPEN_GAP_MAX_MS * 2]);
+  });
+
+  test('a click on the first frame selects: nothing waits for it', async ({ page }) => {
+    await resetWorld({ extraTrucks: 30 });
+    await page.goto('/');
+    // One of the last to draw in, so it is still on its way when the press arrives.
+    const row = page.locator('[data-row-id]').nth(17);
+    await row.waitFor();
+    await quiet(page);
+    const box = (await row.boundingBox())!;
+    const id = await row.getAttribute('data-row-id');
+    await page.mouse.move(box.x + 300, box.y + box.height / 2);
+
+    await page.addInitScript(() => {
+      /*
+       * A page load keeps the main thread busy, so a real press can arrive after 300ms have
+       * gone. The opening is stretched for this one test, so the press is sure to land
+       * inside it. Whether a click lands does not depend on how long the fade is.
+       */
+      const real = Element.prototype.animate;
+      Element.prototype.animate = function (this: Element, frames, options) {
+        return real.call(
+          this,
+          frames,
+          typeof options === 'object' && options.fill === 'backwards'
+            ? { ...options, duration: Number(options.duration) * 40, delay: Number(options.delay) * 40 }
+            : options,
+        );
+      };
+      window.addEventListener(
+        'pointerdown',
+        (event) => {
+          const hit = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-row-id]');
+          const wrapper = hit?.parentElement;
+          (window as unknown as { __press: unknown }).__press = {
+            id: hit?.getAttribute('data-row-id') ?? null,
+            opacity: wrapper ? Number(getComputedStyle(wrapper).opacity) : null,
+            moving: wrapper ? wrapper.getAnimations().length : null,
+          };
+        },
+        { capture: true, once: true },
+      );
+    });
+    await page.goto('/', { waitUntil: 'commit' });
+    await page.waitForFunction(
+      (rowId) => document.querySelector(`[data-row-id="${rowId}"]`)?.parentElement?.getAnimations().length,
+      id,
+      { polling: 'raf' },
+    );
+    await page.mouse.down();
+    await page.mouse.up();
+    const press = await page.evaluate(
+      () => (window as unknown as { __press: { id: string; opacity: number; moving: number } }).__press,
+    );
+    expect(press.id).toBe(id);
+    expect(press.moving).toBe(1);
+    expect(press.opacity).toBeLessThan(1);
+    await expect(page.locator(`[data-row-id="${id}"]`)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('never again: not on a page change, a chip, a refetch or a poll', async ({ page }) => {
+    await logAnimations(page);
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const once = (await openings(page)).length;
+    expect(once).toBeGreaterThan(0);
+
+    await pollWith(page, lateFirst(2));
+    await quiet(page);
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.locator('[data-history-summary]').waitFor();
+    await quiet(page);
+    await page.keyboard.press('g');
+    await page.keyboard.press('b');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    await page.keyboard.press('1');
+    await quiet(page);
+    await page.keyboard.press('0');
+    await quiet(page);
+    await pollWith(page, lateFirst(3));
+    await quiet(page);
+    expect((await openings(page)).length).toBe(once);
+  });
+
+  test('rows that only arrive after a fetch take it, once', async ({ page }) => {
+    await logAnimations(page);
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/?chips=late');
+    // Nothing late, so nothing to draw: the opening is still to come.
+    await page.getByText('No trucks in this filter').first().waitFor();
+    await quiet(page);
+    expect(await openings(page)).toEqual([]);
+
+    await pollWith(page, lateFirst(3));
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect.poll(async () => (await openings(page)).length).toBe(3);
+    await quiet(page);
+
+    await pollWith(page, lateFirst(4));
+    await quiet(page);
+    expect((await openings(page)).length).toBe(3);
+  });
+
+  test('the server and the first client render are the same: no hydration complaint', async ({ page }) => {
+    const complaints: string[] = [];
+    page.on('pageerror', (e) => complaints.push(e.message));
+    page.on('console', (m) => {
+      if (m.type() === 'error' && /hydrat|#418|#423|#425/i.test(m.text())) complaints.push(m.text());
+    });
+    await resetWorld({ extraTrucks: 5 });
+    const html = await (await page.goto('/'))!.text();
+    expect(html).not.toMatch(/opacity:\s*0/);
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    expect(complaints).toEqual([]);
+  });
+
+  test('nothing grows while it plays', async ({ page }) => {
+    await resetWorld({ extraTrucks: 30 });
+    await page.goto('/', { waitUntil: 'commit' });
+    await page.locator('body').waitFor();
+    const stop = await watchFrames(page);
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+  });
+
+  test('under reduced motion: the rows are simply there', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logAnimations(page);
+    await resetWorld({ extraTrucks: 5 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
     expect(await started(page)).toEqual([]);
   });
 });

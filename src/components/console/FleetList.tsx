@@ -8,6 +8,7 @@ import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
 import { BulkBarSlot } from './BulkBarSlot';
+import { openBoardOnce } from './board-opening';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -111,6 +112,7 @@ export function FleetList({
 }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const [columns, setColumns] = useState<6 | 8>(8);
 
   useLayoutEffect(() => {
@@ -138,6 +140,14 @@ export function FleetList({
   const items = virtualizer.getVirtualItems();
   const firstVisible = items[0]?.index ?? 0;
   const lastVisible = items[items.length - 1]?.index ?? -1;
+
+  // §12.149. In the commit the first rows are drawn in, ahead of their first frame.
+  const hasRows = items.length > 0;
+  useLayoutEffect(() => {
+    if (hasRows && scrollRef.current && bodyRef.current) {
+      openBoardOnce(scrollRef.current, bodyRef.current);
+    }
+  }, [hasRows]);
 
   /** Marker click rails the row into view (§9.3, two-way selection). */
   const scrollToId = useCallback(
@@ -245,6 +255,7 @@ export function FleetList({
 
         {/* The body dims as a whole: the schedule is not to be trusted. */}
         <div
+          ref={bodyRef}
           style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
           className={feedStale ? 'opacity-[.72]' : ''}
         >

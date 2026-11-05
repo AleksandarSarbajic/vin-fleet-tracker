@@ -254,6 +254,11 @@ export const MOTION_MS = {
   pageIn: 180,
   /** §12.149. The bulk bar, in and out of its slot. */
   bulkBar: 200,
+  /** §12.149. The board's opening, once per load: all of it, and each row's share. */
+  boardOpen: 300,
+  boardOpenRow: 120,
+  /** So three rows do not take the whole 300ms. Normally the rows in view set the gap. */
+  boardOpenGapMax: 20,
 } as const;
 
 /**
@@ -295,4 +300,6 @@ export const EASING = {
    * so the time a window takes is time you can see, with no slow start.
    */
   dialog: 'cubic-bezier(.22,.61,.36,1)',
+  /** §12.149. What only fades, and goes nowhere, has no reason to speed up or slow down. */
+  fade: 'linear',
 } as const;
