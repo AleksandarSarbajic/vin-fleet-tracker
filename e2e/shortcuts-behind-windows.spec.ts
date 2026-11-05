@@ -321,6 +321,8 @@ test.describe('every other window, with focus on a button', () => {
     await page.keyboard.press('Control+k');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
+    // It takes the focus itself a moment after it opens, and that must land first.
+    await expect(palette.getByRole('combobox')).toBeFocused();
     await nothingMovesBehind(
       page,
       palette.getByRole('option').first(),
@@ -439,6 +441,7 @@ test.describe("a window's own keys keep working", () => {
     await page.keyboard.press('Control+k');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
+    await expect(palette.getByRole('combobox')).toBeFocused();
     await palette.getByRole('combobox').fill(String(TRUCK_NUMBERS.dallas));
     await palette.getByRole('option').first().focus();
     await page.keyboard.press('Enter');
