@@ -240,3 +240,23 @@ describe('a selected truck the board is not showing', () => {
     expect(box?.checked).toBe(false);
   });
 });
+
+describe('P on a selected truck the board is not showing', () => {
+  it('pins nothing', async () => {
+    await render(['late']);
+    await selectA();
+    await poll([ARRIVED_A, LATE_B]);
+    await press('p');
+    await poll([LATE_A, LATE_B]);
+    const pin = rowFor('101')!.querySelector('button[aria-label$="truck 101"]');
+    expect(pin?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('pins a truck the board is showing, as ever', async () => {
+    await render(['late']);
+    await selectA();
+    await press('p');
+    const pinned = [...document.querySelectorAll('button[aria-label="Unpin truck 101"]')];
+    expect(pinned.length).toBeGreaterThan(0);
+  });
+});

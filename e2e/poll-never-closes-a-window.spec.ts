@@ -491,3 +491,35 @@ test.describe('the controls', () => {
     await stillOpenWithTheWork(modal);
   });
 });
+
+test.describe('P on a selected truck', () => {
+  const pinned = (page: Page) => page.evaluate(() => localStorage.getItem('ft.pinned'));
+
+  test('the board is not showing it: P pins nothing', async ({ page }) => {
+    const row = await boardOnLate(page);
+    const polled = pollShows(page, (truck) => truck?.status === 'ARRIVED');
+    await theTruckArrives();
+    await polled;
+    await expect(row).toHaveCount(0);
+
+    await page.keyboard.press('p');
+    await page.waitForTimeout(SETTLE_MS);
+    expect(await pinned(page)).toBeNull();
+
+    // And it is not pinned when it comes back.
+    const back = pollShows(page, (truck) => truck?.status === 'LATE');
+    await theArrivalIsUndone();
+    await back;
+    await expect(row).toBeVisible();
+    expect(await pinned(page)).toBeNull();
+  });
+
+  test('the board is showing it: P pins it and unpins it, as ever', async ({ page }) => {
+    const row = await boardOnLate(page);
+    await row.click();
+    await page.keyboard.press('p');
+    await expect.poll(() => pinned(page)).toContain(IDS.truckChicago);
+    await page.keyboard.press('p');
+    await expect.poll(() => pinned(page)).not.toContain(IDS.truckChicago);
+  });
+});

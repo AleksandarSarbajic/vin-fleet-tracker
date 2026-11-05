@@ -575,7 +575,9 @@ export function Console({
    * decide whether to count a pinned truck once or twice, and they would not
    * all decide the same way.
    */
-  const pins = usePinned(selectedId);
+  // A selection can outlive its row. P on a truck the board is not showing would pin it
+  // unseen, so it answers for the selected ROW, as X does.
+  const pins = usePinned(selectedRow?.id ?? null);
   const pinnedRows = useMemo(
     () =>
       pins.pinned
