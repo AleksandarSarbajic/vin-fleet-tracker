@@ -115,6 +115,16 @@ export function whenOver(animation: Animation, then: () => void): void {
   animation.addEventListener('cancel', once);
 }
 
+/**
+ * Takes an element's inline style off, attribute and all. Blink writes an inline style
+ * out to the attribute only when something asks: remove the attribute before that and
+ * it empties the style and leaves `style=""` behind. Asking first makes it a real removal.
+ */
+export function clearStyle(el: Element): void {
+  el.getAttribute('style');
+  el.removeAttribute('style');
+}
+
 const MOVEMENT = new Set(['transform', '--press', '--lift']);
 
 /**

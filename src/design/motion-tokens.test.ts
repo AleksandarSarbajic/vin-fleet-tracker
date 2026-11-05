@@ -11,6 +11,10 @@ describe('the numbers of the new motion (§12.149)', () => {
     expect(MOTION_MS.segmentSlide).toBe(180);
   });
 
+  it('a count rolls in 240ms', () => {
+    expect(MOTION_MS.countRoll).toBe(240);
+  });
+
   it('the curve is the windows’ curve', () => {
     expect(EASING.dialog).toBe('cubic-bezier(.22,.61,.36,1)');
   });

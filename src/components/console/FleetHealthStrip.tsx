@@ -1,7 +1,8 @@
 'use client';
 
 import type { FleetHealth } from '@/server/health';
-import { healthBar, healthText, type Segment } from '@/lib/health-bar';
+import { healthBar, healthParts, type Segment } from '@/lib/health-bar';
+import { RollingNumber } from './RollingNumber';
 
 /**
  * §14 feature 8 — the day's outcome, in the list toolbar.
@@ -89,11 +90,14 @@ export function FleetHealthStrip({
       ) : null}
 
       <span
+        data-health-text=""
         className={`truncate font-sans text-small tabular-nums text-text-secondary${
           giveWay ? ' shrink-[1000]' : ''
         }`}
       >
-        {healthText(bar, health)}
+        {healthParts(bar, health).map((part, i) =>
+          typeof part === 'number' ? <RollingNumber key={i} value={part} /> : part,
+        )}
       </span>
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import type { Status } from '@/lib/status';
 import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
+import { RollingNumber } from './RollingNumber';
 
 /**
  * design-spec §9.1, §12.8, §12.9.
@@ -267,11 +268,10 @@ function Chip({
       }`}
     >
       {label}
-      <span
+      <RollingNumber
+        value={count}
         className={`font-sans text-[12px] font-semibold leading-none tabular-nums ${countInk ?? ''}`}
-      >
-        {count}
-      </span>
+      />
     </button>
   );
 }

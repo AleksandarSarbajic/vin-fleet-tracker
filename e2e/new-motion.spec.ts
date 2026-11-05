@@ -18,6 +18,8 @@ test.use({ contextOptions: { reducedMotion: 'no-preference' } });
  */
 const DIALOG_CURVE = 'cubic-bezier(.22,.61,.36,1)';
 const SEGMENT_MS = 180;
+const ROLL_MS = 240;
+const FLASH_MS = 1600;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -485,5 +487,343 @@ test.describe('step 2, a segment highlight slides', () => {
     expect(seen.length).toBeGreaterThan(10);
     expect(Math.max(...seen.map((f) => f.overlays))).toBe(0);
     expect(Math.max(...seen.map((f) => f.animations))).toBe(0);
+  });
+});
+
+/**
+ * Serves `/api/fleet` through `change`, and asks for it now: the same request a poll
+ * makes, by the same hook, with no 20s to wait. Returns once the answer is in the page.
+ */
+async function pollWith(page: Page, change: (rows: FleetRowLike[]) => void) {
+  await page.unroute('**/api/fleet');
+  await page.route('**/api/fleet', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as { fleet: FleetRowLike[] };
+    change(body.fleet);
+    await route.fulfill({ response, json: body });
+  });
+  const answered = page.waitForResponse('**/api/fleet');
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await answered;
+}
+
+type FleetRowLike = { id: string; status: string; computed: string; active: boolean };
+
+/** The first `n` rows are late, and the rest as they were. */
+const lateFirst = (n: number) => (rows: FleetRowLike[]) => {
+  rows.forEach((row, i) => {
+    if (i < n) {
+      row.status = 'LATE';
+      row.computed = 'LATE';
+    }
+  });
+};
+
+test.describe('step 3, a count rolls when it changes', () => {
+  const chip = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(`^${name}\\b`) }).first();
+  const cell = (page: Page, name: string) => chip(page, name).locator('[data-roll]');
+  const COPY = '[data-roll-copy]';
+
+  const openLong = async (page: Page) => {
+    await resetWorld({ extraTrucks: 20 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+  };
+
+  test('0 to 1: two numbers for its length, then a plain number', async ({ page }) => {
+    await openLong(page);
+    await expect(cell(page, 'Late')).toHaveText('0');
+    await chip(page, 'Late').evaluate((el) => {
+      (window as unknown as { __chip: Element }).__chip = el;
+    });
+    const stop = await watchFrames(page);
+    const frames = await record(page, () => ({
+      // Per number: a truck going late takes one off another chip in the same poll.
+      copies: Math.max(
+        0,
+        ...[...document.querySelectorAll('[data-roll]')].map(
+          (b) => b.querySelectorAll('[data-roll-copy]').length,
+        ),
+      ),
+      // What the Late chip's box is doing on this frame, read where it happens.
+      ...(() => {
+        const box = (window as unknown as { __chip: Element }).__chip.querySelector('[data-roll]')!;
+        const copy = box.querySelector('[data-roll-copy]');
+        if (!copy) return { overflow: null, from: null, duration: null, easing: null };
+        const number = box.firstElementChild!.getAnimations()[0]?.effect as KeyframeEffect | undefined;
+        return {
+          overflow: getComputedStyle(box).overflow,
+          from: number?.getKeyframes()[0]?.transform ?? null,
+          duration: number?.getTiming().duration ?? null,
+          easing: number?.getTiming().easing ?? null,
+        };
+      })(),
+    }));
+    await pollWith(page, lateFirst(1));
+    await expect(cell(page, 'Late')).toHaveText('1', { timeout: 2_000 });
+    const seen = await frames();
+    const { grew, frames: count } = await stop();
+    expect(grew).toEqual([]);
+    expect(count).toBeGreaterThan(5);
+    expect(seen.filter((f) => f.copies > 0).length).toBeGreaterThan(3);
+    expect(Math.max(...seen.map((f) => f.copies))).toBe(1);
+    const rolling = seen.filter((f) => f.overflow !== null);
+    expect(rolling.length).toBeGreaterThan(3);
+    for (const frame of rolling) {
+      // It rolls inside its own box. Going up, the new number comes from below.
+      expect(frame.overflow).toBe('clip');
+      expect(frame.from).toBe('translateY(100%)');
+      expect(frame.duration).toBe(ROLL_MS);
+      expect(curve(String(frame.easing))).toBe(curve(DIALOG_CURVE));
+    }
+
+    // Plain: the number, as text, with nothing on it or around it.
+    const rest = await cell(page, 'Late').evaluate((box) => ({
+      text: box.textContent,
+      children: box.children.length,
+      boxStyle: box.getAttribute('style'),
+      numberStyle: box.firstElementChild?.getAttribute('style') ?? null,
+      animations: box.getAnimations({ subtree: true }).length,
+    }));
+    expect(rest).toEqual({ text: '1', children: 1, boxStyle: null, numberStyle: null, animations: 0 });
+
+    // Going down, it comes from above.
+    const down = await record(page, () => {
+      const box = (window as unknown as { __chip: Element }).__chip.querySelector('[data-roll]')!;
+      return (box.firstElementChild!.getAnimations()[0]?.effect as KeyframeEffect | undefined)?.getKeyframes()[0]
+        ?.transform;
+    });
+    await pollWith(page, lateFirst(0));
+    await expect(cell(page, 'Late')).toHaveText('0');
+    const ways = new Set((await down()).filter(Boolean));
+    expect(ways).toEqual(new Set(['translateY(-100%)']));
+  });
+
+  test('a screen reader only ever gets the final number', async ({ page }) => {
+    await openLong(page);
+    await chip(page, 'Late').evaluate((el) => {
+      (window as unknown as { __chip: Element }).__chip = el;
+    });
+    const frames = await record(page, () => {
+      const el = (window as unknown as { __chip: Element }).__chip;
+      const copy = el.querySelector('[data-roll-copy]');
+      const clone = el.cloneNode(true) as Element;
+      clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+      return {
+        spoken: clone.textContent,
+        copyHidden: copy ? copy.getAttribute('aria-hidden') : 'none',
+      };
+    });
+    await pollWith(page, lateFirst(1));
+    await expect(cell(page, 'Late')).toHaveText('1');
+    await expect(page.getByRole('button', { name: /^Late\s*1$/ })).toBeVisible();
+    const seen = await frames();
+    expect([...new Set(seen.map((f) => f.spoken))]).toEqual(['Late0', 'Late1']);
+    expect(seen.some((f) => f.copyHidden === 'true')).toBe(true);
+    expect(seen.every((f) => f.copyHidden === 'true' || f.copyHidden === 'none')).toBe(true);
+  });
+
+  test('9 to 10: the chip beside it steps once, and nothing moves up or down', async ({ page }) => {
+    await openLong(page);
+    await pollWith(page, lateFirst(9));
+    await expect(cell(page, 'Late')).toHaveText('9');
+    await expect(page.locator(COPY)).toHaveCount(0);
+    await quiet(page);
+
+    await chip(page, 'Late').evaluate((el) => {
+      (window as unknown as { __chip: Element }).__chip = el;
+    });
+    await chip(page, 'At risk').evaluate((el) => {
+      (window as unknown as { __next: Element }).__next = el;
+    });
+    const stop = await watchFrames(page);
+    const frames = await record(page, () => {
+      const w = window as unknown as { __chip: Element; __next: Element };
+      const box = w.__chip.querySelector('[data-roll]')!.getBoundingClientRect();
+      const chipBox = w.__chip.getBoundingClientRect();
+      return {
+        nextX: w.__next.getBoundingClientRect().x,
+        top: box.top,
+        height: box.height,
+        chipTop: chipBox.top,
+        chipHeight: chipBox.height,
+      };
+    });
+    await pollWith(page, lateFirst(10));
+    await expect(cell(page, 'Late')).toHaveText('10');
+    await expect(page.locator(COPY)).toHaveCount(0);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(new Set(seen.map((f) => f.nextX)).size).toBe(2);
+    expect(new Set(seen.map((f) => f.chipTop)).size).toBe(1);
+    expect(new Set(seen.map((f) => f.chipHeight)).size).toBe(1);
+    expect(new Set(seen.map((f) => f.top)).size).toBe(1);
+    expect(new Set(seen.map((f) => f.height)).size).toBe(1);
+  });
+
+  test('rapid polls: one old number at a time, and it ends on the last', async ({ page }) => {
+    await openLong(page);
+    const frames = await record(page, () => ({
+      most: Math.max(
+        0,
+        ...[...document.querySelectorAll('[data-roll]')].map(
+          (b) => b.querySelectorAll('[data-roll-copy]').length,
+        ),
+      ),
+    }));
+    for (const n of [1, 2, 3, 4, 5]) await pollWith(page, lateFirst(n));
+    await expect(cell(page, 'Late')).toHaveText('5');
+    await expect(page.locator(COPY)).toHaveCount(0);
+    const seen = await frames();
+    expect(Math.max(...seen.map((f) => f.most))).toBe(1);
+    expect(await cell(page, 'Late').evaluate((b) => b.getAttribute('style'))).toBeNull();
+  });
+
+  test('nothing changed: nothing rolls, and the first paint never does', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __rolls: number };
+      w.__rolls = 0;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          for (const n of r.addedNodes) {
+            if (n instanceof HTMLElement && n.hasAttribute('data-roll-copy')) w.__rolls += 1;
+          }
+        }
+      }).observe(document, { subtree: true, childList: true });
+    });
+    await openLong(page);
+    await pollWith(page, () => {});
+    await quiet(page);
+    expect(await page.evaluate(() => (window as unknown as { __rolls: number }).__rolls)).toBe(0);
+  });
+
+  test('a press holds it until it ends', async ({ page }) => {
+    await openLong(page);
+    const box = (await page.locator('[data-row-id]').first().boundingBox())!;
+    await page.mouse.move(box.x + 200, box.y + 10);
+    await page.mouse.down();
+    await pollWith(page, lateFirst(1));
+    const copy = page.locator(COPY).first();
+    await copy.waitFor({ state: 'attached' });
+    const time = () => copy.evaluate((el) => el.getAnimations()[0]!.currentTime as number);
+    const first = await time();
+    await page.waitForTimeout(ROLL_MS + 60);
+    expect(await time()).toBe(first);
+    await page.mouse.up();
+    await expect(page.locator(COPY)).toHaveCount(0);
+  });
+
+  /** Counts every copy ever added, however briefly. */
+  const countCopies = (page: Page) =>
+    page.addInitScript(() => {
+      const w = window as unknown as { __rolls: number };
+      w.__rolls = 0;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          for (const n of r.addedNodes) {
+            if (n instanceof HTMLElement && n.hasAttribute('data-roll-copy')) w.__rolls += 1;
+          }
+        }
+      }).observe(document, { subtree: true, childList: true });
+    });
+  const copiesEver = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __rolls: number }).__rolls);
+
+  test('a tab in the background does not roll: it would play on the way back', async ({ page }) => {
+    await countCopies(page);
+    await openLong(page);
+    await page.evaluate(() =>
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true }),
+    );
+    await pollWith(page, lateFirst(1));
+    await expect(cell(page, 'Late')).toHaveText('1');
+    expect(await copiesEver(page)).toBe(0);
+  });
+
+  test('on a phone, where the chips are not drawn, nothing rolls behind them', async ({ browser }) => {
+    const { context, page } = await onPhone(browser, SIZES[3]!);
+    try {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await countCopies(page);
+      await resetWorld({ extraTrucks: 5 });
+      await page.goto('/');
+      await page.locator('[data-count-tile="late"]').waitFor();
+      await pollWith(page, lateFirst(1));
+      await expect(page.locator('[data-count-tile="late"]')).toHaveAttribute('aria-label', 'Late, 1');
+      expect(await copiesEver(page)).toBe(0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('under reduced motion: the new number at once, and no second one', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await countCopies(page);
+    await openLong(page);
+    const frames = await record(page, () => document.querySelectorAll('[data-roll-copy]').length);
+    await pollWith(page, lateFirst(1));
+    await expect(cell(page, 'Late')).toHaveText('1');
+    await quiet(page);
+    expect(await copiesEver(page)).toBe(0);
+    expect(Math.max(...(await frames()))).toBe(0);
+    expect(await cell(page, 'Late').evaluate((b) => b.getAnimations({ subtree: true }).length)).toBe(0);
+  });
+
+  test('the flash stays the strongest thing: the row keeps its 1.6s, the count only its cell', async ({ page }) => {
+    await openLong(page);
+    let changed = '';
+    const firstRow = (rows: FleetRowLike[]) => {
+      changed = rows[0]!.id;
+      lateFirst(1)(rows);
+    };
+    await pollWith(page, firstRow);
+    const first = page.locator(`[data-row-id="${changed}"]`);
+    const before = (await first.boundingBox())!;
+    const flash = first.locator('.animate-flash');
+    await flash.waitFor({ state: 'attached' });
+    const duration = await flash.evaluate(
+      (el) => el.getAnimations()[0]!.effect!.getComputedTiming().duration,
+    );
+    expect(duration).toBe(FLASH_MS);
+    expect(ROLL_MS).toBeLessThan(FLASH_MS / 4);
+    // The poll that started it moved no row.
+    expect((await first.boundingBox())!.y).toBe(before.y);
+    // What rolls is 12px high inside a chip; what flashes is the whole row.
+    const rolled = await cell(page, 'Late').boundingBox();
+    expect(rolled!.height * rolled!.width).toBeLessThan((before.width * before.height) / 20);
+  });
+
+  test('the health strip: a real poll rolls the number that changed, and only it', async ({ page }) => {
+    test.setTimeout(120_000);
+    await resetWorld({ extraTrucks: 5, appointmentUtc: new Date() });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const strip = page.locator('[data-health-text]');
+    const text = (await strip.textContent())!;
+    const total = Number(/of (\d+) done/.exec(text)?.[1]);
+    await page.route('**/api/health', async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { onTime: number; remaining: number };
+      body.onTime += 1;
+      body.remaining -= 1;
+      await route.fulfill({ response, json: body });
+    });
+    const stop = await watchFrames(page);
+    const frames = await record(page, () =>
+      [...document.querySelectorAll('[data-health-text] [data-roll]')]
+        .filter((b) => b.querySelector('[data-roll-copy]'))
+        .map((b) => b.getAttribute('data-roll')),
+    );
+    await expect(strip).toHaveText(new RegExp(`^1 of ${total} done`), { timeout: 70_000 });
+    await expect(strip.locator(COPY)).toHaveCount(0);
+    const seen = await frames();
+    const { grew } = await stop();
+    expect(grew).toEqual([]);
+    expect(seen.filter((f) => f.length > 0).length).toBeGreaterThan(3);
+    expect(new Set(seen.flat())).toEqual(new Set(['1']));
+    expect(await strip.locator('[data-roll]').first().evaluate((b) => b.getAttribute('style'))).toBeNull();
   });
 });

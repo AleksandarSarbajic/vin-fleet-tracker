@@ -248,6 +248,8 @@ export const MOTION_MS = {
   pressOut: 180,
   /** §12.149. A segment's highlight, from what was chosen to what is. */
   segmentSlide: 180,
+  /** §12.149. A count, on a poll that changed it. */
+  countRoll: 240,
 } as const;
 
 /**

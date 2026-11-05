@@ -81,7 +81,19 @@ export function healthBar(health: FleetHealth): HealthBar {
  * when there is one.
  */
 export function healthText(bar: HealthBar, health: FleetHealth): string {
-  if (bar.total === 0) return 'No stops today';
-  const tail = health.unscheduled > 0 ? ` · ${health.unscheduled} unscheduled` : '';
-  return `${bar.done} of ${bar.total} done · ${health.late} late${tail}`;
+  return healthParts(bar, health).join('');
+}
+
+/** The same line in pieces, so its numbers can each roll on their own (§12.149). */
+export function healthParts(bar: HealthBar, health: FleetHealth): (string | number)[] {
+  if (bar.total === 0) return ['No stops today'];
+  return [
+    bar.done,
+    ' of ',
+    bar.total,
+    ' done · ',
+    health.late,
+    ' late',
+    ...(health.unscheduled > 0 ? [' · ', health.unscheduled, ' unscheduled'] : []),
+  ];
 }
