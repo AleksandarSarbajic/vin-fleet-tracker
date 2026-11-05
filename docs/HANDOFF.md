@@ -81,8 +81,11 @@ motion by default, and under the preference a transition is a true 0. See
 **3bc: NOT pushed** (2026-11-05): cleanup before the new motion. Discard by keyboard,
 the reorder bar in the toolbar, bulk modal Esc, the last windows on frames, a row's
 press at 60ms, and the press, lift and hit area on one clock. See "Phase 3bc" below.
-**3bc follow-up: NOT pushed** (2026-11-05): the board's shortcuts stand down behind any
-window, through one guard in `keymap.ts`. See "Phase 3bc follow-up" below.
+**3bc follow-up: pushed** (origin at `35f399f` when follow-up 2 began; live not checked): the
+board's shortcuts stand down behind any window, through one guard in `keymap.ts`. See "Phase 3bc
+follow-up" below.
+**3bc follow-up 2: NOT pushed** (2026-11-05): a poll never closes a window. See "Phase 3bc follow-up
+2" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10583,13 +10586,82 @@ The 17 element `onKeyDown`s (`TruckRow`, `Split`, `ConsoleHeader`, `SearchField`
 
 **Found wrong and not fixed:**
 
-1. **A poll alone can close the edit window and lose the typed work, with no key pressed.** Measured, one throwaway test: Late chip on, editing a late truck with typed work, the truck arrives, the next poll moves it out of the chip, and **the window is gone, with no question.** The cause: `editingRow` is read from `rows`, which the chips have already filtered (`Console.tsx:473`). Reading it from `all` looks like the fix, but it was not tried. Recommended next, before 3bd: it is the same loss as `G H`, and it needs no mistake from the dispatcher. `timelineRow` has the same shape, with nothing typed in it to lose.
+1. **A poll alone can close the edit window and lose the typed work, with no key pressed.** Measured, one throwaway test: Late chip on, editing a late truck with typed work, the truck arrives, the next poll moves it out of the chip, and **the window is gone, with no question.** The cause: `editingRow` is read from `rows`, which the chips have already filtered (`Console.tsx:473`). Reading it from `all` looks like the fix, but it was not tried. Recommended next, before 3bd: it is the same loss as `G H`, and it needs no mistake from the dispatcher. `timelineRow` has the same shape, with nothing typed in it to lose. **Fixed: see "Phase 3bc follow-up 2".**
 2. **A phone sheet left open and widened stays mounted**, hidden, and comes back on narrowing. Harmless now the guard ignores it.
 
 **Questions for Alex:**
 
 1. **Push?** Your call under "Do not push".
 2. **Fix the poll closing the edit window next, ahead of 3bd?** Recommended: yes.
+
+### Phase 3bc follow-up 2: a poll never closes a window (2026-11-05)
+
+One fix, no motion. **NOT pushed.** Built on `35f399f`, clean tree, level with origin. Closes "Found wrong and not fixed" item 1 of the follow-up.
+
+| Commit | What |
+|---|---|
+| `3755b6b` | `useWindowRow`: the edit window and the timeline read their truck from `all`. Enter only opens a truck the board shows |
+| `d322907` | X does not check a truck the board is not showing |
+| `71f2e7b` | `e2e/poll-never-closes-a-window.spec.ts`, 16 tests, on the real 20s poll |
+
+**The two things the advisor read and had not run.**
+
+| Claim | Result | What ran |
+|---|---|---|
+| 1. No chip is needed: with none, `passesFilters` returns `row.active` | **Confirmed** | e2e, no chips, `active = false`, next poll: the window went from `Edit load for truck 101` to nothing |
+| 1. The worker marks a truck inactive after 24 h with no fix | **Wrong** | `seedActiveFlags` runs only from `seedIfCold`, which returns as soon as a cursor exists: first start only. Throwaway test through what a poll runs (`upsertTrucks`, `writePositions`) with a 30-hour-old fix: `active = true`. The only other writer is `stop-edit.ts:1476`, an admin's flip. So this route needs an admin, in another browser or the modal itself |
+| 2. `editingId` is not cleared, so the board's keys stand down with nothing on screen | **Confirmed** | e2e, window gone, another truck selected by mouse: `ArrowUp`, `x`, `Enter`, `Escape` did nothing. `ArrowDown` changed only the address, which was the click's `?truck=` landing late; the selection did not move |
+| 2. The window opens again by itself when the truck returns, with an empty form | **Confirmed, one word off** | e2e, arrival undone, next poll: the window was back, by itself. The form was not empty: the stored load, `E2E-101`, with the typed work gone |
+
+**The fix.** `useWindowRow(id, all)` in `src/hooks/useWindowRow.ts`, for both windows. The row prop is this poll's row whenever there is one, so what the window shows stays live.
+
+**Can a truck leave `all`?** Only by someone deleting it from the database by hand. `all` is `data?.fleet`, with `initialData` set and `placeholderData` keeping the last answer, so it is not empty while refetching, and a failed poll keeps the last good data (run: a 500 from `/api/fleet` left the window open with the row still drawn). The query is `from trucks t` with left joins and no `where`. Nothing in the app or worker deletes a truck, and `setQueryData` in the modal only maps over rows. In that one case the window stays on the last row it had. Run both ways: a truck filtered out of the poll's answer stays open and Save saves; a truck deleted by hand stays open, Save shows an error, the typed work is still there, and Discard closes it cleanly.
+
+**One thing the brief did not ask for, and the reason.** `rows` also meant "a truck the board shows". With the lookup on `all`, Enter on a selection that had left the board opened a window on a truck nobody could see: seen failing, `[ 'Edit load for truck 101' ]`. So Enter now checks `rows` itself. **X had the same fault, and it was there before this phase,** with no window involved: it ticked the hidden truck, which came back checked for the next bulk action. Its own commit. `P` looks the same (`usePinned(selectedId)`), read and not run, not changed.
+
+**After closing a window whose truck has left.** Arrows select the first row on the board, X checks it, Esc clears the checks and then the selection, and no page error. Focus falls to the page: what opened the window went with its row, and every board key listens there. Tab then starts from the top. The window does not come back with the truck, and Enter opens it again only once it is back on the board, on a fresh form.
+
+**Saving after an arrival asks first.** The stop was reached after the form opened, so the save puts §12.119's "Correction, or the next trip?". It could never have been asked while the window closed under it. Correction saved the typed value.
+
+**Every other way a window can lose typed work.** None changed here.
+
+| Way | Asks? | How known |
+|---|---|---|
+| Browser Back | **No.** Left for `/assignments`, no dialog | Run |
+| Reload | **No.** No dialog | Run |
+| Closing the tab | **No.** No dialog. The console has no `beforeunload`; `AssignmentBoard.tsx:202` does | Run |
+| **Reopen… from a new-load form** | **Asks about something else.** The confirm speaks of the closed load and never of the typed form, and `onReopened` is `onClose` | Run: typed number gone |
+| List editor: Esc or Cancel with a typed name | **No** | Run |
+| Bulk modal: Esc or Cancel with a typed note | **No** (3bc made Esc do what Cancel does) | Run |
+| Add to list: a new list's name | **No**, by the same handler | Read: the field is not there on opening |
+| Narrow window, §12.94 | **No**, documented, stays | Read |
+| Reload after a refused save (§12.117) | The press is the answer: "the typed values are discarded only here" | Read |
+| Remove stop | **No**: one click, that stop's values, by intent | Read |
+| Typing in the moment after a save that lands with a warning | **No**: the fields stay live while the saved load is read again, then the editor reopens | Read, not run |
+| A render error | **No**: `global-error.tsx` replaces the page | Read, not run |
+| The list on screen deleted while the session has expired | **No**: that fallback's `router.replace` meets the sign-in redirect. With a good session the window stays (run) | Read, not run |
+| Clear stop, PDF fill, Discard | **Yes**: Clear stop's confirm is given the unsaved list; a fill asks Replace or Keep mine | Read |
+
+Also a window that closes on a poll, with nothing typed in it: **the phone's truck sheet** (`sheetOpen && selectedRow`). Run: it closes when the truck leaves the chip and opens again by itself when it returns, the shape of claim 2. Not changed: the brief named two windows. The bulk modal, list editor and add-to-list hold no row, so a poll cannot close them: read, not run.
+
+**Tests.** Seen failing on `35f399f`: 12 of 16 e2e, 3 of them my own faults (below), and 6 of the 7 Console unit tests then written. With those 3 corrected and the lookup back on `rows.find`, 10 of 16. The 6 that pass there are the controls, the list deleted and the failed poll, which say what must not change. Mutations, each alone and restored:
+
+| Mutation | Unit | e2e |
+|---|---|---|
+| Back to `rows.find` | 6 of 15 | **10 of 16** |
+| The hook fed `rows` | 1 (only after I added it) | 1 of 3 run: "so does one that has left the chip" |
+| No Enter guard | 1 | "Enter and X do nothing…" |
+| No X guard | 1 | "Enter and X do nothing…" |
+| No hold | 2 | 2 of 3 run |
+
+**Slips of mine.** The hook fed `rows` passed every unit test, because the hold hides it; only the e2e saw it, so a unit test now holds the live row in `npm run check`. My first `rows.find` mutation left an unused import, the build refused it and nothing ran: fixed and rerun. Two of my controls were wrong: the row does not print the load number, and "Late" is printed twice in the panel. And the Late-chip test failed on the fixed build because it did not answer the §12.119 question, which was the product working.
+
+**Checks.** `npm run check` at `71f2e7b`: **229 files, 4207 tests** (227 and 4192 before). The forbidden-files grep printed nothing. **Full e2e on the default config, once, after the last code write: run `2026-11-05T14-53-35-896Z` at `71f2e7b`: 411 passed, 0 failed, 0 flaky** (31.9 min, up from 395 and 26.0; the new spec takes 5.8, waiting on real polls), the machine awake. Nothing to classify. Every baseline matched, and `git diff 35f399f HEAD -- e2e/__screenshots__ package.json drizzle src/worker` is empty. The three server errors in its log are the same three as before.
+
+**Questions for Alex:**
+
+1. **Push?** Your call under "Do not push".
+2. **The console has no `beforeunload`, and Reopen… drops a typed form.** Recommended next, both small: Back, Reload and closing the tab are the widest way left to lose an edit, and `AssignmentBoard` already has the pattern. The list editor's and bulk modal's Esc lose little: recommended, leave them.
 
 ## Next
 
