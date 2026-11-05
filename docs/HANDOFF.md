@@ -78,6 +78,9 @@ animations in the live stylesheet (checked). Alex looked: "too subtle".
 press, and the whole window fades on close (§12.148). e2e runs with reduced
 motion by default, and under the preference a transition is a true 0. See
 "Phase 3bb" below.
+**3bc: NOT pushed** (2026-11-05): cleanup before the new motion. Discard by keyboard,
+the reorder bar in the toolbar, bulk modal Esc, the last windows on frames, a row's
+press at 60ms, and the press, lift and hit area on one clock. See "Phase 3bc" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10370,6 +10373,160 @@ motion on, and the default suite runs reduced.
 2. **The two corner pixels on a 1px border.** Recommended: leave them. Closing them takes
    knowing the border's width, which CSS cannot read.
 3. **A row's press at 180ms against a button's 60ms.** Recommended: look at it live first.
+
+### Phase 3bc: cleanup before the new motion (2026-11-04 and 05)
+
+Six fixes, each its own commit, each test written first and seen failing. No new
+motion. **NOT pushed.** Built on `3ba310c`, which was `origin/master`, with a clean tree.
+
+**Decision (Alex, 2026-11-04, who left the choice to the advisor).** From the
+more-motion demo, the next phase, **3bd, builds at On: rows, selection (map 450ms),
+counts, tabs as segments only, pages and bulk bar, board opening.** No truck glide
+(`FleetMap.tsx:55-58` stands), no Bold, the phone sheet stays. None of it is built here.
+
+**Commits, in the order asked:**
+
+| Commit | Fix | Seen failing first |
+|---|---|---|
+| `f0cd3d0` | Discard by keyboard: `DiscardConfirm.tsx` | 10 of 13 unit, 7 e2e. Cmd/Ctrl+Enter really did `POST /api/stops` behind it |
+| `d9dbc1c` | The reorder bar in the toolbar; `useResortHold` removed | Every row moved 23.5px on the real board, and a click aimed at a row took the one above |
+| `0dbd526` | Bulk modal Esc, and the board's own Esc stands down under any window | 4 of 6 unit, 3 e2e, including the add-to-list modal |
+| `e2ff0ee` | The last windows onto `DialogFrame`; `LEFT_OUT` empty | 4 guard tests, 4 e2e |
+| `efd2bc8` | A row's press at 60ms, release at 180 | `[160, ...]` against `[60, 180]`; hit area 0.18s against 0.06s; 1 rule test |
+| `1558948` | The press, the lift and the hit area on one clock | 168 of 300 grew, 191 of 540 missed; 13 e2e |
+
+**1. Discard by keyboard.** As asked: focus on Keep editing, Tab stays inside, Esc means
+Keep editing, focus back where it was in the form, Cmd/Ctrl+Enter does nothing. **"Typing
+reaches nothing" needed one thing more than ClearStopConfirm and ReopenConfirm do.** Moving
+focus to a button would have handed the keys to the board: its shortcuts ask only whether the
+caret is in a field. So `D`, `1`, `/`, `G H` would have worked behind it, and `G H` left the page
+with the question unanswered: the mutation run shows exactly that. It stops propagation, not
+the default, so the browser's own keys still work. **The one exception, by design:** Enter and
+Space work the focused button, so Space answers Keep editing and the next letters go back to the
+form. The mouse is unchanged.
+
+**2. The reorder bar.** Reproduced on the unfixed board before changing anything, with the
+pointer on the list: nothing for 10s, then every row down 23.5px on a 44px row, and the click
+selected the row above. It now stands in `ListToolbar`, in a line of fixed height outside the
+scroller. Same words, same click, and it shows at once: rows only move when it is clicked. No
+other reason turned up to keep `useResortHold`, so it, its test and `RESORT_HOLD_MS` are gone.
+The phone never showed the bar and still does not. Spec: §5.6, §4's Stale-sort line, §12.4, the
+§14.5 table and the note on the hold.
+
+**How it fits, measured at 560px, the narrowest a drag leaves:** bar 204px and whole, Density
+210px, whole and not moved, and the strip gets 105px: "Today" and its bar narrowed from 88px in
+proportion, with its line of text gone until the bar is clicked. A small trap on the way: shrink
+factors below 1 do not take up what is left once the others are spent, so the first version
+overflowed below about 455px. Large factors on the strip instead. At 320px, which only a split stored on
+a wider window can reach, Density is still whole and the bar shortens with an ellipsis. With nothing
+to re-sort the strip's classes are as they were, so no baseline moved.
+
+**3. Bulk modal Esc.** Exactly Cancel, in every state: Cancel is never disabled, not even with
+the write on its way. **It needed one more line, in `Console.tsx`:** the board's Esc for checked
+rows listens in the capture phase on window, ahead of every dialog, and stops the event. With
+focus on a button, Esc cleared the rows behind the modal and the modal's own Esc never ran. The
+add-to-list modal already had that bug, seen failing too. That one shared handler now stands down
+while any `aria-modal` window is open, and its `X` with it.
+
+**4. The last windows on frames.** `TruckListEditor`, `TruckTimeline`, and `PhoneHistory`'s load
+sheet and week chooser. Classes, roles and focus kept, and the timeline's press on the scrim still
+closes it. **One addition:** `origin-bottom` on the two history sheets, as `TruckSheet` has, so a
+sheet opens from its bottom edge. It does nothing at rest. `LEFT_OUT` is empty, so a scrim drawn by
+hand now fails `frames-guard.test.ts`.
+
+**5. A row's press.** The brief said the build does 180ms. **It did 160ms, with a real pointer on
+the row, for the press and the release.** `[data-row-id]:hover` set one duration for every property,
+the transform's too, and it comes later at the same weight as the rule the 3bb note had read. The hit
+area ran at 180: a third clock. Now press-in for the press, press-out for the release with the pointer
+on the row or off it, and hover sets the ground only.
+
+**6. The two hit-area leftovers: both closed, one fault.** The hit area had keyframes and a transition
+of its own and the transform had another, so on the first frame of a press the transform was already at
+.974 with the hit area still at its start.
+
+Same matrix before and after, invented elements in the real app, real clicks, every frame, 2 placements
+(whole pixels; 300.47 wide at 10.3), 3 sizes, 3 borders, and a row:
+
+| | Before (`efd2bc8`) | After (`1558948`) |
+|---|---|---|
+| Held press arriving within 170ms, held 16 to 240ms: scroller grew | **168 of 300** | **0 of 300** |
+| Press right on arrival, held 16 to 40ms, up to 2px from an edge: missed | **191 of 540** | **0 of 540** |
+| The same, hovered 220ms first | 0 of 540 | 0 of 540 |
+
+My 191 is far above the advisor's 10 of 384 because my gesture is faster; the shape is the same: only
+without a hover first.
+
+**The fix, in `globals.css` only.** `--press` and `--lift` are registered with `@property` and it is they that
+transition. The transform and the hit area read the same two numbers, so on every frame the hit area is the
+exact inverse of that frame's transform. All four hit-area keyframes are gone. At rest there is still no
+transform: with nothing on it, the transform goes back by a transition of its own. Under a press or a lift it
+is worked out on the main thread, so it repaints for those frames.
+
+**Two constants I added and then took out.** My first version kept 1/32px short on the right and below and
+reached 1/8px past on the left and above, on an argument about rounding. Removing each one failed nothing, and my
+new first-pixel test passes on the old CSS too (so it is a control, not a regression test). So I tested the plain
+form harder: 336 harsh fractional runs, and 400 at a scroller edge just under a half pixel, where the argument said
+it must grow: **0 of 736, and the edge probe got better.** Both are gone, and §12.148's promise stands as it was.
+
+**What remains of 6,** all of it on the miss side, Chromium only:
+
+- The two corner pixels of an even 1px border, as before.
+- The outermost hundredths of a pixel on the right and below, once a press has landed: .01px with no border,
+  .04px with a 1px border, .03px on a row. Left and top land from the very edge. A mouse reports whole pixels (half
+  at 2x), so a pointer only stands there if the edge itself falls in that sliver. At whole and half pixels: 0 of 1,080.
+- Calculated, never seen: a borderless button could stick out by up to 1/64px from rounding. No margin for it, see above.
+- Where `@property` is missing (Safari before 16.4, Firefox before 128) a press and a lift jump rather than glide; the
+  hit area is still right. Neither browser was run.
+
+**The sweep: one button.** Every lifting button within 1px of a scroller's right or bottom edge, read in the page:
+
+| Button | Where | When |
+|---|---|---|
+| **Show map / Hide map** (`Split.tsx`) | Full width, flush with the page's right edge | 768 to 1085 wide |
+
+Nothing changed for it, as asked. A permanent test holds it at no growth, with the old CSS too, so it was never at risk.
+About 5,800 buttons read over 190 states: board, scrolled to its end, selected with the popup, scope menu to the end of a
+long list, account menu, palette, shortcut sheet, list editor, bulk and add-to-list modals, timeline, edit window at its top
+and end and with a stop added, driver dropdown, Clear stop, Discard, Assignments and its picker, History and its week picker,
+at 1920, 1440, 1280, 1086, 1024 and 768, and the phone board, truck sheet, filters, history, load sheet and week chooser at
+320x568, 390x844 and 667x375. **A control:** a flush button planted in the board's scroller is found. **Not reached:** the
+bulk bar at 1024 and 768 (a virtualized row was not drawn), though it was at the four wider widths.
+
+**Found wrong and not fixed, none of them in the six:**
+
+1. **The board's shortcuts work behind every other window when focus is on a button. Measured:** in the edit window with
+   typed work and focus on Clear stop, `G H` **left the page and the work was gone, with no question**; `D` changed the density
+   behind Clear stop's confirm, the edit window and the timeline. The Discard confirm now stops this for itself. This is the one
+   to fix next: a small shared guard, and it is real data loss. Recommended before 3bd.
+2. **§12.148's table says a hover is 160ms; a button lifts in 180ms** (`press-out`), since 3bb. Hover strengths were out of scope.
+3. **The map toggle presses by 4%, about 41px at 1024.** It is full width by stretching, with no `w-full`, so "a long thing does not
+   shrink by 4%" misses it.
+4. **A stored split is not clamped on load** (`Split.tsx`), so a list dragged to its minimum on a big screen reloads far under 560px on
+   a small window. And a drag's minimum is 561 to 563px, not 560: the clamp counts without the handle, the grid with it.
+
+**Tests.** e2e: `dialog-motion.spec.ts` from 57 to 104. Changed in place, and why: the bulk modal's row in "every window opens" now closes
+by Esc, since it has one; `hover-press-rule.test.ts`'s keyframe checks are replaced by "no clock of its own, no constant, registered numbers",
+because the keyframes are gone. New tests have their own `test.setTimeout` and a 15s wait for the bar, past the old hold's 10s so a returning
+hold fails on the row that moved. **No existing wait was lengthened and no retry added.**
+
+Mutations, each alone and restored: the Discard guard and swallow removed fail on `/api/stops` and on `G H` leaving the page; the hit area not
+taking the press's number fails 3; the lift out of its height fails 4; the old CSS fails 13 of the one-clock tests.
+
+**Slips of mine, all caught before a commit.** Mapbox's own telemetry POST failed my "nothing is saved"; I narrowed it to our origin. A space in
+"typing reaches nothing" clicked the focused button. A stale animation-frame loop read a removed element, and a probe whose text overflowed at rest
+failed for the wrong reason: both fixed, and `mount` now refuses an overflowing probe. My sweep's first control failed for that same text reason, and
+the first pass never reached 1024 and 768: a second pass did.
+
+**Checks.** `npm run check` at `1558948`: **225 files, 4165 tests** (223 and 4139 before). The forbidden-files grep printed nothing. **Full e2e on the
+default config, run `2026-11-05T01-01-42-749Z`: 364 passed, 0 failed, 0 flaky** (23.9 min, up from 293), `dialog-motion.spec.ts` included, the machine awake.
+Nothing to classify. Every screenshot baseline matched, and `git diff 3ba310c HEAD -- e2e/__screenshots__` is empty. `package.json`, the engine, the worker and
+the migrations are untouched. The three server errors in its log are the same three as before: `route-failure-sentry.spec.ts`'s two deliberate injections and the reader's failure test.
+
+**Questions for Alex:**
+
+1. **Push?** Your call under "Do not push".
+2. **Fix the shortcuts behind windows first (item 1 above)?** Recommended: yes, small, ahead of 3bd, because `G H` loses typed work.
+3. **The other three found-wrong items:** recommended: leave them until they bother anyone.
 
 ## Next
 
