@@ -710,8 +710,8 @@ would not read (`2h`).
 
 | Thing | Duration |
 |---|---|
-| Ground and selection changes | **120ms ease-out**; between two rows on screen the selection slides, 180ms (§12.149) |
-| Map pan on selection | **450ms**, Mapbox's default curve (§12.149) |
+| Ground and selection changes | **120ms ease-out**; between two rows on screen the selection slides, 280ms (§12.149) |
+| Map pan on selection | **700ms**, Mapbox's default curve (§12.149) |
 | Other map pans: a zoom, a cluster, the nudge that clears a popup | **150ms** |
 | Everything else | See §12.148 and §12.149 |
 
@@ -720,6 +720,9 @@ nothing else animates". Windows and menus open with motion, a copy of them fades
 when they close, buttons respond to hover and press, and the new motion shows what
 just happened. A poll still moves no row, and markers still do not animate between
 fixes: interpolating would draw positions we do not have.)*
+
+*(The 280ms and the 700ms are the Bold values: Alex chose Bold on 2026-11-06, phase 3bg. See
+§12.149.)*
 
 Under `prefers-reduced-motion`: **all of it becomes 0ms** and the map
 **jumps rather than pans**. The marker→row link becomes a static highlight.
@@ -10644,21 +10647,26 @@ transition cannot run on an element that has just appeared. No animation library
 Phase 3bd (Alex, 2026-11-04, who left the choice to the advisor). Alex asked for more
 motion and pointed at Awwwards GSAP sites. Those spend 2 to 8 s on an opening and replace
 scrolling, which is wrong for a board open all day. What was built instead is motion that
-shows what just happened, at the demo's On setting. **Supersedes in part** §8.3 and §14.4.
+shows what just happened, first at the demo's On setting. **Supersedes in part** §8.3 and §14.4.
+
+**Alex chose Bold on 2026-11-06** (phase 3bg), from the 3be demo, which opens at All bold: "like
+all the things we added", with no other strength sent back. So every motion below is at Bold, and
+search still does not glide. The table has those numbers. Only the strengths changed: every rule
+below stands as it was.
 
 | Motion | Length | Curve | When |
 |---|---|---|---|
-| **A segment's highlight slides** | 180ms | `EASING.dialog` | Density, the basemap, the phone's List and Map. Not the chips: they are multi-select, so there is no one place to slide from |
-| **A count rolls** | 240ms | `EASING.dialog` | The chips' counts and the health strip's numbers, when one changes |
-| **A new page fades and rises 6px** | 180ms | `EASING.dialog` | A change of page. Not the page a load lands on |
-| **The bulk bar comes up into its slot** | 200ms | `EASING.dialog` | Two rows checked; down again on closing |
-| **The board draws in** | 300ms in all, each row 120ms, gaps at most 20ms | linear, opacity only | Once per page load, when there are first rows to draw |
-| **The selection slides** | 180ms | `EASING.dialog` | Between two rows, with the old one on screen. Otherwise it just appears |
-| **The map travels to a selection** | 450ms | Mapbox's default | Every selection. A zoom, a cluster and the nudge that clears a popup stay at 150ms |
-| **Rows glide** | 260ms; leaving and arriving fade, linear | `EASING.dialog` | A chip, a list, the reorder bar. Nothing else |
+| **A segment's highlight slides** | 260ms | `EASING.dialog` | Density, the basemap, the phone's List and Map. Not the chips: they are multi-select, so there is no one place to slide from |
+| **A count rolls** | 400ms | `EASING.dialog` | The chips' counts and the health strip's numbers, when one changes |
+| **A new page fades and rises 10px** | 260ms | `EASING.dialog` | A change of page. Not the page a load lands on |
+| **The bulk bar comes up into its slot** | 300ms | `EASING.dialog` | Two rows checked; down again on closing |
+| **The board draws in** | 500ms in all, each row 200ms, gaps at most 35ms | linear, opacity only | Once per page load, when there are first rows to draw |
+| **The selection slides** | 280ms | `EASING.dialog` | Between two rows, with the old one on screen. Otherwise it just appears |
+| **The map travels to a selection** | 700ms | Mapbox's default | Every selection. A zoom, a cluster and the nudge that clears a popup stay at 150ms |
+| **Rows glide** | 380ms; leaving and arriving fade, linear | `EASING.dialog` | A chip, a list, the reorder bar. Nothing else |
 
 **Not built, on purpose.** Trucks gliding between fixes: at the fleet's zoom a truck moves
-under a pixel per poll, and it would draw positions we do not have. Bold values. Chips
+under a pixel per poll, and it would draw positions we do not have. Chips
 sliding. Any change to a phone sheet. A map panel slide. Any library: `lib/motion.ts` is
 the browser's Web Animations and nothing else.
 
@@ -10668,7 +10676,8 @@ the browser's Web Animations and nothing else.
 - **Nothing loops, and nothing moves when nothing changed.** A stored density or basemap,
   read a moment after load, does not slide. A poll with the same counts rolls nothing.
 - **The flash stays the strongest thing on the board.** It keeps its 1.6s on the whole row.
-  What a poll starts is a number rolling inside its own box.
+  What a poll starts is a number rolling inside its own box, for a quarter of that at most: at
+  Bold it is exactly a quarter, so a longer roll would have to answer to this.
 - **A poll never moves a row (§12.4).** A poll that changes who is in the list moves rows as
   it always did, by a snap with no glide.
 - **Reduced motion: a true 0, and nothing lost.** The CSS rule cannot reach a Web Animation,
@@ -10684,7 +10693,9 @@ sends the click to the list, or to the row that took its place. In the demo only
 presses during a glide selected the pressed row. Whatever is moving stops on the frame last
 drawn, not the next: `pause()` alone waits for the next frame, and on that frame a row can
 move out from under a press that has already come down, so the time is set as well, which
-settles it at once. A press already down when something starts holds that too. Mapbox has no
+settles it at once. A press already down when something starts holds that too. What has
+already been cancelled is left alone: until its cancel event it is still on the list, with no
+time, and `pause()` would bring it back at its first frame with nothing to resume it. Mapbox has no
 pause, so a press on the map stops its pan where it is: a marker that moved between press and
 release would not be under the click, and the click would land on bare map and clear the
 selection.
@@ -10738,11 +10749,11 @@ number a screen reader can reach: the old one is a copy, `aria-hidden`. The widt
 the start, as it always did. A poll landing mid-roll ends the roll it finds, so there are never
 three numbers. Nothing rolls in a background tab, where it would play on the way back.
 
-**A new page has a transform for 180ms,** so it is the containing block for everything `fixed` in
-it, and anything measured against the screen then is up to 6px off and stays off when it lands.
+**A new page has a transform for 260ms,** so it is the containing block for everything `fixed` in
+it, and anything measured against the screen then is up to 10px off and stays off when it lands.
 So a click or a key ends the rise first, in the capture phase, ahead of whatever will read a box. A
 press has already held it by then, so what the pointer came down on did not move. The box around it
-clips for those frames, or 6px of page past the bottom makes the document scroll.
+clips for those frames, or 10px of page past the bottom makes the document scroll.
 
 **A long pan needed two guards that a short one got away without.** The popup's own
 `ResizeObserver` asks for the nudge that keeps it clear of the map's edge, and a new truck's popup
@@ -10753,7 +10764,8 @@ same way. A press on the map ends its landing's nudge along with the pan, or tha
 under the press that stopped it.
 
 **The numbers** are `MOTION_MS`, `MOTION_SHAPE` and `EASING` in `tokens.ts`, held to this table by
-`motion-tokens.test.ts`.
+`motion-tokens.test.ts`. A strength is one token, so taking one motion back is one line there, with
+that test's number, the same number written out in `e2e/new-motion.spec.ts`, and this table.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

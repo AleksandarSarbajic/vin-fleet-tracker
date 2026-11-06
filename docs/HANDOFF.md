@@ -90,6 +90,9 @@ closes a window. See "Phase 3bc follow-up 2" below.
 and closing the tab ask, Reopen says what goes, P and the phone's sheet follow the board. See "Phase 3bc follow-up 3" below.
 **3bd: NOT pushed** (2026-11-06): the new motion, and the status override draft counting as typed work. Rows glide is
 the top commit and reverts on its own. See "Phase 3bd" below.
+**Update at the end of 3bg (2026-11-06): 3bd, 3be and 3bf are pushed**: origin's master was `da89c4b`. Their deploy is not checked here.
+**3bg: NOT pushed** (2026-11-06): a press just after a cancel no longer throws or strands an animation, and the six live motions are at the
+Bold values Alex chose. See "Phase 3bg" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11047,6 +11050,120 @@ A clickable demo of quality-of-life features, so Alex can try them before anythi
 5. **Nothing says a save went through.** `edit/EditStopModal.tsx:924` just closes. This corrects 3be's `saved` row above, which says a toast rises: none does, unless a status happens to change on the next poll.
 
 **Next:** Alex clicks and sends back the link box's text. 5 needs an answer on polling a hidden tab before it is worth building, and 3 needs a yes on the box.
+
+### Phase 3bg: the six live motions at Bold, and a press behind a cancel (2026-11-06)
+
+The first build batch of what Alex approved in 3be: "like all the things we added", with no other strength sent, so All bold, Search off. One live bug fixed, then strengths only, with no new surface. **NOT pushed and not deployed:** Alex pushes.
+
+| Commit | What |
+|---|---|
+| `e939bbb` | A press just after a cancel no longer throws or strands an animation |
+| `25696b1` | `ListToolbar.tsx`'s comment says 160ms, as it fades |
+| `274610d` | The values, in `tokens.ts` |
+| `83a6a17` | Two e2e failures from the first full run, each fixed at its cause |
+| The docs commit | §8.3, §12.149 and this section |
+
+**The bug.** `hold()` in `lib/motion.ts` read the time, called `pause()` and set the time back. After `cancel()`, until its cancel event, an animation is still in `moving` with a null time. A press in that gap threw in a window listener, which ended the loop, so what came after it was not held. `pause()` had also brought the cancelled one back at its first frame, outside `held`, so nothing resumed it. It now returns before `pause()` on a null time.
+
+**Seen in the real app for the first time.** The route is one production has: a chip mid-glide cancels every flight and starts new ones (`row-glide.ts:110`), with a press queued behind that commit. A real mouse, 20 runs each:
+
+| `hold()` | Threw | Brought back | The 19 after it not held | A row left displaced, a paused animation stuck on it |
+|---|---|---|---|---|
+| As it was | 20 | 20 | 20 | 20 |
+| Time set guarded only, as a control | 0 | 19 | 0 | 19 |
+| Returns before `pause()`, as committed | 0 | 0 | 0 | 0 |
+
+The control's other run failed the test's own precondition, a very late press with nothing moving after it, which is why that became part of the landing condition. The unit test for "stays idle" catches the control too. Unit tests hold the logic in `npm run check`, with a fake that behaves as a real cancelled animation does; `e2e/new-motion.spec.ts` holds it against a real one.
+
+**Landing a press in the gap.** It only judges a press that landed there. My first version never did: 20 of 20 failed on its own control, because I assumed a chip commits in a microtask, and a test with no control would have counted those as the bug. It now blocks from the cancel itself. Landed, by how long the main thread stays busy: 30ms 0 of 20, 60ms 1 of 20, 90ms 16 of 20, 120ms 12 of 20, 200ms 7 of 10, 300ms 7 of 10. So a press takes about 80ms to arrive from Playwright, and past that about 1 in 4 still miss, for a reason not established. A miss is tried again, up to 16 times. The assertions are not retried.
+
+**Reasoned, not reached.** A press between an animation's end and its finish event would pause it at its end, and `play()` on the release would rewind it to the start. A real mouse behind a glide's end reached that state 0 times in 80, and a scripted check never saw it in 120 seconds. Nothing changed for it.
+
+**The values.** All in `tokens.ts`, and all 11 match the Bold column of the demo's source (`.taste-skill/motion/more/page.js`).
+
+| Token | On | Bold |
+|---|---|---|
+| `rowGlide` | 260 | **380** |
+| `selectionSlide` | 180 | **280** |
+| `mapTravel` | 450 | **700** |
+| `boardOpen` | 300 | **500** |
+| `boardOpenRow` | 120 | **200** |
+| `boardOpenGapMax` | 20 | **35** |
+| `countRoll` | 240 | **400** |
+| `segmentSlide` | 180 | **260** |
+| `pageIn` | 180 | **260** |
+| `bulkBar` | 200 | **300** |
+| `pageRisePx` | 6 | **10** |
+
+**To take one motion back: one token, one line in `tokens.ts`.** Nothing else in the app changes. Set it to the On value above, for example `mapTravel: 450`. The same number is written out in `motion-tokens.test.ts`, in a constant at the top of `e2e/new-motion.spec.ts` and in §12.149's table, on purpose, so those fail until told.
+
+| Motion | Tokens | Constant in `new-motion.spec.ts` |
+|---|---|---|
+| Rows | `rowGlide` | `GLIDE_MS`. Also the 380 in `listenForPresses`, and take 300 out of `TIMES` in the press table |
+| Selection | `selectionSlide` | `SELECT_MS` |
+| Map | `mapTravel` | `MAP_MS` |
+| Opening | `boardOpen`, `boardOpenRow`, `boardOpenGapMax` | `OPEN_MS`, `OPEN_ROW_MS`, `OPEN_GAP_MAX_MS` |
+| Counts | `countRoll` | `ROLL_MS` |
+| Tabs | `segmentSlide` | `SEGMENT_MS` |
+| Pages | `pageIn`, `pageRisePx` | `PAGE_MS`, `RISE_PX` |
+| Bulk bar | `bulkBar` | `BAR_MS` |
+
+**The press table at 380ms,** a real mouse, in the page's own measure, from the final full run. Each cell is 16 presses, misses, and how many of them were in a gap.
+
+| Into the glide | Held 16ms | Held 40ms | Held 80ms | Held 150ms |
+|---|---|---|---|---|
+| 20ms | 0 missed, 4 gaps | 0, 3 | 0, 3 | 0, 4 |
+| 60ms | 0, 5 | 0, 2 | 0, 2 | 0, 3 |
+| 120ms | 0, 4 | 0, 3 | 0, 3 | 0, 2 |
+| 300ms | 0, 1 | 0, 1 | 0, 2 | 0, 1 |
+
+**256 presses, 0 missed, and nothing under the pointer moved from press to release on any of them** (at most 0.1px). 43 in a gap; rows moving up 57, down 49, staying put 107; first row drawn 97, last 45. All six of up, down or staying put by first or last were reached. Three full runs of this table gave the same result. Gaps thin out at 300ms, as they should, late in a glide.
+
+**The other checks,** at the final run unless it says otherwise:
+
+- **Selection at 700ms:** fast arrow keys end on the last truck with nothing cutting the pan short, and the highlight never jumps. A popup that changes height does not stop the pan. A new selection drops the last truck's nudge. The popup lands clear of every edge and control from six directions. A press on the map stops the pan, the popup stands still for the pan's whole length, and no nudge runs under the press or a drag.
+- **The opening at 500ms:** the permanent test stretches it ×40, so I also pressed at the true length: 20 of 20 real presses landed mid-opening, on a row still at opacity 0, and each selected that row.
+- **Counts at 400ms:** never more than one old number, and it ends on the last. "Rapid polls" did not prove a poll landed mid-roll, and it now requires that.
+- **The flash:** it keeps its 1600ms on the whole row, and the cell that rolls is under a twentieth of the row's area. A poll that starts both moves no row.
+- **Every scroller on every frame, a poll moving no row, reduced motion a true 0:** all pass, each at the new numbers, with `watchFrames`' planted control still caught.
+- **A chip's fade:** read from the running browser, `0.16s` on a chip and on a segment, both carrying `duration-ground`. So the corrected comment is right.
+
+**The map's load at 700ms cannot be measured on this machine,** which draws in software. What is shown is that the pan takes 700ms and the guards hold. What 700ms of redrawing costs on a real GPU is not known. Alex's screen is the first place it will be seen.
+
+**Planted control.** `selectionSlide: 281`, one millisecond off: `motion-tokens.test.ts` said `expected 281 to be 280`, and "from one row to another" said `Expected: 280, Received: 281`. Removed, and the tree clean. Before the values went in, the new numbers failed on the old tokens: 7 of 8 in `motion-tokens.test.ts` and 9 of 9 e2e tests, each naming its old value.
+
+**Test lines changed, beyond the numbers and the titles that state them:**
+
+1. The segment press test's 250ms wait is now `SEGMENT_MS + 60`. It exists to outlast the slide, and 250 no longer did. The only wait lengthened.
+2. "A change of page" read its last frame after `quiet`, about 200ms, shorter than a rise now. It first waits until nothing is moving. A condition, added because its first run at Bold failed.
+3. `expect(ROLL_MS).toBeLessThan(FLASH_MS / 4)` is now `toBeLessThanOrEqual`, because 400 is exactly a quarter of 1600. **This one is a real loosening,** and I chose it over inventing another bound: it was already a judgment, and the flash's area and length still hold. A longer roll now has to answer to it.
+4. "Rapid polls" gained its mid-roll requirement. Stricter.
+5. The press table gained 300ms, and finds a glide by 380.
+6. "A popover opened mid-rise" aims at the button's middle, not 8px in. See below.
+7. `openMixed` waits for the Late count before pressing chips. See below. Stricter for every test built on it.
+
+Five comments naming old lengths in `new-motion.spec.ts`, three passages in `PageRise.tsx` and one in `board-opening.ts` were reworded, so a strength stays one line. No code in those two files changed.
+
+**The first full run failed, and why.** Run `2026-11-06T20-25-10-302Z` at `274610d`: 526 passed, 2 failed, and `phone-signout` did not run because it depends on the rest. Both failures were presses, and I measured each with its token at Bold and put back at On:
+
+| Test | At Bold | At On | So |
+|---|---|---|---|
+| A popover opened mid-rise | 5 of 30 | 0 of 30 | Caused by Bold |
+| A row's own buttons mid-glide | 2 of 30 | 2 of 30 | **Not Bold.** Flaky before it, and 3bd's clean run was luck |
+
+The first: on a rise's first frame the page stood 10px low, the button's top at 18.5 and the pointer at 16.5, so the press hit the header behind it. The second: `pollWith` returns when the answer reaches Playwright, which can be ahead of the page. A chip pressed then sorted the old statuses, so in about 1 run in 5 the list was not late-first, and a row the test says stays put went 93px down from under the pointer. The press then correctly selected the row rather than checking its box. After the fixes: 30 of 30 each, the order `101 102 103` in 30 of 30, and two more passes of the whole file, the press table aside, with no failures.
+
+**Found wrong, not fixed:**
+
+1. **A press on the top 10px of a control on a rise's first frame lands behind it.** It was 6px at On. The page is at opacity 0 on that frame, so nobody is aiming at something they can see. Recommended: leave it.
+2. **The roll is exactly a quarter of the flash now,** so there is no margin left in that line. It only matters if counts are ever turned up further.
+3. **The demo's "Today's app" preset** shows the six at On, which stops being true once this ships. It is git-ignored and out of scope here, and the demo reads none of the changed tokens, so it still builds and runs as it was.
+
+**Limits.** Chromium only. The feel is Alex's to judge, and has not been seen.
+
+**Checks.** `npm run check`: **232 files, 4260 tests** (232 and 4257 before). The forbidden-files grep printed nothing. **Full e2e on the default config, once, after the last code write: run `2026-11-06T22-09-33-293Z` at `83a6a17`: 529 passed, 0 failed, 0 flaky** (49.0 min, up from 528 and 47.7), started 23:09:33 against a last code write at 22:37:01, the machine awake. `git diff da89c4b HEAD -- e2e/__screenshots__ package.json package-lock.json drizzle src/worker src/server src/lib/status.ts` is empty, so every baseline matched with none re-saved.
+
+**Next:** Alex pushes and looks at it live. Later batches come from separate prompts.
 
 ## Next
 
