@@ -1051,7 +1051,8 @@ test.describe('step 4, a page rises', () => {
     const scope = page.locator('[data-scope] [aria-haspopup="menu"]');
     const menu = page.locator('[data-views-menu]');
     const box = (await scope.boundingBox())!;
-    await page.mouse.move(box.x + 8, box.y + 8);
+    // Its middle. On a rise's first frame the page is 10px low, and 8px in is above the button.
+    await page.mouse.move(box.x + 8, box.y + box.height / 2);
     await quiet(page);
     await page.mouse.down();
     await page.mouse.up();
@@ -2281,6 +2282,11 @@ async function openMixed(page: Page, trucks = 33, viewport = { width: 1440, heig
   await page.goto('/');
   await page.locator('[data-row-id]').first().waitFor();
   await pollWith(page, mixed);
+  // `pollWith` returns when the answer reaches Playwright, which can be ahead of the page. A chip
+  // pressed before the page has it sorts the old statuses, and the list is not in this order.
+  await expect(page.getByRole('button', { name: /^Late\b/ }).first().locator('[data-roll]')).toHaveText(
+    String(Math.ceil(trucks / 3)),
+  );
   await page.keyboard.press('1');
   await page.keyboard.press('0');
   await expect.poll(() => stillMoving(page)).toBe(0);
