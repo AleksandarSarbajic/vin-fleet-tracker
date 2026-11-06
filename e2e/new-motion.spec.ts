@@ -3351,3 +3351,159 @@ test.describe('the press during a glide', () => {
     expect(id).not.toBeNull();
   });
 });
+
+/**
+ * A chip mid-glide cancels every flight and starts new ones (`land`, `row-glide.ts`). A
+ * cancelled animation stays in `moving` (`lib/motion.ts`) until its cancel event, which waits
+ * for the next frame, and its time reads null until then. A press queued behind the commit
+ * lands in that gap. The real app and a real mouse.
+ */
+test.describe('a press behind a cancel', () => {
+  type Entry = { animation: Animation; cancelEvent: boolean };
+  type Seen = { __all: Entry[]; __gap: Entry[]; __later: Entry[]; __armed: boolean };
+
+  const watchCancels = (page: Page) =>
+    page.addInitScript(() => {
+      const w = window as unknown as Seen;
+      w.__all = [];
+      w.__gap = [];
+      w.__later = [];
+      w.__armed = false;
+      /*
+       * Anchored on the cancel, not on a guess at when React commits, since a chip also goes
+       * through the URL. Right after the commit this cancel is part of, the main thread stays
+       * busy, with the press waiting behind it.
+       */
+      const cancel = Animation.prototype.cancel;
+      Animation.prototype.cancel = function (this: Animation) {
+        cancel.call(this);
+        if (!w.__armed) return;
+        w.__armed = false;
+        queueMicrotask(() => {
+          console.info('press now');
+          const until = performance.now() + 120;
+          while (performance.now() < until);
+        });
+      };
+      const real = Element.prototype.animate;
+      Element.prototype.animate = function (this: Element, frames, options) {
+        const animation = real.call(this, frames, options);
+        const entry: Entry = { animation, cancelEvent: false };
+        animation.addEventListener('cancel', () => {
+          entry.cancelEvent = true;
+        });
+        w.__all.push(entry);
+        return animation;
+      };
+      // Ahead of `lib/motion.ts`'s listener, as this runs before the page's own code: what the press finds.
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          w.__gap = w.__all.filter((e) => e.animation.playState === 'idle' && !e.cancelEvent);
+          const first = w.__all.indexOf(w.__gap[0]!);
+          w.__later = w.__all.filter((e, i) => i > first && e.animation.playState === 'running');
+        },
+        true,
+      );
+    });
+
+  const stateOf = (page: Page) =>
+    page.evaluate(() => {
+      const w = window as unknown as Seen;
+      return {
+        inGap: w.__gap.length,
+        broughtBack: w.__gap.filter((e) => e.animation.playState !== 'idle').length,
+        later: w.__later.length,
+        laterPaused: w.__later.filter((e) => e.animation.playState === 'paused').length,
+        laterTimes: w.__later.map((e) => e.animation.currentTime),
+      };
+    });
+
+  /** Where every row stands against where the list says it belongs, and how it shows. */
+  const standing = (page: Page) =>
+    page.evaluate(() => ({
+      running: document
+        .getAnimations()
+        .filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+      displaced: [...document.querySelectorAll('[data-row-id]')].filter((r) => {
+        const wrapper = r.parentElement as HTMLElement;
+        const cs = getComputedStyle(wrapper);
+        const drawn = new DOMMatrixReadOnly(cs.transform).m42;
+        return Math.abs(drawn - new DOMMatrixReadOnly(wrapper.style.transform).m42) > 0.5 || cs.opacity !== '1';
+      }).length,
+    }));
+
+  /**
+   * Only a press that landed in the gap says anything, so the others are tried again. About
+   * 3 in 4 land, however long the main thread stays busy past 90ms (measured, phase 3bg).
+   */
+  const pressInTheGap = async (page: Page) => {
+    for (let tries = 0; tries < 16; tries += 1) {
+      const pressNow = page.waitForEvent('console', { predicate: (m) => m.text() === 'press now' });
+      await page.evaluate(
+        () =>
+          new Promise<void>((done) => {
+            const chip = () =>
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }));
+            chip();
+            // Frames into the glide, the same chip again, which cancels every flight.
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => {
+                  (window as unknown as Seen).__armed = true;
+                  chip();
+                  done();
+                }),
+              ),
+            );
+          }),
+      );
+      await pressNow;
+      await page.mouse.down();
+      const atPress = await stateOf(page);
+      // Very late, a press finds the gap a flight leaves as it lands, with nothing after it.
+      if (atPress.inGap > 0 && atPress.later > 0) return atPress;
+      await page.mouse.up();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+    }
+    throw new Error('No press landed in the gap in 16 tries');
+  };
+
+  test('a chip mid-glide with a press queued behind it: nothing thrown, nothing brought back, the rest held', async ({ page }) => {
+    test.setTimeout(120_000);
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(error.message));
+    await watchCancels(page);
+    await openMixed(page);
+    const box = (await page.locator('[data-row-id]').nth(3).boundingBox())!;
+    await page.mouse.move(box.x + 300, box.y + box.height / 2);
+
+    const atPress = await pressInTheGap(page);
+
+    await page.waitForTimeout(GLIDE_MS + 60);
+    const heldLater = await stateOf(page);
+    await page.mouse.up();
+    const released = await stateOf(page);
+    // A condition, and one the fault cannot hang: over means neither moving nor paused.
+    await page.waitForFunction(() =>
+      (window as unknown as Seen).__later.every((e) => !['running', 'paused'].includes(e.animation.playState)),
+    );
+    await quiet(page);
+
+    expect({
+      thrown,
+      broughtBack: heldLater.broughtBack,
+      notHeld: atPress.later - atPress.laterPaused,
+      timesMovedUnderThePress: heldLater.laterTimes.filter((t, i) => t !== atPress.laterTimes[i]).length,
+      stillPausedAfterTheRelease: released.laterPaused,
+      atRest: await standing(page),
+    }).toEqual({
+      thrown: [],
+      broughtBack: 0,
+      notHeld: 0,
+      timesMovedUnderThePress: 0,
+      stillPausedAfterTheRelease: 0,
+      atRest: { running: 0, displaced: 0 },
+    });
+  });
+});

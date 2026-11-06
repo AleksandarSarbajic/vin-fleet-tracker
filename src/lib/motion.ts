@@ -39,9 +39,15 @@ let pressed = false;
  * frame to take effect, and on that frame a row can move out from under a press that
  * has already come down. Setting the time settles it now (Web Animations: "silently
  * set the current time" cancels a pending pause).
+ *
+ * A null time is an animation already cancelled, in `moving` only until its cancel event.
+ * It is over, so it is left alone: `pause()` would bring it back at its first frame with
+ * nothing to resume it, and setting a null time throws, which would end the press's loop
+ * with the rest of `moving` still running.
  */
 function hold(animation: Animation): void {
   const at = animation.currentTime;
+  if (at === null) return;
   animation.pause();
   animation.currentTime = at;
   held.add(animation);

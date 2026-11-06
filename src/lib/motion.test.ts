@@ -11,21 +11,41 @@ type Fake = {
   currentTime: number | null;
   pause: ReturnType<typeof vi.fn>;
   play: ReturnType<typeof vi.fn>;
+  cancel: () => void;
   addEventListener: (type: string, listener: () => void) => void;
   fire: (type: string) => void;
 };
 
+/**
+ * As a real one behaves, where `hold` depends on it. After `cancel()` the time reads null,
+ * `pause()` brings the animation back at its first frame, and setting a resolved time to
+ * null throws. `e2e/new-motion.spec.ts` holds the same three facts against a real browser.
+ */
 function fakeAnimation(): Fake {
   const listeners = new Map<string, (() => void)[]>();
+  let time: number | null = 40;
   const a: Fake = {
     playState: 'running',
-    currentTime: 40,
+    get currentTime() {
+      return time;
+    },
+    set currentTime(to) {
+      if (to === null && time !== null) {
+        throw new TypeError('currentTime may not be changed from resolved to unresolved');
+      }
+      time = to;
+    },
     pause: vi.fn(() => {
+      time ??= 0;
       a.playState = 'paused';
     }),
     play: vi.fn(() => {
       a.playState = 'running';
     }),
+    cancel: () => {
+      time = null;
+      a.playState = 'idle';
+    },
     addEventListener: (type, listener) =>
       listeners.set(type, [...(listeners.get(type) ?? []), listener]),
     fire: (type) => (listeners.get(type) ?? []).forEach((l) => l()),
@@ -145,6 +165,53 @@ describe('a press holds what is moving', () => {
     made.fire('finish');
     pointer('pointerdown');
     expect(made.pause).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * After `cancel()` an animation stays in `moving` until its cancel event, a frame away at
+ * most. A press can land in that gap: a chip mid-glide cancels every flight, and the main
+ * thread is busy with that commit while the press waits behind it.
+ */
+describe('a press in the gap between a cancel and its cancel event', () => {
+  const cancelThenOneStillMoving = () => {
+    const gone = animating();
+    const other = animating();
+    motion.play(gone.el, [], { duration: 100 });
+    motion.play(other.el, [], { duration: 100 });
+    gone.made.cancel();
+    return { gone: gone.made, other: other.made };
+  };
+
+  /** The press, with what it threw handed back, so each test here fails on its own claim. */
+  const press = () => {
+    const thrown: string[] = [];
+    try {
+      pointer('pointerdown');
+    } catch (error) {
+      thrown.push(String(error));
+    }
+    return thrown;
+  };
+
+  it('throws nothing', () => {
+    cancelThenOneStillMoving();
+    expect(press()).toEqual([]);
+  });
+
+  it('leaves the cancelled animation idle: it is not brought back at its first frame', () => {
+    const { gone } = cancelThenOneStillMoving();
+    press();
+    expect(gone.playState).toBe('idle');
+    expect(gone.currentTime).toBeNull();
+  });
+
+  it('still holds what is moving after it, and that resumes on the release', () => {
+    const { other } = cancelThenOneStillMoving();
+    press();
+    expect(other.playState).toBe('paused');
+    pointer('pointerup');
+    expect(other.playState).toBe('running');
   });
 });
 
