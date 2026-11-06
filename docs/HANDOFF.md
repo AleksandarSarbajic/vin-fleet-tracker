@@ -10961,6 +10961,93 @@ The advisor measured `b45cd15` with a separate recorder. "56 of 56 started" was 
 | phSearch | Appears at once. `phone/PhoneTopBar.tsx:88`, `phone/PhoneTopBar.tsx:158` | A person. | Small: on mount. Risk: a scale on an input while a phone's keyboard opens is not measured on a real phone. |
 | phKey | Appears at once. `map/MapChrome.tsx:296`, `map/MapChrome.tsx:301`, `map/FleetMap.tsx:445` | A person. | Small: on `open`. Risk: the panel is always mounted and hidden by class, and above 768px it never hides, so it must only play on a phone. |
 
+### Phase 3bf: demo (2026-11-06)
+
+A clickable demo of quality-of-life features, so Alex can try them before anything is built ("like all the things we added but i want more qol things added with more things like this"). **Nothing shipped:** nothing under `src/`, `e2e/`, baselines, migrations, the worker or `package.json` changed. Not pushed. What ships is Alex's call.
+
+- **Open:** `.taste-skill/motion/qol.html`. Git-ignored with its sources. **Build:** `npx tsx .taste-skill/motion/build-qol.mjs`. **Check:** `node .taste-skill/motion/check-qol.mjs`, no network.
+- **14 switches,** 11 from the brief and 3 of the agent's own, each Off or On with a Try button. Presets: Today's app and All on, where it opens. The choice is in the link box: `#all=on&menu=off`. Motion stays at All bold with Search off, and there are no motion switches.
+- Off is what production does today, from the code. Real Tailwind config, tokens and fonts; the real keymap, zones and states are read at build.
+
+**Changed from the brief, and why:**
+
+- **3 is not a one-click stamp.** `ArrivalFields.tsx:18` says why arrival is a time and not a button: a stamp records when the dispatcher got round to it, and that gap is the only column anyone can argue detention from. So the row and the popup open a small box holding the time at the stop, and Enter marks it. It is still one Enter away from now, which the window's own default also is (`load-form.ts:166`), only with more clicks: that is the risk if it ships.
+- **1 only works on a truck with no next stop.** The strip is only offered while every stop is unsaved (`EditStopModal.tsx:1268`): a fill replaces stops, and a saved stop is never replaced. A row with a next stop is marked with that reason and takes nothing. Widening this is a separate decision.
+- **10 is mostly live already.** `TruckRow.tsx:377` marks the driver, position and next stop. The switch adds the truck number, a cell matched whole, and the field the row does not show when that is where the match was. Off shows production's marks.
+- **5 also says when the console cannot reach its server:** "Not updating · Fleet Tracker". It is the same fault by another road. The count is the Late chip's own, so a list scopes it.
+
+**Rules 3 has to keep, from `ArrivalFields.tsx`, `load-form.ts` and `stop-edit.ts`.** The demo keeps 1 to 12 and 17. 13 to 15 need the real server or a role the demo does not have. 16 is what the window does today:
+
+1. A wall time at the stop, never a stamp of now: `ArrivalFields.tsx:18`.
+2. The integers and the zone go to the server, which converts. Nothing builds an instant to send: `load-form.ts:497`.
+3. The zone is the stop's, not a second picker: `load-form.ts:162`.
+4. The default is now at the stop: `load-form.ts:166`.
+5. The abbreviation comes from the date and time typed, at render: `ArrivalFields.tsx:101`.
+6. Departed only under an arrival: `ArrivalFields.tsx:46`, `stop-edit.ts:1201`.
+7. Taking away an arrival takes its departure too: `ArrivalFields.tsx:120`, `arrival-columns.ts:29`.
+8. No arrival while an earlier stop has not been left: `ArrivalFields.tsx:116`, `load-form.ts:706`, `stop-edit.ts:1086`. A row's next stop should not trip it, since within a load the next stop is the first not left (`next-stop.ts:83`), but the server still asks.
+9. A GPS arrival is replaced only as a decision, in the window: `ArrivalFields.tsx:181`. The row offers Depart and leaves it.
+10. A marked arrival reads `marked`, not `arrived`: `TruckRow.tsx:311`, `stop-edit.ts:1139`.
+11. Refused in the server's words: in the future past 5 minutes (`stop-edit.ts:76`, `:1061`, `:1210`), after it left (`:1071`), before it arrived (`:1216`).
+12. An hour the clocks skip is refused: `lib/appointment.ts:265`, `stop-edit.ts:894`.
+13. An arrival writes the truck's position as its anchor, and a stop with none gets a warning that must reach the person: `stop-edit.ts:1125`, `:1156`. A toast has to carry it.
+14. A viewer sees the control disabled with its reason, never hidden: `roles.ts:8`. The route still asks: `app/api/stops/route.ts:29`.
+15. Not below the editing width: `MapPopup.tsx:357`.
+16. A repeated hour on the fall-back night says nothing today: `server/appointment.ts:251` returns `ambiguous`, and the arrival at `stop-edit.ts:1050` does not use it. A box that makes marking quicker makes that more likely to matter. Not changed here.
+17. A load that moved since is refused: `app/api/stops/route.ts:63`. The demo's Undo refuses and says so; the real one has to send the load's version, and aim at the stop it marked, because the row has moved on to the next.
+
+**Every switch, for building batches.** Read from the code at `b3f4d74`. A script confirmed each citation in this section: the file exists and that line holds the name it is cited for. "How hard" and the risks are judgment, not measurement, and every map row's cost is unmeasured on a real GPU. Paths as in 3be's table.
+
+| Feature | Today in production | What starts it | Writes to the database, and through which route | New route, migration or engine change | How hard to build for real, and the risk |
+|---|---|---|---|---|---|
+| 1 Drop a PDF on a row | Only the strip takes a file: `edit/RateconStrip.tsx:277`, `:282`. A file let go on the board opens in the tab. The strip is offered only with every stop unsaved: `edit/EditStopModal.tsx:1268` | A person, dragging | Not until Save: `POST /api/stops`. The read stays in the browser. Read with AI stays its own press: `POST /api/ratecon/read` | None | Medium: a board-level drag, and the window taking a file as it opens. Risk: the file must survive until the strip mounts. A truck still holding an old load asks §12.92's question at Save: `edit/EditStopModal.tsx:471` |
+| 2 Address suggestions | A plain field: `edit/StopForm.tsx:242`, `edit/Field.tsx:40`, with no `autoComplete`. A paste is split: `edit/StopForm.tsx:248` | A person, each key | Reads only. Writes nothing until Save: `POST /api/stops` | A new read route over `stops`, distinct addresses, dispatcher role, fetched once per window and filtered in the browser. No migration, no engine change | Medium. Risk: Chrome's own autofill on a field called Street address can stand over the list. An old typo is offered as if right. A pick must go through `edit/load-form.ts:291`, so on a new stop whose zone is still `auto` the zone follows the pick as it follows typing; date and time do not move |
+| 3 Mark arrived and departed | The window only: `edit/ArrivalFields.tsx:112`, `:190`, saved by `edit/EditStopModal.tsx:779` | A person | Yes: arrival or departure with its source, and the anchor. Undo writes again | A new narrow route, because `/api/stops` takes the whole load edit and spends the geocode limit (`app/api/stops/route.ts:32`). Its refusals shared with `server/stop-edit.ts:1042`. No migration. No engine change: the board reads the same columns | Large. Risk: now is one Enter away, so invented detention gets easier (`edit/ArrivalFields.tsx:20`). Undo is new, and has to survive the row moving on and a load that changed |
+| 4 Today and Tomorrow | A date input and nothing else: `edit/AppointmentFields.tsx:236` | A person | Not until Save: `POST /api/stops`, as wall parts | None | Small: `lib/calendar.ts:17` and `:11` exist. Risk: a later address can move an `auto` zone while the date stays, as a typed date does today |
+| 5 The tab title | Never changes: `app/layout.tsx:22`, and no `document.title` in `src/` | On its own: a poll | No | No route. One setting at `hooks/useFleet.ts:33` | Small to write. **Risk, and it is the real question:** the poll stops while a tab is hidden (`@tanstack/query-core` `queryObserver.ts:532`), which is the one time a title is read. As asked it freezes on what it said when the dispatcher left. Polling in the background is about 180 `/api/fleet` calls an hour per hidden tab, and browsers throttle hidden timers |
+| 6 The saved row glows | Save closes and that is all: `edit/EditStopModal.tsx:924`. The list stays | A person: Save, then its fetch lands | No: the save is already `POST /api/stops` | None | Medium: a named cause carried across the fetch, as `glideCause` is, and `console/FleetList.tsx:177` to reach the row. Risk: the row can leave the chip on save, and the flash can land at the same moment (`console/TruckRow.tsx:568`) |
+| 7 Show all | Fits once, on load: `map/FleetMap.tsx:266`, `:256` | A person | No | None | Small: `map/geo.ts:98` over `rows` (`console/Console.tsx:1139`). Risk: the popup's nudge would pull the map off its fit. It sits beside the others because under the zoom is where toasts land (`map/MapChrome.tsx:206`). Travel cost unmeasured |
+| 8 Right-click on a row | No `contextmenu` anywhere in `src/` | A person | Only through 3's Mark. Pin is in this browser (`hooks/usePinned.ts:11`), Check is in memory | None beyond 3 | Medium: a new surface with focus to give back, and it must join the key guard. Risk: Chrome on a Mac is understood to select the word under a right-click before `contextmenu`; the demo reads the selection before the press, but that order is emulated in the check, not measured |
+| 9 Hover row and marker | A row's own ground: `console/TruckRow.tsx:486`. The map's layers answer clicks only: `map/FleetMap.tsx:475` | A person | No | None | Medium to large: a second one-feature source like the selection's, since feature state cannot reach a clustered point (`map/layers.ts:54`). Risk: each change is a `setData` and a full canvas redraw, so a sweep down the rows is one per row, and marker to row means picking on mouse moves. Row hover already prefetches: `console/Console.tsx:467`. Unmeasured |
+| 10 Search marks | **Mostly live:** `console/TruckRow.tsx:377`, on `:647`, `:676`, `:698`. Not the truck number: `:602`. Load, street and ZIP are searched (`lib/search.ts:39`) and not shown | A person, each settled query | No | None | Small. Risk: `Marked` leaves a whole-cell match plain (`console/TruckRow.tsx:379`), so a truck number needs that changed. The hint takes room in the cell the copy controls sit over |
+| 11 Keys C and T | Neither is bound, and neither clashes: `lib/keymap.ts:120`, with P and X at `:152`, `:153` | A person | No | None | Small: Console's handler and two keymap rows. Risk: the tick is `console/CopyButton.tsx:32`'s own state, so a key cannot say Copied until that moves. `map/MapPopup.tsx:172` says no sixth key, which this supersedes. No new listener: `lib/keymap.ts:73` |
+| 12 Drop anywhere in the window (agent's idea) | The 36px strip only: `edit/RateconStrip.tsx:277`. Off it, the browser opens the file, behind `edit/EditStopModal.tsx:523`'s question if anything is unsaved | A person, dragging | Not until Save: `POST /api/stops` | None | Small. Risk: on saved stops it must swallow the file and say nothing was read |
+| 13 Earlier by 10, 20, 30 (agent's idea) | Type the time: `edit/ArrivalFields.tsx:156` | A person | No: only what 3 then writes | None beyond 3 | Small, with 3. Risk: over midnight and a clock change, so through an instant for display and back to a wall time, as the demo does |
+| 14 Copy the ETA line (agent's idea) | Copy takes the address and the load: `lib/copy-text.ts:24`, `:39` | A person | No | None | Small. Risk: it must stand down on a stale feed (`console/FeedBanner.tsx:134`) and where there is no ETA. Nothing is sent to anyone |
+
+**The agent's ideas, with their evidence.** 12: the strip is the only drop target in `src/`, and a miss leaves the page, against 48 reads on 90 loads since 2026-10-15. 13: `ArrivalFields.tsx:20`'s own example is a truck that docked 26 minutes before the dispatcher got round to it, against 70 hand marks (43 arrivals, 27 departures). 14: the banner's "do not quote an ETA from this screen" shows quoting is the daily act, and neither copy format holds one. No count exists for 14. Nothing else was proposed: the other candidates saved less than they cost, at 18 trucks.
+
+**What the map stand-in cannot show.** It is DOM on a plain div, so nothing here measures Mapbox. For 9, a hover source repaints the canvas on each change and picking runs on mouse moves, on a real GPU unmeasured. For 7, the stand-in scales its markers during the travel, and Mapbox's stay one size; below zoom 6 the globe makes a fit inexact (`FleetMap.tsx:233`).
+
+**What the demo cannot show.** No PDF is parsed: it reads the first bytes and fills invented stops, so the page limit, a locked file, a scan and Read with AI are not here. No server, so no fetch delay, no race, no anchor warning, and the refusals are copied words. A hidden tab's poll. A viewer. The window's discard question: Esc just closes. React's cost. It answers only some keys (↑ ↓ Enter Esc P X D / ? ⌘K, C and T), and R and S are its own. Chromium only.
+
+**Check, final run:** page md5 `9cca7eca154094d452df25a7d2649f24`, `Failures: 0`, 0 page errors, 0 requests aborted, 312 s. Each switch by hand with real mouse and keyboard, four ways: all off, off with the rest on, on, and on under reduced motion. Every frame's scrollers read, and each act judged against its own start and end. At rest: nothing running, no style left, no extra node. Every Try pressed twice 60ms apart, in reverse order at 1280x680, and with every switch off. A Try's subject in view at 1440x900, 1440x790 and 1280x680, switches open, in tab order and fresh: all 14 in, lowest 100%.
+
+| Case for 4, dates derived in the check, dispatcher in Chicago | Stop's zone | Dispatcher's date | Today | Tomorrow |
+|---|---|---|---|---|
+| The stop ahead | America/New_York | 2026-11-06 | 2026-11-07 | 2026-11-08 |
+| The stop behind | America/Denver | 2026-11-07 | 2026-11-06 | 2026-11-07 |
+| The 25-hour day | America/Chicago | 2027-11-07 | 2027-11-07 | 2027-11-08 |
+| The 23-hour day | America/Chicago | 2027-03-14 | 2027-03-14 | 2027-03-15 |
+
+5 was checked live and late, nobody late, a stale feed including a poll during it, and the server unreachable. 6's glow peaks 12.1 from the row's ground against 14.1 to 25.4 for the flash, and lasts 1000ms against 1600ms.
+
+**25 planted controls,** one or more per kind of check, each caught by the failure it was planted to cause and each passing once taken out: a scroller growing, an extra node, a style left, a loop, reduced motion ignored, Off doing more than today, On not doing what it says, a page error on a double press (3be's saved Try's own fault), a subject out of view, an animated scroll, a key while typing, a key behind a window, and one or more for each of features 1 to 10.
+
+**What the check found in its own work.** A press in the gap after a `cancel` threw, which is production finding 1 below. On a short window the first keystroke raised "Unsaved changes", scroll anchoring moved the form, and closing on a scroll took the suggestion list away; it now follows the field. The first full run hung for 1h34m, because a planted glow that never ends met an unbounded loop in the check, and nothing had a time limit; every run now has one, and the whole a 25 minute ceiling. Reading the controls after that run found four weak: one was caught only because the planted file was not named `qol.html`, one by a different failure from the one it planted, one could not catch on this platform, and the plain-title check sat behind an `if`. All are fixed, and a control now names the failure it counts.
+
+**Check limits.** The real-file road is a synthesized drag event carrying a real `File`, and the stand-in is a real mouse under Playwright's drag: neither is an OS drag from the desktop. A Mac's right-click order is emulated: neither Chromium build here selects a word on the press. In view is geometry plus what covers it, so it says nothing about whether anything reads well. That is Alex's.
+
+**Found wrong in production, not fixed:**
+
+1. **A press just after a cancel throws and strands an animation.** `lib/motion.ts:46` sets `currentTime` back to what it read, and a cancelled animation reads null. It stays in `moving` until its cancel event, which comes later (`lib/motion.ts:101`), and it is cancelled at `console/row-glide.ts:110`, `:116`, `:257` and `lib/number-roll.ts:49`, `:50`. Reproduced with those steps in Chromium: `TypeError`, then the animation stays paused at its first frame, so a row would stand at its old place. **Not reproduced in the real app,** and the gap is about a frame, so it needs a press during a long task. One line, in the first build batch.
+2. **A PDF let go anywhere but the strip leaves the app.** No other drop handler exists (`edit/RateconStrip.tsx:277`). In the window, `edit/EditStopModal.tsx:523` only asks if something is unsaved.
+3. **On a stale feed the chips above the board still count late.** `FilterChips.tsx`, `FleetHealthStrip.tsx` and `ListFooter.tsx` never mention the feed, while the row's chip withdraws (`console/chip-props.ts:35`). From the code, not seen on a real stale feed. Whether §5.9 covers them is a decision.
+4. **A search match can leave a row with no sign why:** a load number, street or ZIP (`lib/search.ts:39`), and a truck number (`console/TruckRow.tsx:602`). A query matching a whole cell is not marked either (`console/TruckRow.tsx:379`).
+5. **Nothing says a save went through.** `edit/EditStopModal.tsx:924` just closes. This corrects 3be's `saved` row above, which says a toast rises: none does, unless a status happens to change on the next poll.
+
+**Next:** Alex clicks and sends back the link box's text. 5 needs an answer on polling a hidden tab before it is worth building, and 3 needs a yes on the box.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
