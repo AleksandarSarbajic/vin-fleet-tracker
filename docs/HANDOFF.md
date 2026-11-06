@@ -10848,6 +10848,31 @@ The virtualizer draws the same rows at 200 as at 60, so the frames do not change
 2. **Rows glide:** keep after a look, or hold back? Recommended: keep.
 3. **The toolbar's 5px and the list's order (found wrong 1 and 2):** recommended, both next. Item 1 re-saves baselines, so it needs your yes.
 
+### Phase 3be: demo (2026-11-06)
+
+A clickable demo of motion on every surface that has none, so Alex can judge strengths before anything is built (verdict on 3bd: "i want motion, animations EVERYWHERE"). **Nothing shipped:** nothing under `src/`, `e2e/`, baselines, migrations, the worker or `package.json` changed. Not pushed. What ships is Alex's call.
+
+- **Open:** `.taste-skill/motion/everywhere.html`. Git-ignored with its sources, so a fresh clone does not have it. **Build:** `npx tsx .taste-skill/motion/build-everywhere.mjs`. **Check:** `node .taste-skill/motion/check-everywhere.mjs`, no network.
+- **56 switches,** each Off, On, Bold and Max, each with a Try button. Presets: Today's app, All on, All bold (it opens here), All max. Search is Off in every preset. The choice is in the hash, written to be read: `#all=today&chip=max`.
+- **Off** on a new surface is what production does today, taken from what the real CSS plays. On the six live motions, which are On in production, it is the app before 3bd.
+
+**Check, final run:** 63 acts on the 56 switches, local Chromium, `file://`, all network aborted, 0 page errors. For all 63: Off starts none of its own, the other levels start theirs at lengths written out in the check, no scroller grows past the larger of its start and its end at rest on any frame, nothing is left at rest, the end state is byte-identical to Off, and under reduced motion nothing moves and the end state is right. Everything on together at All bold and All max also ends where Off ends. 72 presses during a glide: 0 missed, nothing moved under the pointer. A poll at All max moved no row on any frame. The longest thing at Max is 1125ms; the flash is 1600ms. Nine planted controls were each caught and pass once taken out. The recorder also found a real bug in the demo, a saved view's delete growing the menu's scroller by 15px, now fixed.
+
+**Against the brief's list.** Added 12: the note beside the chips, Density's rows, "Copied", the map's trail, the basemap, choosing another stop, the palette's cursor, a folded History day, the Assignments tabs and "Saved", the phone's search field and marker key. Not there to animate: a stop being moved (`load-form.ts` only adds and removes, so it became the stops below sliding up), timeline bars (they are stop cards), truck list editor rows (they are chips). Already moves, so no switch: toasts, windows and menus, except phone sheets as asked. Left out: typing in the History and Assignments filters, for the reason search does not glide; a Split double-click, which changes a width; the phone's History page.
+
+**What the map stand-in cannot show.** It is DOM on a plain div, so it says nothing about real Mapbox cost, and that needs measuring on a real GPU. Markers are symbol layers, so fading them per truck means feature state or `setData` every frame, each redrawing the whole canvas. The ring's paint transition still repaints the map for its length. The trail starts when its fetch lands, not at the click. A basemap change is `setStyle`, and a crossfade needs two maps or a canvas screenshot. The popup is real DOM and the cheap one, but its nudge measures it with `getBoundingClientRect`, which a scale throws off. Showing a hidden map calls `resize`; what that draws in its first frame was not measured.
+
+**Against the spec, as switches only:** search gliding, Density's rows and pinned rows gliding each go against a line in §12.149. Choosing one supersedes that line.
+
+**Found wrong in production, not fixed:**
+
+1. **A chip's ground fades 160ms, not 120ms.** Chips and segments carry `duration-ground`, and `ListToolbar.tsx`'s comment says 120ms, but §12.148's hover rule outranks the class. Measured in the demo, which is built from the real CSS. Harmless: fix the comment or decide.
+2. **Production has a loop:** the History skeleton's infinite pulse while a week loads (`HistoryStates.tsx:127`, `PhoneHistory.tsx:247`). §12.149's "nothing loops" is about the board; the demo's rule is everywhere.
+
+**Limits.** Chromium only. Plain JS stand-ins, so no React re-render cost. The phone is a 390px frame with a mouse. A week lands at once here, where production has a fetch and that skeleton. Only the press table and the Try buttons use real input; the other acts are scripted clicks.
+
+**Next:** Alex clicks and sends back the link box's text. 3bd's 7 motions took full e2e from 35.2 to 47.7 min, so picks are best built in small batches.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
