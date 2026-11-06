@@ -86,8 +86,10 @@ board's shortcuts stand down behind any window, through one guard in `keymap.ts`
 follow-up" below.
 **3bc follow-up 2: pushed** (origin at `1b432ba` when follow-up 3 began; live not checked): a poll never
 closes a window. See "Phase 3bc follow-up 2" below.
-**3bc follow-up 3: NOT pushed** (2026-11-05): Reload and closing the tab ask, Reopen says what goes, P and
-the phone's sheet follow the board. See "Phase 3bc follow-up 3" below.
+**3bc follow-up 3: pushed** (origin at `84b8704` when 3bd began; live 2026-11-05 by the advisor's check): Reload
+and closing the tab ask, Reopen says what goes, P and the phone's sheet follow the board. See "Phase 3bc follow-up 3" below.
+**3bd: NOT pushed** (2026-11-06): the new motion, and the status override draft counting as typed work. Rows glide is
+the top commit and reverts on its own. See "Phase 3bd" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -10743,6 +10745,108 @@ The count is true at the moment of the press: what the window says is what it do
 
 1. **Push?** Your call under "Do not push".
 2. **The override draft, and the bulk and add-to-list windows, ahead of 3bd?** Recommended: yes, both small. The first loses typed work; the second writes to a truck that was not in the window when it opened.
+
+### Phase 3bd: the new motion (2026-11-05 and 06)
+
+Motion that shows what just happened, at the demo's On values, each its own commit, lowest risk first and rows last. **NOT pushed.** Built on `84b8704`, clean tree, level with origin. The decision and the reasoning are §12.149.
+
+| Commit | What | Seen failing first | Mutated |
+|---|---|---|---|
+| `4e7280f` | Step 0, not motion: the status override draft counts as typed work | 8 of 13 unit, the e2e reload case | 8, all caught |
+| `d8e5093` | Step 1: the map toggle is a long thing, and §12.148's hover line | The lift, on hover | The `w-full` removed is the seen failure |
+| `763c877` | Step 2: a segment's highlight slides. Starts `lib/motion.ts` | 7 of 10 e2e, slide off | 15, all caught |
+| `036e5d4` | Step 3: a count rolls | 8 of 9 e2e | 17; the roll copy's fill went |
+| `d64ecd5`, `6d201ce` | Step 4: a page rises, and the bulk bar comes up into its slot | 12 of 17 e2e | 19; `makeInert` on the bar's copy went |
+| `47f5339` | Step 5: the board draws in, once per load | 5 of 8 e2e | 7, all caught |
+| `72421f2` | Step 6: the selection slides, and the map takes 450ms | 7 e2e, then the popup-height case | 21; a `dragPan` guard went |
+| `adde63e` | What the mutation run found in steps 2 to 6, and a press on the map ending its nudge | With the fix out, under a press in a long pan | Below |
+| `280dcba` | Step 7, LAST: rows glide, and the press | 11 of 17 e2e | 31; a guard for a row's own controls went |
+
+**Rows glide is on top and reverts on its own.** `git revert 280dcba` applied with no conflict in a worktree, and typecheck, lint, 232 files and 4,256 unit tests, and 30 browser tests for the other motions all passed with it out. The history was reordered once to make that true: my fixes had landed above it and touched its files. The tree was compared afterwards and was byte-identical.
+
+**The press during a glide.** A real mouse, in the page's own measure, from the final full run. The row the browser hit at the press is the row selected. In a gap, the nearest row drawn.
+
+| Into the glide | Held 16ms | Held 40ms | Held 80ms | Held 150ms |
+|---|---|---|---|---|
+| 20ms | 16 presses, 0 missed | 16, 0 | 16, 0 | 16, 0 |
+| 60ms | 16, 0 | 16, 0 | 16, 0 | 16, 0 |
+| 120ms | 16, 0 | 16, 0 | 16, 0 | 16, 0 |
+
+**192 presses, 0 misses, and nothing under the pointer moved from press to release on any of them.** Of those: 37 in a gap; rows moving up 42, moving down 30, staying put 83; first row drawn 68, last 29. All six of up, down or staying put by first or last were reached. A press at "20ms" lands on a frame, so it measures 16.6 or 33.3.
+
+**With the pause mutated away, the same table:**
+
+| Into the glide | Held 16ms | Held 40ms | Held 80ms | Held 150ms |
+|---|---|---|---|---|
+| 20ms | 0 missed, moved in 9, up to 252px | 1, 8, 288px | 1, 8, 394px | 3, 9, 385px |
+| 60ms | 1, 7, 103px | 1, 8, 140px | 2, 8, 189px | 2, 8, 242px |
+| 120ms | 0, 8, 53px | 0, 9, 63px | 0, 8, 78px | 1, 8, 80px |
+
+12 misses, and the row moved under the pointer on about half of all presses. The test at the late point catches it: at 120ms, 8 or 9 of every 16 moved. Misses alone would undersell it, because a press now also remembers its row.
+
+Also run, mid-glide: a press and move off selects nothing; a double press opens the row under the pointer; Space and Enter on the focused row; X on the selected row; a row's checkbox checks and does not select; a row's pin pins and does not select; a gap press that wanders 2px selects, and 40px does not.
+
+**Re-render cost: the real list, compiled for production,** 24 chip changes, every frame for 300ms after each, at 1024 with the map hidden, because the map is drawn in software here. "Commit" is the change's own work, the row copies and the glide's setup included.
+
+| Rows | CPU | Glide | Frame p50 | p95 | Max | Over 20ms | Commit p50 | Max |
+|---|---|---|---|---|---|---|---|---|
+| 60 | 1x | on | 16.7 | 16.7 | 16.8 | 0 of 444 | 10.7 | 17.4 |
+| 60 | 1x | off | 16.7 | 16.8 | 16.8 | 0 of 439 | 10.7 | 22.3 |
+| 200 | 1x | on | 16.7 | 16.7 | 16.8 | 0 of 445 | 15.2 | 22.0 |
+| 200 | 1x | off | 16.7 | 16.7 | 16.8 | 0 of 441 | 12.6 | 31.0 |
+| 60 | 4x slower | on | 16.7 | 16.8 | 33.4 | 1 of 440 | 38.5 | 52.3 |
+| 60 | 4x slower | off | 16.7 | 16.8 | 33.4 | 3 of 439 | 32.3 | 45.4 |
+| 200 | 4x slower | on | 16.7 | 16.8 | 33.4 | 12 of 429 | 62.1 | 86.7 |
+| 200 | 4x slower | off | 16.7 | 16.8 | 33.4 | 3 of 438 | 40.5 | 52.9 |
+
+The virtualizer draws the same rows at 200 as at 60, so the frames do not change. What grows is the sort and filter a chip was already paying for, and at 4x slower with 200 rows the glide's setup adds about 20ms to a click.
+
+**Found by this phase, and fixed:**
+
+1. **The map stopped short of the truck.** The popup's own `ResizeObserver` also asked for the nudge, and a new truck's popup is usually another height, so 28ms into the pan a `panBy` cancelled it: the map ended at -107.97 for a truck at -90.2. The brief's "the nudge waits for `moveend`" missed this second route in. That route is there at 150ms too, in production today, in a window too short to notice.
+2. **A press in a long pan nudged the map under the pointer.** A press stops the pan, stopping fires `moveend`, and the landing's nudge then ran with the pointer down. Only with the popup off the map, and at the fleet's zoom Mapbox draws a globe and a far truck's popup never leaves it, so it took zooming in to see.
+3. **A list that gets shorter cut off what was leaving.** The scroller is only as tall as what is in it, with the footer right under it, so the footer jumped up on the first frame, rows below the new end vanished instead of fading, and a press aimed at a row landed on the footer: 42 misses of 192 in my first table. It now holds its bottom edge until the rows land, so the footer comes up as they land.
+4. **The first animation ever could run under a press** already down, because press listening started with it.
+5. **`style=""` left behind.** Blink writes an inline style out to the attribute only when asked, so removing the attribute first leaves it. A MutationObserver asks, which is why logging hid it. `clearStyle`.
+
+**Departures from the brief, each for a reason:**
+
+- **A list is not in `resetKey`,** though the brief says it is. `glideCause` names it, so a list glides, and the order rule is left as it was (found wrong 2).
+- **`fill: 'forwards'` is nowhere.** Nothing failed without it.
+- **A press also stops the map's pan.** The brief's rule is that a press pauses whatever is moving, and Mapbox has no pause. A marker that moved between press and release would not be under the click, and the click would clear the selection.
+- **The pressed row is remembered,** beyond the pause. The browser's animation clock reads a frame ahead outside a frame, and can tick over between the hit test and the hold. At the start of a glide a frame can be a whole row. It has its own test, which takes the row out from under the pointer mid-press.
+
+**Found wrong and not fixed:**
+
+1. **The list toolbar is not a fixed height.** It is `h-8` with no `shrink-0`, so on a list too long for the screen flex squeezes it from 32px to 27px, and the whole list jumps 5px when a chip takes it across that line. In production today, and §12.4 calls it "a line of fixed height". The glide carries the 5px smoothly. A `shrink-0` would move every long-list screenshot by 5px, so per the brief it stopped here. Recommended next: fix it and re-save those baselines on your yes.
+2. **Clearing a list leaves the order it had.** Run: fleet `103 200 … 208 101 102`, list on `101 102`, list off `101 102 103 200 …` with "12 rows would reorder". The list is not in `resetKey`, so a list change keeps what was shown and adds to the end. §12.4 says a filter change sorts. Recommended: add it to `resetKey`, one line, your call.
+3. **After clicking a row's checkbox, Esc does not clear the checks.** Run: focus stays on the `input`, `isTypingTarget` counts every input as typing, and the bar itself says `Esc`. X and the arrows are dead the same way until focus moves. Recommended: small, next.
+4. **A note typed on a live override is lost by a save with other changes.** Run: note and ZIP changed, Save sends no override, and the note is gone with no word. Alone it now asks on Esc and leaves Save off, which is honest but a dead end. It was like this before step 0. Recommended: small, next.
+5. **A gap press near a row flying away selects it, and the list then scrolls to it.** Correct by the rule, and a little odd. Leave it.
+
+**Not proven:** in one earlier version of the table, 5 of 192 presses in gaps at 120ms selected a different row from the one my recorder called nearest. It did not come back in 64 presses on the same plan. The likely cause is that the recorder measured just before the hold landed and the code just after, and with the pointer almost midway between two rows a frame's difference flips the answer. The recorder now measures during the hold. Likely, not shown.
+
+**Chromium only.** No other browser is installed here. `overflow: clip` needs Safari 16, and `@property` was already noted in 3bc.
+
+**Tests.** `e2e/new-motion.spec.ts` is new: 100 tests, each reading every scroller on the page on every animation frame, with a planted control. Mutated: about 115 in all, each alone and restored, in a throwaway worktree. Changed in place, and why: `dialog-motion.spec.ts`'s map toggle test now expects 99.5% and no lift, as asked, and still holds it at no growth. `window-keys-guard.test.ts` lists `PageRise`, which ends a rising page on a key and answers for nothing. `vitest.setup.ts` removes happy-dom's `animate()`, whose animations never end. No wait lengthened and no retry added.
+
+**Slips of mine, all caught before the end.**
+- Two commits landed with a test still failing because I chained the commit to the run: `d64ecd5`, fixed in `6d201ce`, and one amended before it mattered.
+- About a third of my first mutations survived or did not compile, and each survivor was a weak test: a duration read from the token it was checking, a reduced-motion test that stopped recording before the next frame, a slop test that skipped itself when it missed a gap.
+- My mutation runner restored the wrong copy when a mutation touched a file twice, so 20 results were empty and I reran them.
+- `--no-deps` ran 12 minutes against a signed-out account.
+- I claimed the press-on-the-map bug in a commit message on reasoning alone. The mutation then survived, so I proved it with a better test and reworded the commit.
+- My first press table reached no row staying put, because the chip and the spot advanced in lockstep, and then a scrolled list, and then only presses with no glide running.
+
+**Checks.** `npm run check` at `280dcba`: **232 files, 4257 tests** (229 and 4220 before). The forbidden-files grep printed nothing. **Full e2e on the default config, once, after the last code write: run `2026-11-05T23-39-42-307Z` at `280dcba`: 528 passed, 0 failed, 0 flaky** (47.7 min, up from 426 and 35.2), the machine awake. Nothing to classify. Every baseline matched, and `git diff 84b8704 HEAD -- e2e/__screenshots__ package.json package-lock.json drizzle src/worker src/server src/lib/status.ts` is empty. `.taste-skill/` is unchanged.
+
+**Rows glide: recommended, ship.** 0 misses in 192 presses and in every run since the height hold, nothing moved under a press, frames hold at 200 rows, and if it feels wrong live it comes out with one revert. Alex is the judge of the feel, and has not seen it.
+
+**Questions for Alex:**
+
+1. **Push?** Your call under "Do not push". Recommended: yes, all of it, then look at it live.
+2. **Rows glide:** keep after a look, or hold back? Recommended: keep.
+3. **The toolbar's 5px and the list's order (found wrong 1 and 2):** recommended, both next. Item 1 re-saves baselines, so it needs your yes.
 
 ## Next
 

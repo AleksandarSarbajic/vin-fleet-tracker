@@ -1448,8 +1448,9 @@ slipped to At risk` recolours the row and the marker without moving anything.
 **The offer moves nothing either (phase 3bc).** It used to sit in flow at the top of
 the scroller, so each time it appeared every row went down by its height: 23.5px on
 a 44px row, so a click aimed at the upper half of a row selected the row above.
-The toolbar line has a fixed height, so now it appears at once, whatever the pointer
-is doing, and rows move when it is clicked and at no other time. It sits to the left
+The toolbar line has a fixed height (*phase 3bd: on a list too long for the screen flex squeezes
+it from 32px to 27px, which it does at rest and whatever the bar is doing; see HANDOFF*), so now it
+appears at once, whatever the pointer is doing, and rows move when it is clicked and at no other time. It sits to the left
 of Density, which keeps its place. At the narrowest list pane, 560px, the health
 strip gives way: its text goes first, then its bar narrows in proportion.
 
@@ -10542,7 +10543,8 @@ a key or a Save, sometimes after the server's answer to that Save. The one
 exception is the tour, which opens by itself on a first visit. Nothing moves
 when data refreshes on its own: rows, lists, re-sorts, new rows and the row flash
 keep §8.3's and §14.4's rules. Row ground keeps its 120ms, except under the
-pointer.
+pointer. (*§12.149: a count that changes on a poll rolls, inside its own box. That is all a poll
+ever starts.*)
 
 **Closing never waits.** The window closes as it always has: removed at once,
 focus returned at once, and the next click and key land at once. What fades is a
@@ -10628,7 +10630,7 @@ code waits on `animationend`.
 **In the tests.** e2e runs with reduced motion by default
 (`playwright.config.ts`), because a robot's click can land during an opening,
 find its target "not stable", and move the form with its retry's scroll. Only
-`dialog-motion.spec.ts` turns motion back on.
+`dialog-motion.spec.ts` and `new-motion.spec.ts` turn motion back on.
 
 **One component each.** `DialogFrame` and `PopFrame`
 (`src/components/overlay/`), with `useOpening` for what they share and
@@ -10636,6 +10638,122 @@ find its target "not stable", and move the form with its retry's scroll. Only
 cannot ship without these. Keyframes, not transitions, for an opening: a
 transition cannot run on an element that has just appeared. No animation library
 (Alex: "CSS only" means no library).
+
+## 12.149 The new motion: what just happened
+
+Phase 3bd (Alex, 2026-11-04, who left the choice to the advisor). Alex asked for more
+motion and pointed at Awwwards GSAP sites. Those spend 2 to 8 s on an opening and replace
+scrolling, which is wrong for a board open all day. What was built instead is motion that
+shows what just happened, at the demo's On setting. **Supersedes in part** §8.3 and §14.4.
+
+| Motion | Length | Curve | When |
+|---|---|---|---|
+| **A segment's highlight slides** | 180ms | `EASING.dialog` | Density, the basemap, the phone's List and Map. Not the chips: they are multi-select, so there is no one place to slide from |
+| **A count rolls** | 240ms | `EASING.dialog` | The chips' counts and the health strip's numbers, when one changes |
+| **A new page fades and rises 6px** | 180ms | `EASING.dialog` | A change of page. Not the page a load lands on |
+| **The bulk bar comes up into its slot** | 200ms | `EASING.dialog` | Two rows checked; down again on closing |
+| **The board draws in** | 300ms in all, each row 120ms, gaps at most 20ms | linear, opacity only | Once per page load, when there are first rows to draw |
+| **The selection slides** | 180ms | `EASING.dialog` | Between two rows, with the old one on screen. Otherwise it just appears |
+| **The map travels to a selection** | 450ms | Mapbox's default | Every selection. A zoom, a cluster and the nudge that clears a popup stay at 150ms |
+| **Rows glide** | 260ms; leaving and arriving fade, linear | `EASING.dialog` | A chip, a list, the reorder bar. Nothing else |
+
+**Not built, on purpose.** Trucks gliding between fixes: at the fleet's zoom a truck moves
+under a pixel per poll, and it would draw positions we do not have. Bold values. Chips
+sliding. Any change to a phone sheet. A map panel slide. Any library: `lib/motion.ts` is
+the browser's Web Animations and nothing else.
+
+**The rules, each held by a test in `e2e/new-motion.spec.ts`:**
+
+- **Nothing waits.** A click, a key or a tap works from the first frame.
+- **Nothing loops, and nothing moves when nothing changed.** A stored density or basemap,
+  read a moment after load, does not slide. A poll with the same counts rolls nothing.
+- **The flash stays the strongest thing on the board.** It keeps its 1.6s on the whole row.
+  What a poll starts is a number rolling inside its own box.
+- **A poll never moves a row (§12.4).** A poll that changes who is in the list moves rows as
+  it always did, by a snap with no glide.
+- **Reduced motion: a true 0, and nothing lost.** The CSS rule cannot reach a Web Animation,
+  so `lib/motion.ts` is the only place that may start one, and it asks first.
+  `reduced-motion-rule.test.ts` fails on any `.animate(` anywhere else.
+- **Nothing grows a scroller (§12.148), on any frame.** Every test of a motion reads every
+  scroller on the page on every animation frame.
+- **Nothing is left at rest.** No running animation, no style, no extra node.
+
+**A press holds whatever is moving until it ends** (`lib/motion.ts`). The browser sends a
+click to what the press and the release have in common, so a row that moves between them
+sends the click to the list, or to the row that took its place. In the demo only 12 of 16
+presses during a glide selected the pressed row. Whatever is moving stops on the frame last
+drawn, not the next: `pause()` alone waits for the next frame, and on that frame a row can
+move out from under a press that has already come down, so the time is set as well, which
+settles it at once. A press already down when something starts holds that too. Mapbox has no
+pause, so a press on the map stops its pan where it is: a marker that moved between press and
+release would not be under the click, and the click would land on bare map and clear the
+selection.
+
+**Rows glide.** The cause is said, by `glideCause` in `Console.tsx`: the chips, the list, and
+a count of the reorder bar's clicks. Nothing looks at positions on its own, so a density change,
+a resize, a scroll, a search and a poll can never start one. A search does not glide because
+typing would start one on every key while someone looks for a truck.
+
+- **The wrappers move, in the virtualizer's own coordinates.** A Web Animation runs over the
+  wrapper's inline `translateY`, which React goes on writing, and leaves nothing when it ends.
+  So the row is live the whole way, and a scroll carries it along.
+- **Where a row is drawn is read just before the commit** (`BeforeCommit`, a class, because only a
+  class can run then). So a second chip takes every row up from where it is drawn, and five chips
+  in a row never jump. `useDisplayOrder` adopts a new order while rendering, not in an effect, so
+  the commit a chip changes holds the whole of its change.
+- **Nothing in flight extends the scroller.** The list clips for those frames, and its box reaches
+  to the bottom of the view. That reach adds nothing to what can be scrolled. A row coming from far
+  away starts just past the edge of the view, not thousands of pixels off, so it arrives at a sane
+  speed.
+- **A list that gets shorter holds its bottom edge until the rows land.** The scroller is only as
+  tall as what is in it, with the footer right under it. Left to that, the footer jumps up on the
+  first frame, what is leaving below the new end is cut off rather than seen going, and a press
+  aimed at a row lands on the footer. So the footer comes up as the rows land. It holds the bottom
+  edge and not the height, because the toolbar above is not always the same height (below).
+- **Rows in flight have a solid ground,** because a row's own is see-through and rows overlap on
+  the way. The further one is going, the higher it travels.
+- **A row leaving the drawn window** has no wrapper left to move, so an inert copy finishes the
+  journey. It has no identity (`makeInert`) and takes no pointer, so a press goes through it to
+  the real row under it.
+- **A press belongs to what it came down on.** In a gap between rows it selects the nearest row
+  drawn (the one on top, if rows arriving from past the edge are level), never nothing. If the
+  release finds another row, which the click would give to neither, the pressed row is selected: the
+  browser's animation clock runs a frame ahead of what was hit-tested, and at the start of a glide a
+  frame can be a whole row. Moved more than 4px before the release, it selects nothing.
+- **Pinned rows do not glide.** They are outside the virtualizer. A chip that hides one takes it
+  away at once, and the rows below go from where they were drawn, so a block that changes height
+  does not make them jump.
+- **A row's place changing mid-flight** (a poll that changes who is in the list, a density change)
+  sends it there at once.
+
+**The selection** and **a segment's highlight** are overlays: the real look is on the row or the
+button all along, held back by `data-selection-target` or `data-segment-target` so the overlay
+can arrive, and when it lands both go. The look it left goes at once and not over its own 120ms,
+or it would be seen twice. Measured in layout, not with `getBoundingClientRect`, for a segment,
+since the button just pressed is at 96% and on its way back. A selection during a glide just
+appears.
+
+**A count roll.** What React rendered is the new number from the first frame, and it is the only
+number a screen reader can reach: the old one is a copy, `aria-hidden`. The width steps once, at
+the start, as it always did. A poll landing mid-roll ends the roll it finds, so there are never
+three numbers. Nothing rolls in a background tab, where it would play on the way back.
+
+**A new page has a transform for 180ms,** so it is the containing block for everything `fixed` in
+it, and anything measured against the screen then is up to 6px off and stays off when it lands.
+So a click or a key ends the rise first, in the capture phase, ahead of whatever will read a box. A
+press has already held it by then, so what the pointer came down on did not move. The box around it
+clips for those frames, or 6px of page past the bottom makes the document scroll.
+
+**A long pan needed two guards that a short one got away without.** The popup's own
+`ResizeObserver` asks for the nudge that keeps it clear of the map's edge, and a new truck's popup
+is usually another height, so moments into the pan a nudge cancelled it and the map stopped short of
+the truck. A travel in flight now ignores that, and nudges as it lands. And what was waiting to nudge
+for the last truck is dropped when a new selection starts, or fast arrow keys would stop short the
+same way. A press on the map ends its landing's nudge along with the pan, or that would move the map
+under the press that stopped it.
+
+**The numbers** are `MOTION_MS`, `MOTION_SHAPE` and `EASING` in `tokens.ts`, held to this table by
+`motion-tokens.test.ts`.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
@@ -11034,7 +11152,8 @@ transitionTimingFunction: { flash: 'cubic-bezier(.2,0,0,1)',
 
 *(Superseded in part by §12.148: windows and menus open with motion, a copy of
 them fades when they close, and buttons respond to hover and press. "Overlays:
-opacity only, 120ms" below is replaced by it. The other rows stand.)*
+opacity only, 120ms" below is replaced by it. §12.149 adds the new motion, which shows
+what just happened. The other rows stand.)*
 
 | | |
 |---|---|
