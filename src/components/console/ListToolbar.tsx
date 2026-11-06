@@ -100,8 +100,9 @@ export function ListToolbar({
                  * then diverged on every measurement that matters: `h-[18px]`
                  * against the chips' 26, no gap, `tracking-[.09em]` against
                  * .08, and no transition at all — so the active state changed
-                 * instantly where every other control in the console grounds
-                 * over 120ms (§8.3).
+                 * instantly where every other control in the console fades its
+                 * ground. Over 160ms, by §12.148's hover rule in `globals.css`,
+                 * which outranks the `duration-ground` below.
                  *
                  * 18px was not a token either. §14.4's `chip-compact: 18px` is
                  * the STATUS chip inside a row, which shrinks with density;
