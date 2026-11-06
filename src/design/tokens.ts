@@ -228,7 +228,7 @@ export const MOTION_MS = {
    * §12.149. The map going to a selected truck. Long enough to see which way it went,
    * and it is Mapbox's default curve, so the pan keeps its own easing.
    */
-  mapTravel: 450,
+  mapTravel: 700,
   /** §14.4. Flash ground decays to the resting ground over this. */
   flash: 1600,
   /** §14.4. Chip crossfade. The WIDTH snaps — only opacity is animated. */
@@ -252,22 +252,22 @@ export const MOTION_MS = {
   pressIn: 60,
   pressOut: 180,
   /** §12.149. A segment's highlight, from what was chosen to what is. */
-  segmentSlide: 180,
+  segmentSlide: 260,
   /** §12.149. A count, on a poll that changed it. */
-  countRoll: 240,
+  countRoll: 400,
   /** §12.149. A new page's fade and rise. */
-  pageIn: 180,
+  pageIn: 260,
   /** §12.149. The bulk bar, in and out of its slot. */
-  bulkBar: 200,
+  bulkBar: 300,
   /** §12.149. The board's opening, once per load: all of it, and each row's share. */
-  boardOpen: 300,
-  boardOpenRow: 120,
-  /** So three rows do not take the whole 300ms. Normally the rows in view set the gap. */
-  boardOpenGapMax: 20,
+  boardOpen: 500,
+  boardOpenRow: 200,
+  /** So three rows do not take the whole opening. Normally the rows in view set the gap. */
+  boardOpenGapMax: 35,
   /** §12.149. The selected row's ground, from the row it was on. */
-  selectionSlide: 180,
+  selectionSlide: 280,
   /** §12.149. Rows going to their new places, on a chip, a list or the reorder bar. */
-  rowGlide: 260,
+  rowGlide: 380,
 } as const;
 
 /**
@@ -285,7 +285,7 @@ export const MOTION_SHAPE = {
   flatPressScale: 0.995,
   hoverLiftPx: 1,
   /** §12.149. A new page comes up this far. */
-  pageRisePx: 6,
+  pageRisePx: 10,
   /** The row's grey hover bar, in `text.muted`. */
   rowBarOpacity: 0.8,
 } as const;

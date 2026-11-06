@@ -6,7 +6,7 @@ import { clearStyle, play, whenOver } from '@/lib/motion';
 
 /**
  * §12.149, the page change. The old page is gone as it always was, and the new one
- * fades and rises 6px. `app/template.tsx` mounts this anew on a change of page, and not
+ * fades and rises `pageRisePx`. `app/template.tsx` mounts this anew on a change of page, and not
  * for a change of `?truck=`, a poll or a refetch: Next keys a template on the segment
  * with its search params taken out.
  *
@@ -14,13 +14,13 @@ import { clearStyle, play, whenOver } from '@/lib/motion';
  * board has its own opening. A module's flag and not a ref: the template mounts anew.
  *
  * **A page that is rising has a transform,** so for those frames it is the containing
- * block for everything `fixed` in it, and anything measured against the screen is up to
- * 6px off and stays off when it lands. So what could open or measure ends the rise first:
+ * block for everything `fixed` in it, and anything measured against the screen can be off by
+ * up to that rise and stays off when it lands. So what could open or measure ends the rise first:
  * a click or a key, in the capture phase, ahead of whatever will read a box. A press has
  * already held it by then, so what the pointer came down on did not move.
  *
- * The box clips while it rises, or 6px of page below the screen makes the document
- * scroll for 180ms. It has nothing on it otherwise, and no layout of its own.
+ * The box clips while it rises, or the page below the screen makes the document scroll
+ * for as long as it rises. It has nothing on it otherwise, and no layout of its own.
  */
 let landedOnFirstPage = false;
 

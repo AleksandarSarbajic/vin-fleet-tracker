@@ -3,8 +3,8 @@ import { play } from '@/lib/motion';
 
 /**
  * §12.149. The board draws in once per page load: the rows in view fade in, one just
- * after the other, 300ms in all. Opacity only, so nothing moves and every row is live from
- * its first frame: a click on a row still at nothing selects it.
+ * after the other, `boardOpen` in all. Opacity only, so nothing moves and every row is live
+ * from its first frame: a click on a row still at nothing selects it.
  *
  * Once per load and not once per mount, so coming back from another page does not replay
  * it, which is why the flag is the module's. It waits for there to be rows: a board that

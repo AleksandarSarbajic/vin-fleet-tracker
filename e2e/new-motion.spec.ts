@@ -17,19 +17,19 @@ test.use({ contextOptions: { reducedMotion: 'no-preference' } });
  * token passes whatever the token says.
  */
 const DIALOG_CURVE = 'cubic-bezier(.22,.61,.36,1)';
-const SEGMENT_MS = 180;
-const ROLL_MS = 240;
+const SEGMENT_MS = 260;
+const ROLL_MS = 400;
 const FLASH_MS = 1600;
-const PAGE_MS = 180;
-const RISE_PX = 6;
-const BAR_MS = 200;
-const OPEN_MS = 300;
-const OPEN_ROW_MS = 120;
-const OPEN_GAP_MAX_MS = 20;
-const SELECT_MS = 180;
-const MAP_MS = 450;
+const PAGE_MS = 260;
+const RISE_PX = 10;
+const BAR_MS = 300;
+const OPEN_MS = 500;
+const OPEN_ROW_MS = 200;
+const OPEN_GAP_MAX_MS = 35;
+const SELECT_MS = 280;
+const MAP_MS = 700;
 const ZOOM_MS = 150;
-const GLIDE_MS = 260;
+const GLIDE_MS = 380;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -236,7 +236,7 @@ async function record2<T>(page: Page, read: () => T) {
 /**
  * The page's own frames have settled. The map's first load, drawn in software here,
  * runs frames of 200ms and more for a second or so after a page opens (measured), and a
- * 180ms motion started in them is only a frame or two. A condition, not a wait.
+ * short motion started in them is only a frame or two. A condition, not a wait.
  */
 const quiet = (page: Page) =>
   page.evaluate(
@@ -408,7 +408,7 @@ test.describe('step 2, a segment highlight slides', () => {
     const compact = (await page.locator('[data-segment="compact"]').boundingBox())!;
     const distance = Math.abs(compact.x - comfortable.x);
     // In the page, two frames apart, so the second lands well before the first arrives:
-    // Playwright's own round trips can outlast most of 180ms and hide a jump.
+    // Playwright's own round trips can outlast most of a slide and hide a jump.
     await page.evaluate(
       () =>
         new Promise<void>((done) => {
@@ -455,7 +455,7 @@ test.describe('step 2, a segment highlight slides', () => {
       page.locator(OVERLAY).evaluate((el) => el.getAnimations()[0]!.currentTime as number);
     const first = await time();
     expect(first).toBeLessThan(SEGMENT_MS);
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(SEGMENT_MS + 60);
     expect(await time()).toBe(first);
     await page.mouse.up();
     await expect(page.locator(OVERLAY)).toHaveCount(0);
@@ -696,6 +696,9 @@ test.describe('step 3, a count rolls when it changes', () => {
 
   test('rapid polls: one old number at a time, and it ends on the last', async ({ page }) => {
     await openLong(page);
+    await chip(page, 'Late').evaluate((el) => {
+      (window as unknown as { __chip: Element }).__chip = el;
+    });
     const frames = await record(page, () => ({
       most: Math.max(
         0,
@@ -703,12 +706,18 @@ test.describe('step 3, a count rolls when it changes', () => {
           (b) => b.querySelectorAll('[data-roll-copy]').length,
         ),
       ),
+      old:
+        (window as unknown as { __chip: Element }).__chip.querySelector('[data-roll-copy]')?.textContent ??
+        null,
     }));
     for (const n of [1, 2, 3, 4, 5]) await pollWith(page, lateFirst(n));
     await expect(cell(page, 'Late')).toHaveText('5');
     await expect(page.locator(COPY)).toHaveCount(0);
     const seen = await frames();
     expect(Math.max(...seen.map((f) => f.most))).toBe(1);
+    // A poll really landed mid-roll: from one old number to the next with no frame between.
+    const midRoll = seen.filter((f, i) => i > 0 && f.old && seen[i - 1]!.old && f.old !== seen[i - 1]!.old);
+    expect(midRoll.length).toBeGreaterThan(0);
     expect(await cell(page, 'Late').evaluate((b) => b.getAttribute('style'))).toBeNull();
   });
 
@@ -818,7 +827,8 @@ test.describe('step 3, a count rolls when it changes', () => {
       (el) => el.getAnimations()[0]!.effect!.getComputedTiming().duration,
     );
     expect(duration).toBe(FLASH_MS);
-    expect(ROLL_MS).toBeLessThan(FLASH_MS / 4);
+    // A quarter at most. Exactly a quarter since Bold, so a longer roll has to answer to this.
+    expect(ROLL_MS).toBeLessThanOrEqual(FLASH_MS / 4);
     // The poll that started it moved no row.
     expect((await first.boundingBox())!.y).toBe(before.y);
     // What rolls is 12px high inside a chip; what flashes is the whole row.
@@ -926,7 +936,7 @@ test.describe('step 4, a page rises', () => {
       { polling: 'raf' },
     );
 
-  test('a change of page: it fades and rises 6px in 180ms, and leaves nothing', async ({ page }) => {
+  test('a change of page: it fades and rises 10px in 260ms, and leaves nothing', async ({ page }) => {
     await logAnimations(page);
     await page.goto('/');
     await page.locator('[data-row-id]').first().waitFor();
@@ -934,6 +944,9 @@ test.describe('step 4, a page rises', () => {
     const stop = await watchFrames(page);
     const frames = await record(page, riseFrame);
     await toBoardAndBack(page);
+    // Past its end, so the last frame read is the page at rest: `quiet` alone is shorter than a rise.
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
 
     const seen = await frames();
     const { grew, frames: count } = await stop();
@@ -946,7 +959,7 @@ test.describe('step 4, a page rises', () => {
 
     const rising = seen.filter((f) => f.running);
     expect(rising.length).toBeGreaterThan(2);
-    // The box clips for as long as it rises, or 6px of page below the screen scrolls.
+    // The box clips for as long as it rises, or the page below the screen scrolls.
     expect(new Set(rising.map((f) => f.clip))).toEqual(new Set(['clip']));
     for (const f of rising) {
       expect(f.y).toBeGreaterThanOrEqual(0);
@@ -1239,7 +1252,7 @@ test.describe('step 4, the bulk bar comes up into its slot', () => {
     };
   };
 
-  test('opening: 200ms on the curve, inside its slot, and nothing left', async ({ page }) => {
+  test('opening: 300ms on the curve, inside its slot, and nothing left', async ({ page }) => {
     await logAnimations(page);
     await openBoard(page);
     const stop = await watchFrames(page);
@@ -1479,7 +1492,7 @@ test.describe('step 5, the board opens once per page load', () => {
   const delays = (page: Page) =>
     page.evaluate(() => (window as unknown as { __delays: number[] }).__delays);
 
-  test('a long board: every row in view, 300ms in all, opacity only and linear', async ({ page }) => {
+  test('a long board: every row in view, 500ms in all, opacity only and linear', async ({ page }) => {
     await logAnimations(page);
     await logDelays(page);
     await resetWorld({ extraTrucks: 30 });
@@ -1502,7 +1515,7 @@ test.describe('step 5, the board opens once per page load', () => {
     const gaps = await delays(page);
     expect(gaps).toHaveLength(inView);
     expect(gaps[0]).toBe(0);
-    // All of it in 300ms: the last row's start, and its own 120ms.
+    // All of it in 500ms: the last row's start, and its own 200ms.
     expect(gaps.at(-1)! + OPEN_ROW_MS).toBeCloseTo(OPEN_MS, 5);
     expect(gaps[1]! - gaps[0]!).toBeLessThanOrEqual(OPEN_GAP_MAX_MS);
 
@@ -1516,7 +1529,7 @@ test.describe('step 5, the board opens once per page load', () => {
     for (const row of rest) expect(row).toEqual({ animations: 0, opacity: '' });
   });
 
-  test('a short board: the gap has a ceiling, so three rows do not take 300ms', async ({ page }) => {
+  test('a short board: the gap has a ceiling, so three rows do not take 500ms', async ({ page }) => {
     await logDelays(page);
     await page.goto('/');
     await page.locator('[data-row-id]').first().waitFor();
@@ -1536,9 +1549,9 @@ test.describe('step 5, the board opens once per page load', () => {
 
     await page.addInitScript(() => {
       /*
-       * A page load keeps the main thread busy, so a real press can arrive after 300ms have
-       * gone. The opening is stretched for this one test, so the press is sure to land
-       * inside it. Whether a click lands does not depend on how long the fade is.
+       * A page load keeps the main thread busy, so a real press can arrive after the opening
+       * has gone. It is stretched for this one test, so the press is sure to land inside it.
+       * Whether a click lands does not depend on how long the fade is.
        */
       const real = Element.prototype.animate;
       Element.prototype.animate = function (this: Element, frames, options) {
@@ -1696,7 +1709,7 @@ test.describe('step 6, the selection slides', () => {
     return [b.x + 300, b.y + b.height / 2] as const;
   };
 
-  test('from one row to another: 180ms, on the curve, under the words, and nothing left', async ({ page }) => {
+  test('from one row to another: 280ms, on the curve, under the words, and nothing left', async ({ page }) => {
     await openLong(page);
     const [x1, y1] = await midpoint(page, 2);
     await page.mouse.click(x1, y1);
@@ -2036,7 +2049,7 @@ test.describe('step 6, the map travels', () => {
     };
   };
 
-  test('a selection takes 450ms on the default curve, and ends on the truck', async ({ page }) => {
+  test('a selection takes 700ms on the default curve, and ends on the truck', async ({ page }) => {
     await openSpread(page);
     await selectAndLand(page, 3);
     await clearCalls(page);
@@ -2388,7 +2401,7 @@ const keysTwoFramesApart = (page: Page, keys: string[]) =>
   );
 
 test.describe('step 7, rows glide', () => {
-  test('a chip: rows go 260ms on the curve, leavers fade, nothing grows, and nothing is left', async ({ page }) => {
+  test('a chip: rows go 380ms on the curve, leavers fade, nothing grows, and nothing is left', async ({ page }) => {
     await logAnimations(page);
     await openMixed(page);
     const stop = await watchFrames(page);
@@ -3011,7 +3024,7 @@ test.describe('the press during a glide', () => {
                 !(a instanceof CSSTransition) &&
                 !(a instanceof CSSAnimation) &&
                 Boolean((a.effect as KeyframeEffect).getKeyframes()[0]?.transform) &&
-                (a.effect as KeyframeEffect).getTiming().duration === 260,
+                (a.effect as KeyframeEffect).getTiming().duration === 380,
             );
           w.__press = {
             at: any ? Number(any.currentTime) : null,
@@ -3041,7 +3054,7 @@ test.describe('the press during a glide', () => {
     page.evaluate((k) => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
     }, key);
-  test('a real mouse, at 20, 60 and 120ms into a glide, held 16 to 150ms: the row drawn under it is the row selected', async ({ page }, info) => {
+  test('a real mouse, at 20, 60, 120 and 300ms into a glide, held 16 to 150ms: the row drawn under it is the row selected', async ({ page }, info) => {
     test.setTimeout(30 * 60_000);
     await listenForPresses(page);
     await openMixed(page);
@@ -3081,7 +3094,7 @@ test.describe('the press during a glide', () => {
       { key: '1', y: last }, // Late off: back to the whole list
     ];
 
-    const TIMES = [20, 60, 120];
+    const TIMES = [20, 60, 120, 300];
     const HOLDS = [16, 40, 80, 150];
     const ROUNDS_PER_COMBO = 16;
     const lateBy = new Map<number, number>(TIMES.map((t) => [t, 0]));
