@@ -98,6 +98,9 @@ Bold values Alex chose. See "Phase 3bg" below.
 App: `2e9e75e`, Vercel deployment 7687850697, success 16:30:12 UTC. Worker: `scripts/deploy.sh` at `1a2170f` (all four gates, e2e 529/0),
 running since 18:27:42 UTC, 0 restarts, polling; rollback sha `17865af`. The one worker Sentry event at 18:28:00 is the verify step's
 deliberate second instance being refused. The first deploy attempt stopped at e2e on a test defect: see "Phase 3bh", "Deploy".
+**3bi: NOT pushed, NOT deployed** (2026-11-10): the worker switches on an inactive truck no admin switched off when it drives,
+audited, never off; the Inactive chip says "· N moving" (§12.151). **Not live until BOTH the app and the worker are deployed:** the
+chip goes with the app, the rule only with `scripts/deploy.sh` (the advisor runs it). See "Phase 3bi" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11304,6 +11307,59 @@ Between steps 1 and 3 the board shows the new ETA while the worker's two logs (`
 **Next:** the advisor verifies; Alex pushes and deploys both halves, or says otherwise.
 
 **Deploy, 2026-11-10 (the advisor, at Alex's word "you do everything").** Verified first: check 233/4291, forbidden grep empty, the advisor's own `eta:score` matched the A/B and capped/route-speed tables, the cap put back in a worktree failed the same 15 tests by name, 0 of the scorer's place names in added lines or commit messages. Alex pushed; the app went live at `2e9e75e` (deployment 7687850697, success 16:30:12 UTC). The worker ran `17865af` (active, `SENTRY_RELEASE` matching) — the rollback sha. The first `scripts/deploy.sh` stopped at gate 4, droplet untouched: e2e run `2026-11-10T16-33-39-919Z`, 527 passed, 1 failed — `new-motion.spec.ts` "the press during a glide", three misses, all in its last combo (300 ms, held 150 ms), all on the column header. **Cause, a test defect, not 3bh:** the seed stamps `feed_health` once, the board calls the feed stale 5 min later (§12.3), the test runs about that long, and the stale banner pushed the list below the `view` the test measured at its start. **Fix:** the test refreshes `feed_health` before each combo, as the worker's poll would, and after each combo asserts the banner is absent, by name. Control: aging the feed instead fails at "20ms, held 16ms: the feed went stale mid-test" (56 s); fixed: passed (3.8 min). Any other long e2e test that measures the board once is exposed the same way; none other has failed.
+
+### Phase 3bi: an inactive truck nobody switched off comes back when it drives (2026-11-10)
+
+From the advisor's brief. Alex, 2026-11-10: "drivers changed the trucks, 127 not in list, showing non active while it is active on the road." Four trucks (123, 127, 134, 147) were hidden by the day-one seed flag, which no admin had chosen; the advisor switched them on by hand the same day. This phase stops it happening again. **NOT pushed and NOT deployed. Not live until both the app and the worker are deployed.** Built on `0fc016e` (= origin), clean.
+
+| Commit | What |
+|---|---|
+| `6287423` | The worker rule (`src/worker/activate.ts`), its call in the poll, and `worker/activate.test.ts` (14 tests) |
+| `92d13ba` | `FleetRow.moving`, `isMovingFix` (`lib/moving.ts`), "· N moving" on the Inactive chip, and `console/InactiveMoving.test.tsx` (8 tests) |
+| The docs commit | §12.151, a pointer in §12.14, and this section |
+
+**The rule (Alex's decision through the advisor; do not widen it):** an inactive truck reporting a fix above `STOPPED_BELOW_MPH` (3, strictly) becomes active, with one audit row (`entity 'truck'`, actor null, `before {active:false}`, `after {active:true, source:'worker', reason:'moving', speedMph, fixAt}`), in one statement per poll (a data-modifying CTE, so the flag and its row stand or fall together). Not if an admin switched it off. Never off. `seedActiveFlags` is unchanged. No migration, no RLS change, no env.
+
+**"An admin switched it off", read one step narrower than the brief, and why.** The brief said the truck's newest `entity 'truck'` row. Production holds 14 `entity 'truck'` rows from the bulk assignment window (`source 'bulk-assignment'`, a driver change, no `active` key). Read literally, a driver assigned after an admin's switch-off would become the newest row, and the worker would undo the admin's choice. So the rule reads the newest truck row **that carries `after.active`**. This can only leave more trucks alone, never fewer. A test pins it. On a tie in `created_at` the admin's switch-off wins. **If the advisor reads the brief's line the other way, it is a one-line change before the worker deploy.**
+
+**Where it runs, and a failure.** In `pollOnce`, after `recordSuccess` and before the arrival sweep, so a truck switched on is swept, routed and logged in the same poll. `runActivation` never throws: a failure is logged at error as `truck activation failed` (string literal, `describe(error)` for the text, as the ETA log does) and the poll goes on. This departs from the brief's "rolls back with the poll's own error handling", which would have stalled the cursor for the whole fleet on a failure in a rule about a few hidden trucks. The codebase's sweeps are each caught on their own for that reason (§12.27, §12.31). What the brief asked for still holds: no flag without its row (one statement), no unhandled rejection, no silent catch.
+
+**The console.** The Inactive chip is what the default board shows; "N inactive hidden" appears only with a list on. It reads `INACTIVE 3 · 1 MOVING` (the chip's own type and ink, uppercase like its label), and its title reads `Inactive · key 7 · 1 moving`. Nothing is added at 0. "Moving": newest fix above `STOPPED_BELOW_MPH` and not stale by `staleMinutes` (45; `isStale` in `lib/status.ts` is now exported, not copied). It is computed in `applyStatus` with the server's `now`, never the browser's clock while rendering (§12.124). It counts every inactive moving truck. After the rule those are, in practice, the admin-hidden ones, but between the app deploy and the worker deploy a seed-hidden truck that moves is counted too. The phone's More sheet does not show the note.
+
+**Production, read-only, before building** (first statement `set session characteristics as transaction read only;`, `transaction_read_only` printed `on`, 2026-11-10 18:54 UTC): 8 trucks inactive (111, 125, 240, 242, 243, 244, 245, and one with no truck number). None has a truck audit row about the flag. The truck audit rows in all: 4 `advisor` (`active` true, the four switched on today) and 14 `bulk-assignment` (no `active`). Inactive with a fix above 3 mph in the last 7 days: **1, truck 125** (2 fixes, the newest 2026-11-04 22:21 UTC). Under the brief's limit of 3. The first poll after the worker deploy switches on only what moves in that poll: 125, or any of the eight, the first time it drives.
+
+**Tests.** `npm run check`: **235 files, 4313 tests** (233 and 4291 at 3bh): 14 + 8 new, no existing test changed. New, by name:
+
+- `worker/activate.test.ts`: "switches on a seed-inactive truck with a 40 mph fix, with exactly one worker audit row"; "writes no second audit row on the next poll"; "leaves a truck an admin switched off inactive at 40 mph, with no audit row"; "keeps it off when an admin switched it off again after an advisor switched it on (newest row wins)"; "switches it on when the newest row about the flag is an advisor's, after an admin's switch-off"; "keeps an admin's switch-off when a later bulk assignment wrote a truck row without the flag"; "lets the admin's switch-off win a tie on created_at"; "leaves a parked truck inactive: fixes at 0 and at exactly 3 mph"; "leaves an active truck untouched, with no audit row"; "switches on two trucks in one poll, one audit row each"; `movingFixes` ×3; and, COMMITTED in `fleet_commit` with a trigger that refuses the worker's audit insert (dropped in `finally`), "leaves no flag without its row, logs the error by name, and resolves".
+- `console/InactiveMoving.test.tsx`: `isMovingFix` ×3 (3.1 moves, exactly 3 does not, 46 min is stale, 45 is not); "applyStatus sets moving from the newest fix and the stale rule, active or not"; "shows nothing new with 0 moving"; "shows "· 1 moving" for one admin-hidden truck on the road"; "does not count a stale fix: 40 mph, 46 minutes old"; "does not count an active truck that is moving".
+
+**Mutations, in a worktree at `92d13ba`, the whole unit suite each** (a 5th failure in every run is the worktree-only `appointment.test.ts` "converts identically under TZ=UTC and TZ=Asia/Kolkata", as in 3bh):
+
+- (a) admin-choice check dropped: **4 fail**: the admin switch-off, newest row wins, the bulk-assignment row, the tie.
+- (b) `>=` on the speed: **3 fail**: the parked truck, and both `movingFixes` threshold tests.
+- (c) the flag without the audit row: **4 fail**: the 40 mph switch-on, no second row, two trucks, and the failure test.
+- (extra) the update and the insert as two statements: the failure test fails (with 5 others, the mutation also lost the admin check).
+
+**e2e, once, at `92d13ba`: run `2026-11-10T19-06-36-409Z`: 527 passed, 1 failed, 1 did not run** (48.7 min, machine awake). The failure: `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button": `toBeFocused` on the palette's first option ("Pin Truck 101") received inactive for 10 s; the screenshot shows the caret back in the palette's box and the chip at `INACTIVE 0` with no note. The one not run is the `phone-signout` project, which depends on `chromium` passing. The same test, alone, `--repeat-each=5` at `92d13ba`: **5 of 5 passed** (3.0 s each; 11.8 s in the failed run). Nothing in 3bi touches focus, the palette or the overlay, and no row in that test is inactive. The palette focuses its box once, on open, in a `setTimeout(0)`; what moved focus back later is **unverified**. Not fixed: out of scope, and no retries (Alex, 2026-10-16). **`scripts/deploy.sh` gates on a green e2e, so it may stop on this test once more.** No baseline moved; none re-saved.
+
+**Deploying it: the steps, for the advisor. NOT run.** No migration, no env. Either order works; the order below matches 3bh:
+
+1. `git push origin master`. Vercel deploys the app; the chip's note goes live. Check by full sha on the deployments API ("How to run the checks").
+2. Read what the worker runs now, for the rollback: `ssh root@209.38.36.72 'cd /opt/vin-fleet-tracker && git rev-parse HEAD && systemctl is-active vin-fleet-worker.service'`. The last recorded worker deploy is `1a2170f` (3bh).
+3. From the repo root, tree clean, on the pushed commit: `scripts/deploy.sh` (four gates, about 50 min, then stop, checkout, `npm ci --omit=dev`, start, verify). From then on the rule runs.
+4. After it: in the worker log, `poll: ingested` carries `trucksActivated`, and a switch-on logs `inactive trucks switched on: moving`. Read-only: `select entity_id, after, created_at from audit_log where entity = 'truck' and after->>'source' = 'worker'`.
+
+**Rollback.** Worker: `scripts/deploy.sh <the sha from step 2>` (`1a2170f`). App: `git revert 92d13ba`, push. A truck the worker switched on stays on after a rollback; each has its audit row, and an admin can switch it off in the edit window. That switch-off then holds against the rule.
+
+**Found wrong in the brief, or worth knowing:**
+
+1. **"Newest truck audit row" would have let a bulk assignment undo an admin's switch-off** (above). Narrowed to rows that carry `after.active`.
+2. **"Rolls back with the poll's own error handling"** would stall the cursor on a persistent failure. Caught on its own instead, as the sweeps are (above).
+3. **The first-poll set is not the 7-day set.** The rule acts on fixes the poll ingests, not on history: 125 moved last on 2026-11-04, so it flips only when it next drives.
+4. **One inactive truck has no truck number** (7 numbers for 8 trucks). It is named by `samsara_name` on the board, as before.
+5. **The day-one seed is still a one-way guess.** A truck that is idle for 24 hours at a cold start goes inactive and now comes back the first time it moves. That is the rule, and `seedActiveFlags` is unchanged by instruction. Recorded only.
+
+**Unverified:** what the droplet runs today (step 2); the e2e palette focus failure's cause; the chip's note on a real board (no inactive truck was moving at 18:54 UTC).
 
 ## Next
 

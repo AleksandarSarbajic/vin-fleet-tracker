@@ -1639,6 +1639,8 @@ Without a way to see and flip inactive trucks, **seeding is a dead end**.
 A chip plus a checkbox in the edit modal is enough. **No separate admin
 screen.** See §9.1 and §9.9.
 
+**Since §12.151 (2026-11-10):** the worker switches ON an inactive truck no admin switched off when it drives (audited), never off; the chip says how many inactive trucks are moving.
+
 ### Role treatment
 
 A `viewer` sees every Edit, Save, `Clear now` and `Reassign` control
@@ -10932,6 +10934,72 @@ fail by name.
 is 23 at 200 mi. The four distances within a trip are not independent. Every
 scored arrival is street precision. The ceiling was chosen from routes HERE
 has already returned for our lanes; a lane with a legal 80 would be clamped.
+
+## 12.151 An inactive truck nobody switched off comes back when it drives
+
+**Alex, 2026-11-10: "drivers changed the trucks, 127 not in list, showing non
+active while it is active on the road."** Phase 3bi. Narrows §12.14's "the
+feed never touches the flag" by one audited rule, in one direction.
+
+**The finding.** Four trucks had `active = false` while reporting GPS: 123
+(7,426 fixes in 24 h), 127 (7,475), 147 (3,222, with an open assignment) and
+134 (24, barely moving). They were hidden from the board, and the worker skips
+an inactive truck for routing, arrival detection and the ETA logs. None had a
+truck audit row: nobody chose to hide them. `seedActiveFlags` did, once, on
+2026-09-18, when they had no fix in 24 h. After that only an admin writes the
+flag, and the feed was barred from it so that an admin's choice is never
+undone. The same bar meant the seed's guess was never undone either. The
+advisor switched the four on by hand the same day, with an audit row each
+(`source 'advisor'`).
+
+**The rule** (`src/worker/activate.ts`, Alex through the advisor, 2026-11-10;
+do not widen it):
+
+1. An inactive truck that reports a fix faster than `STOPPED_BELOW_MPH` (3,
+   strictly above, as the arrival sweep counts) becomes active. This happens
+   in the poll that ingests the fix, in ONE statement per poll: the update and
+   its audit row are one data-modifying CTE, so a failure leaves neither. The
+   row is `entity 'truck'`, `actor_user_id` null, `before {active: false}`,
+   `after {active: true, source: 'worker', reason: 'moving', speedMph, fixAt}`
+   (the newest such fix of the poll).
+2. **Unless an admin switched it off.** That means the truck's newest `entity
+   'truck'` audit row *that carries `after.active`* has `active: false` and
+   `source 'edit-modal'` (`setTruckActive`). Rows from the advisor or the
+   worker, and no row at all, are not an admin's choice. Rows without
+   `after.active` do not count, because the bulk assignment window writes
+   `entity 'truck'` rows for driver changes (`source 'bulk-assignment'`, 14 in
+   production on 2026-11-10). Counted, a later driver change would hide an
+   admin's switch-off and the worker would undo it. On a tie in `created_at`
+   (rows from one transaction share it), the admin's switch-off wins.
+3. **Never off.** Nothing turns a truck off automatically. `seedActiveFlags`
+   is unchanged.
+4. **Said, not hidden.** The Inactive chip reads `Inactive 3 · 1 moving` when
+   inactive trucks in scope are moving: newest fix above `STOPPED_BELOW_MPH`
+   and not stale by `staleMinutes` (`isMovingFix`, `lib/moving.ts`;
+   `FleetRow.moving`, set in `applyStatus` with the server's clock). After
+   rule 1 these are, in practice, trucks an admin hid. The note uses the
+   chip's own type and ink, and shows nothing at 0. No banner, no
+   notification, no colour.
+
+**A failure costs one poll, not the feed.** The call never throws: it logs
+`truck activation failed` at error and the poll goes on. It runs after the
+heartbeat and before the arrival sweep, so a truck switched on is swept in
+the same poll. A persistent failure leaves the truck hidden, as before this
+rule, and does not stall the cursor for the fleet.
+
+**At the first deploy** (read-only, 2026-11-10 18:54 UTC): 8 trucks inactive,
+none with a truck audit row about the flag. One (125) reported a fix above
+3 mph in the last 7 days, the newest on 2026-11-04. Nobody flips at the first
+poll unless one of them moves.
+
+**Tests.** `worker/activate.test.ts`: a seed-inactive truck at 40 mph is
+switched on with one worker row, and the next poll writes no second row. An
+admin's switch-off stands at 40 mph, again after an advisor's row, after a
+bulk-assignment row, and on a tie. 0, exactly 3 and no speed stay off; an
+active truck is untouched. A failed audit insert, committed in
+`fleet_commit`, leaves the flag off, logs by name and resolves.
+`console/InactiveMoving.test.tsx`: 0 moving shows nothing, one shows
+`· 1 moving`, and a 46-minute-old fix does not count.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
