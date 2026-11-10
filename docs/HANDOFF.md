@@ -93,6 +93,10 @@ the top commit and reverts on its own. See "Phase 3bd" below.
 **Update at the end of 3bg (2026-11-06): 3bd, 3be and 3bf are pushed**: origin's master was `da89c4b`. Their deploy is not checked here.
 **3bg: NOT pushed** (2026-11-06): a press just after a cancel no longer throws or strands an animation, and the six live motions are at the
 Bold values Alex chose. See "Phase 3bg" below.
+**Update at the start of 3bh (2026-11-10): 3bg is pushed**: origin's master was `73a09ba`. Its deploy is not checked here.
+**3bh: NOT pushed, and NOT LIVE until BOTH the app and the worker are deployed** (2026-11-10): a routed ETA travels at the route's own
+speed, no longer capped at 52 mph (§12.150). The worker imports the engine (`status.ts`, `routing.ts`), so the droplet needs a redeploy.
+The exact steps are in "Phase 3bh" below and have NOT been run.
 
 | Commit | What | § |
 |---|---|---|
@@ -11164,6 +11168,139 @@ The first: on a rise's first frame the page stood 10px low, the button's top at 
 **Checks.** `npm run check`: **232 files, 4260 tests** (232 and 4257 before). The forbidden-files grep printed nothing. **Full e2e on the default config, once, after the last code write: run `2026-11-06T22-09-33-293Z` at `83a6a17`: 529 passed, 0 failed, 0 flaky** (49.0 min, up from 528 and 47.7), started 23:09:33 against a last code write at 22:37:01, the machine awake. `git diff da89c4b HEAD -- e2e/__screenshots__ package.json package-lock.json drizzle src/worker src/server src/lib/status.ts` is empty, so every baseline matched with none re-saved.
 
 **Next:** Alex pushes and looks at it live. Later batches come from separate prompts.
+
+### Phase 3bh: a routed ETA at the route's own speed, not at 52 (2026-11-10)
+
+From the advisor's brief. Alex, 2026-11-10: "when the truck is driving 300 miles non stop ETA is wrong." The engine changed, with its tests, a measurement before and after, and §12.150. **NOT pushed and NOT deployed. Not live until both the app and the worker are deployed** (steps below, not run). Built on `73a09ba` (= origin), clean.
+
+| Commit | What |
+|---|---|
+| `713a133` | `eta:score` replays the route's own speed beside `here-raw`, the two candidates, the rule, and LATE at the mark. Measurement only |
+| `4fc634e` | The engine: routed and lane-estimate ETAs at the route's speed under a 75 mph ceiling; straight-line keeps 52. Its tests |
+| `3a340fb` | Two printed lines in `eta:score`'s closing list |
+| The docs commit | §12.150, four one-line pointers in the spec, and this section |
+
+**Alex's decision, 2026-11-10: fix the driving ETA.** He was told the trade-off and accepted it. The 52 mph cap made a long lane read later, which by accident warned early about a driver who would go on to rest. After this phase LATE comes when the truck parks and can no longer make it, not hours before. **Do not reopen it, and do not win the early warning back another way:** no allowance from stops, rests, breaks or hours driven (CLAUDE.md, "Never build"; 3au), and no slower speed.
+
+**What changed in the engine** (`routeSpeed` in `lib/routing.ts`, was `cappedSpeed`; `STATUS_DEFAULTS` in `lib/status.ts`):
+
+| Basis | Before | Now |
+|---|---|---|
+| `routed`, `lane-estimate` | the route's implied speed, never above `avgSpeedMph` (52) | the route's implied speed (routed miles ÷ HERE's duration), never above `routeSpeedCeilingMph` (75) |
+| `straight-line` | 52 | 52 |
+| a route with no usable duration | 52 | 52 |
+
+Nothing else: not the AT_RISK buffer, the LATE rule, the stopped rule, the arrival sweep, route freshness or recompute. No routing call added, no migration, no env, no dependency. Two comments that had become wrong are rewritten (`cappedSpeed`'s "no loaded truck sustains", and `Projection.speedMph`'s "Never faster than the configured average"), and a third in `provider.ts` ("only ever uses it to slow the ETA down").
+
+**Why 52 was wrong** (`npm run eta:score`, run before any change, 2026-11-10 12:51 UTC): 446 no-stop segments verified by positions, 35 trips, 11 trucks: a median 68 mph (p10 60, p90 71), 423 of 446 faster than 52, 4 mph above HERE's own speed; the cap cost a median 27 min per 100 road miles. The same as the brief's figures.
+
+**The ceiling, measured before it was set.** Every row of `route_samples`, read-only (the session's first statement `set session characteristics as transaction read only;`, `transaction_read_only` printed `on`):
+
+| | n | p50 | p90 | p99 | max | above 70 | above 75 | above 80 |
+|---|---|---|---|---|---|---|---|---|
+| HERE truck (the provider now) | 3,752 | 62.5 | 68.3 | 73.3 | 76.2 | 202 | 8 (0.21%) | 0 |
+| Mapbox car (before §12.59) | 353 | 63.6 | 66.6 | 69.4 | 70.7 | 4 | 0 | 0 |
+| All | 4,105 | 62.7 | 68.2 | 73.2 | 76.2 | 206 | 8 (0.19%) | 0 |
+
+Under the brief's 1% above 75, so the build went on. The 171 routes the board held at that moment: max 73.8, none above 75. No row has a zero duration, and the stored `implied_mph` equals miles ÷ duration on every row.
+
+**The candidates and the rule** (set in the brief; not changed after the numbers). A: the route's speed under the ceiling. B: A plus one fixed number of minutes on every routed or lane-estimate ETA. B ships only if, driving only, it beats A on med|e| by 3+ min at every one of 200, 100, 50 and 25 mi and raises worst10% at none.
+
+How B was fitted, which the brief left to me: the constant is the median driving-only error of A over the rows made from a route, pooled over the four distances, rounded to a whole minute; for each row it is fitted without that row's truck. It came out at +9 min from all trucks, and 9 to 10 leaving one of the 17 trucks out.
+
+| Driving only | A median | A med\|e\| | A worst10% | B median | B med\|e\| | B worst10% | Gain | n |
+|---|---|---|---|---|---|---|---|---|
+| 200 mi | +13.6 | 17.3 | 53.5 | +4.6 | 8.3 | 48.4 | 9.0 | 23 |
+| 100 mi | +12.7 | 12.7 | 47.6 | +3.7 | 6.1 | 38.6 | 6.6 | 35 |
+| 50 mi | +6.8 | 8.6 | 27.9 | −2.3 | 6.7 | 23.2 | **1.9** | 41 |
+| 25 mi | +6.5 | 6.5 | 26.5 | −2.5 | 5.2 | 17.5 | **1.3** | 45 |
+
+| As seen | A median | A med\|e\| | A worst10% | B median | B med\|e\| | B worst10% | n |
+|---|---|---|---|---|---|---|---|
+| 200 mi | +58.4 | 60.9 | 633.4 | +49.4 | 51.9 | 624.4 | 30 |
+| 100 mi | +17.5 | 17.5 | 505.7 | +8.5 | 11.9 | 496.7 | 44 |
+| 50 mi | +7.2 | 9.2 | 420.8 | −2.1 | 9.2 | 411.8 | 50 |
+| 25 mi | +6.6 | 6.6 | 433.8 | −2.4 | 6.5 | 424.8 | 55 |
+
+**A shipped.** B gains under 3 min at 50 and 25 mi. It raised worst10% nowhere. There is no constant in the engine.
+
+**Before and after, on the same rows.** `eta:score`'s `shown` row cannot give this: on a log row it is what the worker of the day wrote, so after the change it mixes two engines. The like-for-like pair is its two new replay rows, each at the basis the board really had: `capped` (the engine as it was) and `route-speed` (the engine as it is). Error is actual minus predicted, minutes; plus means the truck arrived after the ETA.
+
+| | Capped: median | med\|e\| | worst10% | late/within/early | Route speed: median | med\|e\| | worst10% | late/within/early | n |
+|---|---|---|---|---|---|---|---|---|---|
+| Driving only, 200 mi | −37 | 37 | 54 | 1/2/20 | +14 | 17 | 54 | 20/0/3 | 23 |
+| Driving only, 100 mi | −12 | 19 | 32 | 8/5/22 | +13 | 13 | 48 | 29/5/1 | 35 |
+| Driving only, 50 mi | −4 | 7 | 28 | 11/12/18 | +7 | 9 | 28 | 27/9/5 | 41 |
+| Driving only, 25 mi | +4 | 5 | 23 | 19/24/2 | +7 | 7 | 27 | 29/16/0 | 45 |
+| As seen, 200 mi | −2 | 43 | 580 | 13/4/13 | +58 | 61 | 633 | 27/1/2 | 30 |
+| As seen, 100 mi | +1 | 24 | 484 | 21/3/20 | +18 | 18 | 506 | 36/7/1 | 44 |
+| As seen, 50 mi | −3 | 10 | 412 | 18/13/19 | +7 | 9 | 421 | 34/11/5 | 50 |
+| As seen, 25 mi | +4 | 6 | 434 | 26/27/2 | +7 | 7 | 434 | 36/19/0 | 55 |
+
+The `capped` row before the engine change is the `shown` row of the run made before any change, figure for figure. Run before and after `4fc634e`, the candidate and LATE sections are identical line for line, so the engine now says what the measurement said it would.
+
+`eta:stops`, before and after: its `current` row is `shown`, so it moved only on the rows replayed from a recompute (at 200 mi median −1 to +8, med|e| 39 to 34; at 100 mi +1 to +5). Its `here-raw` and `+ allowance` rows did not move, and its conclusion is as 3au and the re-run of 2026-11-10 left it. The other differences between the two runs are the 7-day window rolling 17 minutes.
+
+**LATE at the mark, old engine against new.** For each log row with a deadline: was the ETA after the deadline the log stored when the truck crossed the distance. On all 141 log rows the recorded ETA is the `capped` replay to the second, so the old column is what the board's engine said.
+
+| | Actually late: n | LATE old | LATE new | On time: n | LATE old | LATE new |
+|---|---|---|---|---|---|---|
+| 200 mi | 3 | 1 | 1 | 17 | 2 | 0 |
+| 100 mi | 6 | 4 | 3 | 29 | 3 | 0 |
+| 50 mi | 8 | 7 | 6 | 32 | 1 | 0 |
+| 25 mi | 9 | 7 | 6 | 35 | 0 | 0 |
+
+- **Six false LATEs gone** (on 4 trips that arrived on time).
+- **One true LATE gone, at 100, 50 and 25 mi:** truck 113, no stop, arrived 10 min after its deadline. The cap had it 22, 8 and 1 min past the deadline; the route's speed has it 6, 3 and 2 min inside. This is candidate A's early bias, below.
+- **Late under neither engine:** three trips (trucks 128, 135, 145) that parked for about 8 hours after the mark. This is the trade-off: no driving ETA sees them.
+- 3 rows at each of 100, 50 and 25 mi had a deadline already past at the mark, and are LATE under both.
+- **Cannot be replayed:** 40 rows (10, 9, 10, 11 by distance): the 38 `pos` and `rec` rows, where no deadline was stored at the time, and 2 log rows whose stop had none. Whether a row was SHOWING LATE: an override, a missing driver and a stale position outrank it and are not stored at the mark (none depends on the ETA, so they are the same under both). AT_RISK: the appointment type is not stored at the mark.
+
+**The details line changed, though the brief put UI out of scope.** The routed `Distance` line read "speed capped at 52 mph", from `STATUS_DEFAULTS.avgSpeedMph`. Left alone it would have been false on every routed row. It now reads "Routed truck road miles at the route's own speed, at most 75 mph — driving only, no rest stops", the ceiling read from the config. One string and its test; no layout, no other text.
+
+**`eta_marks.avg_speed_mph`: I did not stop, and this is why.** The brief said to stop and ask if a stored column would no longer mean what it says. My reading: it still does. It is `STATUS_DEFAULTS.avgSpeedMph` when the row was written, 52 before and after, and the worker writes it exactly as before. What changed is what that config does to a routed row, which is the phase itself. What is lost is that the 75 mph ceiling is stored nowhere, which would take a migration the brief rules out. So nothing is reinterpreted and nothing new is written: the schema comment and §12.150 say it, and a worker test pins what a routed row now holds (`speed_mph` 66.7 beside `avg_speed_mph` 52). Rows from before and after are told apart by `logged_at` against the worker's deploy. **If the advisor reads the brief's line the other way, the place to add a column is before the worker deploy,** and nothing here is pushed.
+
+**Tests.** With literal numbers. New, by name:
+
+- `routing.test.ts`: "travels a 300 mile route in 4.5 hours at 66.7 mph, not at 52"; "takes the first live route at its own 65.5 mph"; "clamps a route that implies 90 mph to the 75 mph ceiling"; "leaves a route at exactly 75 mph alone"; "still drives a straight-line estimate at 52 mph"; "drives a lane-estimate at its route's own speed".
+- `status.test.ts`: "keeps 52 mph for a straight-line estimate, and 75 as the ceiling on a route"; and under "with a route, at the route's own speed (§12.150)": "puts a 300 mile route measured at 4.5 hours 4 h 30 min after the fix, not 5 h 46"; "is ON_TIME for a 17:30 deadline that the 52 mph cap called LATE"; "is still LATE when the route's own speed cannot make it"; "drives a route that implies 90 mph at the 75 mph ceiling"; "drives a lane-estimate at its route's speed too"; "drives a route with no duration at 52, having no speed to take from it".
+- `eta-marks.test.ts`: "replays the engine as it was before §12.150 when the ceiling is the average".
+- `worker/eta-marks.test.ts`: "logs a routed row at the route's own speed, with the 52 mph average beside it".
+- `src/test/eta-candidates.test.ts`: 17, on invented rows: the constant, A and B on the same rows, the rule, LATE at the mark.
+
+Existing tests that pinned 52 on a routed ETA, each with its new value and none loosened:
+
+1. `routing.test.ts` "never travels faster than the configured average" asserted the rule this phase removes. It is now "takes the first live route at its own 65.5 mph", on the same route.
+2. `routing.test.ts` "keeps the ETA still while the clock moves" computed its own speed as `Math.min(…, 52)` and asserted a drift under 2 minutes. It now reads the projection's speed (64.414) and pins the drift at −0.09 min. Tighter.
+3. `routing.test.ts` "does not divide by a zero duration" says 52 in figures, and covers the lane-estimate too.
+4. `eta-marks.test.ts`: the routed replay is 2 h (was `128 / 52`); the lane-estimate and the advanced route 1.6 h; the straight line 1.923077 h, unchanged in value; the ZIP what-if 0.04 h. `here-raw` gained a route at 80 mph, where the board stops at 75 and it does not.
+5. `eta-basis.test.ts`: the sentence is asserted whole, and must not say "capped" or "52".
+
+**Mutation, in a worktree at `4fc634e`:** the cap put back (`Math.min(implied, speeds.avgSpeedMph)`), the whole unit suite: **15 tests fail, each naming its number.** `routing.test.ts` 6 (the 300 mi route, the first live route, the 90 mph clamp, exactly 75, the lane-estimate, the §12.40 drift), `status.test.ts` 4 (16:28, ON_TIME, the ceiling, the lane-estimate), `eta-marks.test.ts` 4 (64 mph, here-raw past the ceiling, every basis, the ZIP what-if), `worker/eta-marks.test.ts` 1. A 16th failure, `appointment.test.ts` "converts identically under TZ=UTC and TZ=Asia/Kolkata", is the worktree: its child process finds no env file there and tries port 5432. It fails the same way with the mutation taken out. The worktree is removed.
+
+**Deploying it: the steps, for Alex or the advisor. NOT run.** There is no migration and no env change. Both halves must go, in this order, because `scripts/deploy.sh` refuses a commit that is not on a remote:
+
+1. `git push origin master`. Vercel deploys the app, and from then the BOARD shows the new ETAs. Check it as "How to run the checks" says (the deployments API, by full sha).
+2. Read what the worker runs now, for the rollback: `ssh root@209.38.36.72 'cd /opt/vin-fleet-tracker && git rev-parse HEAD && systemctl is-active vin-fleet-worker.service'`. This file's last recorded worker deploy is `17865af` (3as, 2026-10-28); that it is still the running commit is unverified here.
+3. From the repo root, tree clean, on the pushed commit: `scripts/deploy.sh`. It runs its four gates (`check`, `preflight`, `db:verify`, `e2e`, about 50 min), then stops the worker, checks out the commit, `npm ci --omit=dev`, sets `SENTRY_RELEASE`, starts it, and verifies the running commit, the singleton guard and the latest poll.
+4. Rollback of the worker: `scripts/deploy.sh <the sha from step 2>`. Rollback of the app: `git revert 4fc634e`, push. (That the revert applies cleanly is checked, under "Checks".)
+
+Between steps 1 and 3 the board shows the new ETA while the worker's two logs (`eta_marks`, `eta_status_changes`) still record the capped one, for about an hour. `eta:score`'s check line counts such rows as `capped`. After step 3 a new routed row in `eta_marks` has `speed_mph` above 52 wherever its route implies more.
+
+**Found wrong, or worth knowing:**
+
+1. **The new ETA is on the early side at every distance.** With no stop at all the truck arrives a median 7 to 14 min after it (driving only: +14, +13, +7, +7). At 50 and 25 mi the driving-only med|e| is 2 min WORSE than under the cap (9 and 7 against 7 and 5), and at 100 mi the driving-only worst10% is 48 against 32. The one lost true LATE above is this. B would have taken about 9 min of it back; it missed the rule by 1.1 and 1.7 min at 50 and 25 mi. Recorded, not proposed: the rule was set in advance.
+2. **As seen, the far-out ETA is now much more optimistic,** which is the accepted trade-off in numbers: the median at 200 mi goes from −2 to +58 and at 100 mi from +1 to +18.
+3. **Four older scripts still turn miles into minutes at 52:** `route:gate` (`gate-falsify.mts`), `shadow:analyse`, `route:drift` and `route:simulate`. Each understates a mile's cost by about a fifth now (69 s at 52 mph, about 55 s at 65). Not changed: they are other phases' measurements.
+4. **`eta:score` prints "block: no real stop has ever had block precision"** two sections below a header that counts 14 block stops. Not changed.
+5. **A zero-mile route would make the engine throw** (`0 / 0`, then an invalid date). Before this phase too. No stored route has ever been under 0.64 mi (read-only, 4,106 samples and 171 held routes), so it has not happened. Not changed.
+6. **The brief's "3 marks in all" for straight-line** is right: 3 `pos` rows, all at 200 mi.
+
+**Unverified:** what the droplet runs today (step 2); the feel of it on the board, which nobody has seen; anything about a lane whose route legally implies more than 75.
+
+**Checks.** `npm run check`: **233 files, 4291 tests** (232 and 4260 before): 17 in the new file and 14 in existing ones. The forbidden-files grep printed nothing. **Full e2e on the default config, once, after the last code write: run `2026-11-10T13-14-59-316Z` at `3a340fb`: 529 passed, 0 failed, 0 flaky** (48.4 min; 529 and 49.0 at 3bg), the machine awake. No baseline moved and none was re-saved. The revert: in a worktree at `3a340fb`, `git revert --no-commit 4fc634e` applied with no conflict, typecheck was clean and 4276 of 4277 unit tests passed, the one being the same worktree-only `appointment.test.ts` case as in the mutation run.
+
+**Next:** the advisor verifies; Alex pushes and deploys both halves, or says otherwise.
 
 ## Next
 

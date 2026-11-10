@@ -2668,6 +2668,8 @@ admits its own construction.
 
 ### Duration, used and capped
 
+**Superseded by §12.150 (2026-11-10): a routed ETA is no longer capped at `avgSpeedMph`; the record below is as it was written.**
+
 `speed = min(routedMiles / routedHours, avgSpeedMph)`.
 
 The route knows road classes, which a flat 52 mph does not — truck 147's
@@ -3025,8 +3027,8 @@ anyone reconciling against a rate confirmation has already gone deliberately.
 
 ```
 Accuracy   ZIP-code centre, ±4.6 mi — Census has no record of this street
-Distance   Routed truck road miles, speed capped at 52 mph — driving only,
-           no rest stops                                  (§12.110)
+Distance   Routed truck road miles at the route's own speed, at most 75
+           mph — driving only, no rest stops    (§12.110, §12.150)
 Route      Starts 379 m from the destination point, at the nearest road
 Lane       ×1.22 measured straight-line-to-road on this lane
 Measured   22s ago
@@ -8145,6 +8147,8 @@ number, cap or engine rule changed. **Test** (`eta-basis.test.ts`): the line
 names truck miles, the configured cap and no rest stops, and does not say
 "car" or "rate confirmation".
 
+**Since §12.150 (2026-11-10) the cap is gone and the line reads "at the route's own speed, at most 75 mph".**
+
 ## 12.111 ETA accuracy, measured — `npm run eta:score`
 
 The board has never kept a past ETA: it is computed on read from the newest
@@ -8197,6 +8201,8 @@ positions):
 - The cap and the missing stops pull in opposite directions, and as seen the
   stops win.
 
+**Decided 2026-11-10, §12.150: the cap came off routed ETAs, on Alex's decision and with the trade-off this paragraph names.**
+
 **HYPOTHESIS — awaiting prediction-log data (§12.112). Not a decision.** From
 118 no-stop stretches, trucks drove a median 69 mph, well above the 52 mph
 cap. Removing the cap alone would make the error a dispatcher sees WORSE,
@@ -8233,6 +8239,7 @@ basis, projected miles, speed, the ETA, the cached route it came from
 `route_samples` from the response already received — no call or request
 change), the deadline and the config in force. Truck number and stop id only;
 no driver, no secret, ever in a row or a log line.
+(Since §12.150 `avg_speed_mph` is the straight-line speed only, and the 75 mph route ceiling is not stored.)
 
 **The key is stop + destination + distance.** A stop edited to a new
 destination is a new trip — 3 of 12 arrived stops had been (§12.111). The
@@ -10766,6 +10773,165 @@ under the press that stopped it.
 **The numbers** are `MOTION_MS`, `MOTION_SHAPE` and `EASING` in `tokens.ts`, held to this table by
 `motion-tokens.test.ts`. A strength is one token, so taking one motion back is one line there, with
 that test's number, the same number written out in `e2e/new-motion.spec.ts`, and this table.
+
+## 12.150 A routed ETA travels at the route's own speed
+
+**Alex, 2026-11-10: "when the truck is driving 300 miles non stop ETA is
+wrong."** It was. Phase 3bh. Supersedes "Duration, used and capped" in §12.31
+and settles §12.111's hypothesis.
+
+**What was wrong.** A routed or lane-estimate ETA took the route's implied
+speed (routed miles ÷ HERE's duration) and capped it at `avgSpeedMph`, 52. The
+cap was set when routing was a car profile (§12.31) and kept under HERE's truck
+profile (§12.59) on the belief that a loaded truck does not sustain the 64 mph
+HERE implies. Measured (`npm run eta:score`, 2026-11-10): between consecutive
+recomputes with positions showing no stop of 5+ min (446 segments, 35 trips,
+11 trucks), trucks covered road miles at a **median 68 mph** (p10 60, p90 71);
+423 of 446 were faster than 52, and the GPS path length agrees (68). That is
+4 mph ABOVE HERE's own speed. The cap put the ETA a median **27 min per 100
+road miles** after a driving truck, about 80 min on 300 miles. §12.111 found
+the same on 2026-10-06 (69 mph, 28 min).
+
+**The rule now** (`routeSpeed` in `lib/routing.ts`):
+
+| Basis | Speed |
+|---|---|
+| `routed`, `lane-estimate` | the route's own: routed miles ÷ HERE's duration, never above `routeSpeedCeilingMph` (75) |
+| `straight-line` | `avgSpeedMph` (52), unchanged |
+| a route with no usable duration | `avgSpeedMph` (52), unchanged |
+
+Both numbers are in `STATUS_DEFAULTS`. Nothing else in the engine changed: not
+the AT_RISK buffer, the LATE rule, the stopped rule, the arrival sweep, route
+freshness or recompute, and no routing call is added.
+
+**The ceiling is a guard on bad route data, not a view about trucks.** Every
+row of `route_samples`, read-only, 2026-11-10: 3,752 HERE routes, implied speed
+p50 62.5, p90 68.3, p99 73.3, max 76.2 mph; above 70: 202, **above 75: 8
+(0.21%)**, above 80: 0. The brief's stop line was 1% above 75. The 171 routes
+the board held at that moment: max 73.8, none above 75. 591 of the 3,752 imply
+under 52 and were never touched by the cap.
+
+**`straight-line` keeps 52** because there is no route to take a speed from,
+its miles are a straight line times 1.25, and too few such trips have arrived
+to fit anything: 3 scored marks in all.
+
+**One correction was allowed, by a rule set before any number was seen** (the
+3bh brief). A: the route's speed, nothing added. B: A plus ONE fixed number of
+minutes on every routed or lane-estimate ETA, fitted leave-one-truck-out as the
+median driving-only error of A (as 3au fitted its allowance, HANDOFF). B ships
+only if, on driving-only rows, it beats A on med|e| by 3 min or more at EVERY
+one of 200, 100, 50 and 25 mi and raises worst10% at none. The run (81
+detected arrivals, 179 scored rows, 17 trucks; the constant came out at +9 min
+from all trucks, 9 to 10 leaving one truck out):
+
+| Driving only | A median | A med\|e\| | A worst10% | B median | B med\|e\| | B worst10% | Gain | n |
+|---|---|---|---|---|---|---|---|---|
+| 200 mi | +13.6 | 17.3 | 53.5 | +4.6 | 8.3 | 48.4 | 9.0 | 23 |
+| 100 mi | +12.7 | 12.7 | 47.6 | +3.7 | 6.1 | 38.6 | 6.6 | 35 |
+| 50 mi | +6.8 | 8.6 | 27.9 | −2.3 | 6.7 | 23.2 | **1.9** | 41 |
+| 25 mi | +6.5 | 6.5 | 26.5 | −2.5 | 5.2 | 17.5 | **1.3** | 45 |
+
+| As seen | A median | A med\|e\| | A worst10% | B median | B med\|e\| | B worst10% | n |
+|---|---|---|---|---|---|---|---|
+| 200 mi | +58.4 | 60.9 | 633.4 | +49.4 | 51.9 | 624.4 | 30 |
+| 100 mi | +17.5 | 17.5 | 505.7 | +8.5 | 11.9 | 496.7 | 44 |
+| 50 mi | +7.2 | 9.2 | 420.8 | −2.1 | 9.2 | 411.8 | 50 |
+| 25 mi | +6.6 | 6.6 | 433.8 | −2.4 | 6.5 | 424.8 | 55 |
+
+B gains under 3 min at 50 and 25 mi, so **A shipped**, by the rule. B raised
+worst10% nowhere. There is no constant in the engine.
+
+**Before and after, on the same rows** (`eta:score`'s `capped` and
+`route-speed` rows: the engine as it was and as it is, each at the basis the
+board really had). Error is actual minus predicted, minutes; plus means the
+truck arrived after the ETA.
+
+| | Capped: median | med\|e\| | worst10% | late/within/early | Route speed: median | med\|e\| | worst10% | late/within/early | n |
+|---|---|---|---|---|---|---|---|---|---|
+| Driving only, 200 mi | −37 | 37 | 54 | 1/2/20 | +14 | 17 | 54 | 20/0/3 | 23 |
+| Driving only, 100 mi | −12 | 19 | 32 | 8/5/22 | +13 | 13 | 48 | 29/5/1 | 35 |
+| Driving only, 50 mi | −4 | 7 | 28 | 11/12/18 | +7 | 9 | 28 | 27/9/5 | 41 |
+| Driving only, 25 mi | +4 | 5 | 23 | 19/24/2 | +7 | 7 | 27 | 29/16/0 | 45 |
+| As seen, 200 mi | −2 | 43 | 580 | 13/4/13 | +58 | 61 | 633 | 27/1/2 | 30 |
+| As seen, 100 mi | +1 | 24 | 484 | 21/3/20 | +18 | 18 | 506 | 36/7/1 | 44 |
+| As seen, 50 mi | −3 | 10 | 412 | 18/13/19 | +7 | 9 | 421 | 34/11/5 | 50 |
+| As seen, 25 mi | +4 | 6 | 434 | 26/27/2 | +7 | 7 | 434 | 36/19/0 | 55 |
+
+So a driving truck that the board put 37 minutes late at 200 miles is now put
+14 minutes early. **The ETA is now on the early side at every distance:** with
+no stop at all, the truck arrives a median 7 to 14 minutes after it. At 50 and
+25 mi the driving-only med|e| is 2 minutes worse than under the cap (9 and 7
+against 7 and 5), and at 100 mi the driving-only worst10% is 48 against 32.
+That is candidate A as the rule chose it; B would have taken about 9 minutes
+of it back and did not pass.
+
+**The trade-off, which Alex accepted (2026-11-10). Do not reopen it.** The cap
+made a long lane read later, and by accident that warned early about a driver
+who would go on to rest: as seen at 200 mi the capped ETA's median error was
+−2. Without it the as-seen median at 200 mi is +58, because the ETA is driving
+only and most long trips include a stop. LATE now comes when the truck is
+parked and can no longer make it, not hours before. Nothing may win the early
+warning back another way: no allowance from stops, rests, breaks or hours
+driven (CLAUDE.md, "Never build"; HANDOFF 3au measured one and found no gain),
+and no slower speed.
+
+**LATE at the mark, replayed** from the log's own rows (the ETA after the
+deadline the log stored when the truck crossed the distance; 141 log rows, on
+which the recorded ETA is the capped replay to the second in 141 of 141):
+
+| | Actually late: n | LATE capped | LATE route speed | On time: n | LATE capped | LATE route speed |
+|---|---|---|---|---|---|---|
+| 200 mi | 3 | 1 | 1 | 17 | 2 | 0 |
+| 100 mi | 6 | 4 | 3 | 29 | 3 | 0 |
+| 50 mi | 8 | 7 | 6 | 32 | 1 | 0 |
+| 25 mi | 9 | 7 | 6 | 35 | 0 | 0 |
+
+The six LATEs the cap raised on trips that arrived on time are gone. One
+warning on a trip that really was late is gone too, at 100, 50 and 25 mi: a
+truck that drove without stopping and arrived 10 minutes after its deadline.
+The cap had it 22, 8 and 1 minutes past; the route's speed has it 6, 3 and 2
+minutes inside. The trips late under neither are the ones that parked for
+about 8 hours after the mark. **Cannot be replayed:** 40 rows (9 to 11 at each
+distance): the 38 `pos` and `rec` rows, where no deadline was stored at the
+time, and 2 log rows whose stop had none. Nor whether a row was showing LATE
+(an override, a missing driver and a stale position outrank it and are not
+stored at the mark; none depends on the ETA), nor AT_RISK (the appointment
+type is not stored at the mark).
+
+**The details line.** The routed `Distance` line (§12.110) said "speed capped
+at 52 mph". It now reads *"Routed truck road miles at the route's own speed, at
+most 75 mph — driving only, no rest stops"*, the ceiling read from
+`STATUS_DEFAULTS`. No other text and no layout changed.
+
+**The prediction log (§12.112) and no migration.** `eta_marks.speed_mph` is the
+speed the row's ETA was made at, as before, and is now the route's own.
+`eta_marks.avg_speed_mph` is still `STATUS_DEFAULTS.avgSpeedMph`, 52 on every
+row: before this phase it capped a routed row, since it only made a
+straight-line one. The ceiling has no column. Rows from before and after are
+told apart by `logged_at` against the worker's deploy. The status log
+(§12.126) records what the engine says, so both logs follow the worker, not
+the app: **until the worker is redeployed they record the capped figures while
+the board shows the new ones.**
+
+**Scoring it.** `eta:score` keeps two replay rows for this: `capped` (the
+ceiling set to the average, which is the old `min(implied, avgSpeedMph)`
+exactly) and `route-speed` (the engine as it is). Its `shown` row on a log row
+is whatever the worker of the day wrote. The candidates, the rule and the LATE
+replay are `scripts/eta-candidates.mts`, with their own section in the output.
+
+**Tests.** `routing.test.ts`: 300 mi in 4.5 h is 66.7 mph and 270 minutes; 90
+mph implied is 75; exactly 75 is left alone; straight-line is 52; a
+lane-estimate takes its route's speed; no duration is 52. `status.test.ts`:
+that route arrives 16:28 from an 11:58 fix (17:44 at 52), and a 17:30 deadline
+the cap called LATE is ON_TIME. `eta-marks.test.ts`, `worker/eta-marks.test.ts`,
+`eta-basis.test.ts` and `eta-candidates.test.ts` hold the replay, the logged
+row, the sentence and the rule. With the cap put back in a worktree, 15 tests
+fail by name.
+
+**What it cannot support.** 81 detected arrivals from 17 trucks; driving-only n
+is 23 at 200 mi. The four distances within a trip are not independent. Every
+scored arrival is street precision. The ceiling was chosen from routes HERE
+has already returned for our lanes; a lane with a legal 80 would be clamped.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
