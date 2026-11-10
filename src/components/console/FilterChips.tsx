@@ -150,6 +150,19 @@ export function chipCounts(rows: FleetRow[]): Record<FilterKey, number> {
   return counts;
 }
 
+/**
+ * §12.151. How many inactive trucks in scope are moving right now (`moving`,
+ * computed server-side). The worker switches on any inactive truck no admin
+ * switched off at its first moving fix, so a truck counted here is, in
+ * practice, one an admin hid that is on the road. Said on the Inactive chip,
+ * never as a banner.
+ */
+export function inactiveMoving(rows: FleetRow[]): number {
+  let n = 0;
+  for (const row of rows) if (!row.active && row.moving) n += 1;
+  return n;
+}
+
 export function FilterChips({
   rows,
   selected,
@@ -162,6 +175,7 @@ export function FilterChips({
   onReset: () => void;
 }) {
   const counts = chipCounts(rows);
+  const moving = inactiveMoving(rows);
 
   /** §8.1: 1–7 toggle, 0 resets to All; 8 is Drivers only (§12.78). */
   useEffect(() => {
@@ -214,6 +228,7 @@ export function FilterChips({
           selected={selected.has(key)}
           ink={CHIP_INK[key]}
           keyName={KEY_OF[key]}
+          note={key === 'inactive' && moving > 0 ? `${moving} moving` : undefined}
           onClick={() => onToggle(key)}
         />
       ))}
@@ -246,6 +261,7 @@ function Chip({
   ink,
   countInk,
   keyName,
+  note,
   onClick,
 }: {
   label: string;
@@ -255,6 +271,8 @@ function Chip({
   /** The count's own ink where it differs from the label's (All). */
   countInk?: string;
   keyName: string;
+  /** §12.151. After the count, in the chip's own ink: "· 1 moving". */
+  note?: string | undefined;
   onClick: () => void;
 }) {
   return (
@@ -262,7 +280,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      title={`${label} · key ${keyName}`}
+      title={note ? `${label} · key ${keyName} · ${note}` : `${label} · key ${keyName}`}
       className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] max-[1023px]:my-1 font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${ink} ${
         selected ? '!border-accent bg-surface-overlay' : 'hover:bg-row-hover'
       }`}
@@ -272,6 +290,10 @@ function Chip({
         value={count}
         className={`font-sans text-[12px] font-semibold leading-none tabular-nums ${countInk ?? ''}`}
       />
+      {note ? (
+        // The label's own type and ink: one more word of the chip, not a badge.
+        <span data-chip-note="">· {note}</span>
+      ) : null}
     </button>
   );
 }

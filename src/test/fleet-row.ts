@@ -52,6 +52,7 @@ export function fleetRow(over: FleetRowOver = {}): FleetRow {
     formattedLocation: '1 Broadway, Chicago, IL',
     cityState: 'Chicago, IL',
     active: true,
+    moving: false,
     status: 'ON_TIME',
     computed: 'ON_TIME',
     override: null,

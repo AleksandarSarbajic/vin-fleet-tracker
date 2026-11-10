@@ -578,8 +578,12 @@ function computeStatus(
   return 'ON_TIME';
 }
 
-/** No fix at all counts as stale — we have nothing to trust either way. */
-function isStale(recordedAtUtc: string | null, staleMinutes: number, now: Date): boolean {
+/**
+ * No fix at all counts as stale — we have nothing to trust either way.
+ * Exported for §12.151's "moving", which must use the same staleness as
+ * STALE_GPS rather than a second copy of it.
+ */
+export function isStale(recordedAtUtc: string | null, staleMinutes: number, now: Date): boolean {
   if (!recordedAtUtc) return true;
   return now.getTime() - new Date(recordedAtUtc).getTime() > staleMinutes * MINUTE;
 }

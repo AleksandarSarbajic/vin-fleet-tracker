@@ -8,6 +8,7 @@ import {
   type DistanceBasis,
 } from '@/lib/routing';
 import { cityState } from '@/samsara/schemas';
+import { isMovingFix } from '@/lib/moving';
 import {
   ARRIVAL_SOURCES,
   FORCED_STATUSES,
@@ -63,6 +64,13 @@ export interface FleetRow {
   cityState: string | null;
   /** Ours, not Samsara's. False rows are hidden unless the Inactive chip is on. */
   active: boolean;
+  /**
+   * §12.151. The newest fix is above `STOPPED_BELOW_MPH` and not stale by
+   * `staleMinutes`. Computed with the server's `now` in `applyStatus`, so the
+   * client never reads its own clock while rendering (§12.124). The Inactive
+   * chip counts the inactive rows with it.
+   */
+  moving: boolean;
 
   /* ------- what the engine said. `status` is what the row shows ------- */
   status: Status;
@@ -451,6 +459,7 @@ export function toFleetRow(raw: FleetQueryRow): FleetRow {
     cityState: cityState(raw.formatted_location),
     active: raw.active,
     // Filled in by applyStatus(), below. Never left to a caller to remember.
+    moving: false,
     status: 'ON_TIME',
     computed: 'ON_TIME',
     override: overrideOf(raw),
@@ -630,6 +639,7 @@ export function applyStatus(
     );
     return {
       ...row,
+      moving: isMovingFix(row.speedMph, row.recordedAt, config.staleMinutes, now),
       status: result.status,
       computed: result.computed,
       override: result.override,
