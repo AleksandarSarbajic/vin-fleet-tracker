@@ -53,6 +53,15 @@ import {
 } from '../src/lib/eta-marks.ts';
 import { haversineMiles } from '../src/lib/status.ts';
 import {
+  MIN_GAIN_MINUTES,
+  candidateErrors,
+  fitConstant,
+  judge,
+  lateAtMarks,
+  type LateCell,
+} from './eta-candidates.mjs';
+import {
+  CANDIDATE_CEILING_MPH,
   CONFIG,
   SCORE_MARKS,
   VARIANTS,
@@ -201,6 +210,11 @@ function summaryLine(label: string, rows: Scored[], v: Variant, drivingOnly: boo
 
 console.log('\n## By distance — one observation per arrival per distance\n');
 console.log('worst10% is the 90th percentile of |error|; under ten observations it is the maximum.');
+console.log(
+  `capped and route-speed (§12.150) are replays at the basis the board had: the route's speed capped at ` +
+    `${CONFIG.avgSpeedMph} mph, and the route's own speed under ${CANDIDATE_CEILING_MPH} mph. ` +
+    `On log rows "shown" is the record, so it is whichever of the two the worker ran at the time.`,
+);
 for (const mark of SCORE_MARKS) {
   const rows = scored.filter((s) => s.mark === mark);
   const count = (source: Scored['source']) => rows.filter((r) => r.source === source).length;
@@ -222,6 +236,89 @@ for (const basis of ['routed', 'lane-estimate', 'straight-line']) {
 }
 console.log(
   '  (All marks pooled, so one arrival can appear up to four times; the replayed rows above are the comparison.)',
+);
+
+/* ----------------------- §12.150: the two candidates --------------------- */
+
+const one = (x: number, w = 6) => (Number.isNaN(x) ? '—' : `${x > 0 ? '+' : ''}${x.toFixed(1)}`).padStart(w);
+const abs1 = (x: number, w = 6) => (Number.isNaN(x) ? '—' : x.toFixed(1)).padStart(w);
+
+console.log('\n## Route speed, with and without an arrival constant (§12.150)\n');
+console.log(
+  `A = route-speed. B = A plus one fixed number of minutes on every routed or lane-estimate ETA, fitted as the ` +
+    `median driving-only error of A, in whole minutes, WITHOUT the row's own truck.`,
+);
+console.log(
+  `The rule, set before these numbers were seen: B only if, driving only, it beats A on med|e| by ${MIN_GAIN_MINUTES}+ min ` +
+    `at EVERY distance and raises worst10% at none. Otherwise A.`,
+);
+const fit = fitConstant(scored);
+const folds = [...fit.without.values()].filter((c): c is number => c !== null);
+console.log(
+  `Constant: ${fit.all === null ? '—' : `${fit.all > 0 ? '+' : ''}${fit.all}`} min from all trucks (${fit.rows} rows, for reading); ` +
+    `leave-one-truck-out ${folds.length ? `${Math.min(...folds)} to ${Math.max(...folds)}` : '—'} min over ${fit.without.size} trucks.`,
+);
+const candidateLine = (label: string, errors: readonly number[]) => {
+  const sum = summarise(errors);
+  if (sum.n === 0) return `  ${label.padEnd(4)} n= 0`;
+  return (
+    `  ${label.padEnd(4)} n=${String(sum.n).padStart(2)}  median ${one(sum.medianSigned)}  med|e| ${abs1(sum.medianAbs)}  ` +
+    `worst10% ${abs1(sum.p90Abs, 7)}  late/within/early ${sum.late}/${sum.within}/${sum.early}`
+  );
+};
+const drivingByMark: { mark: number; a: number[]; b: number[] }[] = [];
+for (const mark of SCORE_MARKS) {
+  const rows = scored.filter((s) => s.mark === mark);
+  console.log(`\n${mark} mi`);
+  for (const mode of [false, true]) {
+    const e = candidateErrors(rows, fit, mode);
+    console.log(
+      `${mode ? ' driving only' : ' as the dispatcher saw it'}${e.noFit ? ` (${e.noFit} rows with no other truck to fit from, in neither)` : ''}`,
+    );
+    console.log(candidateLine('A', e.a));
+    console.log(candidateLine('B', e.b));
+    if (mode) drivingByMark.push({ mark, a: e.a, b: e.b });
+  }
+}
+const verdict = judge(drivingByMark);
+console.log('\nThe rule, driving only:');
+for (const m of verdict.marks) {
+  console.log(
+    `  ${String(m.mark).padStart(3)} mi  med|e| A ${abs1(m.a.medianAbs)}  B ${abs1(m.b.medianAbs)}  gain ${one(m.gain)} ` +
+      `(${m.gainEnough ? `${MIN_GAIN_MINUTES}+: yes` : `${MIN_GAIN_MINUTES}+: NO`})   ` +
+      `worst10% A ${abs1(m.a.p90Abs)}  B ${abs1(m.b.p90Abs)} (${m.worstRaised ? 'RAISED' : 'not raised'})`,
+  );
+}
+console.log(`  By the rule: ${verdict.shipB ? 'B' : 'A'}.`);
+
+/* -------------------------- §12.150: LATE at the mark -------------------- */
+
+console.log('\n## LATE at the mark — capped vs route speed (§12.150)\n');
+console.log(
+  `Would the LATE rule have fired when the truck crossed the distance: the ETA after the deadline. Log rows only, ` +
+    `with the deadline the log stored at the mark. "Actually late" = the detected arrival was after that deadline.`,
+);
+console.log(
+  `Not replayed: whether the row was showing LATE. An override, a truck with no driver and a stale position all ` +
+    `outrank it, none is stored at the mark, and none depends on the ETA, so they are the same under both.`,
+);
+const lateCell = (c: LateCell) =>
+  `n=${String(c.n).padStart(2)}  capped ${String(c.before).padStart(2)}  route-speed ${String(c.after).padStart(2)}  ` +
+  `(lost ${c.lost}, gained ${c.gained})`;
+for (const m of lateAtMarks(scored, SCORE_MARKS)) {
+  console.log(
+    `  ${String(m.mark).padStart(3)} mi  actually late ${lateCell(m.actuallyLate)}   |   on time ${lateCell(m.onTime)}   |   ` +
+      `deadline already past at the mark: ${m.pastAtMark}; no deadline stored at the mark, cannot be replayed: ${m.notReplayable}`,
+  );
+}
+// The replay is only as good as its agreement with what the worker wrote.
+const logRows = scored.filter((s) => s.source === 'log');
+const agrees = (s: Scored, v: Variant) => Math.abs(s.eta[v]! - s.eta.shown!) <= 1000;
+const asCapped = logRows.filter((s) => agrees(s, 'capped')).length;
+const asRouteSpeed = logRows.filter((s) => !agrees(s, 'capped') && agrees(s, 'route-speed')).length;
+console.log(
+  `  Check: of ${logRows.length} log rows, the recorded ETA is the capped replay to the second in ${asCapped}, ` +
+    `the route-speed replay in ${asRouteSpeed}, neither in ${logRows.length - asCapped - asRouteSpeed}.`,
 );
 
 console.log('\n## By precision\n');

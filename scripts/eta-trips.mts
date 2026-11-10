@@ -36,6 +36,12 @@ export const SCORE_MARKS = [200, 100, 50, 25] as const;
  */
 export const POLL_ALLOWANCE_MS = 60_000;
 export const CONFIG = { avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph, roadFactor: STATUS_DEFAULTS.roadFactor };
+/**
+ * §12.150. The sanity ceiling the `route-speed` replay runs under. The engine
+ * has no such value yet: this row is what it WOULD say, measured before it is
+ * built.
+ */
+export const CANDIDATE_CEILING_MPH = 75;
 
 /* --------------------------------- inputs -------------------------------- */
 
@@ -88,6 +94,8 @@ export interface LogRow {
   straight_miles: number;
   basis: string;
   eta_utc: Date;
+  /** The deadline as the log recorded it at the mark. Null when the stop had none. */
+  deadline_utc: Date | null;
   stopped_minutes: number | null;
   route_routed_miles: number | null;
   route_duration_s: number | null;
@@ -172,11 +180,12 @@ export async function readEtaInputs(tx: TransactionSql): Promise<EtaInputs> {
     ? []
     : (
         await tx<
-          Raw<LogRow, 'fix_recorded_at' | 'eta_utc' | 'route_computed_at'>[]
+          Raw<LogRow, 'fix_recorded_at' | 'eta_utc' | 'deadline_utc' | 'route_computed_at'>[]
         >`
         select stop_id::text as stop_id, dest_key, mark_miles,
                ${ms('fix_recorded_at')} as fix_recorded_at, fix_lat, fix_lng, straight_miles,
-               basis, ${ms('eta_utc')} as eta_utc, stopped_minutes,
+               basis, ${ms('eta_utc')} as eta_utc, ${ms('deadline_utc')} as deadline_utc,
+               stopped_minutes,
                route_routed_miles, route_duration_s, route_straight_miles, route_lane_ratio,
                ${ms('route_computed_at')} as route_computed_at
         from eta_marks
@@ -185,6 +194,7 @@ export async function readEtaInputs(tx: TransactionSql): Promise<EtaInputs> {
         ...r,
         fix_recorded_at: toDate(r.fix_recorded_at)!,
         eta_utc: toDate(r.eta_utc)!,
+        deadline_utc: toDate(r.deadline_utc),
         route_computed_at: toDate(r.route_computed_at),
       }));
   return { stops, samples, positions, log, logPresent: present };
@@ -250,7 +260,26 @@ const asRoute = (s: SampleRow, stop: StopRow): CachedRoute => ({
   computedAtUtc: s.measured_at.toISOString(),
 });
 
-export const VARIANTS = ['shown', 'routed', 'lane-estimate', 'straight-line', 'here-raw', 'zip-what-if'] as const;
+/**
+ * `capped` and `route-speed` (§12.150) are the engine before and after the 52
+ * mph cap came off a routed ETA, both at the basis the board really had:
+ *
+ *   `capped`      the route's speed, never above the configured average.
+ *   `route-speed` the route's own speed under the sanity ceiling; a
+ *                 straight-line row keeps the average.
+ *
+ * Both are replays, on `log` rows too, where `shown` is the record instead.
+ */
+export const VARIANTS = [
+  'shown',
+  'routed',
+  'lane-estimate',
+  'straight-line',
+  'here-raw',
+  'capped',
+  'route-speed',
+  'zip-what-if',
+] as const;
 export type Variant = (typeof VARIANTS)[number];
 
 export interface Scored {
@@ -263,6 +292,11 @@ export interface Scored {
   basisShown: string;
   /** Minutes stopped from the prediction to the arrival; null when unknown. */
   stopped: number | null;
+  /**
+   * The deadline stored AT the mark, which only the log has. Null on `pos` and
+   * `rec` rows: the stop's deadline today is not what it was then.
+   */
+  deadlineMs: number | null;
   /** ETA instants by variant; null where the variant cannot be built. */
   eta: Record<Variant, number | null>;
 }
@@ -270,8 +304,34 @@ export interface Scored {
 export const placeOf = (s: StopRow) => `${s.city ?? '?'}, ${s.state ?? '?'}`;
 const sameDest = (r: SampleRow, s: StopRow) => r.dest_lat === s.lat && r.dest_lng === s.lng;
 
+/**
+ * The engine as it is, and the two §12.150 replays, from one set of inputs.
+ *
+ * Until the engine carries a ceiling, the route's own speed is reached by
+ * asking it for an "average" of the ceiling: `min(implied, 75)`. A row with no
+ * route has no route speed, and keeps the real average.
+ */
+function replays(input: {
+  anchorMs: number;
+  straight: number;
+  route: CachedRoute | null;
+  fresh: boolean;
+}): { replay: Replayed; capped: number; routeSpeed: number } {
+  const replay = replayAt({ ...input, config: CONFIG });
+  const underCeiling = replayAt({
+    ...input,
+    config: { ...CONFIG, avgSpeedMph: CANDIDATE_CEILING_MPH },
+  });
+  return {
+    replay,
+    capped: replay.shown.etaMs,
+    routeSpeed:
+      replay.shown.basis === 'straight-line' ? replay.shown.etaMs : underCeiling.shown.etaMs,
+  };
+}
+
 function variantsFrom(
-  replay: Replayed,
+  { replay, capped, routeSpeed }: ReturnType<typeof replays>,
   anchorMs: number,
   zip: { straightStop: number; straightCentroid: number; ratio: number } | null,
 ): Record<Variant, number | null> {
@@ -281,6 +341,8 @@ function variantsFrom(
     'lane-estimate': replay.laneEstimate,
     'straight-line': replay.straightLine,
     'here-raw': replay.hereRaw,
+    capped,
+    'route-speed': routeSpeed,
     'zip-what-if': zip
       ? zipWhatIfEtaMs(replay.shown, anchorMs, zip.straightStop, zip.straightCentroid, zip.ratio)
       : null,
@@ -372,16 +434,15 @@ export function scoreTrips(input: {
                 computedAtUtc: logged.route_computed_at.toISOString(),
               }
             : null;
-        const replay = replayAt({
+        const replayed = replays({
           anchorMs,
           straight: logged.straight_miles,
           route,
           fresh: logged.basis === 'routed',
-          config: CONFIG,
         });
         const fix = { lat: logged.fix_lat, lng: logged.fix_lng };
         const eta = variantsFrom(
-          replay,
+          replayed,
           anchorMs,
           centroid
             ? {
@@ -402,6 +463,7 @@ export function scoreTrips(input: {
           anchorMs,
           basisShown: logged.basis,
           stopped: logged.stopped_minutes,
+          deadlineMs: logged.deadline_utc?.getTime() ?? null,
           eta,
         });
         any = true;
@@ -412,7 +474,7 @@ export function scoreTrips(input: {
         const anchorMs = hit.fix.atMs;
         const route = routeAt(anchorMs);
         const fresh = routeFreshAt(route, hit.fix, stop, new Date(anchorMs + POLL_ALLOWANCE_MS));
-        const replay = replayAt({ anchorMs, straight: hit.straight, route, fresh, config: CONFIG });
+        const replayed = replays({ anchorMs, straight: hit.straight, route, fresh });
         const stoppedTime = stoppedMinutes(track, anchorMs, arrivedMs);
         scored.push({
           stop,
@@ -421,10 +483,11 @@ export function scoreTrips(input: {
           source: 'pos',
           atMiles: hit.straight,
           anchorMs,
-          basisShown: replay.shown.basis,
+          basisShown: replayed.replay.shown.basis,
           stopped: stoppedTime.covered ? stoppedTime.minutes : null,
+          deadlineMs: null,
           eta: variantsFrom(
-            replay,
+            replayed,
             anchorMs,
             centroid
               ? {
@@ -444,12 +507,11 @@ export function scoreTrips(input: {
       const r = own.find((x) => x.straight_miles <= mark);
       if (!r) continue;
       const anchorMs = r.measured_at.getTime();
-      const replay = replayAt({
+      const replayed = replays({
         anchorMs,
         straight: r.straight_miles,
         route: asRoute(r, stop),
         fresh: true,
-        config: CONFIG,
       });
       const stoppedTime = stoppedMinutes(track, anchorMs, arrivedMs);
       scored.push({
@@ -459,10 +521,11 @@ export function scoreTrips(input: {
         source: 'rec',
         atMiles: r.straight_miles,
         anchorMs,
-        basisShown: replay.shown.basis,
+        basisShown: replayed.replay.shown.basis,
         stopped: stoppedTime.covered ? stoppedTime.minutes : null,
+        deadlineMs: null,
         // No truck position, so no distance to the centroid: no ZIP what-if.
-        eta: variantsFrom(replay, anchorMs, null),
+        eta: variantsFrom(replayed, anchorMs, null),
       });
       any = true;
     }

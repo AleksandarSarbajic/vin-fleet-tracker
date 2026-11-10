@@ -335,6 +335,8 @@ describe('the replay', () => {
       'lane-estimate': null,
       'straight-line': shown,
       'here-raw': here,
+      capped: shown,
+      'route-speed': here,
       'zip-what-if': null,
     };
     return {
@@ -346,6 +348,7 @@ describe('the replay', () => {
       anchorMs: T0,
       basisShown: 'routed',
       stopped: null,
+      deadlineMs: null,
       eta,
     };
   };
