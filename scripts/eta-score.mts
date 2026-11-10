@@ -444,6 +444,11 @@ console.log(`
 - Driving-only needs positions for the whole stretch; only trips inside the 7-day window (or a saved copy) have them.
 - "Stopped" is reported speed ≤ 3 mph for ${MIN_STOP_MINUTES}+ min. A crawl in traffic counts as driving.
 - The basis rows other than "shown" are replays: what that basis WOULD have said from the same inputs, not what anyone saw.
+- "shown" mixes two engines after §12.150: a log row is what the worker of its day wrote (capped at ${CONFIG.avgSpeedMph} mph before the
+  3bh worker, the route's speed after), and a pos or rec row is replayed by the engine as it is now. For before against after
+  on the same rows, read "capped" against "route-speed".
+- LATE at the mark is the rule's verdict on ${logRows.length} log rows. It is not what the row showed, and it says nothing about AT_RISK:
+  the appointment type is not stored at the mark.
 - No ZIP stop has an arrival time, so the ZIP figures are what-ifs on street trips. No block stop exists.
 - Segment speeds assume consecutive routes share a path; a re-route onto a different road reads as a speed change.
 `);
