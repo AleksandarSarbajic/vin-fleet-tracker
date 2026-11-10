@@ -94,9 +94,10 @@ the top commit and reverts on its own. See "Phase 3bd" below.
 **3bg: NOT pushed** (2026-11-06): a press just after a cancel no longer throws or strands an animation, and the six live motions are at the
 Bold values Alex chose. See "Phase 3bg" below.
 **Update at the start of 3bh (2026-11-10): 3bg is pushed**: origin's master was `73a09ba`. Its deploy is not checked here.
-**3bh: NOT pushed, and NOT LIVE until BOTH the app and the worker are deployed** (2026-11-10): a routed ETA travels at the route's own
-speed, no longer capped at 52 mph (§12.150). The worker imports the engine (`status.ts`, `routing.ts`), so the droplet needs a redeploy.
-The exact steps are in "Phase 3bh" below and have NOT been run.
+**3bh: LIVE, both halves** (2026-11-10): a routed ETA travels at the route's own speed, no longer capped at 52 mph (§12.150).
+App: `2e9e75e`, Vercel deployment 7687850697, success 16:30:12 UTC. Worker: `scripts/deploy.sh` at `1a2170f` (all four gates, e2e 529/0),
+running since 18:27:42 UTC, 0 restarts, polling; rollback sha `17865af`. The one worker Sentry event at 18:28:00 is the verify step's
+deliberate second instance being refused. The first deploy attempt stopped at e2e on a test defect: see "Phase 3bh", "Deploy".
 
 | Commit | What | § |
 |---|---|---|
