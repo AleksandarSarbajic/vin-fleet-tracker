@@ -11302,6 +11302,8 @@ Between steps 1 and 3 the board shows the new ETA while the worker's two logs (`
 
 **Next:** the advisor verifies; Alex pushes and deploys both halves, or says otherwise.
 
+**Deploy, 2026-11-10 (the advisor, at Alex's word "you do everything").** Verified first: check 233/4291, forbidden grep empty, the advisor's own `eta:score` matched the A/B and capped/route-speed tables, the cap put back in a worktree failed the same 15 tests by name, 0 of the scorer's place names in added lines or commit messages. Alex pushed; the app went live at `2e9e75e` (deployment 7687850697, success 16:30:12 UTC). The worker ran `17865af` (active, `SENTRY_RELEASE` matching) — the rollback sha. The first `scripts/deploy.sh` stopped at gate 4, droplet untouched: e2e run `2026-11-10T16-33-39-919Z`, 527 passed, 1 failed — `new-motion.spec.ts` "the press during a glide", three misses, all in its last combo (300 ms, held 150 ms), all on the column header. **Cause, a test defect, not 3bh:** the seed stamps `feed_health` once, the board calls the feed stale 5 min later (§12.3), the test runs about that long, and the stale banner pushed the list below the `view` the test measured at its start. **Fix:** the test refreshes `feed_health` before each combo, as the worker's poll would, and after each combo asserts the banner is absent, by name. Control: aging the feed instead fails at "20ms, held 16ms: the feed went stale mid-test" (56 s); fixed: passed (3.8 min). Any other long e2e test that measures the board once is exposed the same way; none other has failed.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
