@@ -141,10 +141,11 @@ describe('needsRecompute', () => {
 });
 
 describe('projectDistance', () => {
-  const AVG = 52;
+  /** The engine's two speeds, written out: the tests below are about these numbers. */
+  const SPEEDS = { avgSpeedMph: 52, routeSpeedCeilingMph: 75 };
 
   it('uses the routed miles when the route is fresh', () => {
-    const p = projectDistance(FAR_STRAIGHT, cached(), 1.25, AVG, true);
+    const p = projectDistance(FAR_STRAIGHT, cached(), 1.25, SPEEDS, true);
     expect(p.basis).toBe('routed');
     expect(p.miles).toBeCloseTo(481.3, 3);
   });
@@ -154,7 +155,7 @@ describe('projectDistance', () => {
    * global constant: our own lanes ranged 1.070 to 1.460.
    */
   it('estimates from the lane ratio when the route has gone stale', () => {
-    const p = projectDistance(200, cached(), 1.25, AVG, false);
+    const p = projectDistance(200, cached(), 1.25, SPEEDS, false);
     expect(p.basis).toBe('lane-estimate');
     expect(p.miles).toBeCloseTo(200 * (481.3 / FAR_STRAIGHT), 6);
     // Emphatically not the brief's constant.
@@ -162,32 +163,75 @@ describe('projectDistance', () => {
   });
 
   it('falls back to the brief’s constant only when nothing was ever routed', () => {
-    const p = projectDistance(200, null, 1.25, AVG, false);
+    const p = projectDistance(200, null, 1.25, SPEEDS, false);
     expect(p.basis).toBe('straight-line');
     expect(p.miles).toBeCloseTo(250, 6);
     expect(p.laneRatio).toBeNull();
   });
 
   /**
-   * The provider's duration is optimistic. The first live call implied
-   * 65.5 mph, which no loaded truck sustains.
+   * §12.150. Until phase 3bh a routed ETA never travelled faster than 52 mph,
+   * and this test said so. Trucks drive a median 68 between stops, so the cap
+   * put the ETA 27 minutes per 100 road miles after them.
    */
-  it('never travels faster than the configured average', () => {
-    // 481.3 mi in 7.35 h is 65.5 mph.
-    const p = projectDistance(FAR_STRAIGHT, cached(), 1.25, AVG, true);
-    expect(p.speedMph).toBe(AVG);
+  it('travels a 300 mile route in 4.5 hours at 66.7 mph, not at 52', () => {
+    const route = cached({ routedMiles: 300, routedDurationS: 16_200 });
+    const p = projectDistance(FAR_STRAIGHT, route, 1.25, SPEEDS, true);
+    expect(p.miles).toBe(300);
+    expect(p.speedMph).toBeCloseTo(66.667, 3);
+    // 270 minutes. At 52 mph it was 346.
+    expect((p.miles / p.speedMph) * 60).toBeCloseTo(270, 6);
+  });
+
+  it('takes the first live route at its own 65.5 mph', () => {
+    // 481.3 mi in 7.35 h.
+    const p = projectDistance(FAR_STRAIGHT, cached(), 1.25, SPEEDS, true);
+    expect(p.speedMph).toBeCloseTo(65.483, 3);
+  });
+
+  it('clamps a route that implies 90 mph to the 75 mph ceiling', () => {
+    // 300 mi in 3 h 20 min. No truck does that; the duration is wrong.
+    const tooFast = cached({ routedMiles: 300, routedDurationS: 12_000 });
+    const p = projectDistance(FAR_STRAIGHT, tooFast, 1.25, SPEEDS, true);
+    expect(p.speedMph).toBe(75);
+    expect((p.miles / p.speedMph) * 60).toBe(240);
+  });
+
+  it('leaves a route at exactly 75 mph alone', () => {
+    const atCeiling = cached({ routedMiles: 300, routedDurationS: 14_400 });
+    expect(projectDistance(FAR_STRAIGHT, atCeiling, 1.25, SPEEDS, true).speedMph).toBe(75);
+  });
+
+  it('still drives a straight-line estimate at 52 mph', () => {
+    // 208 straight miles x 1.25 = 260 road miles: 5 hours.
+    const p = projectDistance(208, null, 1.25, SPEEDS, false);
+    expect(p.basis).toBe('straight-line');
+    expect(p.speedMph).toBe(52);
+    expect(p.miles / p.speedMph).toBe(5);
+  });
+
+  it('drives a lane-estimate at its route’s own speed', () => {
+    // The lane was last measured at 300 mi in 4.5 h, 1.2 road miles a straight one.
+    const lane = cached({ routedMiles: 300, routedDurationS: 16_200, laneRatio: 1.2 });
+    const p = projectDistance(100, lane, 1.25, SPEEDS, false);
+    expect(p.basis).toBe('lane-estimate');
+    expect(p.miles).toBe(120);
+    expect(p.speedMph).toBeCloseTo(66.667, 3);
+    // 108 minutes. At 52 mph it was 138.
+    expect((p.miles / p.speedMph) * 60).toBeCloseTo(108, 6);
   });
 
   it('DOES take the route’s speed when the route is slower than the average', () => {
     // A lane of county roads: 60 miles in 3 hours is 20 mph.
     const slow = cached({ routedMiles: 60, routedDurationS: 3 * 3600, laneRatio: 1.4 });
-    const p = projectDistance(43, slow, 1.25, AVG, true);
+    const p = projectDistance(43, slow, 1.25, SPEEDS, true);
     expect(p.speedMph).toBeCloseTo(20, 6);
   });
 
-  it('does not divide by a zero duration', () => {
+  it('does not divide by a zero duration: such a route has no speed, so 52', () => {
     const broken = cached({ routedDurationS: 0 });
-    expect(projectDistance(FAR_STRAIGHT, broken, 1.25, AVG, true).speedMph).toBe(AVG);
+    expect(projectDistance(FAR_STRAIGHT, broken, 1.25, SPEEDS, true).speedMph).toBe(52);
+    expect(projectDistance(200, broken, 1.25, SPEEDS, false).speedMph).toBe(52);
   });
 });
 
@@ -236,9 +280,11 @@ describe('a fresh route advances with the truck (§12.40)', () => {
     computedAtUtc: '2026-09-18T17:41:00.173Z',
   };
 
+  const SPEEDS = { avgSpeedMph: 52, routeSpeedCeilingMph: 75 };
+
   it('shrinks the projected distance as the straight line shrinks', () => {
-    const atRoute = projectDistance(65.9, lane, 1.25, 52, true);
-    const tenCloser = projectDistance(55.9, lane, 1.25, 52, true);
+    const atRoute = projectDistance(65.9, lane, 1.25, SPEEDS, true);
+    const tenCloser = projectDistance(55.9, lane, 1.25, SPEEDS, true);
 
     expect(atRoute.miles).toBeCloseTo(71.84, 2);
     // Ten straight-line miles closed is ~10.9 road miles on this lane.
@@ -247,38 +293,42 @@ describe('a fresh route advances with the truck (§12.40)', () => {
   });
 
   it('keeps the ETA still while the clock moves, which is the whole point', () => {
-    const speed = Math.min(71.84 / (4015 / 3600), 52);
     // Two fixes 6 minutes apart, the truck covering 6 straight-line miles.
-    const first = projectDistance(65.9, lane, 1.25, 52, true);
-    const later = projectDistance(59.9, lane, 1.25, 52, true);
+    const first = projectDistance(65.9, lane, 1.25, SPEEDS, true);
+    const later = projectDistance(59.9, lane, 1.25, SPEEDS, true);
+    // The route's own speed since §12.150: 71.84 mi in 4015 s. It was 52.
+    expect(first.speedMph).toBeCloseTo(64.414, 3);
+    expect(later.speedMph).toBe(first.speedMph);
 
-    const etaFirst = Date.parse('2026-09-18T17:41:00Z') + (first.miles / speed) * 3_600_000;
+    const etaFirst =
+      Date.parse('2026-09-18T17:41:00Z') + (first.miles / first.speedMph) * 3_600_000;
     const etaLater =
-      Date.parse('2026-09-18T17:47:00Z') + (later.miles / speed) * 3_600_000;
+      Date.parse('2026-09-18T17:47:00Z') + (later.miles / later.speedMph) * 3_600_000;
 
-    // The truck covered 6.0 straight-line miles in 6 minutes — 65.4 mph, above
-    // the 52 mph the projection assumes, so the ETA comes IN slightly. What it
-    // must not do is slide 6 minutes later, which is what it used to do.
+    // The truck covered 6.0 straight-line miles in 6 minutes: 6.54 road miles,
+    // 65.4 mph, a shade above the route's 64.4, so the ETA comes IN by five
+    // seconds. (At the old 52 it came in by a minute and a half.) What it must
+    // not do is slide 6 minutes later, which is what it used to do.
     const driftMinutes = (etaLater - etaFirst) / 60_000;
-    expect(Math.abs(driftMinutes)).toBeLessThan(2);
+    expect(driftMinutes).toBeCloseTo(-0.09, 2);
   });
 
   it('never goes negative when the truck moves away from the stop', () => {
     // 116's demo stop was behind it; the straight line GREW.
-    const away = projectDistance(80, lane, 1.25, 52, true);
+    const away = projectDistance(80, lane, 1.25, SPEEDS, true);
     expect(away.miles).toBe(71.84);
     expect(away.miles).toBeGreaterThan(0);
   });
 
   it('cannot project past the destination', () => {
-    const arrived = projectDistance(0, lane, 1.25, 52, true);
+    const arrived = projectDistance(0, lane, 1.25, SPEEDS, true);
     expect(arrived.miles).toBeGreaterThanOrEqual(0);
   });
 
   it('leaves the lane-estimate and straight-line paths alone', () => {
     // Those already scale with the CURRENT straight line, so they never drifted.
-    expect(projectDistance(50, lane, 1.25, 52, false).miles).toBeCloseTo(50 * 1.0897, 3);
-    expect(projectDistance(50, null, 1.25, 52, false).miles).toBeCloseTo(62.5, 3);
+    expect(projectDistance(50, lane, 1.25, SPEEDS, false).miles).toBeCloseTo(50 * 1.0897, 3);
+    expect(projectDistance(50, null, 1.25, SPEEDS, false).miles).toBeCloseTo(62.5, 3);
   });
 });
 

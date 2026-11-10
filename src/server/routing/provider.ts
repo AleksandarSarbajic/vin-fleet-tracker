@@ -246,10 +246,10 @@ export class HereRouting implements EtaProvider {
       ok: true,
       miles: metresToMiles(section.summary.length),
       /**
-       * `duration`, not `baseDuration`. It includes live traffic, and
-       * `cappedSpeed` only ever uses it to slow the ETA down — a route that
-       * says 35 mph through a city is telling us something, and one that
-       * says 68 is capped at the configured average anyway (§12.31).
+       * `duration`, not `baseDuration`. It includes live traffic, and the
+       * ETA travels at the speed it implies (§12.150): a route that says 35
+       * mph through a city is telling us something, and so is one that says
+       * 68. Only the 75 mph ceiling stands above it.
        */
       durationSeconds: section.summary.duration,
       baseDurationSeconds: section.summary.baseDuration ?? null,

@@ -227,6 +227,8 @@ export async function logEtaMarks(db: Conn, now: Date = new Date()): Promise<Eta
           routeStraightMiles: route?.straightAtRouteMiles ?? null,
           routeLaneRatio: route?.laneRatio ?? null,
           routeComputedAt: route ? new Date(route.computedAtUtc) : null,
+          // The configured average, as ever. Since §12.150 only a straight-line
+          // row was made at it; `speedMph` above is the speed this row used.
           avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph,
           roadFactor: STATUS_DEFAULTS.roadFactor,
         });

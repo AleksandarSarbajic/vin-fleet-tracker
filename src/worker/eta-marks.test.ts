@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { asc, eq, sql } from 'drizzle-orm';
-import { etaMarks, loads, positions, stops } from '@/db/schema';
+import { etaMarks, loads, positions, stopRoutes, stops } from '@/db/schema';
 import { describeDb, rolledBack, rolledBackAlone } from '@/test/db';
 import { makePosition, makeRoutableLane } from '@/test/fleet';
+import { ROUTE_PROVIDER } from '@/lib/routing';
 import { haversineMiles } from '@/lib/status';
 import type { Tx } from '@/server/audit';
 import { logEtaMarks, runEtaLog, runEtaSettle, settleEtaMarks } from './eta-marks';
@@ -72,6 +73,45 @@ describeDb('the ETA prediction log', () => {
     expect(at200!.etaUtc.getTime()).toBeGreaterThan(at200!.fixRecordedAt.getTime());
     expect(at200!.truckNumber).toBe(truckNumber);
     expect(at200!.settledAt).toBeNull();
+  });
+
+  /**
+   * §12.150. What a routed row holds since the 52 mph cap came off:
+   * `speed_mph` is the speed the ETA was made at, which is now the route's
+   * own, and `avg_speed_mph` is still the configured average, which a routed
+   * row no longer reads. Before phase 3bh the two were equal on any route
+   * faster than 52.
+   */
+  it('logs a routed row at the route’s own speed, with the 52 mph average beside it', async () => {
+    const row = await rolledBack(async (tx) => {
+      const from = south(205);
+      const lane = await makeRoutableLane(tx, { from, to: STOP });
+      // Measured from exactly where the truck is: 300 road miles in 4.5 hours.
+      const straight = haversineMiles(from, STOP);
+      await tx.insert(stopRoutes).values({
+        stopId: lane.stopId,
+        routedMiles: 300,
+        routedDurationS: 16_200,
+        fromLat: from.lat,
+        fromLng: from.lng,
+        straightAtRouteMiles: straight,
+        laneRatio: 300 / straight,
+        stopLat: STOP.lat,
+        stopLng: STOP.lng,
+        snapFromM: 4,
+        snapToM: 7,
+        provider: ROUTE_PROVIDER,
+      });
+      await logEtaMarks(tx);
+      return (await marksFor(tx, lane.stopId))[0]!;
+    });
+
+    expect(row.basis).toBe('routed');
+    expect(row.projectedMiles).toBeCloseTo(300, 6);
+    expect(row.speedMph).toBeCloseTo(66.667, 3);
+    // 4 h 30 min after the fix. At the old 52 mph cap: 5 h 46 min.
+    expect((row.etaUtc.getTime() - row.fixRecordedAt.getTime()) / 60_000).toBeCloseTo(270, 3);
+    expect(row.avgSpeedMph).toBe(52);
   });
 
   it('logs nothing new when nothing has been crossed', async () => {

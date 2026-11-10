@@ -761,6 +761,7 @@ export const etaMarks = pgTable(
     straightMiles: doublePrecision('straight_miles').notNull(),
     basis: text('basis').notNull(),
     projectedMiles: doublePrecision('projected_miles').notNull(),
+    /** The speed this ETA was made at: `projected_miles` ÷ it is the time. */
     speedMph: doublePrecision('speed_mph').notNull(),
     etaUtc: timestamp('eta_utc', { withTimezone: true }).notNull(),
     routeRoutedMiles: doublePrecision('route_routed_miles'),
@@ -769,6 +770,17 @@ export const etaMarks = pgTable(
     routeStraightMiles: doublePrecision('route_straight_miles'),
     routeLaneRatio: doublePrecision('route_lane_ratio'),
     routeComputedAt: timestamp('route_computed_at', { withTimezone: true }),
+    /**
+     * `STATUS_DEFAULTS.avgSpeedMph` when the row was written: 52 on every row.
+     *
+     * What it DID changed with §12.150, and the column cannot say so. A row
+     * written by a worker from before phase 3bh was capped at it (`speed_mph`
+     * is never above it). A row written since is made at it only when the
+     * basis is `straight-line`. The ceiling a routed row now runs under (75)
+     * is not stored: there is no column for it and 3bh adds no migration.
+     * Tell the two apart by `logged_at` against the worker's deploy, never by
+     * this value.
+     */
     avgSpeedMph: doublePrecision('avg_speed_mph').notNull(),
     roadFactor: doublePrecision('road_factor').notNull(),
     loggedAt: timestamp('logged_at', { withTimezone: true }).notNull().default(now),

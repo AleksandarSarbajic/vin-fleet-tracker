@@ -35,13 +35,11 @@ export const SCORE_MARKS = [200, 100, 50, 25] as const;
  * can be a few seconds younger than the fix itself.
  */
 export const POLL_ALLOWANCE_MS = 60_000;
-export const CONFIG = { avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph, roadFactor: STATUS_DEFAULTS.roadFactor };
-/**
- * §12.150. The sanity ceiling the `route-speed` replay runs under. The engine
- * has no such value yet: this row is what it WOULD say, measured before it is
- * built.
- */
-export const CANDIDATE_CEILING_MPH = 75;
+export const CONFIG = {
+  avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph,
+  roadFactor: STATUS_DEFAULTS.roadFactor,
+  routeSpeedCeilingMph: STATUS_DEFAULTS.routeSpeedCeilingMph,
+};
 
 /* --------------------------------- inputs -------------------------------- */
 
@@ -307,9 +305,10 @@ const sameDest = (r: SampleRow, s: StopRow) => r.dest_lat === s.lat && r.dest_ln
 /**
  * The engine as it is, and the two §12.150 replays, from one set of inputs.
  *
- * Until the engine carries a ceiling, the route's own speed is reached by
- * asking it for an "average" of the ceiling: `min(implied, 75)`. A row with no
- * route has no route speed, and keeps the real average.
+ * `route-speed` IS the engine now. `capped` is the engine as it was before
+ * phase 3bh, reached by setting the ceiling to the average: the route's speed,
+ * never above 52. That is the old `min(implied, avgSpeedMph)` exactly, and the
+ * scorer checks it against the log, where the old engine's ETAs are recorded.
  */
 function replays(input: {
   anchorMs: number;
@@ -318,16 +317,11 @@ function replays(input: {
   fresh: boolean;
 }): { replay: Replayed; capped: number; routeSpeed: number } {
   const replay = replayAt({ ...input, config: CONFIG });
-  const underCeiling = replayAt({
+  const asItWas = replayAt({
     ...input,
-    config: { ...CONFIG, avgSpeedMph: CANDIDATE_CEILING_MPH },
+    config: { ...CONFIG, routeSpeedCeilingMph: CONFIG.avgSpeedMph },
   });
-  return {
-    replay,
-    capped: replay.shown.etaMs,
-    routeSpeed:
-      replay.shown.basis === 'straight-line' ? replay.shown.etaMs : underCeiling.shown.etaMs,
-  };
+  return { replay, capped: asItWas.shown.etaMs, routeSpeed: replay.shown.etaMs };
 }
 
 function variantsFrom(

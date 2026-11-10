@@ -8,7 +8,6 @@ import {
   type MilesFacts,
 } from './eta-basis';
 import type { DistanceBasis } from './routing';
-import { STATUS_DEFAULTS } from './status';
 
 /**
  * §12.33. The rule, not the wording.
@@ -89,21 +88,22 @@ describe('what moved out of the caution', () => {
   });
 
   it('keeps how the routed figure was built out of the tooltip and in the details', () => {
-    expect(etaCaution(zipRow)).not.toMatch(/truck road miles|capped/);
+    expect(etaCaution(zipRow)).not.toMatch(/truck road miles|capped|own speed/);
     expect(etaDetails(zipRow).map((d) => d.value).join(' ')).toMatch(/truck road miles/);
   });
 
   /**
    * §12.110. It said "for a car" after routing moved to HERE's truck profile
    * (§12.59), and promised a rate confirmation would read longer — true of a
-   * car route, not of this one.
+   * car route, not of this one. Then it said "capped at 52 mph" until §12.150
+   * took the cap off a routed ETA.
    */
-  it('says routed miles are truck miles at the configured cap, driving only', () => {
+  it('says routed miles are truck miles at the route’s own speed, driving only', () => {
     const distance = etaDetails(zipRow).find((d) => d.label === 'Distance')?.value ?? '';
-    expect(distance).toContain('truck road miles');
-    expect(distance).toContain(`capped at ${STATUS_DEFAULTS.avgSpeedMph} mph`);
-    expect(distance).toContain('no rest stops');
-    expect(distance).not.toMatch(/\bcar\b|rate confirmation/);
+    expect(distance).toBe(
+      "Routed truck road miles at the route's own speed, at most 75 mph — driving only, no rest stops",
+    );
+    expect(distance).not.toMatch(/\bcar\b|rate confirmation|capped|52/);
   });
 
   it('keeps the snap distance out of the tooltip and in the details', () => {

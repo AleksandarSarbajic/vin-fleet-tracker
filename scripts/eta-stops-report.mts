@@ -283,7 +283,7 @@ console.log(
     `duration: ${replay.noRoute}; rows whose fold has no data: ${replay.noFit}. The three ETAs are compared on the same rows.`,
 );
 console.log(
-  `  current = what the board showed (52 mph cap, no stops). here-raw = HERE's duration, no cap. ` +
+  `  current = what the board showed (no stops; routed ETAs capped at 52 mph until §12.150). here-raw = HERE's duration, no cap. ` +
     `+ allowance = here-raw plus the allowance at HERE's remaining duration, fitted without the trip's truck.`,
 );
 console.log(

@@ -61,7 +61,6 @@ import {
   type LateCell,
 } from './eta-candidates.mjs';
 import {
-  CANDIDATE_CEILING_MPH,
   CONFIG,
   SCORE_MARKS,
   VARIANTS,
@@ -180,7 +179,7 @@ console.log(
 );
 if (unscorable.length) console.log(`Not scorable:\n  ${unscorable.join('\n  ')}`);
 
-console.log('\n## Per arrival (shown = what the board said; here-raw = HERE duration, no 52 mph cap)\n');
+console.log('\n## Per arrival (shown = what the board said; here-raw = HERE duration, no cap or ceiling)\n');
 console.log(
   'truck  destination              arrived (UTC)      mark src   at mi  basis          stopped  shown:seen  drive | here-raw:seen  drive',
 );
@@ -212,7 +211,7 @@ console.log('\n## By distance — one observation per arrival per distance\n');
 console.log('worst10% is the 90th percentile of |error|; under ten observations it is the maximum.');
 console.log(
   `capped and route-speed (§12.150) are replays at the basis the board had: the route's speed capped at ` +
-    `${CONFIG.avgSpeedMph} mph, and the route's own speed under ${CANDIDATE_CEILING_MPH} mph. ` +
+    `${CONFIG.avgSpeedMph} mph (the engine until §12.150), and the route's own speed under ${CONFIG.routeSpeedCeilingMph} mph (the engine now). ` +
     `On log rows "shown" is the record, so it is whichever of the two the worker ran at the time.`,
 );
 for (const mark of SCORE_MARKS) {
@@ -418,11 +417,15 @@ function speedReport(label: string, set: Segment[]): void {
     );
   }
   console.log(
-    `  the cap's cost, min per 100 road mi (+ = ETA later than the truck)   median ${signed(median(capCost), 4)}  p10 ${signed(quantile(capCost, 0.1), 4)}  p90 ${signed(quantile(capCost, 0.9), 4)}`,
+    `  what a ${CONFIG.avgSpeedMph} mph cap costs, min per 100 road mi (+ = ETA later than the truck)   median ${signed(median(capCost), 4)}  p10 ${signed(quantile(capCost, 0.1), 4)}  p90 ${signed(quantile(capCost, 0.9), 4)}`,
   );
 }
 
 console.log('\n## The 52 mph test — speed covered between consecutive recomputes\n');
+console.log(
+  `${CONFIG.avgSpeedMph} mph capped every routed ETA until §12.150 and is now the straight-line speed only. ` +
+    `This section is why, and stays as the check on it.`,
+);
 console.log(
   `Road miles covered = routed(i) − routed(i+1) on the same lane; time = the routing instants. ` +
     `"No stop" means positions cover the segment and show no stationary episode of ${SEGMENT_STOP_MINUTES}+ min.`,

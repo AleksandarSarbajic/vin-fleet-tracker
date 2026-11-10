@@ -16,7 +16,11 @@ import { ROUTE_PROVIDER, type CachedRoute } from './routing';
 import { STATUS_DEFAULTS } from './status';
 
 const MIN = 60_000;
-const CONFIG = { avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph, roadFactor: STATUS_DEFAULTS.roadFactor };
+const CONFIG = {
+  avgSpeedMph: STATUS_DEFAULTS.avgSpeedMph,
+  roadFactor: STATUS_DEFAULTS.roadFactor,
+  routeSpeedCeilingMph: STATUS_DEFAULTS.routeSpeedCeilingMph,
+};
 
 describe('destinationKey', () => {
   it('counts two floating-point forms of the same point as one', () => {
@@ -168,25 +172,43 @@ describe('replayAt', () => {
   const anchorMs = Date.UTC(2026, 9, 1, 12);
   const hours = (ms: number | null) => ((ms ?? NaN) - anchorMs) / 3_600_000;
 
-  it('shows the routed figure at the cap when the route is fresh', () => {
+  it('shows the routed figure at the route’s own 64 mph when the route is fresh', () => {
     const r = replayAt({ anchorMs, straight: 100, route: route(), fresh: true, config: CONFIG });
     expect(r.shown.basis).toBe('routed');
     expect(r.shown.etaMs).toBe(r.routed);
-    expect(hours(r.routed)).toBeCloseTo(128 / 52, 6);
+    expect(r.shown.speedMph).toBe(64);
+    // 128 mi in the route's own 2 h. Under the 52 mph cap (until §12.150): 2.46 h.
+    expect(hours(r.routed)).toBeCloseTo(2, 6);
   });
 
-  it("takes HERE's own speed for the uncapped variant", () => {
+  it("takes HERE's own speed for the here-raw variant, past the ceiling", () => {
     const r = replayAt({ anchorMs, straight: 100, route: route(), fresh: true, config: CONFIG });
     expect(hours(r.hereRaw)).toBeCloseTo(2, 6);
+    // 128 mi in 1.6 h is 80 mph: the board stops at 75, here-raw does not.
+    const fast = route({ routedDurationS: 5760 });
+    const f = replayAt({ anchorMs, straight: 100, route: fast, fresh: true, config: CONFIG });
+    expect(f.shown.speedMph).toBe(75);
+    expect(hours(f.routed)).toBeCloseTo(1.706667, 6);
+    expect(hours(f.hereRaw)).toBeCloseTo(1.6, 6);
+  });
+
+  it('replays the engine as it was before §12.150 when the ceiling is the average', () => {
+    const capped = { ...CONFIG, routeSpeedCeilingMph: 52 };
+    const r = replayAt({ anchorMs, straight: 100, route: route(), fresh: true, config: capped });
+    expect(r.shown.speedMph).toBe(52);
+    expect(hours(r.routed)).toBeCloseTo(2.461538, 6);
   });
 
   it('replays every basis from the same inputs', () => {
     const r = replayAt({ anchorMs, straight: 80, route: route(), fresh: false, config: CONFIG });
     expect(r.shown.basis).toBe('lane-estimate');
-    expect(hours(r.laneEstimate)).toBeCloseTo((80 * 1.28) / 52, 6);
-    // Advanced by the 20 straight miles covered, at the lane's ratio (§12.40).
-    expect(hours(r.routed)).toBeCloseTo((128 - 20 * 1.28) / 52, 6);
-    expect(hours(r.straightLine)).toBeCloseTo((80 * 1.25) / 52, 6);
+    // 80 straight miles x 1.28 = 102.4 road miles, at the route's 64 mph.
+    expect(hours(r.laneEstimate)).toBeCloseTo(1.6, 6);
+    // Advanced by the 20 straight miles covered, at the lane's ratio (§12.40):
+    // 128 - 25.6 = 102.4 road miles, at 64 mph.
+    expect(hours(r.routed)).toBeCloseTo(1.6, 6);
+    // No route: 80 x 1.25 = 100 miles at the 52 mph average.
+    expect(hours(r.straightLine)).toBeCloseTo(1.923077, 6);
   });
 
   it('has no route-based variants without a route', () => {
@@ -198,7 +220,8 @@ describe('replayAt', () => {
   it('moves the ZIP what-if by the extra distance only', () => {
     const r = replayAt({ anchorMs, straight: 100, route: route(), fresh: true, config: CONFIG });
     const eta = zipWhatIfEtaMs(r.shown, anchorMs, 100, 102, 1.28);
-    expect((eta - r.shown.etaMs) / 3_600_000).toBeCloseTo((2 * 1.28) / 52, 6);
+    // 2 more straight miles x 1.28 = 2.56 road miles at 64 mph: 2.4 minutes.
+    expect((eta - r.shown.etaMs) / 3_600_000).toBeCloseTo(0.04, 6);
   });
 });
 

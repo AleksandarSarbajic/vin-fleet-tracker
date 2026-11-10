@@ -174,9 +174,23 @@ export function needsRecompute(
  */
 export type DistanceBasis = 'routed' | 'lane-estimate' | 'straight-line';
 
+/**
+ * The two speeds a projection can be made at (§12.150). `StatusConfig` has
+ * both, so the engine passes its config whole.
+ */
+export interface ProjectionSpeeds {
+  /** The speed of a `straight-line` ETA, which has no route to take one from. */
+  avgSpeedMph: number;
+  /** The fastest a route's own speed is believed. A guard on bad route data. */
+  routeSpeedCeilingMph: number;
+}
+
 export interface Projection {
   miles: number;
-  /** Miles per hour to travel them. Never faster than the configured average. */
+  /**
+   * Miles per hour to travel them. With a route, the route's own speed, never
+   * above the ceiling. Without one, the configured average (§12.150).
+   */
   speedMph: number;
   basis: DistanceBasis;
   /** The measured road factor used, when one was available. */
@@ -202,7 +216,7 @@ export function projectDistance(
   straightNow: number,
   cached: CachedRoute | null,
   fallbackRoadFactor: number,
-  avgSpeedMph: number,
+  speeds: ProjectionSpeeds,
   fresh: boolean,
 ): Projection {
   if (cached && fresh) {
@@ -229,7 +243,7 @@ export function projectDistance(
     const miles = Math.max(0, cached.routedMiles - Math.max(0, closedRouted));
     return {
       miles,
-      speedMph: cappedSpeed(cached, avgSpeedMph),
+      speedMph: routeSpeed(cached, speeds),
       basis: 'routed',
       laneRatio: cached.laneRatio,
     };
@@ -237,40 +251,52 @@ export function projectDistance(
   if (cached) {
     return {
       miles: straightNow * cached.laneRatio,
-      speedMph: cappedSpeed(cached, avgSpeedMph),
+      speedMph: routeSpeed(cached, speeds),
       basis: 'lane-estimate',
       laneRatio: cached.laneRatio,
     };
   }
   return {
     miles: straightNow * fallbackRoadFactor,
-    speedMph: avgSpeedMph,
+    // No route, so no speed to take from one: the configured average (§12.150).
+    speedMph: speeds.avgSpeedMph,
     basis: 'straight-line',
     laneRatio: null,
   };
 }
 
 /**
- * The provider's own implied speed, capped at the configured average.
+ * The route's own speed: routed miles ÷ the provider's duration (§12.150).
  *
- * Using the duration is better than distance ÷ 52 because the route knows
- * road classes — an interstate lane and a lane of county roads are not the
- * same hour. But it is optimistic: the first live (Mapbox car) call implied
- * 65.5 mph, and HERE's truck profile (§12.59) still implies a median 64 mph
- * across our lanes, which no loaded truck sustains. Capping keeps the useful
- * half (a route that says 35 mph through a city is telling us something) and
- * discards the optimistic half.
+ * The route knows road classes and traffic, so an interstate lane and a lane
+ * of county roads are not the same hour. A `lane-estimate` takes it too: the
+ * road is the same road, only the miles are estimated.
  *
- * NO break time is added. Hours of Service is on the brief's never-build
- * list, so this is a DRIVING-time estimate and the row says so — a long lane
- * will read optimistic against a driver who stops, and inventing a break
- * model would be worse than being clear about it.
+ * UNTIL PHASE 3bh THIS WAS CAPPED AT THE 52 MPH AVERAGE, on the belief that
+ * HERE's truck profile (a median 64 mph across our lanes, §12.59) was faster
+ * than a loaded truck drives. It is not. Between recomputes with no stop, our
+ * trucks covered road miles at a median 68 mph (p10 60, p90 71; 446 segments,
+ * 11 trucks, `eta:score` 2026-11-10), 4 mph ABOVE the route's own speed. The
+ * cap put the ETA a median 27 minutes per 100 road miles after a driving
+ * truck: about 80 minutes on 300 miles.
+ *
+ * The ceiling is a guard on bad route data, not a view about trucks: of 3,752
+ * routes measured, 8 implied more than 75 mph and the fastest 76.2.
+ *
+ * A route with no usable duration has no speed, and falls back to the average.
+ *
+ * NO break time is added, and none may be (CLAUDE.md, "Never build": nothing
+ * Hours-of-Service-derived). This is a DRIVING-time estimate and the row says
+ * so. The cap used to make a long lane read later, which by accident warned
+ * early about a driver who would go on to rest. That is gone on purpose
+ * (Alex, 2026-11-10): LATE now comes when the truck is parked and can no
+ * longer make it, not hours before. Do not win it back with a slower speed.
  */
-function cappedSpeed(cached: CachedRoute, avgSpeedMph: number): number {
+function routeSpeed(cached: CachedRoute, speeds: ProjectionSpeeds): number {
   const hours = cached.routedDurationS / 3600;
-  if (!(hours > 0)) return avgSpeedMph;
+  if (!(hours > 0)) return speeds.avgSpeedMph;
   const implied = cached.routedMiles / hours;
-  return Math.min(implied, avgSpeedMph);
+  return Math.min(implied, speeds.routeSpeedCeilingMph);
 }
 
 /* -------------------------------- the budget ----------------------------- */

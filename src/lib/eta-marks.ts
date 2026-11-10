@@ -185,7 +185,7 @@ export interface Replayed {
   routed: number | null;
   laneEstimate: number | null;
   straightLine: number;
-  /** The route's own duration, no cap. Null without a route. */
+  /** The route's own duration, no ceiling, as if fresh. Null without a route. */
   hereRaw: number | null;
 }
 
@@ -201,23 +201,33 @@ export function replayAt(input: {
   straight: number;
   route: CachedRoute | null;
   fresh: boolean;
-  config: Pick<StatusConfig, 'avgSpeedMph' | 'roadFactor'>;
+  config: Pick<StatusConfig, 'avgSpeedMph' | 'roadFactor' | 'routeSpeedCeilingMph'>;
 }): Replayed {
   const { anchorMs, straight, route, fresh, config } = input;
   const at = (p: { miles: number; speedMph: number }) =>
     anchorMs + (p.miles / p.speedMph) * 3_600_000;
-  const shown = projectDistance(straight, route, config.roadFactor, config.avgSpeedMph, fresh);
+  const shown = projectDistance(straight, route, config.roadFactor, config, fresh);
   return {
     shown: { etaMs: at(shown), miles: shown.miles, speedMph: shown.speedMph, basis: shown.basis },
     routed: route
-      ? at(projectDistance(straight, route, config.roadFactor, config.avgSpeedMph, true))
+      ? at(projectDistance(straight, route, config.roadFactor, config, true))
       : null,
     laneEstimate: route
-      ? at(projectDistance(straight, route, config.roadFactor, config.avgSpeedMph, false))
+      ? at(projectDistance(straight, route, config.roadFactor, config, false))
       : null,
-    straightLine: at(projectDistance(straight, null, config.roadFactor, config.avgSpeedMph, false)),
-    // An infinite average leaves `cappedSpeed` with the route's own speed.
-    hereRaw: route ? at(projectDistance(straight, route, config.roadFactor, Infinity, true)) : null,
+    straightLine: at(projectDistance(straight, null, config.roadFactor, config, false)),
+    // An infinite ceiling leaves the route's own speed, whatever it is.
+    hereRaw: route
+      ? at(
+          projectDistance(
+            straight,
+            route,
+            config.roadFactor,
+            { ...config, routeSpeedCeilingMph: Infinity },
+            true,
+          ),
+        )
+      : null,
   };
 }
 

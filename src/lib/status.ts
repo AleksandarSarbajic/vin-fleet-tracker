@@ -124,7 +124,14 @@ export interface StatusConfig {
   staleMinutes: number;
   /** §12.3, fleet-wide. Drives the §5.9 colour withdrawal, not a status. */
   feedStaleMinutes: number;
+  /**
+   * The speed of a `straight-line` ETA only (§12.150). A routed or
+   * lane-estimate ETA travels at its route's own speed and does not read this,
+   * unless the route has no usable duration.
+   */
   avgSpeedMph: number;
+  /** §12.150. The fastest a route's own speed is believed. Not a cap on trucks. */
+  routeSpeedCeilingMph: number;
   /** Straight line × this ≈ road miles. */
   roadFactor: number;
   /** TOMORROW is measured in THIS zone. Not the stop's, not the browser's. */
@@ -135,7 +142,20 @@ export const STATUS_DEFAULTS = {
   riskBufferMinutes: 45,
   staleMinutes: 45,
   feedStaleMinutes: 5,
+  /**
+   * The brief's 52, kept for `straight-line` alone (§12.150). There is no
+   * route to take a speed from, the miles are a straight line times 1.25, and
+   * too few such trips have arrived to fit anything better: 3 scored marks in
+   * all (`eta:score`, 2026-11-10). It is NOT a cap on a routed ETA any more.
+   */
   avgSpeedMph: 52,
+  /**
+   * §12.150. Of 3,752 routes HERE has measured for us, the implied speed was
+   * p50 62.5, p99 73.3, max 76.2 mph; 8 were above 75 and none above 80
+   * (`route_samples`, 2026-11-10). So 75 leaves real routes alone and stops a
+   * broken duration from promising an arrival nobody can make.
+   */
+  routeSpeedCeilingMph: 75,
   roadFactor: 1.25,
 } as const satisfies Omit<StatusConfig, 'dispatchTz'>;
 
@@ -389,13 +409,7 @@ export function project(
    * no single constant improves it. A route, or a ratio measured from an
    * earlier route on the same lane, beats it every time.
    */
-  const projection = projectDistance(
-    straight,
-    stop.route,
-    config.roadFactor,
-    config.avgSpeedMph,
-    stop.routeFresh,
-  );
+  const projection = projectDistance(straight, stop.route, config.roadFactor, config, stop.routeFresh);
 
   const hours = projection.miles / projection.speedMph;
   const from = new Date(facts.recordedAtUtc).getTime();

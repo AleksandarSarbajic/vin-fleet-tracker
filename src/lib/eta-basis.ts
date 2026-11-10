@@ -236,10 +236,11 @@ export function etaDetails(row: BasisFacts, now: Date = new Date()): BasisDetail
         label: 'Distance',
         /**
          * §12.110. This said "for a car" for two weeks after §12.59 moved
-         * routing to HERE's truck profile. The cap is read from the config,
-         * not written here, so the sentence cannot outlive the number.
+         * routing to HERE's truck profile, and "capped at 52 mph" until
+         * §12.150 took the cap off. The ceiling is read from the config, not
+         * written here, so the sentence cannot outlive the number.
          */
-        value: `Routed truck road miles, speed capped at ${STATUS_DEFAULTS.avgSpeedMph} mph — driving only, no rest stops`,
+        value: `Routed truck road miles at the route's own speed, at most ${STATUS_DEFAULTS.routeSpeedCeilingMph} mph — driving only, no rest stops`,
       });
       break;
     case 'lane-estimate':

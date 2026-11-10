@@ -13,6 +13,7 @@ import {
   type StopFacts,
   type TruckFacts,
 } from './status';
+import { ROUTE_PROVIDER, type CachedRoute } from './routing';
 import { eveningBefore, fallBack } from '@/test/dst';
 import { fcfsEndDate } from './appointment';
 import { wallTimeInstant } from './format';
@@ -533,6 +534,72 @@ describe('the projection itself', () => {
     const from = new Date(facts.recordedAtUtc!).getTime();
     const hours = (new Date(eta).getTime() - from) / 3_600_000;
     expect(hours).toBeCloseTo((miles * config.roadFactor) / config.avgSpeedMph, 6);
+  });
+
+  it('keeps 52 mph for a straight-line estimate, and 75 as the ceiling on a route', () => {
+    expect(STATUS_DEFAULTS.avgSpeedMph).toBe(52);
+    expect(STATUS_DEFAULTS.routeSpeedCeilingMph).toBe(75);
+  });
+
+  /**
+   * §12.150. Until phase 3bh a routed ETA was capped at 52 mph. Our trucks
+   * drive a median 68 between stops, so on 300 miles the board read about 80
+   * minutes after the truck. The fix is at 11:58 UTC in every case below.
+   */
+  describe('with a route, at the route’s own speed (§12.150)', () => {
+    /** Measured from exactly where the truck is, so nothing has been covered yet. */
+    const straight = haversineMiles(NEARBY, STOP_COORDS);
+    const lane = (routedDurationS: number): CachedRoute => ({
+      provider: ROUTE_PROVIDER,
+      routedMiles: 300,
+      routedDurationS,
+      fromLat: NEARBY.lat,
+      fromLng: NEARBY.lng,
+      straightAtRouteMiles: straight,
+      laneRatio: 300 / straight,
+      stopLat: STOP_COORDS.lat,
+      stopLng: STOP_COORDS.lng,
+      snapFromM: 4,
+      snapToM: 7,
+      computedAtUtc: at(-2),
+    });
+    const routed = (routedDurationS: number, over: Partial<StopFacts> = {}) =>
+      truck({ stop: stop({ route: lane(routedDurationS), routeFresh: true, ...over }) });
+
+    it('puts a 300 mile route measured at 4.5 hours 4 h 30 min after the fix, not 5 h 46', () => {
+      // 66.7 mph. At 52 mph this read 17:44:09.
+      expect(projectEta(routed(16_200), config)).toBe('2026-09-18T16:28:00.000Z');
+    });
+
+    it('is ON_TIME for a 17:30 deadline that the 52 mph cap called LATE', () => {
+      // 16:28 against 17:30 is 62 minutes clear. The cap's 17:44 was past it.
+      const facts = routed(16_200, { apptStartUtc: '2026-09-18T17:30:00.000Z' });
+      expect(evaluate(facts, config, NOW).status).toBe('ON_TIME');
+    });
+
+    it('is still LATE when the route’s own speed cannot make it', () => {
+      const facts = routed(16_200, { apptStartUtc: '2026-09-18T16:27:00.000Z' });
+      expect(evaluate(facts, config, NOW).status).toBe('LATE');
+    });
+
+    it('drives a route that implies 90 mph at the 75 mph ceiling', () => {
+      // 300 mi in 3 h 20 min would arrive 15:18. At 75 mph: 4 h, 15:58.
+      expect(projectEta(routed(12_000), config)).toBe('2026-09-18T15:58:00.000Z');
+    });
+
+    it('drives a lane-estimate at its route’s speed too', () => {
+      // Not fresh: the miles are the straight line times the lane's ratio,
+      // which here is 300 again, and the speed is still the route's 66.7.
+      const facts = truck({ stop: stop({ route: lane(16_200), routeFresh: false }) });
+      const result = evaluate(facts, config, NOW);
+      expect(result.distanceBasis).toBe('lane-estimate');
+      expect(result.etaUtc).toBe('2026-09-18T16:28:00.000Z');
+    });
+
+    it('drives a route with no duration at 52, having no speed to take from it', () => {
+      // 300 mi at 52 mph: 5 h 46 min 9 s.
+      expect(projectEta(routed(0), config)).toBe('2026-09-18T17:44:09.230Z');
+    });
   });
 
   it('is null when either end has no coordinates', () => {
