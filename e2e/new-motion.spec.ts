@@ -3106,9 +3106,26 @@ test.describe('the press during a glide', () => {
     const lateBy = new Map<number, number>(TIMES.map((t) => [t, 0]));
     const tally: Tally[] = [];
     let step = 0;
+    /*
+     * The worker keeps the feed fresh by polling every 30 s; in e2e nothing does, and the
+     * board calls the feed stale 5 min after the seed (§12.3). This test runs about that
+     * long, so it does the worker's part itself: once the banner shows, the list sits lower
+     * than `view` says, and the last presses land on the column header (deploy run
+     * 2026-11-10T16-33-39-919Z, all three misses at 300ms, held 150ms).
+     */
+    const keepFeedFresh = async () => {
+      const sql = connect();
+      try {
+        await sql`update feed_health set newest_position_at = now(), last_success_at = now() where id = 1`;
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+    };
+    const feedBanner = page.getByText('Position feed unreachable');
 
     for (const time of TIMES) {
       for (const hold of HOLDS) {
+        await keepFeedFresh();
         let done = 0;
         let tries = 0;
         while (done < ROUNDS_PER_COMBO && tries < ROUNDS_PER_COMBO * 4) {
@@ -3149,6 +3166,8 @@ test.describe('the press during a glide', () => {
           }
         }
         expect(done, `${time}ms, held ${hold}ms: presses that landed on time`).toBe(ROUNDS_PER_COMBO);
+        // The control: a press aimed at a board the stale banner pushed down tests nothing.
+        await expect(feedBanner, `${time}ms, held ${hold}ms: the feed went stale mid-test`).toHaveCount(0);
       }
     }
 
