@@ -12,6 +12,7 @@ import { sweepArrivals } from './arrival';
 import { sweepRouting, type RouteOutcome, type RoutingSweep } from './routing';
 import { runEtaLog, runEtaSettle } from './eta-marks';
 import { runStatusLog } from './status-changes';
+import { runActivation } from './activate';
 import { readBudgetDay } from './budget-day';
 import { budgetStatus, type BudgetBand, type BudgetStatus } from '@/lib/routing';
 import { HereRouting } from '@/server/routing/provider';
@@ -481,6 +482,14 @@ async function pollOnce(
   await recordSuccess(db, page.endCursor, result.newestRecordedAt, gapSeconds);
 
   /**
+   * §12.151. An inactive truck no admin switched off, reporting a moving fix
+   * in this poll, is switched on with its audit row, in one statement. Before
+   * the sweeps, so arrivals, routing and the ETA logs see it this poll. Never
+   * throws: a failure is logged as an error and costs one poll, not the cursor.
+   */
+  const trucksActivated = await runActivation(db, logger, pending, idMap);
+
+  /**
    * §12.27. AFTER the positions land, because it reads them back — running it
    * first would evaluate this poll against last poll's track.
    *
@@ -554,6 +563,7 @@ async function pollOnce(
     routeCallCeiling: routing.budget.ceiling,
     readings: pending.length,
     inserted: result.inserted,
+    trucksActivated,
     duplicates: pending.length - result.inserted - result.skippedUnknownTruck,
     skippedUnknownTruck: result.skippedUnknownTruck,
     newestPositionAt: result.newestRecordedAt?.toISOString() ?? null,

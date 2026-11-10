@@ -79,7 +79,9 @@ export function isActiveByRecency(newestFix: Date | null, now: Date): boolean {
  *
  * `active` is NOT set here — it is ours, seeded once from position recency
  * and flipped by an admin thereafter. Letting the feed touch it would undo
- * that decision on the next poll.
+ * that decision on the next poll. The one exception is narrow and audited:
+ * an inactive truck NO admin switched off is switched on when it reports a
+ * moving fix (`runActivation`, ./activate.ts, §12.151). Never off.
  */
 export async function upsertTrucks(
   db: Db,
