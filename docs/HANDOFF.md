@@ -98,9 +98,9 @@ Bold values Alex chose. See "Phase 3bg" below.
 App: `2e9e75e`, Vercel deployment 7687850697, success 16:30:12 UTC. Worker: `scripts/deploy.sh` at `1a2170f` (all four gates, e2e 529/0),
 running since 18:27:42 UTC, 0 restarts, polling; rollback sha `17865af`. The one worker Sentry event at 18:28:00 is the verify step's
 deliberate second instance being refused. The first deploy attempt stopped at e2e on a test defect: see "Phase 3bh", "Deploy".
-**3bi: NOT pushed, NOT deployed** (2026-11-10): the worker switches on an inactive truck no admin switched off when it drives,
-audited, never off; the Inactive chip says "· N moving" (§12.151). **Not live until BOTH the app and the worker are deployed:** the
-chip goes with the app, the rule only with `scripts/deploy.sh` (the advisor runs it). See "Phase 3bi" below.
+**3bi: LIVE, both halves** (2026-11-11): the worker switches on an inactive truck no admin switched off when it drives,
+audited, never off; the Inactive chip says "· N moving" (§12.151). App `5eff9d7` (deployment 7711026596, success 13:13:29 UTC).
+Worker `5eff9d7` since 14:01:39 UTC, 0 restarts, polling, `trucksActivated` in the poll line; rollback sha `1a2170f`. See "Phase 3bi", "Deploy".
 
 | Commit | What | § |
 |---|---|---|
@@ -11360,6 +11360,8 @@ From the advisor's brief. Alex, 2026-11-10: "drivers changed the trucks, 127 not
 5. **The day-one seed is still a one-way guess.** A truck that is idle for 24 hours at a cold start goes inactive and now comes back the first time it moves. That is the rule, and `seedActiveFlags` is unchanged by instruction. Recorded only.
 
 **Unverified:** what the droplet runs today (step 2); the e2e palette focus failure's cause; the chip's note on a real board (no inactive truck was moving at 18:54 UTC).
+
+**Deploy, 2026-11-11 (the advisor).** Verified first: `npm run check` 235 files / 4313 tests, forbidden grep empty. Pushed `5eff9d7` (origin was `0fc016e`); Vercel deployment 7711026596, success. The droplet ran `1a2170f` before (step 2 answered). `scripts/deploy.sh` passed all four gates in one attempt (e2e 529 passed, 48.3 min, the palette test among them), then started `5eff9d7` at 14:01:39 UTC: 0 restarts, the singleton guard refused the verify step's second instance, first polls carry `trucksActivated: 0`, 0 errors. No truck switched on yet: none of the eight inactive trucks was moving at deploy. The palette failure's cause stays unverified; it did not recur.
 
 ## Next
 
