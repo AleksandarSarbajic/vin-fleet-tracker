@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { slideIn } from '@/lib/appear-motion';
 import { Overlay, useOverlay } from './OverlayLayer';
 import { TOUR, markTourSeen, shouldAutoOpen, stepKeys } from '@/lib/tour';
 import { isPhoneNow } from '@/lib/phone';
@@ -56,6 +58,27 @@ export function OnboardingTour() {
     markTourSeen();
   }, [isOpen]);
 
+  /**
+   * §12.152. A step comes in from the side it is on: from the right on Next, from the
+   * left on Back, keyed by the step. Only those two buttons say which way, so the reset to
+   * the first step as the tour opens plays nothing; the window's own opening is its
+   * motion then. Steps are not all one height, and the panel takes the new step's height
+   * at once: only the words move, inside a box that clips them sideways while they do.
+   */
+  const going = useRef<1 | -1 | 0>(0);
+  const clipBox = useRef<HTMLDivElement | null>(null);
+  const stepBox = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const by = going.current;
+    going.current = 0;
+    if (by === 0 || !stepBox.current || !clipBox.current) return;
+    slideIn(stepBox.current, clipBox.current, MOTION_MS.tourStep, by * MOTION_SHAPE.tourStepPx);
+  });
+  const go = (by: 1 | -1) => {
+    going.current = by;
+    setIndex((i) => i + by);
+  };
+
   const step = TOUR[index];
   if (!step) return null;
   const last = index === TOUR.length - 1;
@@ -63,30 +86,34 @@ export function OnboardingTour() {
   return (
     <Overlay name="tour" label="What this console does" width="w-[520px]">
       <div className="p-5">
-        <p className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
-          {index + 1} of {TOUR.length}
-        </p>
-        <h2 className="mt-1 font-cond text-[19px] font-semibold uppercase leading-[1.15] tracking-[.05em] text-text">
-          {step.title}
-        </h2>
-        <p className="mt-2 text-body leading-[1.55] text-text-secondary">{step.body}</p>
+        <div ref={clipBox}>
+          <div key={step.id} ref={stepBox} data-tour-step={step.id}>
+            <p className="font-cond text-micro uppercase tracking-[.11em] text-text-mutedOnOverlay">
+              {index + 1} of {TOUR.length}
+            </p>
+            <h2 className="mt-1 font-cond text-[19px] font-semibold uppercase leading-[1.15] tracking-[.05em] text-text">
+              {step.title}
+            </h2>
+            <p className="mt-2 text-body leading-[1.55] text-text-secondary">{step.body}</p>
 
-        {stepKeys(step).length > 0 ? (
-          <p className="mt-3 flex flex-wrap items-center gap-2">
-            {stepKeys(step).map((keys) => (
-              <span key={keys.join('')} className="flex items-center gap-[2px]">
-                {keys.map((key) => (
-                  <kbd
-                    key={key}
-                    className="border border-line-hair bg-surface-base px-1 font-mono text-[11px] leading-[1.6] text-text"
-                  >
-                    {key}
-                  </kbd>
+            {stepKeys(step).length > 0 ? (
+              <p className="mt-3 flex flex-wrap items-center gap-2">
+                {stepKeys(step).map((keys) => (
+                  <span key={keys.join('')} className="flex items-center gap-[2px]">
+                    {keys.map((key) => (
+                      <kbd
+                        key={key}
+                        className="border border-line-hair bg-surface-base px-1 font-mono text-[11px] leading-[1.6] text-text"
+                      >
+                        {key}
+                      </kbd>
+                    ))}
+                  </span>
                 ))}
-              </span>
-            ))}
-          </p>
-        ) : null}
+              </p>
+            ) : null}
+          </div>
+        </div>
 
         {/* Progress as dots, because six steps is a number you can see. */}
         <div className="mt-5 flex items-center gap-4">
@@ -109,7 +136,7 @@ export function OnboardingTour() {
           {index > 0 ? (
             <button
               type="button"
-              onClick={() => setIndex((i) => i - 1)}
+              onClick={() => go(-1)}
               className="border border-line-hair px-3 py-1 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
             >
               Back
@@ -117,7 +144,7 @@ export function OnboardingTour() {
           ) : null}
           <button
             type="button"
-            onClick={() => (last ? show(null) : setIndex((i) => i + 1))}
+            onClick={() => (last ? show(null) : go(1))}
             className="bg-accent px-3 py-1 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-inverse hover:bg-accent-hover"
           >
             {last ? 'Done' : 'Next'}

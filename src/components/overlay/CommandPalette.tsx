@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isWindowOpen } from '@/lib/keymap';
+import { MOTION_MS } from '@/design/tokens';
+import { fadeIn } from '@/lib/appear-motion';
 import { Overlay, useOverlay } from './OverlayLayer';
 import {
   ACTION,
@@ -71,6 +73,24 @@ export function CommandPalette<T extends PaletteTruck>({
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const field = useRef<HTMLInputElement>(null);
+
+  /**
+   * §12.152. The results fade in on every key: opacity only and short, because it starts
+   * again on each one, and no row moves. `typed` counts the box's own changes and nothing
+   * else, so the opening's reset to an empty box, the cursor and a poll's new trucks fade
+   * nothing.
+   */
+  const [typed, setTyped] = useState(0);
+  const results = useRef<HTMLDivElement | null>(null);
+  const fading = useRef<Animation | null>(null);
+  const typedBefore = useRef(typed);
+  useLayoutEffect(() => {
+    const before = typedBefore.current;
+    typedBefore.current = typed;
+    if (before === typed || !results.current) return;
+    fading.current?.cancel();
+    fading.current = fadeIn(results.current, MOTION_MS.palResultsFade);
+  });
   const listId = 'command-palette-list';
 
   /**
@@ -172,6 +192,7 @@ export function CommandPalette<T extends PaletteTruck>({
             onChange={(event) => {
               setQuery(event.target.value);
               setCursor(0);
+              setTyped((n) => n + 1);
             }}
             role="combobox"
             aria-expanded="true"
@@ -185,6 +206,7 @@ export function CommandPalette<T extends PaletteTruck>({
         </div>
 
         <div
+          ref={results}
           id={listId}
           role="listbox"
           aria-label="Commands"
