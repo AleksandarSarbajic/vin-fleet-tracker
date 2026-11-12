@@ -11016,7 +11016,7 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
-| **chip** | A filter chip's chosen look: accent edge and overlay ground | **0, taken back** (Bold 270ms) | An overlay inside the chip grows in from 75%, or shrinks away to it | `EASING.dialog` | A person: the chip, its key, Clear filters, a view | A poll; the page's first paint |
+| **chip** | A filter chip's chosen look: accent edge and overlay ground | 270ms | An overlay inside the chip grows in from 75%, or shrinks away to it | `EASING.dialog` | A person: the chip, its key, Clear filters, a view | A poll; the page's first paint |
 | **check** | A row's checkbox | 270ms | The box pops from 50% | `EASING.dialog` | The pressed box's own change | The other boxes of a shift range; X; a poll |
 | **empty** | The empty list | 270ms | Drops 14px and fades in | `EASING.dialog` | The list empties in the commit where the chips, the list or the search changed | A poll that empties a filtered list; the first paint |
 | **feedBanner** | The feed banner | 270ms | Opacity only | linear | A poll that finds the feed stale, on a board already drawn | The first paint; another stale poll |
@@ -11031,20 +11031,26 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
 | **palResults** | The palette's results | 180ms | Opacity only, again on every key | linear | Each change of the box | Opening it, the arrow keys, a poll's new trucks |
 | **tour** | A tour step's words | 270ms | 28px in from the side it is on, and fades in | `EASING.dialog` | Next, from the right; Back, from the left | Opening, and its reset to the first step; a re-render |
 
-**chip is taken back; thirteen ship** (phase 3bj's finish, 2026-11-12, the advisor's
-choice (a), for Alex). `chipGround` is 0, so `groundPop` returns before it adds anything,
-and a chip's chosen look lands at once, as it did before 3bj, through the chip's own
-`transition-colors`. **Why:** with it on, 3bg's "a press behind a cancel", the only
-real-browser proof of §12.149's press fix, never lands its press in the gap (0 of 16): a
-frame is drawn between the test's busy block and the press, which with the chip motion off
-it is not. A motion that silently stops that test from reaching its case does not ship
-until we know why. **The cause is unknown.** Ruled out: `settleLook` (0 of 16 without it),
-the animation itself (the chip's DOM work alone, with no animation, 0 of 16), and a new
-`cancel()` ahead of the rows' glide (the advisor read the phase: the only new one is the
-palette's fade, and `groundPop` removes an old look by `remove()`). The overlay, its CSS
-rule and the shape's tests stay, so (b), the chip back with a gap test that reaches its
-case and that 3bg's guard mutant still fails, is one token from here. Until then the
-chip's rule 4 below describes it as built, not as running.
+**chip is back; all fourteen ship** (phase 3bm, 2026-11-12, 3bj's open item (b)). From
+3bj's finish to 3bm `chipGround` was 0, taken back, because with it on 3bg's "a press
+behind a cancel", the only real-browser proof of §12.149's press fix, never landed its press
+in the gap (0 of 16). **The cause was the test's harness, not the app.** The e2e config
+records a trace on every test (`trace: 'retain-on-failure'`), and the trace takes a DOM
+snapshot in the page around each Playwright action, on the page's main thread. So the old
+test's `page.mouse.down` was sent only after its busy block, and with the chip motion on only
+after the next frame as well, whose cancel events end the gap. Measured, chip on, 12 presses
+each: the trace as configured 0 in the gap, no trace 12, the trace's screenshots alone 12, its
+snapshots alone 0. With snapshots, the press was sent within a millisecond of the next frame's
+first cancel event, 36 times in 36. The real app runs no such snapshot, so nothing changes for
+a person. **Unverified:** why the chip's frame puts the snapshot behind the next frame. The
+press was made 35–53ms after the test's block with the chip motion on, and 14–17ms with it off
+(three slower, which missed). The next frame moved less: 9–27ms after the block's frame with
+the motion on, 16–24ms with it off. The test now sends its press
+the moment the block begins, through a CDP session (`Input.dispatchMouseEvent`, the trusted
+press `page.mouse.down` itself sends, without the snapshot). So the press is queued behind the
+commit, and the page takes it before the next frame's animation events. Each of the test's 16
+presses must reach the gap: 16 of 16 with the chip motion on and off. 3bg's guard mutant fails
+it on its first press either way (HANDOFF, "Phase 3bm").
 
 **The rules, each held by a test** (the unit tests below for causes, `e2e/new-motion.spec.ts`,
 "phase 3bj", for what only a browser shows):
@@ -11073,7 +11079,7 @@ chip's rule 4 below describes it as built, not as running.
    window's own opening (§12.148) is the motion then. **The tour's panel** takes the new
    step's height at once: only the words move.
 4. **A press always lands, because none of these moves its control.** The chip's look
-   (taken back, above) is an overlay inside the chip, and the chip's own look is held back under it by
+   is an overlay inside the chip, and the chip's own look is held back under it by
    `data-ground-host` (written `button[data-ground-host]`, to outrank the selected chip's
    `!border-accent`). The checkbox pops itself, and while it is smaller than its place
    its cell hands a click on that place to the box, as §12.148's pseudo-element keeps a
@@ -11099,8 +11105,7 @@ motion so that each can be taken back alone: `chipGround`, `checkPop`, `emptyDro
 `invalidDrop`, `unsavedDrop`, `savedDrop`, `rateconDrop`, `palResultsFade`, `tourStep`;
 and `chipGroundFromScale`, `checkPopFromScale`, `copiedPopFromScale`, the five
 `…DropPx` and `tourStepPx`. All equal the demo's Bold (`.taste-skill/motion/everywhere/core.js`:
-`GROUND`, `POP`, `DROP`, `FADE`, and the `palResults` and `tour` rows), except
-`chipGround`, which is 0, taken back (above); `chipGroundFromScale` keeps its 0.75. **To take one
+`GROUND`, `POP`, `DROP`, `FADE`, and the `palResults` and `tour` rows). **To take one
 back:** its token to 0 turns it off, and its On value makes it weaker (both in HANDOFF,
 "Phase 3bj"). The shapes are `lib/appear-motion.ts`, which holds no number of its own.
 

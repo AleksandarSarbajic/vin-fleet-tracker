@@ -111,6 +111,9 @@ Not live until pushed. App only (Vercel): no worker file changed, so no worker d
 **At the start of 3bl (2026-11-12): 3bk is NOT pushed**: origin's master was `9af0ea6`, HEAD `4a48477`.
 **3bl: NOT pushed, NOT live** (2026-11-12): Back from the board to History shows History, on the week and filter it was left on (§12.154).
 Not live until pushed. App only (Vercel): one app file changed, no worker file, so no worker deploy. See "Phase 3bl" below.
+**At the start of 3bm (2026-11-12): 3bk and 3bl are NOT pushed**: origin's master was `9af0ea6`, HEAD `66017af`.
+**3bm: NOT pushed, NOT live** (2026-11-12): the chip motion is back at Bold (`chipGround: 270`, §12.152), so all fourteen of 3bj's small motions ship. 3bg's gap test
+now reaches its case with it on (16 of 16), and 3bg's guard mutant fails it. **Not committed:** the full e2e failed on one palette focus test seen once before, in 3bi (see "Phase 3bm"). Not live until pushed. App only (Vercel): one token and tests, no worker file, so no worker deploy. See "Phase 3bm" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11093,7 +11096,7 @@ The first build batch of what Alex approved in 3be: "like all the things we adde
 
 The control's other run failed the test's own precondition, a very late press with nothing moving after it, which is why that became part of the landing condition. The unit test for "stays idle" catches the control too. Unit tests hold the logic in `npm run check`, with a fake that behaves as a real cancelled animation does; `e2e/new-motion.spec.ts` holds it against a real one.
 
-**Landing a press in the gap.** It only judges a press that landed there. My first version never did: 20 of 20 failed on its own control, because I assumed a chip commits in a microtask, and a test with no control would have counted those as the bug. It now blocks from the cancel itself. Landed, by how long the main thread stays busy: 30ms 0 of 20, 60ms 1 of 20, 90ms 16 of 20, 120ms 12 of 20, 200ms 7 of 10, 300ms 7 of 10. So a press takes about 80ms to arrive from Playwright, and past that about 1 in 4 still miss, for a reason not established. A miss is tried again, up to 16 times. The assertions are not retried.
+**Landing a press in the gap.** It only judges a press that landed there. My first version never did: 20 of 20 failed on its own control, because I assumed a chip commits in a microtask, and a test with no control would have counted those as the bug. It now blocks from the cancel itself. Landed, by how long the main thread stays busy: 30ms 0 of 20, 60ms 1 of 20, 90ms 16 of 20, 120ms 12 of 20, 200ms 7 of 10, 300ms 7 of 10. So a press takes about 80ms to arrive from Playwright, and past that about 1 in 4 still miss, for a reason not established. A miss is tried again, up to 16 times. The assertions are not retried. *(Phase 3bm: not 80ms. The trace's DOM snapshot around each action held the press until after the block, every time, and a miss lost a race with the next frame. The test now sends its press mid-block and never tries again; see "Phase 3bm".)*
 
 **Reasoned, not reached.** A press between an animation's end and its finish event would pause it at its end, and `play()` on the release would rewind it to the start. A real mouse behind a glide's end reached that state 0 times in 80, and a scripted check never saw it in 120 seconds. Nothing changed for it.
 
@@ -11519,7 +11522,7 @@ My recommendation: (a) now, and (b) as its own small phase. Both are committed a
 - **The press table: the chip's column is dropped** (4 cells, 32 presses). With nothing playing there is no time into it to press at, so no press would ever land "on time" and the cell could not finish. 3 controls, 96 presses now. `CHIP_FROM`, `CHIP_ON` and `CHIP_OFF` are removed, unused.
 - **Not touched:** 3bg's gap test. **Counts:** `npm run check` 239 files, 4398 tests, as before: tests changed in place.
 - **e2e.** Targeted first, run `2026-11-12T10-36-18-919Z`, covering 3bg's gap test and the four 3bj tests: 6 passed (3.3 min). The gap test passed in 12.1s. **Full run, once: `2026-11-12T10-42-04-744Z` at `1fa0fe9`, default config, started 10:42 UTC after the last code write. 533 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 52.0 min** against 3bg's 49.0, 3.0 over, which is about what this run's four 3bj tests took (23.6s, 3.1s, 4.5s, 2.4 min). "A press behind a cancel" passed in 9.3s. In both runs the press table had 12 cells and 96 presses: 0 missed, 0 off their control, largest move 1px (the reorder bar's hover lift, as above).
-- **Open:** **(b): bring chip back with a gap test that reaches its case; the 3bg guard mutant must still fail it.** Two found here and not fixed are in "Next", "4. Also open": the rate confirmation's strip folding a render late (74px), and a field's accessible name that includes its error.
+- **Open:** **(b): bring chip back with a gap test that reaches its case; the 3bg guard mutant must still fail it.** *(Done in 3bm: see "Phase 3bm".)* Two found here and not fixed are in "Next", "4. Also open": the rate confirmation's strip folding a render late (74px), and a field's accessible name that includes its error.
 
 ### Phase 3bk: eight small motions on History, Assignments and the login page, at Bold (2026-11-12)
 
@@ -11695,6 +11698,83 @@ So **whether Back without a change of week fails depends on how History was open
 **Unverified:** any browser but Chromium; React's one-pass effects as a promise (above); what wrapped `history` before Next in every recorded page load (t=302ms in the run at `4a48477`; not Next's patch; likely Sentry's browser tracing, which passes calls through); why §12.29's bug happened on a `force-dynamic` board. Not seen in production.
 
 **Next:** the advisor verifies; Alex pushes 3bk and 3bl (app only).
+
+### Phase 3bm: the chip motion back, with a gap test that reaches its case (2026-11-12)
+
+3bj's open item (b), from the advisor's brief. The rule (the advisor, 2026-11-12): the chip comes back only with a gap test that reaches its case while the chip motion is on, and 3bg's guard mutant must still fail it. Both hold, so `chipGround` is 270 again and all fourteen of 3bj's small motions ship. §12.152 is the record. **NOT pushed, NOT live.** App only (Vercel): one token in `src/design/tokens.ts`, and tests. The diff against `66017af` under `.taste-skill`, `.samples`, `src/worker` and `supabase` is empty (origin `9af0ea6` is behind 3bk), so no worker deploy.
+
+| Commit | What |
+|---|---|
+| Not committed (the full e2e failed: below) | `chipGround: 270`, the gap test reworked, and 3bj finish's chip tests back on the live motion |
+| The docs commit | §12.152, this section, "What is live", and pointers in "Phase 3bg" and "Phase 3bj" |
+
+**The cause, proven as far as this.** A diagnostic block in `new-motion.spec.ts`, not committed, ran the old test's route 12 times per run: two chips three frames apart, the 120ms block from the cancel, then `page.mouse.down`. It timed each press on the page's clock (the cancel, the block, the first cancel event, the press's `timeStamp`, its dispatch) and in Node (the console signal, the call to `mouse.down`).
+
+| Run | In the gap | Press made, after the block ended |
+|---|---|---|
+| Chip off, the config's trace | 9 of 12 | 14–17ms (3 at 43–50ms, all missed) |
+| Chip on, the config's trace | 0 of 12 | 35–53ms |
+| Chip on, `--trace off` | 12 of 12 | 1–2ms |
+| Chip on, the trace's screenshots only | 12 of 12 | about 1ms |
+| Chip on, the trace's DOM snapshots only | 0 of 12 | 31–45ms |
+| Chip on, both, started by hand as the config does | 0 of 12 | 24–44ms |
+
+- **What the trace does.** `trace: 'retain-on-failure'` (`playwright.config.ts`) records every test, and its snapshots take the DOM in the page around each action, on the page's main thread. The old test awaited `page.evaluate`, whose reply came back only after the block and the frame the block was in. Then `page.mouse.down` took its own snapshot before it sent the press. The console signal itself reached Node mid-block every time.
+- **With the chip motion on,** Node sent the press within a millisecond of the next frame's first cancel event, 36 of 36 in the three runs with snapshots timed in Node, so the gap had already closed. With it off, the 9 that landed were dispatched 1 to 6ms before the next frame's first cancel event.
+- **Not established: why.** What is measured, from the end of the long frame: with the chip motion on (the two runs as configured), the next frame came 9–15ms after it in 16 of 24 tries and 18–27ms in the other 8, and the press was made 33–52ms after it. With the motion off the next frame came 16–24ms after it, and the press 13–16ms (three at 39–47, which missed). So the press is what moves most: its snapshots' round trips finish only after the next frame, every time, with the chip motion on. A guess, not tested: the chip's new composited layer changes when the compositor asks for the next frame.
+- **The real app runs no snapshot.** Nothing found says the chip motion changes what a person's press meets.
+
+**The gap test, reworked** (`e2e/new-motion.spec.ts`, "a press behind a cancel": `pressInTheGap` at :3509, the test at :3538):
+
+1. **The press goes the moment the page says the block began,** through a CDP session: `Input.dispatchMouseEvent`, the same trusted press `page.mouse.down` sends, without the trace's snapshot before it. The `page.evaluate` that presses the chips is not awaited first, since its reply comes back after the block. So the press is made mid-block, queued behind the commit. The page takes it before the next frame's animation events: in the probe of this design, 12 of 12 in the gap, each dispatched about a millisecond before the first cancel event.
+2. **One press per try, never tried again; 16 tries; each must reach the gap, or the test fails on that try.** Reaching it means: made before the block ended (`queued`: its `timeStamp` against the block's end), a cancelled flight still waiting for its cancel event, and the new flights after it. Each try then holds 3bg's assertions as before: nothing thrown, nothing brought back, every later flight held, no time moved under the press, nothing paused after the release, every row at rest. It prints its count: "a press behind a cancel: 16 of 16 presses in the gap".
+3. **Not changed:** the chips (the same synthetic key, three frames apart), the cancel-anchored 120ms block, the hold of `GLIDE_MS + 60`, every assertion. No wait made longer, no retry. The release goes through the same session.
+
+| Run, the test alone | In the gap | Result |
+|---|---|---|
+| Chip on (270) | 16 of 16 | passed, 29.2s |
+| Chip off (0) | 16 of 16 | passed, 28.4s |
+
+It takes 28–29s against 3bg's 9.3s: 16 glides pressed, each held 440ms and left to settle, where the old test judged one.
+
+**The guard mutant,** in a worktree at `66017af` with the reworked test: `hold()`'s `if (at === null) return;` removed (it compiles). The test fails by name on its first press, which was queued and in the gap:
+
+| On press 1 | Chip on (270), run `2026-11-12T17-56-40-434Z` | Chip off (0), the next run |
+|---|---|---|
+| thrown | "Failed to set the 'currentTime' property on 'Animation': currentTime may not be changed from resolved to unresolved" | the same |
+| broughtBack | 1 | 1 |
+| notHeld | 20 | 18 |
+| timesMovedUnderThePress | 20 | 18 |
+| atRest | 1 running, 1 displaced | the same |
+
+The two more on the chip's side are its overlays. The worktree is removed.
+
+**Tests changed, by name.** None deleted; the counts are the same, since every change is in place.
+
+- `design/motion-tokens.test.ts`: "a chip's chosen look: taken back (0), its 75% kept for when it returns" is again "a chip's chosen look: 270ms, from 75%" (`toBe(270)`).
+- `console/board-motion.test.tsx`, the chip describe, again "chip: a chip's chosen look". "a key turns Late on: nothing plays on any chip, nothing is added, and Late's own look is there at once" is again "a key turns Late on: its look grows in from 75% and All's shrinks away, 270ms each", with literal `270` and `'0.75'`. "a click does the same, and the chip never moves: nothing played on it, no style written to it" is again "a click does it too, and once it lands nothing is left on the chip". The `onChips` helper and the taken-back comment are gone. The file is byte-identical to `7ec0f1c`, before 3bj's finish.
+- `e2e/new-motion.spec.ts`, phase 3bj: the board test is again "the board: each at its length, a chip's own look held back, nothing grown, nothing left, and no replay on a resize". Two frames into Late's arrival the chip's edge reads `rgba(0, 0, 0, 0)` under one overlay, and the six chip changes play 12 looks at 270ms, `CHIP_ON` and `CHIP_OFF`. The press table is again "a real mouse on the chip, the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands", with its chip column. `CHIP_FROM`, `CHIP_ON` and `CHIP_OFF` are back. These are 3bj finish's test hunks reversed (`git apply -R` of `1fa0fe9`'s), and they applied cleanly.
+- `e2e/new-motion.spec.ts`, 3bg: "a chip mid-glide with a press queued behind it: nothing thrown, nothing brought back, the rest held" is now "a chip mid-glide with a press queued behind it, 16 times: each lands in the gap, nothing thrown, nothing brought back, the rest held" (above).
+
+**Checks.** `npm run check`: **244 files, 4460 tests** (244 and 4460 before). The forbidden-files grep printed nothing. `git diff --stat 66017af -- .taste-skill .samples src/worker supabase` printed nothing (origin `9af0ea6` is behind `66017af`). Targeted e2e at chip on, before the full run: the gap test, the four 3bj tests and the 3bg press tests (`-g "a press behind a cancel|phase 3bj|the press during a glide"`): 16 passed in 9.2 min, the small press table's misses `[]`.
+
+**e2e, full run, once: FAILED, one test, not this phase's.** Run `2026-11-12T18-10-03-910Z` on the default config, started 18:10 UTC after the last code write (17:58:31 UTC; only the docs changed during the run). **541 passed, 1 failed, and `phone-signout` did not run** (it depends on the rest). 56.2 min against 3bl's 54.4.
+
+- **The failure:** `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button", at its first reading, before any key is pressed: "focus has to be on a button: in a field the old guard held", expected `BUTTON`, received `INPUT`. `toBeFocused` on the palette's first option ("Pin Truck 101") had just passed. The screenshot: the palette open, its first option highlighted, the caret back in its "Jump to a truck…" box, chips at `ALL 3`, `INACTIVE 0`. So something moved focus back to the palette's box after the test had put it on the option. No chip changed before it, so the chip motion did not run in it. **The same test failed the same way in 3bi's run** (`2026-11-10T19-06-36-409Z`, "the caret back in the palette's box"), before the chip motion existed, and has passed in every full run since. Its cause is unverified. Not retried and not changed (the brief: stop and report).
+- **What passed in it:** "a press behind a cancel": "16 of 16 presses in the gap". The 3bj board test with the chip's look held back. The 3bg press table. The 3bj press table with the chip column back: **128 presses, 0 missed, 0 off their control**, largest move under the pointer 1px on the chip and the reorder bar (§12.148's hover lift), 0 on the box and the copy button.
+
+**Found wrong:**
+
+1. **3bg's "a press takes about 80ms to arrive from Playwright."** The press was sent only after the block, every time (measured here), so a longer block never gave it time to arrive. Why longer blocks landed more often in 3bg's table is not established. A pointer now stands at that line in "Phase 3bg".
+2. **3bg's "past that about 1 in 4 still miss"** was a race between Playwright's round trip (about 16ms after the block) and the next frame (about 20ms after it). The 9 that landed in the chip-off run won by 1 to 6ms.
+3. **3bj's "in the real app this makes the gap harder to hit, not easier"** had nothing under it: the effect is the harness's.
+4. **Any other e2e test that sends input right after the page was busy,** through `page.mouse` or `page.keyboard`, waits for the trace's snapshot first. None is known to depend on that timing: the press tables time their motion in the page and press after it, by design.
+
+**Unverified:** why the chip's frame lets the next frame come ahead of the snapshots; that Chromium always hands queued input to the page before the next frame's animation events (measured here through the gap, 16 of 16 in each run, not read in Chromium's source); any browser but Chromium; the feel of the chip motion, which is Alex's.
+
+**Next:** a decision on the palette failure (above), for Alex through the advisor. Then the commits, the advisor's verification, and Alex's push of 3bk, 3bl and 3bm together (app only).
+
+**Committed on Alex's call, 2026-11-12, with the palette failure open;** the clean full e2e for 3bk, 3bl and 3bm is phase 3bn's, which fixes that race.
 
 ## Next
 
