@@ -713,7 +713,7 @@ would not read (`2h`).
 | Ground and selection changes | **120ms ease-out**; between two rows on screen the selection slides, 280ms (§12.149) |
 | Map pan on selection | **700ms**, Mapbox's default curve (§12.149) |
 | Other map pans: a zoom, a cluster, the nudge that clears a popup | **150ms** |
-| Everything else | See §12.148 and §12.149 |
+| Everything else | See §12.148, §12.149 and §12.152 |
 
 *(Superseded in part by §12.148 and §12.149: this table once said "150ms map pan,
 nothing else animates". Windows and menus open with motion, a copy of them fades
@@ -10556,7 +10556,7 @@ exception is the tour, which opens by itself on a first visit. Nothing moves
 when data refreshes on its own: rows, lists, re-sorts, new rows and the row flash
 keep §8.3's and §14.4's rules. Row ground keeps its 120ms, except under the
 pointer. (*§12.149: a count that changes on a poll rolls, inside its own box. That is all a poll
-ever starts.*)
+ever starts.*) (*Superseded in part by §12.152: a poll also fades in the two banners and the reorder bar, opacity only.*)
 
 **Closing never waits.** The window closes as it always has: removed at once,
 focus returned at once, and the next click and key land at once. What fades is a
@@ -10687,6 +10687,7 @@ the browser's Web Animations and nothing else.
 - **The flash stays the strongest thing on the board.** It keeps its 1.6s on the whole row.
   What a poll starts is a number rolling inside its own box, for a quarter of that at most: at
   Bold it is exactly a quarter, so a longer roll would have to answer to this.
+  *(Since §12.152 a poll also fades in the two banners and the reorder bar: opacity only, 270ms, no row moved.)*
 - **A poll never moves a row (§12.4).** A poll that changes who is in the list moves rows as
   it always did, by a snap with no glide.
 - **Reduced motion: a true 0, and nothing lost.** The CSS rule cannot reach a Web Animation,
@@ -11000,6 +11001,95 @@ active truck is untouched. A failed audit insert, committed in
 `fleet_commit`, leaves the flag off, logs by name and resolves.
 `console/InactiveMoving.test.tsx`: 0 moving shows nothing, one shows
 `· 1 moving`, and a 46-minute-old fix does not count.
+
+## 12.152 The small motions: fourteen things arrive
+
+Phase 3bj. Alex, 2026-11-06: "i want motion, animations EVERYWHERE", then "yes, all"
+on the 3be demo; 2026-11-11: continue on motion. The first fourteen of the demo's 28
+small rows, at its Bold values: eight on the board, four in the edit window, the
+palette and the tour. **Supersedes in part** §12.148's and §12.149's "a count rolling is
+all a poll ever starts": a poll now also fades in three things, opacity only (below).
+Everything else in both stands, and the six motions of §12.149 are unchanged.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **chip** | A filter chip's chosen look: accent edge and overlay ground | 270ms | An overlay inside the chip grows in from 75%, or shrinks away to it | `EASING.dialog` | A person: the chip, its key, Clear filters, a view | A poll; the page's first paint |
+| **check** | A row's checkbox | 270ms | The box pops from 50% | `EASING.dialog` | The pressed box's own change | The other boxes of a shift range; X; a poll |
+| **empty** | The empty list | 270ms | Drops 14px and fades in | `EASING.dialog` | The list empties in the commit where the chips, the list or the search changed | A poll that empties a filtered list; the first paint |
+| **feedBanner** | The feed banner | 270ms | Opacity only | linear | A poll that finds the feed stale, on a board already drawn | The first paint; another stale poll |
+| **fetchBanner** | "Can't reach the console server" | 270ms | Opacity only | linear | A poll that fails, on a board already drawn | Another failure while it stands |
+| **reorder** | "N rows would reorder — click to sort" | 270ms | Opacity only | linear | A poll that changes the order | A new count while it stands; a chip |
+| **note** | "N without a driver hidden" | 270ms | Drops 14px and fades in | `EASING.dialog` | Drivers only turned on | A resize that swaps its form; a truck selected; a poll that changes its count; the first paint |
+| **copied** | The tick on a copy button | 270ms | The glyph pops from 50%, inside the button | `EASING.dialog` | A copy that landed | A copy the browser refused |
+| **invalid** | A field's message | 270ms | Drops 14px and fades in | `EASING.dialog` | A new message on a field already drawn: as a person types, or a save refused | The same words again; a field drawn with one (another stop chosen) |
+| **unsaved** | "Unsaved changes" | 270ms | Drops 14px and fades in | `EASING.dialog` | The first change in an open editor | More changes; an editor that opens |
+| **saved** | "Saved · one thing to know" | 270ms | Drops 14px and fades in | `EASING.dialog` | A save that landed with something to say | The editor opened afresh on that save (§12.127), which carries the drop on instead |
+| **ratecon** | What the rate confirmation strip says | 270ms | Drops 14px and fades in | `EASING.dialog` | The strip opening, on a PDF or a paste | Reading, the scan's pages, what it said; a second paste |
+| **palResults** | The palette's results | 180ms | Opacity only, again on every key | linear | Each change of the box | Opening it, the arrow keys, a poll's new trucks |
+| **tour** | A tour step's words | 270ms | 28px in from the side it is on, and fades in | `EASING.dialog` | Next, from the right; Back, from the left | Opening, and its reset to the first step; a re-render |
+
+**The rules, each held by a test** (the unit tests below for causes, `e2e/new-motion.spec.ts`,
+"phase 3bj", for what only a browser shows):
+
+1. **Opacity and transform only.** `translate` and `scale`, the transform properties of
+   their own, so a motion composes with a press, a lift or the copy button's
+   `-translate-y-1/2` and overrides none of them. Nothing animates a width, a height, a
+   top, a margin or a scroller. Where something arrives in the flow (both banners,
+   "Unsaved changes", "Saved", the rate confirmation's words, a field's message, the
+   empty list) what is below moves down by its height at once, as it always did; only
+   the arriving thing fades or drops. A drop comes from above, where nothing can make a
+   scroller grow; a pop starts smaller; a tour step's box clips sideways while it moves.
+2. **What the data does on its own gets a fade at most.** The two banners and the reorder
+   bar: opacity only, no rise, no scale. The empty list drops only when a person emptied
+   it: its cause is named, the way `glideCause` names a glide (`emptyCause` in
+   `FleetList.tsx`: the chips, the list and the search), and compared with the commit
+   before. When a poll empties a filtered list, the list simply says so.
+3. **Never replayed by a re-render.** Each plays in the commit its thing appears in, and
+   never in the commit its host was drawn in (`useOnAppear`): what came with the page or
+   with the window was not seen arriving, and the server's HTML is already painted, so a
+   fade there would flash. A message is keyed by its words. The note is one button with
+   both of its forms, and CSS picks one by width, so a resize has nothing to play. The
+   rate confirmation's words drop once as it opens; what it then says changes inside it.
+   The palette's fade starts again on each key and ends the one before. The tour slides
+   only on Next and Back, so the reset to its first step as it opens slides nothing; the
+   window's own opening (§12.148) is the motion then. **The tour's panel** takes the new
+   step's height at once: only the words move.
+4. **A press always lands, because none of these moves its control.** The chip's look is
+   an overlay inside the chip, and the chip's own look is held back under it by
+   `data-ground-host` (written `button[data-ground-host]`, to outrank the selected chip's
+   `!border-accent`). The checkbox pops itself, and while it is smaller than its place
+   its cell hands a click on that place to the box, as §12.148's pseudo-element keeps a
+   button's: a press there would otherwise fall to the row, which selects the truck, and
+   a double press there would open the editor. Measured in layout (`offsetWidth`), about
+   the centre a scale keeps. **Never a copy of the box:** a second
+   `input[type="checkbox"]` in the row is found by anything that looks for the row's box
+   (phase 3bj's first full run lost six tests to it). The copy button's glyph pops inside
+   the button. The reorder bar only fades, and opacity leaves a hit area whole. A press
+   holds whatever is moving, as §12.149 says.
+5. **Reduced motion: nothing starts and nothing is added** (`mayMove`), for every one.
+6. **"Saved" across the remount.** It drops in the editor the save was made in. The editor
+   opened afresh on the saved load (§12.127) replaces it while it drops, so the modal
+   keeps when the drop began, and the new strip carries it on from there (`dropOn`). If
+   the read of the saved load takes longer than 270ms, the new strip is simply there.
+
+**Where.** Desktop, except the two banners, which the phone shares. A field's message
+drops wherever `Field` is drawn, the bulk window's too.
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token for each
+motion so that each can be taken back alone: `chipGround`, `checkPop`, `emptyDrop`,
+`feedBannerFade`, `fetchBannerFade`, `reorderFade`, `noteDrop`, `copiedPop`,
+`invalidDrop`, `unsavedDrop`, `savedDrop`, `rateconDrop`, `palResultsFade`, `tourStep`;
+and `chipGroundFromScale`, `checkPopFromScale`, `copiedPopFromScale`, the five
+`…DropPx` and `tourStepPx`. All equal the demo's Bold (`.taste-skill/motion/everywhere/core.js`:
+`GROUND`, `POP`, `DROP`, `FADE`, and the `palResults` and `tour` rows). **To take one
+back:** its token to 0 turns it off, and its On value makes it weaker (both in HANDOFF,
+"Phase 3bj"). The shapes are `lib/appear-motion.ts`, which holds no number of its own.
+
+**Tests.** `lib/appear-motion.test.ts` (the shapes, 0, reduced motion, nothing left),
+`console/board-motion.test.tsx`, `edit/strip-motion.test.tsx` and
+`overlay/overlay-motion.test.tsx` (each motion: its cause starts it at its length, its
+non-causes do not, reduced motion starts nothing), and `motion-tokens.test.ts`, all with
+the numbers written out.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

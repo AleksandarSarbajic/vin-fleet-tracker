@@ -101,6 +101,9 @@ deliberate second instance being refused. The first deploy attempt stopped at e2
 **3bi: LIVE, both halves** (2026-11-11): the worker switches on an inactive truck no admin switched off when it drives,
 audited, never off; the Inactive chip says "· N moving" (§12.151). App `5eff9d7` (deployment 7711026596, success 13:13:29 UTC).
 Worker `5eff9d7` since 14:01:39 UTC, 0 restarts, polling, `trucksActivated` in the poll line; rollback sha `1a2170f`. See "Phase 3bi", "Deploy".
+**3bj: NOT pushed, NOT live, NOT done** (2026-11-12): fourteen small motions at the demo's Bold, on the board, in the edit window, the
+palette and the tour (§12.152). Its full e2e run failed one 3bg test, which the chip motion stops from reproducing its gap: a decision
+waits ("Phase 3bj", "e2e, full run"). Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy.
 
 | Commit | What | § |
 |---|---|---|
@@ -11362,6 +11365,145 @@ From the advisor's brief. Alex, 2026-11-10: "drivers changed the trucks, 127 not
 **Unverified:** what the droplet runs today (step 2); the e2e palette focus failure's cause; the chip's note on a real board (no inactive truck was moving at 18:54 UTC).
 
 **Deploy, 2026-11-11 (the advisor).** Verified first: `npm run check` 235 files / 4313 tests, forbidden grep empty. Pushed `5eff9d7` (origin was `0fc016e`); Vercel deployment 7711026596, success. The droplet ran `1a2170f` before (step 2 answered). `scripts/deploy.sh` passed all four gates in one attempt (e2e 529 passed, 48.3 min, the palette test among them), then started `5eff9d7` at 14:01:39 UTC: 0 restarts, the singleton guard refused the verify step's second instance, first polls carry `trucksActivated: 0`, 0 errors. No truck switched on yet: none of the eight inactive trucks was moving at deploy. The palette failure's cause stays unverified; it did not recur.
+
+### Phase 3bj: fourteen small motions at Bold (2026-11-12)
+
+Motion batch 2a, from the advisor's brief: the first 14 of the 3be demo's 28 small rows, at the demo's Bold, after Alex's "i want motion, animations EVERYWHERE" and "yes, all" (2026-11-06) and "continue on motion" (2026-11-11). Eight on the board, four in the edit window, the palette and the tour. The six live motions and their tokens are untouched. §12.152 is the record. **NOT pushed, NOT live.** App only: nothing under `src/worker` reaches a changed file (a script walked the worker's imports: 40 files, none of them), so no worker deploy.
+
+| Commit | What |
+|---|---|
+| `2cf92be` | The tokens, the shapes (`lib/appear-motion.ts`), `useOnAppear`, the chip's CSS rule, their unit tests and the shared recorder |
+| `dd9ba5c` | The board's eight, and `board-motion.test.tsx` |
+| `709c9b1` | The edit window's four, and `strip-motion.test.tsx` |
+| `194fcc3` | The palette and the tour, and `overlay-motion.test.tsx` |
+| `7ec0f1c` | The e2e tests and the press table |
+| The docs commit | §12.152, three one-line pointers (§8.3, §12.148, §12.149) and this section |
+
+**The fourteen.** Lines are as re-grepped at `6f6f281`, before building (3be's table cites `b45cd15`). Bold values from `.taste-skill/motion/everywhere/core.js`.
+
+| Row | File:line at `6f6f281` | Bold (demo) | Token(s) | What starts it |
+|---|---|---|---|---|
+| chip | `console/FilterChips.tsx:279` (Chip's button) | `GROUND` 270ms, from .75 | `chipGround`, `chipGroundFromScale` | `selected` changing after mount: the chip, its key, Clear filters, a view |
+| check | `console/TruckRow.tsx:578` | `POP` 270ms, from .5 | `checkPop`, `checkPopFromScale` | The pressed box's own change event |
+| empty | `console/FleetList.tsx:318` | `DROP` 270ms, 14px | `emptyDrop`, `emptyDropPx` | The list empties in the commit `emptyCause` (chips, list, search) changed |
+| feedBanner | `console/Console.tsx:989` | `FADE` 270ms | `feedBannerFade` | `feedStale` turning true on a board already drawn |
+| fetchBanner | `console/Console.tsx:1005` | `FADE` 270ms | `fetchBannerFade` | `isError` turning true on a board already drawn |
+| reorder | `console/ListToolbar.tsx:61` | `FADE` 270ms | `reorderFade` | `drift` going from 0 to more |
+| note | `console/ConsoleHeader.tsx:320`, `Console.tsx:768` | `DROP` 270ms, 14px | `noteDrop`, `noteDropPx` | The Drivers note arriving after the header mounted |
+| copied | `console/CopyButton.tsx:47`, `:82` | `POP` 270ms, from .5 | `copiedPop`, `copiedPopFromScale` | `copied` turning true |
+| invalid | `edit/Field.tsx:52` | `DROP` 270ms, 14px | `invalidDrop`, `invalidDropPx` | A new non-empty message on a mounted `Field` |
+| unsaved | `edit/EditStopModal.tsx:1164` | `DROP` 270ms, 14px | `unsavedDrop`, `unsavedDropPx` | `hasUnsaved` turning true in an open editor |
+| saved | `edit/EditStopModal.tsx:1170` | `DROP` 270ms, 14px | `savedDrop`, `savedDropPx` | Warnings arriving from a save; the remount carries it on (`dropOn`) |
+| ratecon | `edit/RateconStrip.tsx:270`, `:345` | `DROP` 270ms, 14px | `rateconDrop`, `rateconDropPx` | `open` turning true (a PDF or a paste) |
+| palResults | `overlay/CommandPalette.tsx:173`, `:189` | 180ms, opacity only | `palResultsFade` | Each change of the box (`typed`) |
+| tour | `overlay/OnboardingTour.tsx:112`, `:120` | 270ms, 28px | `tourStep`, `tourStepPx` | Next and Back only |
+
+**How it is built.** `lib/appear-motion.ts` holds the shapes, all through `play` (so reduced motion starts nothing and a press holds them): `dropIn`, `fadeIn`, `popIn`, `slideIn` (clips its box sideways while anything is on its way), `groundPop` (the chip's overlay) and `dropOn` (a drop carried on into a new element). `hooks/useOnAppear.ts` runs a start in the commit something appears and never in the commit its host mounted in. One rule in `globals.css`: `button[data-ground-host]` holds a chip's own look back under its overlay, outranking `!border-accent`. The checkbox pops itself, and its cell hands a click on the box's place to the box while it is smaller (`RowCheck` in `TruckRow.tsx`). Keyframes use `translate` and `scale`, never `transform`. Nothing is left at rest: every node, attribute and inline style these add goes when the motion lands.
+
+**Where the demo's shape changed, the duration kept:**
+
+1. **check, the shape kept, the hit area added.** The box pops itself from 50%, as in the demo. Scaled, it leaves about 7px to aim at, and a press beside it would go through the cell to the row, which selects the truck, and a double press there would open the editor (reasoned from the handlers, not seen). So its cell takes a click on the box's resting place and hands it to the box, as §12.148's pseudo-element keeps a button's. **A copy over the box was built first and failed:** a second `input[type="checkbox"]` in the row broke 6 existing e2e tests that look for the row's box (the bulk bar's `checkTwo` clicked the copy, which sits where the first box is, and a strict locator found two). Removed; see "Found wrong".
+2. **saved.** Not a shape change, a case the demo has no means to show: the editor remounts on the saved load (§12.127), mid-drop. The modal keeps when the drop began, and the new strip carries on from there; past 270ms it is simply there.
+3. **note.** The desktop header's note only. 3be's row cites `PhoneTiles.tsx:192` too; the phone's notes are phone work, not built here.
+
+**The values.** All in `tokens.ts`; all equal the demo's Bold. "On" is the demo's On, for taking one back a step.
+
+| Token | On | Bold |
+|---|---|---|
+| `chipGround` / `chipGroundFromScale` | 180 / 0.9 | **270 / 0.75** |
+| `checkPop` / `checkPopFromScale` | 180 / 0.7 | **270 / 0.5** |
+| `copiedPop` / `copiedPopFromScale` | 180 / 0.7 | **270 / 0.5** |
+| `emptyDrop`, `noteDrop`, `invalidDrop`, `unsavedDrop`, `savedDrop`, `rateconDrop` / each `…DropPx` | 180 / 6 | **270 / 14** |
+| `feedBannerFade`, `fetchBannerFade`, `reorderFade` | 180 | **270** |
+| `palResultsFade` | 120 | **180** |
+| `tourStep` / `tourStepPx` | 180 / 12 | **270 / 28** |
+
+**To take one motion back: one line in `tokens.ts`.** Its duration to 0 turns it off (every shape returns at once on 0, and adds nothing); its On values above make it weaker. Nothing else in the app changes. Its number is also written out, on purpose, in these places, which fail until told:
+
+| Motion | Unit test (describe) | e2e (`new-motion.spec.ts`, "phase 3bj") |
+|---|---|---|
+| chip, check, empty, feedBanner, fetchBanner, reorder, note, copied | `console/board-motion.test.tsx`, the describe named for it | The board test's line for it; chip, check, copied and reorder also in the press table |
+| invalid, unsaved, saved, ratecon | `edit/strip-motion.test.tsx`, the describe named for it | The edit window test (saved is unit only) |
+| palResults, tour | `overlay/overlay-motion.test.tsx` | The palette and tour test |
+| every one | `design/motion-tokens.test.ts`, its own line | |
+
+In the e2e file `SMALL_MS` (270), `DROP_PX`, `POP_FROM` and `CHIP_FROM` are shared by several motions: taking one back gives that one its own constant in its expectation. Turned off (0), its "starts on its cause" tests are the ones to change to "nothing plays".
+
+**Tests.** With the numbers written out. `npm run check`: **239 files, 4398 tests** (235 and 4313 before): 85 new in 4 new files and one existing one, and no existing test changed.
+
+- `lib/appear-motion.test.ts` (12): each shape's keyframes, length and curve; no shape uses `transform`; 0 runs nothing; reduced motion starts and adds nothing; the chip's overlay goes on landing, also after a second change mid-way; the slide's clip lets go after the last; `dropOn` carries on 100ms in, and plays nothing past the end.
+- `console/board-motion.test.tsx` (34), on the real console: for each of the eight, its cause starts it at its length, its non-causes start nothing (a poll, a second poll, the page's first paint with it already there, a chip for the reorder bar, X and a shift range for the box, a refused copy, a truck selected for the note), and reduced motion starts nothing; and a click on the box's place in its cell checks the box and does not select the row.
+- `edit/strip-motion.test.tsx` (18): `Field` re-rendered with the same message plays nothing, other words play, mounting with one plays nothing, gone and back plays; typed into a real editor; "Unsaved changes" once; "Saved" drops in the old editor at 0 and is carried on at 100ms by the new one (`performance.now` controlled, the read held until released), and plays nothing when the read lands after 270ms; the rate confirmation once, not on a second paste.
+- `overlay/overlay-motion.test.tsx` (10): every key fades the list and ends the one before; opening, the arrows and new trucks fade nothing; Next from the right, Back from the left, inside a clip that lets go; opening and the reset to the first step slide nothing.
+- `design/motion-tokens.test.ts` (+11): each token's value.
+- `test/animations.ts`: the recorder the four files share.
+
+**Planted control and mutations,** each in a worktree at `7ec0f1c`, each file restored byte-identical after, the same two files passing 52/52 there unmutated (the same four results as on the version with the copy, before it):
+
+| Planted | Failed, by name |
+|---|---|
+| Control: `invalid` replays on every render (`Field` without `error !== before`) | 3: "a re-render with the same message plays nothing"; "mounting with a message, as choosing another stop does, plays nothing"; "in the window: typed into ZIP, the message drops; typing on with the same message plays nothing more" |
+| (a) `empty` plays on a poll (the cause check removed) | "a poll that empties a filtered list: it is simply there" |
+| (b) `feedBanner` rises, `transform: translateY(14px)`, instead of fading | "a poll that finds the feed stale: it fades in, opacity only, 270ms linear" |
+| (c) `check` pops every box in a shift range (`mine &&` removed) | 2: "a shift-click checks a range, and only the box pressed pops"; "X checks the selected row without a pop: no box was pressed" |
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3bj, the small motions (§12.152)"): one test per area and the press table.
+
+- **The board:** the lengths the browser was given for all eight, the chip's own edge read as `rgba(0, 0, 0, 0)` two frames into its arrival (the real CSS outranks `!border-accent`) and back after, the note played once across a resize to 1300 and back that swaps its form, every scroller on every frame of each step, and nothing left at rest.
+- **The edit window:** a message and "Unsaved changes" as a person types, the rate confirmation's words on a paste, each once, nothing grown, nothing left.
+- **The palette and the tour:** two keys, two fades of 180ms; Next, Next, Back slide 28, 28, −28; the tour's panel never widened; nothing left.
+- **The press table** below.
+
+Each step of the first two is watched on its own (`watchStep`): across several steps, a state in the middle, such as the health strip giving way to the reorder bar, reads as growth.
+
+**The press table,** a real mouse, at 20, 60, 120 and 300ms into each control's own motion by its own clock (±18ms), held 40ms. All four last 270ms, so 300 is just after the end. 8 presses a cell; a press that came early or late is tried again, a miss never.
+
+| Into the motion | chip | check | copied | reorder |
+|---|---|---|---|---|
+| 20ms | 0 missed | 0 | 0 | 0 |
+| 60ms | 0 | 0 | 0 | 0 |
+| 120ms | 0 | 0 | 0 | 0 |
+| 300ms | 0 | 0 | 0 | 0 |
+
+**128 presses, 0 missed, 0 that came down or went up off their control,** in the rerun after the box's rework (the box's own pop, its cell counted as the box), and the same in the run before it. Largest move of what stood under the pointer between press and release: 1px on the chip and the reorder bar, which is §12.148's hover lift dropping as the press comes down, and 0 on the box and the copy button. None of these motions moves its control.
+
+**e2e, full run, once: FAILED. This phase is not done; it waits on one decision.** Run `2026-11-11T23-39-00-837Z` on the default config, started 23:39 UTC after the last code write (23:38): 525 passed, 7 failed, and `phone-signout` did not run (it depends on the rest); 55.5 min. All seven are existing 3bg tests in `new-motion.spec.ts`.
+
+- **Six were my first `check`,** an inert copy of the box popping over it (Found wrong, 5). Fixed: the five bulk bar tests and "a row's own buttons work mid-glide" then passed, with the four 3bj tests, in a rerun of those (12 passed, 1 failed: the seventh).
+- **The seventh is not fixed: "a press behind a cancel"** (3bg's real-browser reproduction of the press fix) no longer lands its press in the gap while the chip motion is on. 0 of 16 tries, in the full run and alone. Each variant below was run alone:
+
+| Variant | The gap test |
+|---|---|
+| As built | 0 of 16, fails |
+| `chipGround: 0`, the chip motion taken back | passes (9.4s) |
+| The chip motion without `settleLook` | 0 of 16 |
+| The chip's DOM work, with no animation | 0 of 16 |
+| The test's busy block 90ms, not 120 (the test only) | 0 of 16 |
+
+A debug print of what each press found: no cancelled flight still waiting for its cancel event, and the new flights 16.6ms in. So a frame was drawn between the 120ms block and the press, which with the chip motion off it is not. **Why the chip's DOM work in that commit lets a frame come first is not established.** Nothing in `lib/motion.ts` changed, and its unit tests still hold `hold()`'s guard. In the real app this makes the gap harder to hit, not easier. But the only real-browser proof of 3bg's fix cannot run while the chip motion is on.
+
+**Decision needed, for Alex through the advisor; not taken here:**
+- (a) Take the chip motion back: `chipGround: 0` in `tokens.ts`, its line in `motion-tokens.test.ts`, the chip lines of `board-motion.test.tsx` and the e2e board test and press table. That is shown to pass the gap test. 13 of 14 ship.
+- (b) Keep the chip motion and rework the gap test to reach the gap another way. Not built, so it is not known to be possible.
+
+My recommendation: (a) now, and (b) as its own small phase. Both are committed as built here (chip on), so either way is one change from here. **Do not push until it is decided.**
+
+**Duration:** 55.5 min against 3bg's 49.0, 6.5 over. It includes the seven failures, five of which waited out 45s timeouts (about 3.5 min). The new tests take about 3.6 min in their own runs: the board 24s, the edit window 3s, the palette and tour 4s, the press table 3.0 min. A clean full run is still owed after the decision.
+
+**Found wrong:**
+
+1. **The brief:** the demo's values are in `everywhere/core.js` (`MOTIONS` and the shapes `GROUND`, `POP`, `DROP`, `FADE`), not `lab.js`, which only reads them.
+2. **The brief's rule 6 was already done:** `ListToolbar.tsx`'s comment has said 160ms since 3bg's `25696b1`: "Over 160ms, by §12.148's hover rule in `globals.css`, which outranks the `duration-ground` below." Nothing to change.
+3. **3be's table, `invalid`:** it says a person starts it with Save. A field's message also appears as a person types (`localErrors` runs on every change: a letter in ZIP says "ZIP must be digits only…" at once). So it drops as you type, once per new message.
+4. **3be's table, `saved`, "Risk: low":** it missed the editor's remount after a save lands (§12.127), which replaces the strip mid-drop. Handled (`dropOn`).
+5. **3be's table, `check`, "`play` on the input":** it shrinks the hit area, which 3be did not say. Kept, with the cell handing the box's place to the box (above). My first answer, an inert copy of the box popping over it, was wrong: the first full e2e run (`2026-11-11T23-39-00-837Z`) failed 7 tests, 6 of them because anything that looks for a row's box found the copy too. Rule for later: never draw a second element that matches what a test or a selector takes for the real control.
+6. **Not motion, before this phase, not fixed:** typing into a load folds the rate confirmation's open strip in a passive effect, a commit after "Unsaved changes" and a message appear, so for a frame all are drawn and the window's scroller is 74px taller than either side (217 → 291 → 171). Shown with reduced motion, where no animation runs and the peak is the same; the e2e test types before it pastes, so no watched step holds that frame. A one-frame jump, likely unseen; recorded only.
+7. **A field's accessible name includes its message,** because its `label` wraps the message (`Field.tsx`): "ZIP ZIP must be digits only…". Not changed (not motion); a test found it by losing the field.
+8. **`Field` is also the bulk window's,** so its messages drop there too. Both banners are the phone's too, so they fade there.
+
+**Unverified:** the feel, which is Alex's; any browser but Chromium (Safari has `translate` and `scale` from 14.1, Firefox from 72, neither run); a real phone. CSS opacity and transform on small elements, so no GPU question like the map's.
+
+**Next:** the decision above; then a clean full e2e run; the advisor verifies; Alex pushes. Batch 2b (History, Assignments, login) comes from a separate prompt.
 
 ## Next
 
