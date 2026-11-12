@@ -1,6 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn, dropOn, type Started } from '@/lib/appear-motion';
+import { useOnAppear } from '@/hooks/useOnAppear';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { etaDetails } from '@/lib/eta-basis';
 import { can, type Role } from '@/lib/roles';
@@ -167,6 +178,8 @@ export function EditStopModal(props: Props) {
   }, [query.data, read]);
   /** §12.127. Each landing opens a new editor: `n` is its React key. */
   const [landed, setLanded] = useState<{ n: number; at: Landed } | null>(null);
+  /** §12.152. When "Saved" began to drop in, so the editor opened after it carries it on. */
+  const savedStarted = useRef<Started | null>(null);
   const onLanded = useCallback(
     (at: Landed) => setLanded((was) => ({ n: (was?.n ?? 0) + 1, at })),
     [],
@@ -189,6 +202,7 @@ export function EditStopModal(props: Props) {
       read={landed?.at.read ?? read}
       landed={landed?.at ?? null}
       onLanded={onLanded}
+      savedStarted={savedStarted}
     />
   );
 }
@@ -276,11 +290,14 @@ function LoadEditor({
   read,
   landed,
   onLanded,
+  savedStarted,
 }: Props & {
   read: LoadForEdit | null;
   /** §12.127. Set when this editor is the load as a save left it. */
   landed: Landed | null;
   onLanded: (at: Landed) => void;
+  /** §12.152. Kept by the modal, which outlives this editor. */
+  savedStarted: RefObject<Started | null>;
 }) {
   const queryClient = useQueryClient();
   /**
@@ -523,6 +540,36 @@ function LoadEditor({
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [hasUnsaved]);
+
+  /**
+   * §12.152. The two strips drop in when they arrive; the form below jumps down at once by
+   * their height, as it did. "Unsaved changes" comes with a person's first change, and
+   * not with an editor that opens with one. "Saved · one thing to know" comes with a save
+   * that landed, and the editor opened afresh on that save (§12.127) replaces the strip
+   * mid-drop, so this records when it began and the new editor carries it on from there.
+   */
+  const unsavedStrip = useRef<HTMLParagraphElement | null>(null);
+  useOnAppear(hasUnsaved, () => {
+    if (unsavedStrip.current) {
+      dropIn(unsavedStrip.current, MOTION_MS.unsavedDrop, MOTION_SHAPE.unsavedDropPx);
+    }
+  });
+  const savedStrip = useRef<HTMLDivElement | null>(null);
+  useOnAppear(saveWarnings.length > 0, () => {
+    if (!savedStrip.current) return;
+    savedStarted.current = { at: performance.now() };
+    dropIn(savedStrip.current, MOTION_MS.savedDrop, MOTION_SHAPE.savedDropPx);
+  });
+  const carried = useRef(false);
+  useLayoutEffect(() => {
+    if (carried.current) return;
+    carried.current = true;
+    const started = savedStarted.current;
+    savedStarted.current = null;
+    if (landed && started && savedStrip.current) {
+      dropOn(savedStrip.current, MOTION_MS.savedDrop, MOTION_SHAPE.savedDropPx, started);
+    }
+  });
 
   const driverChanged = !spent && form.driverId !== initialDriverId;
 
@@ -1162,13 +1209,19 @@ function LoadEditor({
           ) : null}
 
           {hasUnsaved ? (
-            <p className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text">
+            <p
+              ref={unsavedStrip}
+              className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-text"
+            >
               Unsaved changes — {unsaved.join(', ')}.
             </p>
           ) : null}
 
           {saveWarnings.length > 0 ? (
-            <div className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2">
+            <div
+              ref={savedStrip}
+              className="border-b border-status-neutral-bd bg-status-neutral-bg px-4 py-2"
+            >
               <p className="font-cond text-micro uppercase tracking-[.09em] text-status-neutral-fg">
                 Saved · one thing to know
               </p>

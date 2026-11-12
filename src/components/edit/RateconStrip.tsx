@@ -12,6 +12,9 @@ import { prepareForReading, type Prepared } from '@/lib/ratecon/redact';
 import { bumpCount, readCounts, type FillCounts } from '@/lib/ratecon/session-counts';
 import { LAYOUT_NAME, readRatecon, type RateconRead } from '@/lib/ratecon/templates';
 import type { ReadFrom } from './ratecon-fill';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn } from '@/lib/appear-motion';
+import { useOnAppear } from '@/hooks/useOnAppear';
 
 /**
  * §12.122. "Fill from rate confirmation": drop a PDF, choose one, or paste
@@ -269,6 +272,16 @@ export function RateconStrip({
 
   const open = status.kind !== 'idle';
 
+  /**
+   * §12.152. What it says drops in once, as it opens on a PDF or a paste. Reading, the
+   * scan's pages and what it said then change inside it with nothing played. It opens
+   * again, and drops again, only after it has folded.
+   */
+  const detail = useRef<HTMLDivElement | null>(null);
+  useOnAppear(open, () => {
+    if (detail.current) dropIn(detail.current, MOTION_MS.rateconDrop, MOTION_SHAPE.rateconDropPx);
+  });
+
   return (
     <section
       aria-label="Fill from rate confirmation"
@@ -343,7 +356,12 @@ export function RateconStrip({
 
       {/* Only once a PDF or text has been given; folds when the load is typed into. */}
       {open ? (
-        <div data-ratecon-detail="" aria-live="polite" className="flex flex-col gap-1.5 pb-2.5">
+        <div
+          ref={detail}
+          data-ratecon-detail=""
+          aria-live="polite"
+          className="flex flex-col gap-1.5 pb-2.5"
+        >
           {status.kind === 'reading' ? <p className="text-small text-text-mutedOnOverlay">Reading…</p> : null}
           {status.kind === 'scanning' ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small">

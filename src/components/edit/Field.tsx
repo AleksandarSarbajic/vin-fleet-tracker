@@ -1,7 +1,10 @@
 'use client';
 
 import type React from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { checkSaid } from './check-said';
+import { dropIn } from '@/lib/appear-motion';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 
 /** A labelled text input, its error under it, never in a summary banner (§9.9). */
 export function Field({
@@ -34,6 +37,22 @@ export function Field({
   /** The language-model reader filled it, and nobody has confirmed it yet: the source is its AI mark. */
   ai?: boolean;
 }) {
+  /**
+   * §12.152. A new message drops in under its field: keyed by its words, so a re-render
+   * with the same message plays nothing, and neither does mounting with one (choosing
+   * another stop remounts its form). Messages come as a person types and from a refused
+   * save, so a person is behind every one.
+   */
+  const message = useRef<HTMLSpanElement | null>(null);
+  const said = useRef(error);
+  useLayoutEffect(() => {
+    const before = said.current;
+    said.current = error;
+    if (error && error !== before && message.current) {
+      dropIn(message.current, MOTION_MS.invalidDrop, MOTION_SHAPE.invalidDropPx);
+    }
+  });
+
   return (
     <label className="block">
       <span className="mb-1 block text-small text-text-secondary">{label}</span>
@@ -50,7 +69,9 @@ export function Field({
         }`}
       />
       {error ? (
-        <span className="mt-1 block text-small text-status-late-fg">{error}</span>
+        <span ref={message} className="mt-1 block text-small text-status-late-fg">
+          {error}
+        </span>
       ) : check ? (
         <span data-field-check="" className="mt-1 block text-small text-status-risk-fg">
           {checkSaid(check)}
