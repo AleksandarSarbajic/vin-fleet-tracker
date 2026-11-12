@@ -1,14 +1,55 @@
 'use client';
 
 import Image from 'next/image';
-import { useActionState } from 'react';
+import { useActionState, useLayoutEffect, useRef, useState } from 'react';
 import { signIn, type LoginState } from './actions';
 import { BRAND } from '@/lib/brand';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn } from '@/lib/appear-motion';
+import { follow } from '@/lib/motion';
+import { cameByPageChange } from '@/lib/page-arrival';
 
 const initial: LoginState = { error: null };
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(signIn, initial);
+
+  /**
+   * §12.153. The form comes up into its place on a page load. The form is the server's first
+   * paint, so this is CSS in that HTML (`motion-safe:animate-login-in`): it starts with the
+   * first paint and ends by itself. With no script, or a hydration that fails, the form is
+   * there and usable as it always was: nothing hides it that a script must undo. Under
+   * reduced motion `motion-safe:` gives it nothing at all.
+   *
+   * Chosen once, as the page mounts: on the page a load lands on. Reached by a change of page
+   * (signing out lands here so), the page's own rise is the motion (§12.149), as the window's
+   * opening is for the tour (§12.152). The same on the server and in hydration: both say
+   * "load".
+   */
+  const [arrives] = useState(() => !cameByPageChange());
+  const form = useRef<HTMLFormElement | null>(null);
+  /** From hydration on, a press holds the form where it is drawn, as it holds any motion (§12.149). */
+  useLayoutEffect(() => {
+    const el = form.current;
+    if (!el || typeof el.getAnimations !== 'function') return;
+    for (const animation of el.getAnimations()) follow(animation);
+  }, []);
+
+  /**
+   * §12.153. A refusal drops in under the password. Keyed by its words: the same refusal
+   * twice in a row stays where it is, as a field's message does (§12.152), because nothing
+   * new arrived and the alert, whose words did not change, is not read out again either.
+   * The words are in the alert in the commit they land in; only their look moves.
+   */
+  const refusal = useRef<HTMLParagraphElement | null>(null);
+  const refused = useRef(state.error);
+  useLayoutEffect(() => {
+    const before = refused.current;
+    refused.current = state.error;
+    if (state.error && state.error !== before && refusal.current) {
+      dropIn(refusal.current, MOTION_MS.loginErrorDrop, MOTION_SHAPE.loginErrorDropPx);
+    }
+  });
 
   return (
     /*
@@ -19,8 +60,9 @@ export default function LoginPage() {
      */
     <main className="grid min-h-dvh place-items-center bg-surface-sunken p-6 max-md:grid-cols-[minmax(0,1fr)] max-md:p-4">
       <form
+        ref={form}
         action={action}
-        className="w-[420px] max-w-full border border-line-hair bg-surface-base p-8 max-md:p-6"
+        className={`${arrives ? 'motion-safe:animate-login-in ' : ''}w-[420px] max-w-full border border-line-hair bg-surface-base p-8 max-md:p-6`}
       >
         {/* §9.12 / 3f: the knockout lockup at 54px tall, 22px above the title. */}
         <Image
@@ -64,7 +106,7 @@ export default function LoginPage() {
         </label>
 
         {state.error ? (
-          <p role="alert" className="mb-3 text-small font-medium text-status-late-fg">
+          <p ref={refusal} role="alert" className="mb-3 text-small font-medium text-status-late-fg">
             {state.error}
           </p>
         ) : null}
