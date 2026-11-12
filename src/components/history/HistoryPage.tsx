@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -10,7 +10,9 @@ import { HeaderClocks, HeaderSync, useHeaderNow } from '@/components/console/Hea
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { useGoKeys } from '@/hooks/useGoKeys';
 import { FILTER_KEYS } from '@/components/console/FilterChips';
-import { palette } from '@/design/tokens';
+import { MOTION_MS, palette } from '@/design/tokens';
+import { drawIn } from '@/lib/appear-motion';
+import { cameByPageChange } from '@/lib/page-arrival';
 import { BRAND } from '@/lib/brand';
 import { timeInZone } from '@/lib/format';
 import { ENTRY_STATUS_LABEL, type HistoryWeekView } from '@/lib/history';
@@ -86,6 +88,25 @@ export function HistoryPage({
   const [week, setWeek] = useState(initialWeek);
   const [q, setQ] = useState(initialQ);
   const filter = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * §12.153. The rows in view draw in when a change of page opens History, once, in the commit
+   * the page mounts in: never on a filter, a week or its fetch, which change the rows after.
+   * Not on the page a load lands on: those rows are the server's first paint, already on the
+   * screen, and starting them from nothing would flash them.
+   */
+  const scroller = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || !cameByPageChange()) return;
+    drawIn(
+      [...box.querySelectorAll('[data-driver-row]')],
+      box,
+      MOTION_MS.histRowsDraw,
+      MOTION_MS.histRowsDrawRow,
+      MOTION_MS.histRowsDrawGapMax,
+    );
+  }, []);
 
   /**
    * §12.104. The board as it was left: its list, chips, search and truck.
@@ -294,7 +315,7 @@ export function HistoryPage({
         />
 
 
-        <main className="min-h-0 flex-1 overflow-auto print:overflow-visible">
+        <main ref={scroller} className="min-h-0 flex-1 overflow-auto print:overflow-visible">
           {/* The printed title block: the console chrome is not printed. */}
           <div className="hidden items-end justify-between gap-5 border-b-[1.5px] border-print-ink pb-3 print:flex">
             <div className="flex flex-col gap-1.5">

@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { dropIn } from '@/lib/appear-motion';
 import { ENTRY_STATUS_LABEL, NO_DRIVER, type HistoryEntry, type HistoryRow, type HistoryWeekView } from '@/lib/history';
 import { STATUS_INK, STATUS_RULE, StatusIcon, StatusMark } from './StatusMark';
 
@@ -183,8 +186,19 @@ function DayCell({
 }) {
   const [expanded, setExpanded] = useState(false);
   const folded = !expanded && entries.length >= FOLD_AT;
+  /**
+   * §12.153. The loads past the first two drop in when "+N more" opens the day. They were
+   * there all along, hidden, so the cell grows at once and only they move. A cell opens once
+   * and is drawn anew with a new week or filter, folded again, so nothing replays.
+   */
+  const cell = useRef<HTMLDivElement | null>(null);
+  useOnAppear(expanded, () => {
+    const loads = [...(cell.current?.children ?? [])].slice(2, entries.length);
+    for (const load of loads) dropIn(load, MOTION_MS.histFoldDrop, MOTION_SHAPE.histFoldDropPx);
+  });
   return (
     <div
+      ref={cell}
       role="cell"
       className={`flex min-w-0 flex-col gap-1.5 border-l border-line-soft p-1.5 print:gap-[5px] print:border-print-ruleSoft print:px-1.5 print:py-[5px] ${cellGround(index, today)}`}
     >
