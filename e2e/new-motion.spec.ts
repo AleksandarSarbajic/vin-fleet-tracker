@@ -30,6 +30,13 @@ const SELECT_MS = 280;
 const MAP_MS = 700;
 const ZOOM_MS = 150;
 const GLIDE_MS = 380;
+/** §12.152, phase 3bj: the small motions. */
+const SMALL_MS = 270;
+const PAL_MS = 180;
+const DROP_PX = 14;
+const POP_FROM = 0.5;
+const CHIP_FROM = 0.75;
+const TOUR_PX = 28;
 
 test.beforeEach(async () => {
   await resetWorld();
@@ -3543,5 +3550,654 @@ test.describe('a press behind a cancel', () => {
       stillPausedAfterTheRelease: 0,
       atRest: { running: 0, displaced: 0 },
     });
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3bj (§12.152), the small motions, in a real browser: the lengths the browser runs,
+ * the real CSS that holds a chip's look back, every scroller on every frame, a real press on
+ * each new control 20 to 300ms into its motion, and a resize that swaps the note's form. What
+ * starts each one, and what does not, is held by the unit tests (`board-motion.test.tsx`,
+ * `strip-motion.test.tsx`, `overlay-motion.test.tsx`).
+ * ------------------------------------------------------------------------------------------ */
+
+type Small = { what: string; frames: string; duration: number; easing: string };
+type SmallLog = { __small: (Small & { animation: Animation; el: Element })[]; __copies: number };
+
+/** Every Web Animation the page starts, named by what it is on, from before its code runs. */
+const logSmall = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as SmallLog;
+    w.__small = [];
+    w.__copies = 0;
+    const name = (el: Element): string => {
+      const text = el.textContent ?? '';
+      if (el.hasAttribute('data-ground-pop')) return 'chip';
+      if (el instanceof HTMLInputElement && el.type === 'checkbox') return 'check';
+      if (el.hasAttribute('data-empty')) return 'empty';
+      if (el.getAttribute('role') === 'alert' && text.includes('Position feed')) return 'feedBanner';
+      if (el.getAttribute('role') === 'status' && text.includes('reach the console server')) return 'fetchBanner';
+      if (el.tagName === 'BUTTON' && text.includes('reorder — click to sort')) return 'reorder';
+      if (el.getAttribute('data-note') === 'drivers') return 'note';
+      if (el.tagName.toLowerCase() === 'svg' && el.closest('button[aria-label^="Copy"]')) return 'copied';
+      if (el.tagName === 'SPAN' && el.parentElement?.tagName === 'LABEL' && el.classList.contains('text-status-late-fg')) return 'invalid';
+      if (text.startsWith('Unsaved changes')) return 'unsaved';
+      if (text.startsWith('Saved · one thing to know')) return 'saved';
+      if (el.hasAttribute('data-ratecon-detail')) return 'ratecon';
+      if (el.getAttribute('role') === 'listbox') return 'palResults';
+      if (el.hasAttribute('data-tour-step')) return 'tour';
+      return 'other';
+    };
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      w.__small.push({
+        what: name(this),
+        frames: JSON.stringify(frames),
+        duration: Number(timing.duration),
+        easing: String(timing.easing ?? ''),
+        animation,
+        el: this,
+      });
+      return animation;
+    };
+  });
+const smallStarted = async (page: Page) =>
+  page.evaluate(() =>
+    (window as unknown as SmallLog).__small
+      .filter((s) => s.what !== 'other')
+      .map(({ what, frames, duration, easing }) => ({ what, frames, duration, easing })),
+  );
+/** Nothing running, and nothing the small motions add left behind. */
+const smallAtRest = (page: Page) =>
+  page.evaluate(() => ({
+    running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    added: document.querySelectorAll('[data-ground-pop], [data-ground-host]').length,
+    boxStyled: [...document.querySelectorAll('[data-row-id] input[type="checkbox"]')].filter((b) => b.getAttribute('style')).length,
+    clipped: [...document.querySelectorAll('[data-tour-step]')].filter((s) => s.parentElement?.getAttribute('style')).length,
+  }));
+const SMALL_AT_REST = { running: 0, added: 0, boxStyled: 0, clipped: 0 };
+
+const DROP_FRAMES = JSON.stringify([
+  { opacity: 0, translate: `0 -${DROP_PX}px` },
+  { opacity: 1, translate: '0 0' },
+]);
+const FADE_FRAMES = JSON.stringify([{ opacity: 0 }, { opacity: 1 }]);
+const POP_FRAMES = JSON.stringify([
+  { opacity: 0, scale: String(POP_FROM) },
+  { opacity: 1, scale: '1' },
+]);
+const CHIP_ON = JSON.stringify([
+  { opacity: 0, scale: String(CHIP_FROM) },
+  { opacity: 1, scale: '1' },
+]);
+const CHIP_OFF = JSON.stringify([
+  { opacity: 1, scale: '1' },
+  { opacity: 0, scale: String(CHIP_FROM) },
+]);
+const drop = { frames: DROP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
+const fade = { frames: FADE_FRAMES, duration: SMALL_MS, easing: 'linear' };
+const pop = { frames: POP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
+
+/**
+ * One step watched on its own: every scroller on every frame from its cause until all is
+ * still, against that step's own two ends. Watched across several steps, a state in the
+ * middle (the health strip giving way to the reorder bar) would read as growth.
+ */
+const watchStep = async (page: Page, act: () => Promise<unknown>) => {
+  const stop = await watchFrames(page);
+  await act();
+  await expect.poll(() => stillMoving(page)).toBe(0);
+  const { grew } = await stop();
+  return grew;
+};
+
+/** Web Animations still running: the glides and these motions, not a flash or a toast's CSS. */
+const webMoving = (page: Page) =>
+  page.evaluate(
+    () => document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+  );
+
+/** The worker's part: the seed stamps the feed once, and the board calls it stale 5 min on. */
+const keepTheFeedFresh = async () => {
+  const sql = connect();
+  try {
+    await sql`update feed_health set newest_position_at = now(), last_success_at = now() where id = 1`;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+};
+
+test.describe('phase 3bj, the small motions (§12.152)', () => {
+  test('the board: each at its length, a chip’s own look held back, nothing grown, nothing left, and no replay on a resize', async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await logSmall(page);
+    await openMixed(page);
+    // `openMixed` presses chips itself: count only what this test starts.
+    const before = (await smallStarted(page)).length;
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+
+    // chip: two frames into Late's arrival, the real CSS holds its own edge back under the overlay.
+    let during: { edge: string; overlays: number } | null = null;
+    await step('chip', async () => {
+      during = await page.evaluate(
+        () =>
+          new Promise<{ edge: string; overlays: number }>((done) => {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                const chip = [...document.querySelectorAll('button[aria-pressed="true"]')].find((b) =>
+                  (b.textContent ?? '').startsWith('Late'),
+                )!;
+                done({ edge: getComputedStyle(chip).borderTopColor, overlays: chip.querySelectorAll('[data-ground-pop]').length });
+              }),
+            );
+          }),
+      );
+    });
+    expect(during).toEqual({ edge: 'rgba(0, 0, 0, 0)', overlays: 1 });
+    const late = page.getByRole('button', { name: /^Late\b/ }).first();
+    expect(
+      await late.evaluate((b) => ({
+        edge: getComputedStyle(b).borderTopColor === 'rgba(0, 0, 0, 0)',
+        overlays: b.querySelectorAll('[data-ground-pop]').length,
+        held: b.hasAttribute('data-ground-host'),
+      })),
+    ).toEqual({ edge: false, overlays: 0, held: false });
+    await step('chip back', () => page.keyboard.press('0'));
+
+    // check: a real click on a box, and again.
+    const box = page.locator('[data-row-id]').nth(2).locator('input[type="checkbox"]');
+    await step('check on', () => box.click());
+    await step('check off', () => box.click());
+    // The click left focus on the box, where a chip's key is typing, not a chip.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    // empty: Arrived has none in this list.
+    await step('empty', async () => {
+      await page.keyboard.press('4');
+      await expect(page.locator('[data-empty]')).toBeVisible();
+    });
+    await step('empty back', () => page.keyboard.press('0'));
+
+    // note: Drivers only, then a resize across 1440 that swaps it to its short form and back.
+    const note = page.locator('[data-note="drivers"]');
+    await step('note', async () => {
+      await page.keyboard.press('8');
+      await expect(note).toBeVisible();
+    });
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await expect(note.locator('[data-note-text]')).toBeHidden();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(note.locator('[data-note-text]')).toBeVisible();
+    await quiet(page);
+    await step('note back', () => page.keyboard.press('8'));
+
+    // copied: a real click on a row's copy button. Only a truck with a load has an address.
+    const row = page.locator('[data-row-id]').filter({ has: page.locator('button[aria-label="Copy address"]') }).first();
+    await row.hover({ timeout: 10_000 });
+    await step('copied', async () => {
+      await row.getByRole('button', { name: 'Copy address' }).click({ timeout: 10_000 });
+      await expect(row.getByRole('button', { name: 'Copy address' })).toContainText('Copied');
+    });
+
+    // reorder: a poll changes the order on its own.
+    await step('reorder', async () => {
+      await pollWith(page, (rows) => {
+        rows.reverse();
+        mixed(rows);
+      });
+      await expect(page.getByRole('button', { name: /reorder — click to sort/ })).toBeVisible();
+    });
+
+    // feedBanner: the feed goes quiet, and a poll says so.
+    const sql = connect();
+    try {
+      await sql`update feed_health set newest_position_at = now() - interval '3 hours' where id = 1`;
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+    await step('feedBanner', async () => {
+      await pollWith(page, () => {});
+      await expect(page.getByText('Position feed unreachable')).toBeVisible();
+    });
+
+    // fetchBanner: the next poll fails.
+    await page.unroute('**/api/fleet');
+    await page.route('**/api/fleet', (route) => route.fulfill({ status: 503, json: { error: 'down' } }));
+    await step('fetchBanner', async () => {
+      const failed = page.waitForResponse('**/api/fleet');
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await failed;
+      await expect(page.getByText('reach the console server')).toBeVisible();
+    });
+
+    expect(grew).toEqual([]);
+    expect(await smallAtRest(page)).toEqual(SMALL_AT_REST);
+
+    const seen = (await smallStarted(page)).slice(before);
+    const of = (what: string) => seen.filter((s) => s.what === what).map(({ frames: f, duration, easing }) => ({ frames: f, duration, easing }));
+    // Six changes (Late, All, Arrived, All, Drivers only on and off), each two chips' looks.
+    expect(of('chip')).toHaveLength(12);
+    expect(of('chip').every((c) => c.duration === SMALL_MS && c.easing === DIALOG_CURVE)).toBe(true);
+    expect(new Set(of('chip').map((c) => c.frames))).toEqual(new Set([CHIP_ON, CHIP_OFF]));
+    expect(of('check')).toEqual([pop, pop]);
+    expect(of('empty')).toEqual([drop]);
+    expect(of('note')).toEqual([drop]);
+    expect(of('copied')).toEqual([pop]);
+    expect(of('reorder')).toEqual([fade]);
+    expect(of('feedBanner')).toEqual([fade]);
+    expect(of('fetchBanner')).toEqual([fade]);
+  });
+
+  test('the edit window: the rate confirmation, a field’s message and “Unsaved changes”, each once, nothing grown, nothing left', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await logSmall(page);
+    await resetWorld({ extraTrucks: 1 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/?truck=200');
+    await page.locator('[data-row-id][aria-selected="true"]').waitFor();
+    await quiet(page);
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: /truck 200/ });
+    await dialog.locator('[data-ratecon-strip]').waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const grew: string[] = [];
+
+    /*
+     * Typed first, then the paste. Typing into the load folds an open strip in a passive
+     * effect, a commit after the strips appear, so for a frame both are drawn and the
+     * window's scroller is 74px taller than at either end. That is layout, not motion: with
+     * reduced motion it is there just the same (phase 3bj, HANDOFF). Typed first, no step
+     * here holds that frame, and each step is judged on its own frames alone.
+     */
+    // As a person types: a message, then the same message as they type on.
+    await dialog.getByLabel('ZIP', { exact: true }).focus();
+    grew.push(
+      ...(await watchStep(page, async () => {
+        await page.keyboard.type('x');
+        await expect(dialog.getByText('ZIP must be digits only', { exact: false })).toBeVisible();
+        await expect(dialog.getByText(/^Unsaved changes/)).toBeVisible();
+      })),
+    );
+    // The label wraps the message too, so the field is no longer named just "ZIP": type where focus is.
+    grew.push(...(await watchStep(page, () => page.keyboard.type('y'))));
+
+    await page.evaluate(() => navigator.clipboard.writeText('Dear carrier,\nPlease find the load attached.'));
+    await dialog.getByLabel("Or paste the rate confirmation's text").focus();
+    grew.push(
+      ...(await watchStep(page, async () => {
+        await page.keyboard.press('ControlOrMeta+v');
+        await expect(dialog.getByText('Layout not recognised, nothing filled.')).toBeVisible();
+      })),
+    );
+
+    expect(grew).toEqual([]);
+    expect(await smallAtRest(page)).toEqual(SMALL_AT_REST);
+    const seen = (await smallStarted(page)).filter((s) => ['ratecon', 'invalid', 'unsaved'].includes(s.what));
+    expect(seen).toEqual([
+      // The message and the strip arrive in the same commit; the field's effect runs first.
+      { what: 'invalid', ...drop },
+      { what: 'unsaved', ...drop },
+      { what: 'ratecon', ...drop },
+    ]);
+  });
+
+  test('the palette and the tour: results fade on each key, steps slide on Next and Back, nothing grown, nothing left', async ({
+    page,
+  }) => {
+    await logSmall(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+
+    await page.keyboard.press('Control+k');
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    let stop = await watchFrames(page);
+    await page.keyboard.type('da', { delay: 40 });
+    await expect(palette.getByRole('option').first()).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    let watched = await stop();
+    expect(watched.grew).toEqual([]);
+    await page.keyboard.press('Escape');
+
+    await page.keyboard.press('?');
+    await page.getByRole('button', { name: 'Take the tour again' }).click();
+    const tour = page.getByRole('dialog', { name: 'What this console does' });
+    await expect(tour).toBeVisible();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    stop = await watchFrames(page);
+    await tour.getByRole('button', { name: 'Next' }).click();
+    await tour.getByRole('button', { name: 'Next' }).click();
+    await tour.getByRole('button', { name: 'Back' }).click();
+    await expect(tour).toContainText('2 of');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    watched = await stop();
+    expect(watched.grew).toEqual([]);
+    expect(await smallAtRest(page)).toEqual(SMALL_AT_REST);
+
+    const seen = await smallStarted(page);
+    expect(seen.filter((s) => s.what === 'palResults')).toEqual([
+      { what: 'palResults', frames: FADE_FRAMES, duration: PAL_MS, easing: 'linear' },
+      { what: 'palResults', frames: FADE_FRAMES, duration: PAL_MS, easing: 'linear' },
+    ]);
+    const slide = (dx: number) => ({
+      what: 'tour',
+      frames: JSON.stringify([
+        { opacity: 0, translate: `${dx}px 0` },
+        { opacity: 1, translate: '0 0' },
+      ]),
+      duration: SMALL_MS,
+      easing: DIALOG_CURVE,
+    });
+    expect(seen.filter((s) => s.what === 'tour')).toEqual([slide(TOUR_PX), slide(TOUR_PX), slide(-TOUR_PX)]);
+  });
+
+  /**
+   * The press table for the new controls, as `the press during a glide` has one for rows. A
+   * real mouse, 20, 60, 120 and 300ms into each control's own motion (all four last 270ms,
+   * so 300 is just after the end), held 40ms. Landed means the press came at that time, ±18
+   * ms, by the motion's own clock; only those are judged, and a miss is never tried again.
+   */
+  test('a real mouse on the chip, the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands', async ({
+    page,
+    context,
+  }, info) => {
+    test.setTimeout(12 * 60_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await logSmall(page);
+    await page.addInitScript(() => {
+      type Press = { at: number | null; down: boolean; up: boolean | null };
+      const w = window as unknown as SmallLog & { __press: Press | null; __aim: string | null; __since: number };
+      w.__press = null;
+      w.__since = 0;
+      /** The control each motion stands on: a press counts only if it came down, and went up, on it. */
+      const CONTROL: Record<string, string> = {
+        chip: 'button[aria-pressed]',
+        // The box, or its place in its cell, which takes a press for it while it pops.
+        check: 'div:has(> input[type="checkbox"])',
+        copied: 'button[aria-label="Copy address"]',
+        reorder: 'button',
+      };
+      const onControl = (event: Event) =>
+        Boolean(w.__aim && (event.target as Element | null)?.closest?.(CONTROL[w.__aim] ?? '*'));
+      // Counted here and copied nowhere: a press that reached the button runs its handler.
+      Object.defineProperty(navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: async () => {
+          w.__copies += 1;
+        },
+      });
+      window.addEventListener(
+        'pointerdown',
+        (event) => {
+          // Only this round's motion: a press that came before it started has no time in it.
+          const last = w.__small.slice(w.__since).filter((s) => s.what === w.__aim).at(-1);
+          const clock = Number(document.timeline.currentTime);
+          const start = last?.animation.startTime;
+          w.__press = {
+            at: last && start !== null && start !== undefined ? clock - Number(start) : null,
+            down: onControl(event),
+            up: null,
+          };
+        },
+        true,
+      );
+      window.addEventListener(
+        'pointerup',
+        (event) => {
+          if (w.__press) w.__press.up = onControl(event);
+        },
+        true,
+      );
+    });
+    await openMixed(page);
+    const feedBanner = page.getByText('Position feed unreachable');
+
+    type Control = {
+      name: 'chip' | 'check' | 'copied' | 'reorder';
+      /** Where to stand for round `i`, and what to read before and after. */
+      aim: (i: number) => Promise<{ x: number; y: number; read: () => Promise<string> }>;
+      /** Starts the control's own motion, in the page, not awaited. */
+      start: (i: number) => Promise<unknown>;
+      /** What a press that landed leaves: compared with what `read` said before the start. */
+      landed: (before: string, after: string) => boolean;
+    };
+    // Every wait has its own limit: a missing control fails here, not at the test's 12 minutes.
+    const centre = async (locator: Locator) => {
+      const box = (await locator.boundingBox({ timeout: 5_000 }))!;
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const lateChip = page.getByRole('button', { name: /^Late\b/ }).first();
+    const rowAt = (i: number) => page.locator('[data-row-id]').nth(1 + (i % 10));
+    /** Only a truck with a load has an address to copy. */
+    const copyRows = page.locator('[data-row-id]').filter({ has: page.locator('button[aria-label="Copy address"]') });
+    const copyRowAt = async (i: number) => copyRows.nth(i % (await copyRows.count()));
+    /** Two orders, one after the other, so every poll changes the order the board shows. */
+    let flip = false;
+    const reorderBar = page.getByRole('button', { name: /reorder — click to sort/ });
+    let barAt: { x: number; y: number } | null = null;
+    /** At risk and On time trade places: the order changes, and no truck turns late, so no toast. */
+    const answerFrom = async (swap: boolean) => {
+      const body = (await (await page.request.get('/api/fleet')).json()) as { fleet: FleetRowLike[] };
+      mixed(body.fleet);
+      if (swap) {
+        for (const row of body.fleet) {
+          const to = row.status === 'AT_RISK' ? 'ON_TIME' : row.status === 'ON_TIME' ? 'AT_RISK' : row.status;
+          row.status = to;
+          row.computed = to;
+        }
+      }
+      await page.unroute('**/api/fleet');
+      await page.route('**/api/fleet', (route) => route.fulfill({ json: body }));
+    };
+
+    const CONTROLS: Control[] = [
+      {
+        name: 'chip',
+        aim: async () => ({
+          ...(await centre(lateChip)),
+          read: () => lateChip.getAttribute('aria-pressed', { timeout: 2_000 }).then(String),
+        }),
+        start: () => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }))),
+        // The key turned it on, and the press turned it off again.
+        landed: (before, after) => before === after,
+      },
+      {
+        name: 'check',
+        aim: async (i) => {
+          const box = rowAt(i).locator('input[type="checkbox"]');
+          return {
+            ...(await centre(box)),
+            read: async () =>
+              `${await box.isChecked({ timeout: 2_000 })}|${await rowAt(i).getAttribute('aria-selected', { timeout: 2_000 })}`,
+          };
+        },
+        start: (i) =>
+          page.evaluate(
+            (n) => (document.querySelectorAll('[data-row-id]')[1 + (n % 10)]!.querySelector('input[type="checkbox"]') as HTMLInputElement).click(),
+            i,
+          ),
+        // Checked by the start, unchecked by the press, and the row not selected by it.
+        landed: (before, after) => before === after,
+      },
+      {
+        name: 'copied',
+        aim: async (i) => {
+          const row = await copyRowAt(i);
+          await row.hover({ timeout: 5_000 });
+          const button = row.getByRole('button', { name: 'Copy address' });
+          // The last round's "Copied" has to go first, or this click shows nothing new.
+          await expect(button).not.toContainText('Copied', { timeout: 3_000 });
+          return {
+            ...(await centre(button)),
+            read: async () =>
+              `${await page.evaluate(() => (window as unknown as SmallLog).__copies)}|${await row.getAttribute('aria-selected', { timeout: 2_000 })}`,
+          };
+        },
+        start: (i) =>
+          page.evaluate((n) => {
+            const rows = [...document.querySelectorAll('[data-row-id]')].filter((r) => r.querySelector('button[aria-label="Copy address"]'));
+            (rows[n % rows.length]!.querySelector('button[aria-label="Copy address"]') as HTMLButtonElement).click();
+          }, i),
+        // Two copies, the start's and the press's, and the row not selected by either.
+        landed: (before, after) => {
+          const [was, wasSelected] = before.split('|');
+          const [now, isSelected] = after.split('|');
+          return Number(now) === Number(was) + 2 && isSelected === wasSelected;
+        },
+      },
+      {
+        name: 'reorder',
+        aim: async () => {
+          // Where the bar stands: shown once by a poll and measured.
+          if (barAt === null) {
+            flip = !flip;
+            await answerFrom(flip);
+            await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+            await reorderBar.waitFor({ timeout: 10_000 });
+            barAt = await centre(reorderBar);
+          }
+          // A bar left from the round before (a press that came early) is clicked away first.
+          if (await reorderBar.isVisible()) {
+            await reorderBar.click({ timeout: 5_000 });
+            await expect(reorderBar).toHaveCount(0, { timeout: 5_000 });
+            await expect.poll(() => webMoving(page), { timeout: 3_000 }).toBe(0);
+          }
+          // The next poll is answered from memory, so the bar comes as soon as the page asks.
+          flip = !flip;
+          await answerFrom(flip);
+          return { ...barAt, read: async () => String(await reorderBar.count()) };
+        },
+        start: () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))),
+        // There before the press and gone after it: the press sorted the list.
+        landed: (_before, after) => after === '0',
+      },
+    ];
+
+    const TIMES = [20, 60, 120, 300];
+    const HOLD = 40;
+    const ROUNDS = 8;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const tally: { control: string; time: number; ok: boolean; offControl: boolean; moved: number }[] = [];
+
+    for (const control of CONTROLS) {
+      for (const time of TIMES) {
+        await keepTheFeedFresh();
+        let lateBy = 0;
+        let done = 0;
+        let tries = 0;
+        while (done < ROUNDS && tries < ROUNDS * 6) {
+          tries += 1;
+          const { x, y, read } = await control.aim(tries);
+          await page.mouse.move(x, y);
+          await quiet(page);
+          const before = await read();
+          await page.evaluate((m) => {
+            const w = window as unknown as SmallLog & { __aim: string; __since: number; __press: unknown };
+            w.__aim = m;
+            w.__since = w.__small.length;
+            w.__press = null;
+          }, control.name);
+
+          const fired = control.start(tries);
+          await sleep(Math.max(0, time - lateBy));
+          await page.mouse.down();
+          await fired;
+          const pressed = await page.evaluate(() => (window as unknown as { __press: { at: number | null } }).__press);
+          const box = await page.evaluate(
+            ({ px, py }) => {
+              const el = document.elementFromPoint(px, py);
+              const r = el?.getBoundingClientRect();
+              return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+            },
+            { px: x, py: y },
+          );
+          await sleep(HOLD);
+          const boxAfter = await page.evaluate(
+            ({ px, py }) => {
+              const el = document.elementFromPoint(px, py);
+              const r = el?.getBoundingClientRect();
+              return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+            },
+            { px: x, py: y },
+          );
+          await page.mouse.up();
+          const ends = await page.evaluate(() => (window as unknown as { __press: { down: boolean; up: boolean | null } }).__press);
+          // A press on the reorder bar sorts and glides; a chip toggles and glides.
+          await expect.poll(() => webMoving(page), { timeout: 3_000 }).toBe(0);
+          await expect.poll(async () => control.landed(before, await read()), { timeout: 1_000 }).toBe(true).catch(() => {});
+          const after = await read();
+
+          // Early, before the motion began: wait longer next time. Otherwise learn from the gap.
+          if (pressed.at === null) lateBy -= 20;
+          else lateBy += (pressed.at - time) * 0.4;
+          const onTime = pressed.at !== null && Math.abs(pressed.at - time) <= 18;
+          if (onTime) {
+            done += 1;
+            tally.push({
+              control: control.name,
+              time,
+              ok: control.landed(before, after),
+              offControl: !ends.down || ends.up !== true,
+              moved: box && boxAfter ? Math.max(Math.abs(box.x - boxAfter.x), Math.abs(box.y - boxAfter.y)) : -1,
+            });
+          }
+          // Put it back for the next round when the press did not.
+          if (control.name === 'chip' && (await lateChip.getAttribute('aria-pressed', { timeout: 2_000 })) === 'true') {
+            await page.keyboard.press('1');
+          }
+          if (control.name === 'check' && (await rowAt(tries).locator('input[type="checkbox"]').isChecked({ timeout: 2_000 }))) {
+            await rowAt(tries).locator('input[type="checkbox"]').uncheck({ timeout: 5_000 });
+          }
+          await expect.poll(() => webMoving(page), { timeout: 3_000 }).toBe(0);
+        }
+        const these = tally.filter((t) => t.control === control.name && t.time === time);
+        process.stdout.write(
+          `SMALL PRESS ${control.name} at ${time}ms: ${done} landed in ${tries} tries, ${these.filter((t) => !t.ok).length} missed\n`,
+        );
+        expect(done, `${control.name} at ${time}ms: presses that landed on time`).toBe(ROUNDS);
+        await expect(feedBanner, `${control.name} at ${time}ms: the feed went stale mid-test`).toHaveCount(0);
+      }
+    }
+
+    const rows = tally.reduce<Record<string, { presses: number; misses: number; offTarget: number; mostMoved: number }>>((table, t) => {
+      const key = `${t.control} at ${t.time}ms`;
+      const row = (table[key] ??= { presses: 0, misses: 0, offTarget: 0, mostMoved: 0 });
+      row.presses += 1;
+      if (!t.ok) row.misses += 1;
+      if (t.offControl) row.offTarget += 1;
+      row.mostMoved = Math.max(row.mostMoved, Math.round(t.moved * 10) / 10);
+      return table;
+    }, {});
+    const report = JSON.stringify({ rows, misses: tally.filter((t) => !t.ok) }, null, 1);
+    await info.attach('small-press-table', { body: report, contentType: 'application/json' });
+    process.stdout.write(`SMALL PRESS TABLE\n${report}\nEND SMALL PRESS TABLE\n`);
+
+    expect(tally).toHaveLength(CONTROLS.length * TIMES.length * ROUNDS);
+    expect(tally.filter((t) => !t.ok)).toEqual([]);
+    // Each press came down on its control and went up on it: no motion took it away.
+    expect(tally.filter((t) => t.offControl)).toEqual([]);
+    /*
+     * What stood under the pointer moved by no more than §12.148's own press: a hovered
+     * button drops its 1px lift as it is pressed, and none of these motions moves its
+     * control at all (an overlay, a copy, the glyph inside, opacity).
+     */
+    expect(tally.filter((t) => t.moved > 1.01)).toEqual([]);
   });
 });
