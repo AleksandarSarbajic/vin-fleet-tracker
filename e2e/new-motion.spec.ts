@@ -4310,17 +4310,6 @@ const rowDrop = { frames: DROP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE 
 const dropsOf = (entries: Paged[]) => entries.map(({ frames, duration, easing }) => ({ frames, duration, easing: curve(easing) }));
 const asDrops = (n: number) => Array.from({ length: n }, () => ({ ...rowDrop, easing: curve(DIALOG_CURVE) }));
 
-/**
- * A change of page to a week of History, made by Next's own router, as a `Link` makes it. Not
- * the browser's Back: from the board, Back to History changes the address and leaves the board
- * drawn (phase 3bk, "Found wrong"), and the account menu opens the server's real week, which
- * this seed leaves empty.
- */
-const toHistoryWeek = (page: Page, week: string) =>
-  page.evaluate((w) => {
-    (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(`/history?week=${w}`);
-  }, week);
-
 /** A signed-out context: the login page with no session, so no load of it asks the hosted auth. */
 const signedOut = { storageState: { cookies: [], origins: [] }, reducedMotion: 'no-preference' as const };
 
@@ -4684,12 +4673,15 @@ test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
     await quiet(page);
     expect(await paged(page)).toEqual([]);
 
-    // To the board, and to the week again by a change of page. The rows in view draw in.
+    /*
+     * To the board, and Back to the week: a change of page (§12.154). Not the account menu: it
+     * opens the server's real week, which this seed leaves empty. The rows in view draw in.
+     */
     await page.locator('[data-board-link]').click();
     await page.locator('[data-row-id]').first().waitFor();
     await quiet(page);
     await step('histRows', async () => {
-      await toHistoryWeek(page, '2026-W39');
+      await page.goBack();
       await rows.first().waitFor();
     });
     await expect(page).toHaveURL(/week=2026-W39/);
@@ -4990,8 +4982,9 @@ test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
         await quiet(page);
         return firstAt;
       },
+      // Back from the board to the week, each round: a change of page (§12.154).
       start: async () => {
-        await toHistoryWeek(page, '2026-W39');
+        await page.goBack();
         await begun(page, 'histRows');
       },
       waits: true,

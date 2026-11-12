@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { AccountMenu, type AccountUser } from '@/components/console/AccountMenu';
 import { HeaderClocks, HeaderSync, useHeaderNow } from '@/components/console/HeaderStatus';
@@ -22,6 +22,7 @@ import {
   formatIsoWeek,
   isoWeekOf,
   mondayOf,
+  parseIsoWeek,
   rangeLabel,
   shiftWeek,
   weekdayIndex,
@@ -85,8 +86,18 @@ export function HistoryPage({
   const router = useRouter();
   const fleet = useFleet(initialFleet);
   const now = useHeaderNow(initialFleet.fetchedAt);
-  const [week, setWeek] = useState(initialWeek);
-  const [q, setQ] = useState(initialQ);
+  /*
+   * §12.154. The week and the filter the address holds, read as the server reads them, and the
+   * server's own only if it holds none. Back and Forward draw this page again from Next's cache,
+   * whose props are the week it was first opened on; the address is the week it was left on.
+   * On a load the two are the same. Next's address, not `window.location`, which lags it.
+   */
+  const address = useSearchParams();
+  const [week, setWeek] = useState(() => {
+    const asked = address.get('week');
+    return (asked ? parseIsoWeek(asked) : null) ?? initialWeek;
+  });
+  const [q, setQ] = useState(() => address.get('q') ?? initialQ);
   const filter = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -137,7 +148,21 @@ export function HistoryPage({
   useEffect(() => {
     const params = new URLSearchParams({ week: weekKey });
     if (q.trim()) params.set('q', q.trim());
-    window.history.replaceState(null, '', `/history?${params.toString()}`);
+    const href = `/history?${params.toString()}`;
+    /*
+     * §12.154. A microtask later, not now. Next hooks `history.replaceState` in an effect of its
+     * router, an ancestor's, and React runs a child's effects first: on the page a load lands on
+     * this one ran before the hook, so its `null` went to the browser as it was, wiped the
+     * router's own state off this entry, and Back to it did nothing. Hooked, the call keeps that
+     * state and tells the router the new address. No server round trip either way.
+     */
+    let live = true;
+    queueMicrotask(() => {
+      if (live) window.history.replaceState(null, '', href);
+    });
+    return () => {
+      live = false;
+    };
   }, [weekKey, q]);
 
   const today = civilDateIn(now, dispatchTz);

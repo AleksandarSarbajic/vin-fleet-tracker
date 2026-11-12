@@ -95,6 +95,117 @@ test('from the account menu, through a week change, and back with G B', async ({
   await expect(page).toHaveURL(/\/history/);
 });
 
+/**
+ * §12.154. Back and Forward between the board and History: History on screen with the week (and
+ * the filter) it was left on, the board gone; Forward, the board again. Every way History is
+ * opened: from the board (the account menu, G H), and by its own address (a load: a bookmark, a
+ * sent link, a reload), the week in it or not.
+ */
+test.describe('Back and Forward between the board and History', () => {
+  const historyShown = async (page: Page, range: string, week: string) => {
+    await expect(page.locator('[data-history-toolbar]')).toBeVisible();
+    await expect(page.locator('[data-row-id]')).toHaveCount(0);
+    await expect(page.locator('[data-week-range]')).toHaveText(range);
+    await expect(page).toHaveURL(new RegExp(`/history\\?week=${week}(&|$)`));
+  };
+  const boardShown = async (page: Page) => {
+    await expect(page.locator('[data-row-id]').first()).toBeVisible();
+    await expect(page.locator('[data-history-toolbar]')).toHaveCount(0);
+    await expect(page).toHaveURL(/\/(\?.*)?$/);
+  };
+  const toBoard = async (page: Page) => {
+    await page.locator('[data-board-link]').click();
+    await boardShown(page);
+  };
+  const W39 = 'Sep 21 – 27, 2026';
+
+  test.beforeEach(async ({ page }) => page.setViewportSize({ width: 1440, height: 900 }));
+
+  test('from the board by the account menu, another week, the board, Back: History on that week; Forward: the board', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await page.getByRole('button', { name: /^Account/ }).click();
+    await page.getByRole('menuitem', { name: /Driver history/ }).click();
+    // The browser's frozen "today" first (see the account-menu test above).
+    await expect(page.locator('[data-history-header]')).toContainText('10:42');
+    await page.getByRole('button', { name: 'This week' }).click();
+    await expect(page).toHaveURL(/week=2026-W40/);
+    await page.getByRole('button', { name: 'Previous week' }).click();
+    await historyShown(page, W39, '2026-W39');
+    await toBoard(page);
+
+    await page.goBack();
+    await historyShown(page, W39, '2026-W39');
+    await expect(row(page, 'Marcus Reyes')).toContainText('48179');
+    await page.goForward();
+    await boardShown(page);
+  });
+
+  test('from the board by G H, the board, Back with no change of week: History; Forward: the board', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.locator('[data-history-toolbar]').waitFor();
+    await expect(page).toHaveURL(/\/history\?week=\d{4}-W\d{2}$/);
+    const week = /week=(\d{4}-W\d{2})/.exec(page.url())![1]!;
+    const range = (await page.locator('[data-week-range]').textContent())!;
+    await toBoard(page);
+
+    await page.goBack();
+    await historyShown(page, range, week);
+    await page.goForward();
+    await boardShown(page);
+  });
+
+  for (const address of ['/history?week=2026-W39', '/history']) {
+    test(`opened by its address ${address}, the board, Back: History on that week; Forward: the board`, async ({ page }) => {
+      await page.goto(address);
+      await page.locator('[data-history-toolbar]').waitFor();
+      await expect(page).toHaveURL(/\/history\?week=\d{4}-W\d{2}$/);
+      const week = /week=(\d{4}-W\d{2})/.exec(page.url())![1]!;
+      const range = (await page.locator('[data-week-range]').textContent())!;
+      if (address.includes('W39')) expect(range).toBe(W39);
+      await toBoard(page);
+
+      await page.goBack();
+      await historyShown(page, range, week);
+      await page.goForward();
+      await boardShown(page);
+    });
+  }
+
+  test('opened by its address, another week and a filter, the board, Back: History on that week and that filter', async ({
+    page,
+  }) => {
+    await page.goto('/history?week=2026-W40');
+    await page.locator('[data-history-toolbar]').waitFor();
+    await page.getByRole('button', { name: 'Previous week' }).click();
+    await expect(page).toHaveURL(/week=2026-W39$/);
+    const filter = page.locator('[data-history-toolbar]').getByLabel('Filter drivers');
+    await filter.fill('marcus');
+    await expect(page).toHaveURL(/week=2026-W39&q=marcus$/);
+    await expect(page.locator('[data-driver-row]')).toHaveCount(1);
+    await toBoard(page);
+
+    await page.goBack();
+    await historyShown(page, W39, '2026-W39');
+    await expect(page).toHaveURL(/week=2026-W39&q=marcus$/);
+    await expect(filter).toHaveValue('marcus');
+    await expect(page.locator('[data-driver-row]')).toHaveCount(1);
+    await page.goForward();
+    await boardShown(page);
+  });
+
+  test('the server still draws the week: its own HTML carries the rows (§12.29)', async ({ page }) => {
+    const html = await (await page.request.get('/history?week=2026-W39')).text();
+    expect(html).toContain('data-driver-row="Marcus Reyes"');
+    expect(html).toContain('data-week-range=""');
+  });
+});
+
 test('a viewer reads the same page; nobody signed in gets 401 from the data', async ({ page, browser }) => {
   await setRole('viewer');
   try {
