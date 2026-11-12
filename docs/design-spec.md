@@ -11239,6 +11239,50 @@ written through a stand-in router that hooks `replaceState` in an ancestor's eff
 does. Six of its seven fail on the code before. `new-motion.spec.ts` reaches History's week
 by Back, as a person does, not by `window.next.router.push`.
 
+## 12.155 The palette's box is focused once
+
+Phase 3bn. Seen as one e2e test failing in two full runs (3bi, 2026-11-10; 3bm, 2026-11-12),
+in the code since the palette itself (§14 feature 10).
+
+**The bug.** The command palette's box took the focus twice every time it opened. The layer's
+focus trap (`useFocusTrap`, every overlay's) focused it, as the panel's first focusable, in the
+commit that opens it. Then the palette's own `setTimeout(() => focus(), 0)` focused it again,
+a task later. A busy page can run a timer late, and when it did, the second focus took the
+focus back from wherever it had gone in between. `shortcuts-behind-windows.spec.ts`'s palette
+test put the focus on a row, confirmed it, and then found the caret back in the box. A person
+cannot move the focus inside the palette in the moment between the two, so a person was
+probably never affected (unverified).
+
+**The proof.** A throwaway copy of that test, not committed, held every 0ms timer from just
+before ⌘K and ran them right after its check that the row had the focus. On the code before,
+10 of 10 failed with the full runs' message (`INPUT` where `BUTTON` was expected), and in each
+a held 0ms timer moved the focus from the row to the box. With the timer taken out, the box
+still had the focus on opening while every 0ms timer was held, so from the trap alone, and 5 of
+5 passed. A plain 150ms added to every 0ms timer failed 6 of 10, at three different steps: the
+moment between the check and the next reading can be 5ms.
+
+**The fix: one focus.** The timer is gone, and the box carries `data-initial-focus`, so the
+trap picks it by its mark rather than for being first, as DiscardConfirm, ReopenConfirm,
+ClearStopConfirm, PreviousLoadQuestion, ReachedStopQuestion and TruckListEditor already do. The
+trap focuses without a scroll, which the timer's call did not ask for. Unchanged: the box has
+the focus on every opening (⌘K or Ctrl+K from the board or the search field, after closing it,
+from the cheat sheet and during the tour, §14.5); every opening starts from an empty box with
+the cursor on the first row; closing gives the focus back to where it was. When the palette
+takes over from the sheet or the tour, the layer closes one and opens the other in one commit,
+and React runs the closing one's clean-up (which gives the focus back) before the opening one's
+trap, so the box ends with it.
+
+**The class.** No other focus in `src` waits for a timer, a frame or a promise (23 `.focus(`
+calls, searched). No other window under the trap focuses on opening by itself as well: the
+edit window's `.focus()` on a new stop's street runs after a person adds a stop, and the
+add-to-list window's `autoFocus` name box appears only when a person chooses "New list…".
+
+**Tests.** `CommandPalette.test.tsx`, "focus (§12.155)": the box has the focus at once with no
+timer run; a row keeps it when every pending timer runs; focused once, without a scroll; from
+the search field, and back to it on Esc; reopened empty on the first row; from the sheet, and
+during the tour. With the timer put back, "focus moved to a row stays there when every pending
+timer runs" fails. The e2e test is unchanged but for its comment.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
@@ -11663,7 +11707,7 @@ wanted the same pixels.
 | **Health strip vs chips** | No number appears in both. Chips: trucks by state now. Strip: stops done today, split on time / late. Placed in the **list toolbar**, not the header, so it is read with the list rather than competing with the chip row. |
 | **Trail vs markers** | Dots, no stroke, 4–5px — smaller than any marker (14px+) and **never a line**, so a future route preview can own the solid line. The selected marker gains a steel edge so trail and head read as one object. |
 | **Toast placement** | Moves to the map's top-right: bottom-left now belongs to the bulk bar, and the list's top holds the pinned block. |
-| **Overlays** | Palette, cheat sheet and tour share one scrim and one layer, **only one open at a time**. `⌘K` during the tour ends the tour; `?` inside the palette types a "?". |
+| **Overlays** | Palette, cheat sheet and tour share one scrim and one layer, **only one open at a time**. `⌘K` during the tour ends the tour; `?` inside the palette types a "?". *(§12.155: the palette's box takes the focus once, from the layer's trap, as it opens.)* |
 
 ### Two collisions that resolved differently here (build notes)
 

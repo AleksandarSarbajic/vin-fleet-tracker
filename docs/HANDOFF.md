@@ -114,6 +114,9 @@ Not live until pushed. App only (Vercel): one app file changed, no worker file, 
 **At the start of 3bm (2026-11-12): 3bk and 3bl are NOT pushed**: origin's master was `9af0ea6`, HEAD `66017af`.
 **3bm: NOT pushed, NOT live** (2026-11-12): the chip motion is back at Bold (`chipGround: 270`, §12.152), so all fourteen of 3bj's small motions ship. 3bg's gap test
 now reaches its case with it on (16 of 16), and 3bg's guard mutant fails it. **Not committed:** the full e2e failed on one palette focus test seen once before, in 3bi (see "Phase 3bm"). Not live until pushed. App only (Vercel): one token and tests, no worker file, so no worker deploy. See "Phase 3bm" below.
+**At the start of 3bn (2026-11-12): 3bk, 3bl and 3bm are NOT pushed**: origin's master was `9af0ea6`, HEAD `54ca873` (3bm committed as `bb6d5c9` and `54ca873`).
+**3bn: NOT pushed, NOT live** (2026-11-12): the command palette's box is focused once as it opens, not twice (§12.155), which explains and fixes the e2e palette failure of 3bi and 3bm.
+Not live until pushed. App only (Vercel): one app file, no worker file, so no worker deploy. Its full e2e is the clean run for 3bk, 3bl and 3bm. See "Phase 3bn" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11353,7 +11356,7 @@ From the advisor's brief. Alex, 2026-11-10: "drivers changed the trucks, 127 not
 - (c) the flag without the audit row: **4 fail**: the 40 mph switch-on, no second row, two trucks, and the failure test.
 - (extra) the update and the insert as two statements: the failure test fails (with 5 others, the mutation also lost the admin check).
 
-**e2e, once, at `92d13ba`: run `2026-11-10T19-06-36-409Z`: 527 passed, 1 failed, 1 did not run** (48.7 min, machine awake). The failure: `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button": `toBeFocused` on the palette's first option ("Pin Truck 101") received inactive for 10 s; the screenshot shows the caret back in the palette's box and the chip at `INACTIVE 0` with no note. The one not run is the `phone-signout` project, which depends on `chromium` passing. The same test, alone, `--repeat-each=5` at `92d13ba`: **5 of 5 passed** (3.0 s each; 11.8 s in the failed run). Nothing in 3bi touches focus, the palette or the overlay, and no row in that test is inactive. The palette focuses its box once, on open, in a `setTimeout(0)`; what moved focus back later is **unverified**. Not fixed: out of scope, and no retries (Alex, 2026-10-16). **`scripts/deploy.sh` gates on a green e2e, so it may stop on this test once more.** No baseline moved; none re-saved.
+**e2e, once, at `92d13ba`: run `2026-11-10T19-06-36-409Z`: 527 passed, 1 failed, 1 did not run** (48.7 min, machine awake). The failure: `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button": `toBeFocused` on the palette's first option ("Pin Truck 101") received inactive for 10 s; the screenshot shows the caret back in the palette's box and the chip at `INACTIVE 0` with no note. The one not run is the `phone-signout` project, which depends on `chromium` passing. The same test, alone, `--repeat-each=5` at `92d13ba`: **5 of 5 passed** (3.0 s each; 11.8 s in the failed run). Nothing in 3bi touches focus, the palette or the overlay, and no row in that test is inactive. The palette focuses its box once, on open, in a `setTimeout(0)`; what moved focus back later is **unverified**. Not fixed: out of scope, and no retries (Alex, 2026-10-16). **`scripts/deploy.sh` gates on a green e2e, so it may stop on this test once more.** No baseline moved; none re-saved. *(Explained in 3bn, §12.155: the palette focused its box twice, by the layer's trap and by that `setTimeout(0)`, and a late timer took the focus back from the row. "Once, in a `setTimeout(0)`" above was wrong. Fixed in `5787ec7`.)*
 
 **Deploying it: the steps, for the advisor. NOT run.** No migration, no env. Either order works; the order below matches 3bh:
 
@@ -11760,7 +11763,7 @@ The two more on the chip's side are its overlays. The worktree is removed.
 
 **e2e, full run, once: FAILED, one test, not this phase's.** Run `2026-11-12T18-10-03-910Z` on the default config, started 18:10 UTC after the last code write (17:58:31 UTC; only the docs changed during the run). **541 passed, 1 failed, and `phone-signout` did not run** (it depends on the rest). 56.2 min against 3bl's 54.4.
 
-- **The failure:** `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button", at its first reading, before any key is pressed: "focus has to be on a button: in a field the old guard held", expected `BUTTON`, received `INPUT`. `toBeFocused` on the palette's first option ("Pin Truck 101") had just passed. The screenshot: the palette open, its first option highlighted, the caret back in its "Jump to a truck…" box, chips at `ALL 3`, `INACTIVE 0`. So something moved focus back to the palette's box after the test had put it on the option. No chip changed before it, so the chip motion did not run in it. **The same test failed the same way in 3bi's run** (`2026-11-10T19-06-36-409Z`, "the caret back in the palette's box"), before the chip motion existed, and has passed in every full run since. Its cause is unverified. Not retried and not changed (the brief: stop and report).
+- **The failure:** `shortcuts-behind-windows.spec.ts` "the palette: the board keys, from a button", at its first reading, before any key is pressed: "focus has to be on a button: in a field the old guard held", expected `BUTTON`, received `INPUT`. `toBeFocused` on the palette's first option ("Pin Truck 101") had just passed. The screenshot: the palette open, its first option highlighted, the caret back in its "Jump to a truck…" box, chips at `ALL 3`, `INACTIVE 0`. So something moved focus back to the palette's box after the test had put it on the option. No chip changed before it, so the chip motion did not run in it. **The same test failed the same way in 3bi's run** (`2026-11-10T19-06-36-409Z`, "the caret back in the palette's box"), before the chip motion existed, and has passed in every full run since. Its cause is unverified. Not retried and not changed (the brief: stop and report). *(Explained in 3bn, §12.155: a second focus of the palette's box, a 0ms timer that ran late, after the test had moved focus to the row. Fixed in `5787ec7`.)*
 - **What passed in it:** "a press behind a cancel": "16 of 16 presses in the gap". The 3bj board test with the chip's look held back. The 3bg press table. The 3bj press table with the chip column back: **128 presses, 0 missed, 0 off their control**, largest move under the pointer 1px on the chip and the reorder bar (§12.148's hover lift), 0 on the box and the copy button.
 
 **Found wrong:**
@@ -11775,6 +11778,53 @@ The two more on the chip's side are its overlays. The worktree is removed.
 **Next:** a decision on the palette failure (above), for Alex through the advisor. Then the commits, the advisor's verification, and Alex's push of 3bk, 3bl and 3bm together (app only).
 
 **Committed on Alex's call, 2026-11-12, with the palette failure open;** the clean full e2e for 3bk, 3bl and 3bm is phase 3bn's, which fixes that race.
+
+### Phase 3bn: the palette's focus race (2026-11-12)
+
+From the advisor's brief. One e2e test had failed two full runs the same way: `shortcuts-behind-windows.spec.ts:318`, "the palette: the board keys, from a button" (3bi, `2026-11-10T19-06-36-409Z`; 3bm, `2026-11-12T18-10-03-910Z`). §12.155 is the record. **NOT pushed, NOT live.** App only (Vercel): one app file, `src/components/overlay/CommandPalette.tsx`; the diff against `54ca873` under `.taste-skill`, `.samples`, `src/worker` and `supabase` is empty, so no worker deploy.
+
+| Commit | What |
+|---|---|
+| `5787ec7` | The fix, `CommandPalette.test.tsx`'s seven focus tests, and the e2e test's comment |
+| The docs commit | §12.155, its pointer from §14.5's "Overlays" row, this section, "What is live", and notes in "Phase 3bi" and "Phase 3bm" |
+
+**The advisor's hypothesis, proved.** Two things focused the palette's box as it opened: the layer's trap (`useFocusTrap`, `useModalChrome.ts:79`, the first focusable, in the commit that opens it) and the palette's own `window.setTimeout(() => field.current?.focus(), 0)` (`CommandPalette.tsx:126`, a task later). The test's wait at `:325` passed on the trap's focus. A timer that ran after line 100's `button.focus()` took the focus back to the box.
+
+- **The failure's own trace** (`2026-11-12T18-10-03-910Z`): `Control+k` at 921ms took 244ms (a busy page), the combobox was focused at 1169, the option focused and checked at 1172–1175, and the reading at 1421 found `INPUT`.
+- **A throwaway copy of the test,** never committed (in the scratchpad, not the repo). Its init script logs every focus change, and from just before `Control+k` holds every 0ms `setTimeout`. Right after line 101's check it runs the held ones, at once, in one evaluate. The same script ran on the old code and on the fix.
+
+| Run | Result |
+|---|---|
+| Old code, the copy, `--repeat-each=10` | **10 of 10 failed**, each at line 103 with the full runs' message: "focus has to be on a button: in a field the old guard held", expected `BUTTON`, received `INPUT`. In each: the box focused on opening while every 0ms timer was held, then "a held 0ms timer moved focus BUTTON[option] -> INPUT[combobox]" (1 or 2 timers released) |
+| Old code with `:126`'s timer removed, in a worktree, `--repeat-each=5` | **5 of 5 passed.** The box had the focus on opening with every 0ms timer held, so from the trap alone; no timer moved the focus |
+| The fix, the copy, `--repeat-each=10` | **10 of 10 passed**, no timer moved the focus (0 or 1 unrelated timers released) |
+
+- **Two things tried first, recorded:** the copy with no delay, 3 runs, reproduced it once by itself: "a 0ms timer moved focus BUTTON[option] -> INPUT[combobox]", 85ms after the trap's focus, failing at line 101 that time. The brief's example, 150ms added to every 0ms timer, failed 6 of 10 at three different steps (line 103, line 101, and a key typed into the box in the key loop, which emptied the list and timed a `focus()` out at 45s): the time between the option's check and the next reading ran from 5ms to 400ms, so no fixed delay lands in it every time. Hence the hold-and-release.
+- **A person:** cannot move the focus within the palette in the moment between the two focuses, so most likely never met this (unverified).
+
+**The fix** (`CommandPalette.tsx`): the timer, its clean-up and the `field` ref it used are gone. The box carries `data-initial-focus` (`:191`), so the trap picks it by its mark, once, with `preventScroll` (the timer's `focus()` had none). The open effect (`:125-129`) still empties the box and puts the cursor on the first row. Nothing in §14 or §12 said the box was focused twice or by a timer, so nothing in the spec is contradicted.
+
+**The class.** `.focus(` occurs 23 times in `src`; one only, the palette's, waited for a timer, a frame or a promise. Of the 12 callers of `useFocusTrap` (the layer's one covers the palette, the sheet and the tour), none also focuses on opening by itself: `EditStopModal.tsx:471` focuses a new stop's street after a person adds one (a synchronous effect), and `AddToListModal.tsx:132`'s `autoFocus` box appears only when a person picks "New list…" (`target` starts `null`). Nothing else to fix.
+
+**Tests.** `npm run check`: **244 files, 4467 tests** (244 and 4460 before). New in `CommandPalette.test.tsx`, "focus (§12.155)":
+
+- "on opening, the box has the focus at once, with no timer run"
+- "focus moved to a row stays there when every pending timer runs"
+- "the box is focused once, and without a scroll"
+- "from the search field: the box takes the focus, and Esc gives it back to the field"
+- "closed and opened again: the box has the focus, empty, with the cursor on the first row"
+- "from the sheet (§14.5): ⌘K hands over, and the box has the focus"
+- "during the tour (§14.5): ⌘K ends it, and the box has the focus"
+
+**Mutant,** in a worktree on the fix: the timer put back word for word with its ref. 25 of 25 passed there unmutated; with the timer, **1 failed by name**, "focus (§12.155) > focus moved to a row stays there when every pending timer runs": expected the row (`button#view:v1`), received the box (`<input>`). The worktree is removed.
+
+**e2e.** The real `:318` test alone on the fix, `--repeat-each=20`: **20 of 20 passed** (run `2026-11-12T19-34-14-643Z`). Its comment at `:324` said the palette "takes the focus itself a moment after it opens", now false, and now reads "Its box takes the focus as it opens, once (§12.155)". Nothing else in the test changed.
+
+**e2e, full run, once: clean.** Run `2026-11-12T19-36-32-904Z` on the default config, at `5787ec7` with the tree clean, from the terminal, started 19:36:32 UTC after the commit; only these docs changed during it. **543 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 55.8 min** against 3bm's 56.2. The palette test passed (2.8s); "a press behind a cancel" printed "16 of 16 presses in the gap". **It is the clean full run for 3bk, 3bl and 3bm too:** HEAD holds all four phases.
+
+**Unverified:** that a person was never affected; why the timer ran late (85ms after the trap's focus in one run here, and after the option's check in the 3bm trace, where the page was busy: the map's software frames are the likeliest, not measured); any browser but Chromium.
+
+**Next:** the advisor verifies; Alex pushes 3bk, 3bl, 3bm and 3bn together (app only).
 
 ## Next
 
