@@ -11013,7 +11013,7 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
-| **chip** | A filter chip's chosen look: accent edge and overlay ground | 270ms | An overlay inside the chip grows in from 75%, or shrinks away to it | `EASING.dialog` | A person: the chip, its key, Clear filters, a view | A poll; the page's first paint |
+| **chip** | A filter chip's chosen look: accent edge and overlay ground | **0, taken back** (Bold 270ms) | An overlay inside the chip grows in from 75%, or shrinks away to it | `EASING.dialog` | A person: the chip, its key, Clear filters, a view | A poll; the page's first paint |
 | **check** | A row's checkbox | 270ms | The box pops from 50% | `EASING.dialog` | The pressed box's own change | The other boxes of a shift range; X; a poll |
 | **empty** | The empty list | 270ms | Drops 14px and fades in | `EASING.dialog` | The list empties in the commit where the chips, the list or the search changed | A poll that empties a filtered list; the first paint |
 | **feedBanner** | The feed banner | 270ms | Opacity only | linear | A poll that finds the feed stale, on a board already drawn | The first paint; another stale poll |
@@ -11027,6 +11027,21 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
 | **ratecon** | What the rate confirmation strip says | 270ms | Drops 14px and fades in | `EASING.dialog` | The strip opening, on a PDF or a paste | Reading, the scan's pages, what it said; a second paste |
 | **palResults** | The palette's results | 180ms | Opacity only, again on every key | linear | Each change of the box | Opening it, the arrow keys, a poll's new trucks |
 | **tour** | A tour step's words | 270ms | 28px in from the side it is on, and fades in | `EASING.dialog` | Next, from the right; Back, from the left | Opening, and its reset to the first step; a re-render |
+
+**chip is taken back; thirteen ship** (phase 3bj's finish, 2026-11-12, the advisor's
+choice (a), for Alex). `chipGround` is 0, so `groundPop` returns before it adds anything,
+and a chip's chosen look lands at once, as it did before 3bj, through the chip's own
+`transition-colors`. **Why:** with it on, 3bg's "a press behind a cancel", the only
+real-browser proof of §12.149's press fix, never lands its press in the gap (0 of 16): a
+frame is drawn between the test's busy block and the press, which with the chip motion off
+it is not. A motion that silently stops that test from reaching its case does not ship
+until we know why. **The cause is unknown.** Ruled out: `settleLook` (0 of 16 without it),
+the animation itself (the chip's DOM work alone, with no animation, 0 of 16), and a new
+`cancel()` ahead of the rows' glide (the advisor read the phase: the only new one is the
+palette's fade, and `groundPop` removes an old look by `remove()`). The overlay, its CSS
+rule and the shape's tests stay, so (b), the chip back with a gap test that reaches its
+case and that 3bg's guard mutant still fails, is one token from here. Until then the
+chip's rule 4 below describes it as built, not as running.
 
 **The rules, each held by a test** (the unit tests below for causes, `e2e/new-motion.spec.ts`,
 "phase 3bj", for what only a browser shows):
@@ -11054,8 +11069,8 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
    only on Next and Back, so the reset to its first step as it opens slides nothing; the
    window's own opening (§12.148) is the motion then. **The tour's panel** takes the new
    step's height at once: only the words move.
-4. **A press always lands, because none of these moves its control.** The chip's look is
-   an overlay inside the chip, and the chip's own look is held back under it by
+4. **A press always lands, because none of these moves its control.** The chip's look
+   (taken back, above) is an overlay inside the chip, and the chip's own look is held back under it by
    `data-ground-host` (written `button[data-ground-host]`, to outrank the selected chip's
    `!border-accent`). The checkbox pops itself, and while it is smaller than its place
    its cell hands a click on that place to the box, as §12.148's pseudo-element keeps a
@@ -11081,7 +11096,8 @@ motion so that each can be taken back alone: `chipGround`, `checkPop`, `emptyDro
 `invalidDrop`, `unsavedDrop`, `savedDrop`, `rateconDrop`, `palResultsFade`, `tourStep`;
 and `chipGroundFromScale`, `checkPopFromScale`, `copiedPopFromScale`, the five
 `…DropPx` and `tourStepPx`. All equal the demo's Bold (`.taste-skill/motion/everywhere/core.js`:
-`GROUND`, `POP`, `DROP`, `FADE`, and the `palResults` and `tour` rows). **To take one
+`GROUND`, `POP`, `DROP`, `FADE`, and the `palResults` and `tour` rows), except
+`chipGround`, which is 0, taken back (above); `chipGroundFromScale` keeps its 0.75. **To take one
 back:** its token to 0 turns it off, and its On value makes it weaker (both in HANDOFF,
 "Phase 3bj"). The shapes are `lib/appear-motion.ts`, which holds no number of its own.
 

@@ -101,9 +101,9 @@ deliberate second instance being refused. The first deploy attempt stopped at e2
 **3bi: LIVE, both halves** (2026-11-11): the worker switches on an inactive truck no admin switched off when it drives,
 audited, never off; the Inactive chip says "· N moving" (§12.151). App `5eff9d7` (deployment 7711026596, success 13:13:29 UTC).
 Worker `5eff9d7` since 14:01:39 UTC, 0 restarts, polling, `trucksActivated` in the poll line; rollback sha `1a2170f`. See "Phase 3bi", "Deploy".
-**3bj: NOT pushed, NOT live, NOT done** (2026-11-12): fourteen small motions at the demo's Bold, on the board, in the edit window, the
-palette and the tour (§12.152). Its full e2e run failed one 3bg test, which the chip motion stops from reproducing its gap: a decision
-waits ("Phase 3bj", "e2e, full run"). Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy.
+**3bj: NOT pushed, NOT live** (2026-11-12): fourteen small motions at the demo's Bold, on the board, in the edit window, the
+palette and the tour (§12.152); finished by (a): the chip motion taken back (`chipGround: 0`), 13 ship. Full e2e clean at `1fa0fe9`: 533 passed, 0 failed (52.0 min).
+Waits on the advisor's verification and Alex's push; (b) is open ("Phase 3bj", "Finish: (a)"). Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy.
 
 | Commit | What | § |
 |---|---|---|
@@ -11505,6 +11505,15 @@ My recommendation: (a) now, and (b) as its own small phase. Both are committed a
 
 **Next:** the decision above; then a clean full e2e run; the advisor verifies; Alex pushes. Batch 2b (History, Assignments, login) comes from a separate prompt.
 
+**Finish: (a), 2026-11-12.** The advisor's decision, for Alex: the chip motion is taken back and the other 13 ship. (b) is its own small phase later, not started here. Reason: 3bg's "a press behind a cancel" is the only real-browser proof of the press fix, and a motion that silently stops that test from reaching its case is not shipped until we know why. The advisor checked, read-only, before deciding: nothing new in 3bj calls `cancel()` before the rows' glide does (the only new one is the palette's `fading.current?.cancel()`), and `groundPop` removes an old look by `remove()`, not `cancel()`. **The cause is still unknown.**
+
+- **How:** `chipGround: 0` in `tokens.ts`, by this section's rule ("its duration to 0 turns it off"; 3bg's rule, its On value, would weaken it, not take it back). `groundPop` returns at `taken(ms)` (`appear-motion.ts:92`) before it adds an overlay or an attribute or calls `settleLook`, which is the variant in the table above shown to pass the gap test. `chipGroundFromScale` stays 0.75. The code, the `button[data-ground-host]` rule and `appear-motion.test.ts`'s shape tests (literal 270, not the token) stay, for (b).
+- **Tests changed, none deleted.** `motion-tokens.test.ts`: "a chip's chosen look: taken back (0), its 75% kept for when it returns". `board-motion.test.tsx`, the chip describe (now "…, taken back"): its first two became "a key turns Late on: nothing plays on any chip, nothing is added, and Late's own look is there at once" and "a click does the same, and the chip never moves: nothing played on it, no style written to it". Its other three hold at 0 and are unchanged. The e2e board test is renamed "…a chip's look at once with nothing played…". Its chip step watches Late on every frame for 400ms (nothing played on it or inside it, no overlay, no hold-back, 0px moved), and its six chip changes now play `[]`. Mutant: `chipGround` back to 270 fails the three unit tests by name.
+- **The press table: the chip's column is dropped** (4 cells, 32 presses). With nothing playing there is no time into it to press at, so no press would ever land "on time" and the cell could not finish. 3 controls, 96 presses now. `CHIP_FROM`, `CHIP_ON` and `CHIP_OFF` are removed, unused.
+- **Not touched:** 3bg's gap test. **Counts:** `npm run check` 239 files, 4398 tests, as before: tests changed in place.
+- **e2e.** Targeted first, run `2026-11-12T10-36-18-919Z`, covering 3bg's gap test and the four 3bj tests: 6 passed (3.3 min). The gap test passed in 12.1s. **Full run, once: `2026-11-12T10-42-04-744Z` at `1fa0fe9`, default config, started 10:42 UTC after the last code write. 533 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 52.0 min** against 3bg's 49.0, 3.0 over, which is about what this run's four 3bj tests took (23.6s, 3.1s, 4.5s, 2.4 min). "A press behind a cancel" passed in 9.3s. In both runs the press table had 12 cells and 96 presses: 0 missed, 0 off their control, largest move 1px (the reorder bar's hover lift, as above).
+- **Open:** **(b): bring chip back with a gap test that reaches its case; the 3bg guard mutant must still fail it.** Two found here and not fixed are in "Next", "4. Also open": the rate confirmation's strip folding a render late (74px), and a field's accessible name that includes its error.
+
 ## Next
 
 Rewritten 2026-10-15. Every claim names the phase it comes from; "unverified"
@@ -11654,6 +11663,14 @@ fingerprint (3y) stay built and unused.
 
 ### 4. Also open
 
+- **The rate confirmation's strip folds one render late** (3bj, "Found wrong", 6): typing
+  into a load folds its open strip in a passive effect, a commit after "Unsaved changes"
+  and a field's message appear, so for one frame all are drawn and the edit window's
+  scroller is 74px taller than either side (217 → 291 → 171). Before 3bj, not motion, not
+  fixed.
+- **A field's accessible name includes its error** (3bj, "Found wrong", 7): `Field.tsx`'s
+  `label` wraps the message, so ZIP is named "ZIP ZIP must be digits only…" while it
+  shows. Not motion, not fixed.
 - **Full e2e, 2026-10-14:** 246 passed (3a). The 2b follow-up's reader specs
   ran in it too.
 - **The two intermittent hangs** (3b-prep: truck-lists "Adding…", timeline
