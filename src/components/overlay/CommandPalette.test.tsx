@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommandPalette } from './CommandPalette';
+import { OnboardingTour } from './OnboardingTour';
 import { OverlayProvider } from './OverlayLayer';
 import { ShortcutSheet } from './ShortcutSheet';
 import type { PaletteTruck } from '@/lib/palette';
@@ -48,7 +49,7 @@ const spies = {
   density: vi.fn(),
 };
 
-const render = (selectedLabel: string | null = 'Truck 101') => {
+const render = (selectedLabel: string | null = 'Truck 101', withTour = false) => {
   act(() => {
     root.render(
       <OverlayProvider>
@@ -64,6 +65,7 @@ const render = (selectedLabel: string | null = 'Truck 101') => {
           onToggleDensity={spies.density}
         />
         <ShortcutSheet />
+        {withTour ? <OnboardingTour /> : null}
       </OverlayProvider>,
     );
   });
@@ -275,5 +277,123 @@ describe('what it says about itself', () => {
     // suggest the first one is a suggestion.
     expect(container.textContent).toContain('Late today');
     expect(container.textContent).not.toContain('Truck 202');
+  });
+});
+
+/**
+ * §12.155. The box is focused once, by the overlay's trap, in the commit that opens the
+ * palette. A second focus a task later (a 0ms timer, until phase 3bn) took the focus back from
+ * wherever it had gone in between: no person is that quick, a test is, and one failed on it.
+ */
+describe('focus (§12.155)', () => {
+  const keyOn = (target: EventTarget, key: string, init: KeyboardEventInit = {}) =>
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }));
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('on opening, the box has the focus at once, with no timer run', () => {
+    vi.useFakeTimers();
+    render();
+    press('k', { metaKey: true });
+    expect(document.activeElement).toBe(field());
+  });
+
+  it('focus moved to a row stays there when every pending timer runs', () => {
+    vi.useFakeTimers();
+    render();
+    press('k', { metaKey: true });
+    const row = options()[0] as HTMLElement;
+    act(() => row.focus());
+    expect(document.activeElement).toBe(row);
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it('the box is focused once, and without a scroll', () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    try {
+      render();
+      press('k', { metaKey: true });
+      const onTheBox = focus.mock.contexts.flatMap((self, i) =>
+        self === field() ? [focus.mock.calls[i]] : [],
+      );
+      expect(onTheBox).toEqual([[{ preventScroll: true }]]);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it('from the search field: the box takes the focus, and Esc gives it back to the field', () => {
+    render();
+    const search = document.createElement('input');
+    search.setAttribute('aria-label', 'Search the fleet');
+    document.body.appendChild(search);
+    try {
+      act(() => search.focus());
+      keyOn(search, 'k', { ctrlKey: true });
+      expect(document.activeElement).toBe(field());
+      keyOn(field()!, 'Escape');
+      expect(field()).toBeNull();
+      expect(document.activeElement).toBe(search);
+    } finally {
+      search.remove();
+    }
+  });
+
+  it('closed and opened again: the box has the focus, empty, with the cursor on the first row', () => {
+    render();
+    press('k', { metaKey: true });
+    type('truck');
+    arrow('ArrowDown');
+    expect(selected()).toBe(options()[1]);
+    press('k', { metaKey: true });
+    expect(field()).toBeNull();
+    press('k', { metaKey: true });
+    expect(document.activeElement).toBe(field());
+    expect(field()?.value).toBe('');
+    expect(selected()).toBe(options()[0]);
+  });
+
+  it('from the sheet (§14.5): ⌘K hands over, and the box has the focus', () => {
+    render();
+    press('?');
+    expect(container.querySelector('[aria-label="Keyboard shortcuts"]')).not.toBeNull();
+    press('k', { metaKey: true });
+    expect(container.querySelector('[aria-label="Keyboard shortcuts"]')).toBeNull();
+    expect(document.activeElement).toBe(field());
+  });
+
+  it('during the tour (§14.5): ⌘K ends it, and the box has the focus', () => {
+    // A store that works, so the tour opens itself as on a first visit.
+    const before = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    const store = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+        key: () => null,
+        length: 0,
+      },
+    });
+    try {
+      render('Truck 101', true);
+      const tour = () => container.querySelector('[aria-label="What this console does"]');
+      expect(tour()).not.toBeNull();
+      press('k', { metaKey: true });
+      expect(tour()).toBeNull();
+      expect(document.activeElement).toBe(field());
+    } finally {
+      if (before) Object.defineProperty(window, 'localStorage', before);
+      else Reflect.deleteProperty(window, 'localStorage');
+    }
   });
 });

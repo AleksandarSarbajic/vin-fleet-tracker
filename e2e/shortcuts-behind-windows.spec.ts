@@ -321,7 +321,7 @@ test.describe('every other window, with focus on a button', () => {
     await page.keyboard.press('Control+k');
     const palette = page.getByRole('dialog', { name: 'Command palette' });
     await expect(palette).toBeVisible();
-    // It takes the focus itself a moment after it opens, and that must land first.
+    // Its box takes the focus as it opens, once (§12.155), and that must land first.
     await expect(palette.getByRole('combobox')).toBeFocused();
     await nothingMovesBehind(
       page,

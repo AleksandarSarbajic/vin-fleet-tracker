@@ -72,7 +72,6 @@ export function CommandPalette<T extends PaletteTruck>({
   const isOpen = open === 'palette';
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
-  const field = useRef<HTMLInputElement>(null);
 
   /**
    * §12.152. The results fade in on every key: opacity only and short, because it starts
@@ -117,14 +116,16 @@ export function CommandPalette<T extends PaletteTruck>({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, open, show]);
 
-  /** Every opening starts from an empty box, never from last time's query. */
+  /**
+   * Every opening starts from an empty box, never from last time's query. The box takes the
+   * focus from the overlay's trap, by its `data-initial-focus`, in the commit that opens it
+   * (§12.155). It is focused once: a second focus a task later took the focus back from
+   * wherever it had gone in between.
+   */
   useEffect(() => {
     if (!isOpen) return;
     setQuery('');
     setCursor(0);
-    // The panel mounts with the overlay; focus has to wait for it.
-    const id = window.setTimeout(() => field.current?.focus(), 0);
-    return () => window.clearTimeout(id);
   }, [isOpen]);
 
   const actions = useMemo(
@@ -187,7 +188,7 @@ export function CommandPalette<T extends PaletteTruck>({
       >
         <div className="border-b border-line-hair px-3 py-2">
           <input
-            ref={field}
+            data-initial-focus
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
