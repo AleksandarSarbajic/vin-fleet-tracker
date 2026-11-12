@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { IDS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 import { FREE, seedBoard } from './assignments-seed';
@@ -37,6 +37,7 @@ const SMALL_MS = 270;
 const PAL_MS = 180;
 const DROP_PX = 14;
 const POP_FROM = 0.5;
+const CHIP_FROM = 0.75;
 const TOUR_PX = 28;
 
 test.beforeEach(async () => {
@@ -3406,7 +3407,16 @@ test.describe('the press during a glide', () => {
  */
 test.describe('a press behind a cancel', () => {
   type Entry = { animation: Animation; cancelEvent: boolean };
-  type Seen = { __all: Entry[]; __gap: Entry[]; __later: Entry[]; __armed: boolean };
+  type Seen = {
+    __all: Entry[];
+    __gap: Entry[];
+    __later: Entry[];
+    __armed: boolean;
+    /** When the block behind the cancel ended, and when the browser made the press, on the page's clock. */
+    __blockEnd: number;
+    __pressMade: number;
+  };
+  const TRIES = 16;
 
   const watchCancels = (page: Page) =>
     page.addInitScript(() => {
@@ -3415,10 +3425,12 @@ test.describe('a press behind a cancel', () => {
       w.__gap = [];
       w.__later = [];
       w.__armed = false;
+      w.__blockEnd = 0;
+      w.__pressMade = 0;
       /*
        * Anchored on the cancel, not on a guess at when React commits, since a chip also goes
        * through the URL. Right after the commit this cancel is part of, the main thread stays
-       * busy, with the press waiting behind it.
+       * busy, and the press is sent while it is.
        */
       const cancel = Animation.prototype.cancel;
       Animation.prototype.cancel = function (this: Animation) {
@@ -3429,6 +3441,7 @@ test.describe('a press behind a cancel', () => {
           console.info('press now');
           const until = performance.now() + 120;
           while (performance.now() < until);
+          w.__blockEnd = performance.now();
         });
       };
       const real = Element.prototype.animate;
@@ -3444,7 +3457,8 @@ test.describe('a press behind a cancel', () => {
       // Ahead of `lib/motion.ts`'s listener, as this runs before the page's own code: what the press finds.
       window.addEventListener(
         'pointerdown',
-        () => {
+        (event) => {
+          w.__pressMade = event.timeStamp;
           w.__gap = w.__all.filter((e) => e.animation.playState === 'idle' && !e.cancelEvent);
           const first = w.__all.indexOf(w.__gap[0]!);
           w.__later = w.__all.filter((e, i) => i > first && e.animation.playState === 'running');
@@ -3457,6 +3471,8 @@ test.describe('a press behind a cancel', () => {
     page.evaluate(() => {
       const w = window as unknown as Seen;
       return {
+        // Made while the page was still busy behind the commit: queued behind it, not after it.
+        queued: w.__pressMade > 0 && w.__pressMade < w.__blockEnd,
         inGap: w.__gap.length,
         broughtBack: w.__gap.filter((e) => e.animation.playState !== 'idle').length,
         later: w.__later.length,
@@ -3480,77 +3496,99 @@ test.describe('a press behind a cancel', () => {
     }));
 
   /**
-   * Only a press that landed in the gap says anything, so the others are tried again. About
-   * 3 in 4 land, however long the main thread stays busy past 90ms (measured, phase 3bg).
+   * One press, never tried again: it lands in the gap or the test fails (phase 3bm).
+   *
+   * The press is the browser's own `Input.dispatchMouseEvent`, what `page.mouse.down` sends, but
+   * straight from a CDP session, the moment the page says the block began. `page.mouse.down`
+   * could not go then: the e2e trace takes a DOM snapshot in the page around every action, on its
+   * main thread, so that press left only after the block. With the chip motion on it left after
+   * the next frame too, whose cancel events close the gap: 0 of 16 (3bj), 0 of 12 (3bm, and 12 of
+   * 12 with the trace's snapshots off). Sent mid-block, it is queued behind the commit, and the
+   * page takes queued input before the next frame's animation events.
    */
-  const pressInTheGap = async (page: Page) => {
-    for (let tries = 0; tries < 16; tries += 1) {
-      const pressNow = page.waitForEvent('console', { predicate: (m) => m.text() === 'press now' });
-      await page.evaluate(
-        () =>
-          new Promise<void>((done) => {
-            const chip = () =>
-              window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }));
-            chip();
-            // Frames into the glide, the same chip again, which cancels every flight.
+  const pressInTheGap = async (page: Page, cdp: CDPSession, at: { x: number; y: number }) => {
+    const pressNow = page.waitForEvent('console', { predicate: (m) => m.text() === 'press now', timeout: 10_000 });
+    // Its reply comes back only after the block, so the press does not wait for it.
+    const chipped = page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          const chip = () =>
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }));
+          chip();
+          // Frames into the glide, the same chip again, which cancels every flight.
+          requestAnimationFrame(() =>
             requestAnimationFrame(() =>
-              requestAnimationFrame(() =>
-                requestAnimationFrame(() => {
-                  (window as unknown as Seen).__armed = true;
-                  chip();
-                  done();
-                }),
-              ),
-            );
-          }),
-      );
+              requestAnimationFrame(() => {
+                (window as unknown as Seen).__armed = true;
+                chip();
+                done();
+              }),
+            ),
+          );
+        }),
+    );
+    const pressed = (async () => {
       await pressNow;
-      await page.mouse.down();
-      const atPress = await stateOf(page);
-      // Very late, a press finds the gap a flight leaves as it lands, with nothing after it.
-      if (atPress.inGap > 0 && atPress.later > 0) return atPress;
-      await page.mouse.up();
-      await expect.poll(() => stillMoving(page)).toBe(0);
-    }
-    throw new Error('No press landed in the gap in 16 tries');
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1 });
+    })();
+    await Promise.all([chipped, pressed]);
+    return stateOf(page);
   };
 
-  test('a chip mid-glide with a press queued behind it: nothing thrown, nothing brought back, the rest held', async ({ page }) => {
+  test(`a chip mid-glide with a press queued behind it, ${TRIES} times: each lands in the gap, nothing thrown, nothing brought back, the rest held`, async ({ page }) => {
     test.setTimeout(120_000);
     const thrown: string[] = [];
     page.on('pageerror', (error) => thrown.push(error.message));
     await watchCancels(page);
     await openMixed(page);
     const box = (await page.locator('[data-row-id]').nth(3).boundingBox())!;
-    await page.mouse.move(box.x + 300, box.y + box.height / 2);
+    const at = { x: box.x + 300, y: box.y + box.height / 2 };
+    await page.mouse.move(at.x, at.y);
+    const cdp = await page.context().newCDPSession(page);
 
-    const atPress = await pressInTheGap(page);
+    let reached = 0;
+    for (let press = 1; press <= TRIES; press += 1) {
+      const atPress = await pressInTheGap(page, cdp, at);
+      await page.waitForTimeout(GLIDE_MS + 60);
+      const heldLater = await stateOf(page);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1 });
+      const released = await stateOf(page);
+      // A condition, and one the fault cannot hang: over means neither moving nor paused.
+      await page.waitForFunction(
+        () => (window as unknown as Seen).__later.every((e) => !['running', 'paused'].includes(e.animation.playState)),
+        undefined,
+        { timeout: 10_000 },
+      );
+      await quiet(page);
 
-    await page.waitForTimeout(GLIDE_MS + 60);
-    const heldLater = await stateOf(page);
-    await page.mouse.up();
-    const released = await stateOf(page);
-    // A condition, and one the fault cannot hang: over means neither moving nor paused.
-    await page.waitForFunction(() =>
-      (window as unknown as Seen).__later.every((e) => !['running', 'paused'].includes(e.animation.playState)),
-    );
-    await quiet(page);
-
-    expect({
-      thrown,
-      broughtBack: heldLater.broughtBack,
-      notHeld: atPress.later - atPress.laterPaused,
-      timesMovedUnderThePress: heldLater.laterTimes.filter((t, i) => t !== atPress.laterTimes[i]).length,
-      stillPausedAfterTheRelease: released.laterPaused,
-      atRest: await standing(page),
-    }).toEqual({
-      thrown: [],
-      broughtBack: 0,
-      notHeld: 0,
-      timesMovedUnderThePress: 0,
-      stillPausedAfterTheRelease: 0,
-      atRest: { running: 0, displaced: 0 },
-    });
+      // In the gap: a cancelled flight still waiting for its cancel event, with the new ones after it.
+      const inTheGap = atPress.queued && atPress.inGap > 0 && atPress.later > 0;
+      if (inTheGap) reached += 1;
+      expect({
+        press,
+        queued: atPress.queued,
+        inTheGap,
+        thrown,
+        broughtBack: heldLater.broughtBack,
+        notHeld: atPress.later - atPress.laterPaused,
+        timesMovedUnderThePress: heldLater.laterTimes.filter((t, i) => t !== atPress.laterTimes[i]).length,
+        stillPausedAfterTheRelease: released.laterPaused,
+        atRest: await standing(page),
+      }).toEqual({
+        press,
+        queued: true,
+        inTheGap: true,
+        thrown: [],
+        broughtBack: 0,
+        notHeld: 0,
+        timesMovedUnderThePress: 0,
+        stillPausedAfterTheRelease: 0,
+        atRest: { running: 0, displaced: 0 },
+      });
+      await expect.poll(() => stillMoving(page)).toBe(0);
+    }
+    expect(reached).toBe(TRIES);
+    console.info(`a press behind a cancel: ${reached} of ${TRIES} presses in the gap`);
   });
 });
 
@@ -3629,6 +3667,14 @@ const POP_FRAMES = JSON.stringify([
   { opacity: 0, scale: String(POP_FROM) },
   { opacity: 1, scale: '1' },
 ]);
+const CHIP_ON = JSON.stringify([
+  { opacity: 0, scale: String(CHIP_FROM) },
+  { opacity: 1, scale: '1' },
+]);
+const CHIP_OFF = JSON.stringify([
+  { opacity: 1, scale: '1' },
+  { opacity: 0, scale: String(CHIP_FROM) },
+]);
 const drop = { frames: DROP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
 const fade = { frames: FADE_FRAMES, duration: SMALL_MS, easing: 'linear' };
 const pop = { frames: POP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
@@ -3663,7 +3709,7 @@ const keepTheFeedFresh = async () => {
 };
 
 test.describe('phase 3bj, the small motions (§12.152)', () => {
-  test('the board: each at its length, a chip’s look at once with nothing played, nothing grown, nothing left, and no replay on a resize', async ({
+  test('the board: each at its length, a chip’s own look held back, nothing grown, nothing left, and no replay on a resize', async ({
     page,
     context,
   }) => {
@@ -3678,44 +3724,25 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
     };
 
-    /*
-     * chip, taken back (`chipGround: 0`, phase 3bj's finish): on every frame for 400ms after
-     * Late's key, longer than the motion was, nothing plays on the chip or inside it, no
-     * overlay or hold-back is added, and the chip stands where it stood.
-     */
-    type ChipFrames = { frames: number; pressed: boolean; moved: number; played: number; overlays: number; held: boolean };
-    let during = null as ChipFrames | null;
+    // chip: two frames into Late's arrival, the real CSS holds its own edge back under the overlay.
+    let during: { edge: string; overlays: number } | null = null;
     await step('chip', async () => {
       during = await page.evaluate(
         () =>
-          new Promise<ChipFrames>((done) => {
-            const log = (window as unknown as SmallLog).__small;
-            const since = log.length;
-            const chip = [...document.querySelectorAll('button[aria-pressed]')].find((b) => (b.textContent ?? '').startsWith('Late'))!;
-            const at = chip.getBoundingClientRect();
-            const seen: ChipFrames = { frames: 0, pressed: false, moved: 0, played: 0, overlays: 0, held: false };
-            const end = performance.now() + 400;
-            const look = () => {
-              const now = chip.getBoundingClientRect();
-              seen.frames += 1;
-              seen.moved = Math.max(seen.moved, ...[now.x - at.x, now.y - at.y, now.width - at.width, now.height - at.height].map(Math.abs));
-              seen.overlays = Math.max(seen.overlays, chip.querySelectorAll('[data-ground-pop]').length);
-              seen.held ||= chip.hasAttribute('data-ground-host');
-              if (performance.now() < end) {
-                requestAnimationFrame(look);
-                return;
-              }
-              seen.pressed = chip.getAttribute('aria-pressed') === 'true';
-              seen.played = log.slice(since).filter((s) => s.el === chip || chip.contains(s.el)).length;
-              done(seen);
-            };
+          new Promise<{ edge: string; overlays: number }>((done) => {
             window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
-            requestAnimationFrame(look);
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                const chip = [...document.querySelectorAll('button[aria-pressed="true"]')].find((b) =>
+                  (b.textContent ?? '').startsWith('Late'),
+                )!;
+                done({ edge: getComputedStyle(chip).borderTopColor, overlays: chip.querySelectorAll('[data-ground-pop]').length });
+              }),
+            );
           }),
       );
     });
-    expect(during?.frames, 'frames watched across Late’s arrival').toBeGreaterThan(10);
-    expect(during).toEqual({ frames: during?.frames, pressed: true, moved: 0, played: 0, overlays: 0, held: false });
+    expect(during).toEqual({ edge: 'rgba(0, 0, 0, 0)', overlays: 1 });
     const late = page.getByRole('button', { name: /^Late\b/ }).first();
     expect(
       await late.evaluate((b) => ({
@@ -3797,8 +3824,10 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
 
     const seen = (await smallStarted(page)).slice(before);
     const of = (what: string) => seen.filter((s) => s.what === what).map(({ frames: f, duration, easing }) => ({ frames: f, duration, easing }));
-    // Six changes (Late, All, Arrived, All, Drivers only on and off), and no chip's look plays: taken back.
-    expect(of('chip')).toEqual([]);
+    // Six changes (Late, All, Arrived, All, Drivers only on and off), each two chips' looks.
+    expect(of('chip')).toHaveLength(12);
+    expect(of('chip').every((c) => c.duration === SMALL_MS && c.easing === DIALOG_CURVE)).toBe(true);
+    expect(new Set(of('chip').map((c) => c.frames))).toEqual(new Set([CHIP_ON, CHIP_OFF]));
     expect(of('check')).toEqual([pop, pop]);
     expect(of('empty')).toEqual([drop]);
     expect(of('note')).toEqual([drop]);
@@ -3920,13 +3949,11 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
 
   /**
    * The press table for the new controls, as `the press during a glide` has one for rows. A
-   * real mouse, 20, 60, 120 and 300ms into each control's own motion (all three last 270ms,
+   * real mouse, 20, 60, 120 and 300ms into each control's own motion (all four last 270ms,
    * so 300 is just after the end), held 40ms. Landed means the press came at that time, ±18
    * ms, by the motion's own clock; only those are judged, and a miss is never tried again.
-   * The chip's column went with its motion (phase 3bj's finish): with nothing playing there
-   * is no time into it to press at, and a press on a still chip is the board's own tests'.
    */
-  test('a real mouse on the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands', async ({
+  test('a real mouse on the chip, the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands', async ({
     page,
     context,
   }, info) => {
@@ -3940,6 +3967,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       w.__since = 0;
       /** The control each motion stands on: a press counts only if it came down, and went up, on it. */
       const CONTROL: Record<string, string> = {
+        chip: 'button[aria-pressed]',
         // The box, or its place in its cell, which takes a press for it while it pops.
         check: 'div:has(> input[type="checkbox"])',
         copied: 'button[aria-label="Copy address"]',
@@ -3981,7 +4009,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
     const feedBanner = page.getByText('Position feed unreachable');
 
     type Control = {
-      name: 'check' | 'copied' | 'reorder';
+      name: 'chip' | 'check' | 'copied' | 'reorder';
       /** Where to stand for round `i`, and what to read before and after. */
       aim: (i: number) => Promise<{ x: number; y: number; read: () => Promise<string> }>;
       /** Starts the control's own motion, in the page, not awaited. */
@@ -3994,6 +4022,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       const box = (await locator.boundingBox({ timeout: 5_000 }))!;
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     };
+    const lateChip = page.getByRole('button', { name: /^Late\b/ }).first();
     const rowAt = (i: number) => page.locator('[data-row-id]').nth(1 + (i % 10));
     /** Only a truck with a load has an address to copy. */
     const copyRows = page.locator('[data-row-id]').filter({ has: page.locator('button[aria-label="Copy address"]') });
@@ -4018,6 +4047,16 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
     };
 
     const CONTROLS: Control[] = [
+      {
+        name: 'chip',
+        aim: async () => ({
+          ...(await centre(lateChip)),
+          read: () => lateChip.getAttribute('aria-pressed', { timeout: 2_000 }).then(String),
+        }),
+        start: () => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }))),
+        // The key turned it on, and the press turned it off again.
+        landed: (before, after) => before === after,
+      },
       {
         name: 'check',
         aim: async (i) => {
@@ -4139,7 +4178,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
           );
           await page.mouse.up();
           const ends = await page.evaluate(() => (window as unknown as { __press: { down: boolean; up: boolean | null } }).__press);
-          // A press on the reorder bar sorts and glides.
+          // A press on the reorder bar sorts and glides; a chip toggles and glides.
           await expect.poll(() => webMoving(page), { timeout: 3_000 }).toBe(0);
           await expect.poll(async () => control.landed(before, await read()), { timeout: 1_000 }).toBe(true).catch(() => {});
           const after = await read();
@@ -4159,6 +4198,9 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
             });
           }
           // Put it back for the next round when the press did not.
+          if (control.name === 'chip' && (await lateChip.getAttribute('aria-pressed', { timeout: 2_000 })) === 'true') {
+            await page.keyboard.press('1');
+          }
           if (control.name === 'check' && (await rowAt(tries).locator('input[type="checkbox"]').isChecked({ timeout: 2_000 }))) {
             await rowAt(tries).locator('input[type="checkbox"]').uncheck({ timeout: 5_000 });
           }

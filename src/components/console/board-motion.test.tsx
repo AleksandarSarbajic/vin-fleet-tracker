@@ -145,30 +145,34 @@ const POP_HALF = {
   easing: 'cubic-bezier(.22,.61,.36,1)',
 };
 
-/**
- * Taken back (`chipGround: 0`, phase 3bj's finish): 3bg's real-browser gap test cannot
- * reach its case with it on, for a cause not found (§12.152). What played on a chip or
- * inside one: its look's overlay, or the chip itself moved.
- */
-const onChips = () => on((el) => el.closest('button[aria-pressed]') !== null);
-
-describe('chip: a chip’s chosen look, taken back', () => {
-  it('a key turns Late on: nothing plays on any chip, nothing is added, and Late’s own look is there at once', async () => {
+describe('chip: a chip’s chosen look', () => {
+  it('a key turns Late on: its look grows in from 75% and All’s shrinks away, 270ms each', async () => {
     await render();
     await press('1');
-    expect(chip('Late').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('Late').className).toContain('!border-accent');
-    expect(onChips()).toEqual([]);
-    expect(container!.querySelector(`[${GROUND_POP}]`)).toBeNull();
-    expect(container!.querySelector('[data-ground-host]')).toBeNull();
+    const looks = on((el) => el.hasAttribute(GROUND_POP));
+    expect(looks.map((p) => [p.el.parentElement === chip('Late'), p.el.parentElement === chip('All')])).toEqual([
+      [false, true],
+      [true, false],
+    ]);
+    expect(shape(looks[1]!)).toEqual({
+      keyframes: [
+        { opacity: 0, scale: '0.75' },
+        { opacity: 1, scale: '1' },
+      ],
+      duration: 270,
+      easing: 'cubic-bezier(.22,.61,.36,1)',
+    });
+    expect(looks[0]!.keyframes).toEqual([
+      { opacity: 1, scale: '1' },
+      { opacity: 0, scale: '0.75' },
+    ]);
   });
 
-  it('a click does the same, and the chip never moves: nothing played on it, no style written to it', async () => {
+  it('a click does it too, and once it lands nothing is left on the chip', async () => {
     await render();
     await act(async () => chip('Late').click());
-    expect(chip('Late').getAttribute('aria-pressed')).toBe('true');
-    expect(onChips()).toEqual([]);
-    expect([chip('Late').getAttribute('style'), chip('All').getAttribute('style')]).toEqual([null, null]);
+    expect(on((el) => el.hasAttribute(GROUND_POP))).toHaveLength(2);
+    act(() => recorder.finishAll());
     expect(container!.querySelector(`[${GROUND_POP}]`)).toBeNull();
     expect(container!.querySelector('[data-ground-host]')).toBeNull();
   });

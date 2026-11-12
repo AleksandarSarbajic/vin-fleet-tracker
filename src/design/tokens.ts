@@ -273,12 +273,8 @@ export const MOTION_MS = {
    * §12.152. The small motions (phase 3bj), at the demo's Bold. One token each, so one can
    * be taken back on its own: its On value from §12.152's table, or 0, which turns it off.
    */
-  /**
-   * A chip's chosen look arriving or leaving, on a person's click or key. **Taken back: 0**
-   * (phase 3bj's finish, §12.152). At Bold (270) 3bg's real-browser "a press behind a
-   * cancel" never reaches its gap, for a cause not found. Its scale below is kept for (b).
-   */
-  chipGround: 0,
+  /** A chip's chosen look arriving or leaving, on a person's click or key. */
+  chipGround: 270,
   /** The box a person clicked, and only that one. */
   checkPop: 270,
   /** The empty list, when a person emptied it. Never on a poll. */
