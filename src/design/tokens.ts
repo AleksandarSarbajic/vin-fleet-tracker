@@ -301,6 +301,37 @@ export const MOTION_MS = {
   palResultsFade: 180,
   /** A tour step coming in from the side it is on, on Next and Back. */
   tourStep: 270,
+
+  /*
+   * §12.153. The small motions of the pages that are not the board (phase 3bk), at the
+   * demo's Bold. One token each, as above: 0 turns one off, its On value weakens it.
+   */
+  /**
+   * Driver history's rows in view drawing in, when a change of page opens it: all of it,
+   * each row's share, and the gap's ceiling. Its own, not the board's (§12.149: 500/200/35).
+   */
+  histRowsDraw: 450,
+  histRowsDrawRow: 180,
+  histRowsDrawGapMax: 30,
+  /** The loads a folded day shows on "+N more". */
+  histFoldDrop: 270,
+  /** The Assignments rows in view, as History's. */
+  asgRowsDraw: 450,
+  asgRowsDrawRow: 180,
+  asgRowsDrawGapMax: 30,
+  /** A row's driver and its "was" line, on a person's pick. Never on a refresh's rebase. */
+  asgDriverDrop: 270,
+  /** The picker's "Add a driver" form, on "+ Add". */
+  asgAddDrop: 270,
+  /** "Saved — …" in the footer. */
+  asgSavedDrop: 270,
+  /**
+   * The login form arriving on a page load: a CSS animation in the server's HTML, so it
+   * needs no script to start or to end (tailwind.config.ts, `login-in`).
+   */
+  loginFormIn: 330,
+  /** The sign-in's refusal, under the password. */
+  loginErrorDrop: 270,
 } as const;
 
 /**
@@ -336,6 +367,20 @@ export const MOTION_SHAPE = {
   savedDropPx: 14,
   rateconDropPx: 14,
   tourStepPx: 28,
+
+  /** §12.153, beside its durations above. */
+  histFoldDropPx: 14,
+  asgDriverDropPx: 14,
+  asgAddDropPx: 14,
+  asgSavedDropPx: 14,
+  /**
+   * The login form comes UP this far, from below, and grows from this scale: the demo's own
+   * shape. Scaled from its middle, its bottom edge starts higher than the rise takes it down
+   * for any form 400px tall or more, so the page never grows (§12.153).
+   */
+  loginFormRisePx: 16,
+  loginFormFromScale: 0.92,
+  loginErrorDropPx: 14,
 } as const;
 
 /**

@@ -120,6 +120,21 @@ const config: Config = {
         },
         /** No `from`: a copy fades from where it stands, full strength or not. */
         'fade-away': { to: { opacity: '0' } },
+        /**
+         * §12.153. The login form coming up into its place on a page load: `translate` and
+         * `scale`, never `transform` (§12.152), so it composes with Sign in's own press. A CSS
+         * animation and not a Web Animation, because the form is in the server's HTML: it
+         * starts with the first paint and ends by itself, with no script to start it, to end
+         * it, or to fail to.
+         */
+        'login-in': {
+          from: {
+            opacity: '0',
+            translate: `0 ${MOTION_SHAPE.loginFormRisePx}px`,
+            scale: String(MOTION_SHAPE.loginFormFromScale),
+          },
+          to: { opacity: '1', translate: '0 0', scale: '1' },
+        },
       },
       animation: {
         flash: `flash-decay ${ms(MOTION_MS.flash)} ${EASING.flash} forwards`,
@@ -143,6 +158,8 @@ const config: Config = {
         'window-out': `fade-away ${ms(MOTION_MS.dialogOut)} linear forwards`,
         'menu-in': `menu-in ${ms(MOTION_MS.menuIn)} ${EASING.dialog} backwards`,
         'menu-out': `fade-away ${ms(MOTION_MS.menuOut)} linear forwards`,
+        // `backwards`, as the dialog's: nothing is left on the form once it lands.
+        'login-in': `login-in ${ms(MOTION_MS.loginFormIn)} ${EASING.dialog} backwards`,
       },
       /**
        * §14.4's density pair. The row heights are a token rather than a

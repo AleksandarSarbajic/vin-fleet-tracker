@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EASING, MOTION_MS, MOTION_SHAPE } from './tokens';
+import tailwind from '../../tailwind.config';
 
 /**
  * §12.149. The new motion's numbers, written out here. Alex chose them from the demo at
@@ -107,5 +108,71 @@ describe('the numbers of the small motions (§12.152)', () => {
 
   it('what only fades is linear', () => {
     expect(EASING.fade).toBe('linear');
+  });
+});
+
+/**
+ * §12.153. The small motions of phase 3bk, on History, Assignments and the login page, at the
+ * demo's Bold, written out here so taking one back fails this until it is told.
+ */
+describe('the numbers of the pages’ small motions (§12.153)', () => {
+  it('History’s rows draw in 450ms, a row in 180ms, with gaps of 30ms at most: not the board’s', () => {
+    expect(MOTION_MS.histRowsDraw).toBe(450);
+    expect(MOTION_MS.histRowsDrawRow).toBe(180);
+    expect(MOTION_MS.histRowsDrawGapMax).toBe(30);
+  });
+
+  it('a folded day’s loads drop 14px in 270ms', () => {
+    expect(MOTION_MS.histFoldDrop).toBe(270);
+    expect(MOTION_SHAPE.histFoldDropPx).toBe(14);
+  });
+
+  it('Assignments’ rows draw in 450ms, a row in 180ms, with gaps of 30ms at most', () => {
+    expect(MOTION_MS.asgRowsDraw).toBe(450);
+    expect(MOTION_MS.asgRowsDrawRow).toBe(180);
+    expect(MOTION_MS.asgRowsDrawGapMax).toBe(30);
+  });
+
+  it('a picked driver, the add form and “Saved” each drop 14px in 270ms', () => {
+    expect(MOTION_MS.asgDriverDrop).toBe(270);
+    expect(MOTION_SHAPE.asgDriverDropPx).toBe(14);
+    expect(MOTION_MS.asgAddDrop).toBe(270);
+    expect(MOTION_SHAPE.asgAddDropPx).toBe(14);
+    expect(MOTION_MS.asgSavedDrop).toBe(270);
+    expect(MOTION_SHAPE.asgSavedDropPx).toBe(14);
+  });
+
+  it('the login form comes up 16px from 92% in 330ms', () => {
+    expect(MOTION_MS.loginFormIn).toBe(330);
+    expect(MOTION_SHAPE.loginFormRisePx).toBe(16);
+    expect(MOTION_SHAPE.loginFormFromScale).toBe(0.92);
+  });
+
+  it('a sign-in refusal drops 14px in 270ms', () => {
+    expect(MOTION_MS.loginErrorDrop).toBe(270);
+    expect(MOTION_SHAPE.loginErrorDropPx).toBe(14);
+  });
+
+  it('the board’s opening is left as it was: 500, 200, 35', () => {
+    expect(MOTION_MS.boardOpen).toBe(500);
+    expect(MOTION_MS.boardOpenRow).toBe(200);
+    expect(MOTION_MS.boardOpenGapMax).toBe(35);
+  });
+
+  /**
+   * The login form's is CSS, so Tailwind writes its keyframes from the tokens: the class it
+   * makes is what the server's HTML carries. `translate` and `scale`, never `transform`, and
+   * `backwards`, so nothing is left on the form once it lands.
+   */
+  it('the login form’s CSS animation: 330ms on the windows’ curve, backwards, up 16px from 92%', () => {
+    const extend = tailwind.theme?.extend as {
+      animation: Record<string, string>;
+      keyframes: Record<string, unknown>;
+    };
+    expect(extend.animation['login-in']).toBe('login-in 330ms cubic-bezier(.22,.61,.36,1) backwards');
+    expect(extend.keyframes['login-in']).toEqual({
+      from: { opacity: '0', translate: '0 16px', scale: '0.92' },
+      to: { opacity: '1', translate: '0 0', scale: '1' },
+    });
   });
 });

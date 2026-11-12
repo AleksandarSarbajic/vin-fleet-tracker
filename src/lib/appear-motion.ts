@@ -119,6 +119,37 @@ export function groundPop(host: HTMLElement, on: boolean, ms: number, from: numb
   else land();
 }
 
+/**
+ * §12.153. A page's rows in view of `scroller` fade in one just after the other, `ms` in all,
+ * each `rowMs`, with gaps of `gapMax` at most: the board opening's shape (§12.149,
+ * `board-opening.ts`), on a page's own numbers. Opacity only, so nothing moves and every row is
+ * live from its first frame. Rows out of view are simply there when scrolled to.
+ */
+export function drawIn(
+  rows: Element[],
+  scroller: Element,
+  ms: number,
+  rowMs: number,
+  gapMax: number,
+): Animation[] {
+  if (taken(ms)) return [];
+  const view = scroller.getBoundingClientRect();
+  const seen = rows.filter((row) => {
+    const box = row.getBoundingClientRect();
+    return box.bottom > view.top && box.top < view.bottom;
+  });
+  const gap = seen.length > 1 ? Math.min(gapMax, (ms - rowMs) / (seen.length - 1)) : 0;
+  return seen.flatMap((row, i) => {
+    const animation = play(row, [{ opacity: 0 }, { opacity: 1 }], {
+      duration: rowMs,
+      delay: i * gap,
+      easing: EASING.fade,
+      fill: 'backwards',
+    });
+    return animation ? [animation] : [];
+  });
+}
+
 /** When a drop started, so a remount can carry it on rather than play it again. */
 export type Started = { at: number };
 

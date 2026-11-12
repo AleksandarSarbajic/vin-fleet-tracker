@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordAnimations, reduceMotion } from '@/test/animations';
-import { GROUND_HOST, GROUND_POP, dropIn, dropOn, fadeIn, groundPop, popIn, slideIn } from './appear-motion';
+import { GROUND_HOST, GROUND_POP, drawIn, dropIn, dropOn, fadeIn, groundPop, popIn, slideIn } from './appear-motion';
 
 /**
  * §12.152. The shapes the small motions are made of. Every number is written out: a test
@@ -164,6 +164,59 @@ describe('a drop carried on (dropOn)', () => {
   it('past its end, plays nothing: the strip is simply there', () => {
     vi.spyOn(performance, 'now').mockReturnValue(1_270);
     expect(dropOn(el(), 270, 14, { at: 1_000 })).toBeNull();
+    expect(recorder.played).toEqual([]);
+  });
+});
+
+/** §12.153. A box at `top`, `height` tall: happy-dom lays nothing out. */
+const placed = (top: number, height = 50) => {
+  const box = el();
+  box.getBoundingClientRect = () => new DOMRect(0, top, 400, height);
+  return box;
+};
+
+describe('a page’s rows drawing in (§12.153)', () => {
+  it('each row in view fades in for 180ms, one after the other, linear, held at nothing until its turn', () => {
+    const scroller = placed(0, 600);
+    const rows = [placed(0), placed(50), placed(100)];
+    drawIn(rows, scroller, 450, 180, 30);
+    expect(recorder.played.map((p) => p.el)).toEqual(rows);
+    for (const p of recorder.played) {
+      expect(p.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+    }
+    expect(recorder.played.map((p) => p.options)).toEqual([
+      { duration: 180, delay: 0, easing: 'linear', fill: 'backwards' },
+      { duration: 180, delay: 30, easing: 'linear', fill: 'backwards' },
+      { duration: 180, delay: 60, easing: 'linear', fill: 'backwards' },
+    ]);
+  });
+
+  it('many rows in view share what is left of 450ms: the last one starts at 270 and ends at 450', () => {
+    const scroller = placed(0, 600);
+    const rows = Array.from({ length: 12 }, (_, i) => placed(i * 50));
+    drawIn(rows, scroller, 450, 180, 30);
+    expect(recorder.played).toHaveLength(12);
+    expect(recorder.played.at(-1)!.options.delay).toBeCloseTo(270, 6);
+    expect(recorder.played[1]!.options.delay).toBeCloseTo(270 / 11, 6);
+  });
+
+  it('rows above or below the view are left alone, and are simply there', () => {
+    const scroller = placed(100, 200);
+    const above = placed(0, 100);
+    const seen = placed(150);
+    const below = placed(300);
+    drawIn([above, seen, below], scroller, 450, 180, 30);
+    expect(recorder.played.map((p) => p.el)).toEqual([seen]);
+  });
+
+  it('taken back (0): nothing plays', () => {
+    expect(drawIn([placed(0)], placed(0, 600), 0, 180, 30)).toEqual([]);
+    expect(recorder.played).toEqual([]);
+  });
+
+  it('under reduced motion nothing plays', () => {
+    unreduce = reduceMotion();
+    expect(drawIn([placed(0), placed(50)], placed(0, 600), 450, 180, 30)).toEqual([]);
     expect(recorder.played).toEqual([]);
   });
 });

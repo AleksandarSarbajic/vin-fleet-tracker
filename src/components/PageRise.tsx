@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { EASING, MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 import { clearStyle, play, whenOver } from '@/lib/motion';
+import { arrive } from '@/lib/page-arrival';
 
 /**
  * §12.149, the page change. The old page is gone as it always was, and the new one
@@ -11,7 +12,8 @@ import { clearStyle, play, whenOver } from '@/lib/motion';
  * with its search params taken out.
  *
  * Never on the page a load landed on: that one is the server's first paint, and the
- * board has its own opening. A module's flag and not a ref: the template mounts anew.
+ * board has its own opening. `lib/page-arrival.ts` keeps which that was, for the pages too
+ * (§12.153): History and Assignments draw their rows only on a change of page.
  *
  * **A page that is rising has a transform,** so for those frames it is the containing
  * block for everything `fixed` in it, and anything measured against the screen can be off by
@@ -22,16 +24,11 @@ import { clearStyle, play, whenOver } from '@/lib/motion';
  * The box clips while it rises, or the page below the screen makes the document scroll
  * for as long as it rises. It has nothing on it otherwise, and no layout of its own.
  */
-let landedOnFirstPage = false;
-
 export function PageRise({ children }: { children: ReactNode }) {
   const box = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
-    if (!landedOnFirstPage) {
-      landedOnFirstPage = true;
-      return;
-    }
+    if (!arrive()) return;
     const el = box.current;
     const page = el?.firstElementChild;
     if (!el || !page) return;

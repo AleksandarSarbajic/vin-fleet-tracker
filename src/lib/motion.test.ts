@@ -225,3 +225,45 @@ describe('whenOver', () => {
     expect(then).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * §12.153. A CSS animation the server's HTML started, the login form's, put under rule 2
+ * once the page's script runs: a press holds it as it holds one `play` started.
+ */
+describe('follow: an animation already running', () => {
+  it('is held by a press at the time last drawn, and goes on at the release', () => {
+    const made = fakeAnimation();
+    motion.follow(made as unknown as Animation);
+    made.currentTime = 52;
+    pointer('pointerdown');
+    expect(made.pause).toHaveBeenCalledTimes(1);
+    expect(made.currentTime).toBe(52);
+    pointer('pointerup');
+    expect(made.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('followed during a press, it waits for the release', () => {
+    pointer('pointerdown');
+    const made = fakeAnimation();
+    motion.follow(made as unknown as Animation);
+    expect(made.pause).toHaveBeenCalledTimes(1);
+    pointer('pointerup');
+    expect(made.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('one already over is left alone: a press does not bring it back', () => {
+    const made = fakeAnimation();
+    made.playState = 'finished';
+    motion.follow(made as unknown as Animation);
+    pointer('pointerdown');
+    expect(made.pause).not.toHaveBeenCalled();
+  });
+
+  it('once it ends, a press no longer touches it', () => {
+    const made = fakeAnimation();
+    motion.follow(made as unknown as Animation);
+    made.fire('finish');
+    pointer('pointerdown');
+    expect(made.pause).not.toHaveBeenCalled();
+  });
+});

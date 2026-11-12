@@ -98,6 +98,18 @@ export function play(
 ): Animation | null {
   if (!mayMove(el)) return null;
   const animation = el.animate(keyframes, options);
+  follow(animation);
+  return animation;
+}
+
+/**
+ * Puts an animation under rule 2, so a press holds it: what `play` does with its own, and
+ * the way in for a CSS animation that started without a script (§12.153, the login form,
+ * which arrives in the server's HTML). Rule 1 is CSS's own for that one: `motion-safe:`, so
+ * under reduced motion there is none to follow. One already over is left alone.
+ */
+export function follow(animation: Animation): void {
+  if (animation.playState === 'finished' || animation.playState === 'idle') return;
   moving.add(animation);
   const drop = () => {
     moving.delete(animation);
@@ -106,7 +118,6 @@ export function play(
   animation.addEventListener('finish', drop);
   animation.addEventListener('cancel', drop);
   if (pressed) hold(animation);
-  return animation;
 }
 
 /** Runs `then` once when the animation is over, however it ended. */
