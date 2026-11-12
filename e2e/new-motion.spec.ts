@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { IDS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
+import { FREE, seedBoard } from './assignments-seed';
+import { seedHistory } from './history-seed';
 
 /**
  * Phase 3bd, the new motion (§12.149), in a real browser with motion on and a real
@@ -4194,5 +4196,864 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
      * control at all (an overlay, a copy, the glyph inside, opacity).
      */
     expect(tally.filter((t) => t.moved > 1.01)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3bk (§12.153): the small motions of History, Assignments and the login page, at
+ * Bold. The numbers are written out, as above. What happy-dom cannot show is here: the
+ * lengths a real browser was given, the login form's CSS with no script at all, a key and a
+ * password manager's fill while it comes up, nothing grown, nothing left, and real presses.
+ * The causes and non-causes are the unit tests' (`history-motion.test.tsx`,
+ * `assign-motion.test.tsx`, `login-motion.test.tsx`).
+ * ------------------------------------------------------------------------------------------ */
+
+const DRAW_MS = 450;
+const DRAW_ROW_MS = 180;
+const DRAW_GAP_MS = 30;
+const LOGIN_MS = 330;
+const LOGIN_RISE_PX = 16;
+const LOGIN_FROM = 0.92;
+
+type Paged = { what: string; frames: string; duration: number; delay: number; easing: string; fill: string };
+type PagedLog = { __paged: (Paged & { animation: Animation })[] };
+
+/** Every Web Animation the page starts, named by what it is on, from before its code runs. */
+const logPages = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as PagedLog;
+    w.__paged = [];
+    const name = (el: Element): string => {
+      if (el.hasAttribute('data-driver-row')) return 'histRows';
+      if (el.parentElement?.getAttribute('role') === 'cell' && el.firstElementChild?.hasAttribute('data-load')) return 'histFold';
+      if (el.hasAttribute('data-asg-row')) return 'asgRows';
+      if (el.getAttribute('role') === 'combobox' && el.closest('[data-asg-row]')) return 'asgDriver';
+      if (el.hasAttribute('data-was')) return 'asgDriverWas';
+      if (el.tagName === 'LI' && el.querySelector('input[aria-label="New driver name"]')) return 'asgAdd';
+      if (el.closest('footer') && (el.textContent ?? '').startsWith('Saved —')) return 'asgSaved';
+      if (el.getAttribute('role') === 'alert' && el.closest('form')) return 'loginError';
+      return 'other';
+    };
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      w.__paged.push({
+        what: name(this),
+        frames: JSON.stringify(frames),
+        duration: Number(timing.duration),
+        delay: Number(timing.delay ?? 0),
+        easing: String(timing.easing ?? ''),
+        fill: String(timing.fill ?? ''),
+        animation,
+      });
+      return animation;
+    };
+  });
+const paged = async (page: Page, what?: string) =>
+  (
+    await page.evaluate(() =>
+      (window as unknown as PagedLog).__paged.map(({ what, frames, duration, delay, easing, fill }) => ({
+        what,
+        frames,
+        duration,
+        delay,
+        easing,
+        fill,
+      })),
+    )
+  ).filter((p) => p.what !== 'other' && (what === undefined || p.what === what));
+
+const DRAW_FRAMES = JSON.stringify([{ opacity: 0 }, { opacity: 1 }]);
+/**
+ * A page's rows in view drew as §12.153 says, held to its numbers as written: one 180ms fade a
+ * row, linear, held at nothing until its turn, the first at once, an even gap of 30ms at most,
+ * and the last starting by 270ms, so all of it is over by 450.
+ */
+const expectDrawn = (entries: Paged[], n: number) => {
+  expect(entries).toHaveLength(n);
+  for (const e of entries) {
+    expect(e).toMatchObject({ duration: DRAW_ROW_MS, easing: 'linear', fill: 'backwards', frames: DRAW_FRAMES });
+  }
+  const delays = entries.map((e) => e.delay);
+  expect(delays[0]).toBe(0);
+  const gaps = delays.slice(1).map((d, i) => d - delays[i]!);
+  for (const g of gaps) {
+    expect(g).toBeCloseTo(gaps[0]!, 6);
+    expect(g).toBeLessThanOrEqual(DRAW_GAP_MS);
+  }
+  expect(delays.at(-1)!).toBeLessThanOrEqual(DRAW_MS - DRAW_ROW_MS + 1e-9);
+};
+/** How many of `rows` stand in `scroller`'s view now. */
+const inViewOf = (page: Page, rows: string, scroller: string) =>
+  page.evaluate(
+    ({ rows, scroller }) => {
+      const view = document.querySelector(scroller)!.getBoundingClientRect();
+      return [...document.querySelectorAll(rows)].filter((r) => {
+        const box = r.getBoundingClientRect();
+        return box.bottom > view.top && box.top < view.bottom;
+      }).length;
+    },
+    { rows, scroller },
+  );
+/** Nothing these motions touch is left with a style, and nothing is running. */
+const pagesAtRest = (page: Page) =>
+  page.evaluate(() => ({
+    running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    styled: [
+      ...document.querySelectorAll(
+        'form, [data-driver-row], [role="cell"] > div, [data-asg-row], [data-asg-row] [role="combobox"], [data-was], li, footer span, [role="alert"]',
+      ),
+    ].filter((el) => el.getAttribute('style')).length,
+  }));
+const rowDrop = { frames: DROP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
+const dropsOf = (entries: Paged[]) => entries.map(({ frames, duration, easing }) => ({ frames, duration, easing: curve(easing) }));
+const asDrops = (n: number) => Array.from({ length: n }, () => ({ ...rowDrop, easing: curve(DIALOG_CURVE) }));
+
+/**
+ * A change of page to a week of History, made by Next's own router, as a `Link` makes it. Not
+ * the browser's Back: from the board, Back to History changes the address and leaves the board
+ * drawn (phase 3bk, "Found wrong"), and the account menu opens the server's real week, which
+ * this seed leaves empty.
+ */
+const toHistoryWeek = (page: Page, week: string) =>
+  page.evaluate((w) => {
+    (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(`/history?week=${w}`);
+  }, week);
+
+/** A signed-out context: the login page with no session, so no load of it asks the hosted auth. */
+const signedOut = { storageState: { cookies: [], origins: [] }, reducedMotion: 'no-preference' as const };
+
+/** The form's own animation, seen from its first frame, and every frame of the page until it is still. */
+const watchLogin = () => {
+  type Frame = { t: number; scrollY: number; opacity: number };
+  const w = window as unknown as {
+    __arrive: { name: string; duration: number; easing: string; fill: string; frames: Keyframe[] }[] | null;
+    __formAnim: Animation | null;
+    __frames: Frame[];
+    __restY: number | null;
+  };
+  w.__arrive = null;
+  w.__formAnim = null;
+  w.__frames = [];
+  const tick = () => {
+    const form = document.querySelector('form');
+    if (form && w.__arrive === null) {
+      const all = form.getAnimations();
+      w.__formAnim = all[0] ?? null;
+      w.__arrive = all.map((a) => ({
+        name: (a as CSSAnimation).animationName,
+        duration: Number(a.effect!.getComputedTiming().duration),
+        // A CSS animation's curve is its keyframes', not its timing's.
+        easing: String((a.effect as KeyframeEffect).getKeyframes()[0]?.easing),
+        fill: String(a.effect!.getTiming().fill),
+        frames: (a.effect as KeyframeEffect).getKeyframes(),
+      }));
+    }
+    if (form) {
+      const root = document.scrollingElement!;
+      w.__frames.push({
+        t: w.__formAnim?.currentTime === null || w.__formAnim === null ? -1 : Number(w.__formAnim.currentTime),
+        scrollY: root.scrollHeight - root.clientHeight,
+        opacity: Number(getComputedStyle(form).opacity),
+      });
+    }
+    if (w.__frames.length < 90) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+
+
+/**
+ * The press table's watch, on every page it presses on: when each press came, by the clock of
+ * the motion it aims at, and whether it came down and went up on its control. The login form's
+ * animation is CSS and started before any script, so it is kept from its first frame here: a
+ * finished one leaves `getAnimations()`. What to aim at survives a reload in `sessionStorage`.
+ */
+const pressWatch = () => {
+  type Press = { at: number | null; down: boolean; same: boolean | null };
+  const w = window as unknown as PagedLog & {
+    __press: Press | null;
+    __since: number;
+    __clicks: number;
+    __formAnim: Animation | null;
+    __downOn: Element | null;
+  };
+  w.__press = null;
+  w.__since = 0;
+  w.__clicks = 0;
+  w.__formAnim = null;
+  w.__downOn = null;
+  const aim = () => sessionStorage.getItem('pressAim');
+  const zone = () => sessionStorage.getItem('pressZone') ?? '*';
+  const keep = () => {
+    const form = document.querySelector('form');
+    if (form && !w.__formAnim) w.__formAnim = form.getAnimations()[0] ?? null;
+    if (!w.__formAnim && performance.now() < 5_000) requestAnimationFrame(keep);
+  };
+  requestAnimationFrame(keep);
+  const timed = (): Animation | null => {
+    if (aim() === 'login') return w.__formAnim;
+    const log = (w.__paged ?? []).slice(w.__since).filter((s) => s.what === aim());
+    // A draw is timed from its first row, a drop from the one just started.
+    return (aim() === 'asgRows' || aim() === 'histRows' ? log[0] : log.at(-1))?.animation ?? null;
+  };
+  const zoneOf = (target: EventTarget | null) => (target as Element | null)?.closest?.(zone()) ?? null;
+  window.addEventListener(
+    'pointerdown',
+    (event) => {
+      const motion = timed();
+      const start = motion?.startTime;
+      w.__downOn = zoneOf(event.target);
+      w.__press = {
+        at: motion && start !== null && start !== undefined ? Number(document.timeline.currentTime) - Number(start) : null,
+        down: w.__downOn !== null,
+        same: null,
+      };
+    },
+    true,
+  );
+  window.addEventListener(
+    'pointerup',
+    (event) => {
+      if (w.__press) w.__press.same = w.__downOn !== null && zoneOf(event.target) === w.__downOn;
+    },
+    true,
+  );
+  window.addEventListener(
+    'click',
+    (event) => {
+      if ((event.target as Element | null)?.closest?.('button[type="submit"]')) w.__clicks += 1;
+    },
+    true,
+  );
+};
+/** Arms one round: what it aims at, the control it must land on, and the log from here on. */
+const arm = (page: Page, aim: string, zone: string) =>
+  page.evaluate(
+    ({ aim, zone }) => {
+      sessionStorage.setItem('pressAim', aim);
+      sessionStorage.setItem('pressZone', zone);
+      const w = window as unknown as PagedLog & { __since: number; __press: unknown };
+      w.__since = (w.__paged ?? []).length;
+      w.__press = null;
+    },
+    { aim, zone },
+  );
+/** Resolves once a motion of `aim` started since the round was armed, and has its time. */
+const begun = (page: Page, aim: string) =>
+  page.waitForFunction(
+    (what) => {
+      const w = window as unknown as PagedLog & { __since: number };
+      const first = (w.__paged ?? []).slice(w.__since).find((s) => s.what === what);
+      return Boolean(first && first.animation.startTime !== null);
+    },
+    aim,
+    { polling: 'raf', timeout: 10_000 },
+  );
+const centreOf = async (locator: Locator) => {
+  const box = (await locator.boundingBox({ timeout: 5_000 }))!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+
+test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
+  test('the login page: up 16px from 92% in 330ms on a load, never hidden without a script, a key and a fill mid-way kept, nothing grown, nothing left', async ({
+    browser,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    // At 480 high the form and its padding are taller than the screen: the page scrolls at rest,
+    // which is where a form coming up from below could make it scroll further.
+    for (const viewport of [{ width: 1920, height: 1080 }, { width: 1280, height: 480 }]) {
+      const context = await browser.newContext({ ...signedOut, viewport });
+      const page = await context.newPage();
+      await page.addInitScript(watchLogin);
+      await page.goto('/login');
+      await page.waitForFunction(() => (window as unknown as { __frames: unknown[] }).__frames.length >= 90, undefined, { timeout: 10_000 });
+      const { arrive, frames, rest } = await page.evaluate(() => {
+        const w = window as unknown as { __arrive: unknown; __frames: { t: number; scrollY: number; opacity: number }[] };
+        const root = document.scrollingElement!;
+        return { arrive: w.__arrive, frames: w.__frames, rest: root.scrollHeight - root.clientHeight };
+      });
+      const [only, ...more] = arrive as { name: string; duration: number; easing: string; fill: string; frames: Record<string, string>[] }[];
+      expect(more).toEqual([]);
+      expect(only).toMatchObject({ name: 'login-in', duration: LOGIN_MS, fill: 'backwards' });
+      expect(curve(only!.easing)).toBe(curve(DIALOG_CURVE));
+      expect(only!.frames[0]).toMatchObject({ opacity: '0', scale: String(LOGIN_FROM) });
+      expect(only!.frames[0]!.translate).toMatch(new RegExp(`^0(px)? ${LOGIN_RISE_PX}px$`));
+      expect(only!.frames.at(-1)).toMatchObject({ opacity: '1', scale: '1' });
+      // It was seen moving, and on no frame could the page scroll further than it does at rest.
+      expect(frames.filter((f) => f.t > 0 && f.t < LOGIN_MS).length).toBeGreaterThan(5);
+      expect(frames.filter((f) => f.scrollY > rest)).toEqual([]);
+      // Nothing left: no style, no animation, and the form at its own look.
+      const form = page.locator('form');
+      expect(await form.getAttribute('style')).toBeNull();
+      expect(
+        await form.evaluate((f) => ({ running: f.getAnimations().length, ...((s) => ({ opacity: s.opacity, translate: s.translate, scale: s.scale }))(getComputedStyle(f)) })),
+      ).toEqual({ running: 0, opacity: '1', translate: 'none', scale: 'none' });
+      await context.close();
+    }
+
+    // With no script at all: the CSS still runs and ends by itself, and the form takes typing at once.
+    {
+      const context = await browser.newContext({ ...signedOut, javaScriptEnabled: false });
+      const page = await context.newPage();
+      await page.goto('/login');
+      const email = page.getByRole('textbox', { name: 'Work email' });
+      await email.fill('rae@example.test', { timeout: 5_000 });
+      await expect(email).toHaveValue('rae@example.test');
+      await expect(page.locator('form')).toHaveCSS('opacity', '1', { timeout: 5_000 });
+      await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+      await context.close();
+    }
+
+    // Under reduced motion: nothing runs, and the form is there on its first frame.
+    {
+      const context = await browser.newContext({ ...signedOut, reducedMotion: 'reduce' });
+      const page = await context.newPage();
+      await page.addInitScript(watchLogin);
+      await page.goto('/login');
+      await page.waitForFunction(() => (window as unknown as { __frames: unknown[] }).__frames.length >= 10, undefined, { timeout: 10_000 });
+      const seen = await page.evaluate(() => {
+        const w = window as unknown as { __arrive: unknown[]; __frames: { opacity: number }[] };
+        return { arrive: w.__arrive, first: w.__frames[0]!.opacity };
+      });
+      expect(seen).toEqual({ arrive: [], first: 1 });
+      await context.close();
+    }
+
+    /*
+     * A key pressed 20ms into it lands in the field, and a password manager's fill at the same
+     * moment (its value set, and its input event) is kept, through hydration and the end.
+     * The key is a real one; a load that took it too early or too late is tried again.
+     */
+    {
+      const context = await browser.newContext({ ...signedOut, viewport: { width: 1920, height: 1080 } });
+      const page = await context.newPage();
+      await page.addInitScript(() => {
+        const w = window as unknown as { __keyAt: number | null; __fillAt: number | null };
+        w.__keyAt = null;
+        w.__fillAt = null;
+        let anim: Animation | null = null;
+        const timeOf = () => (anim && anim.startTime !== null ? Number(document.timeline.currentTime) - Number(anim.startTime) : null);
+        window.addEventListener('keydown', () => (w.__keyAt = timeOf()), true);
+        const tick = () => {
+          const form = document.querySelector('form');
+          const email = form?.querySelector<HTMLInputElement>('input[name="email"]');
+          if (form && !anim) anim = form.getAnimations()[0] ?? null;
+          if (email && document.activeElement !== email && w.__keyAt === null) email.focus();
+          const at = timeOf();
+          if (form && at !== null && at >= 20 && w.__fillAt === null) {
+            const password = form.querySelector<HTMLInputElement>('input[name="password"]')!;
+            password.value = 'filled-by-a-manager';
+            password.dispatchEvent(new Event('input', { bubbles: true }));
+            password.dispatchEvent(new Event('change', { bubbles: true }));
+            w.__fillAt = at;
+          }
+          if (w.__fillAt === null || w.__keyAt === null) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      let lateBy = 0;
+      let at: { key: number | null; fill: number | null } = { key: null, fill: null };
+      for (let tries = 0; tries < 30; tries++) {
+        await page.goto('/login', { waitUntil: 'commit' });
+        await page.waitForFunction(() => document.querySelector('form') !== null, undefined, { polling: 'raf', timeout: 10_000 });
+        await page.waitForTimeout(Math.max(0, 20 - lateBy));
+        await page.keyboard.type('k');
+        // The fill comes on the first frame at 20ms or more: wait for it, not for a guess.
+        await page.waitForFunction(() => (window as unknown as { __fillAt: number | null }).__fillAt !== null, undefined, {
+          polling: 'raf',
+          timeout: 5_000,
+        });
+        at = await page.evaluate(() => {
+          const w = window as unknown as { __keyAt: number | null; __fillAt: number | null };
+          return { key: w.__keyAt, fill: w.__fillAt };
+        });
+        if (at.key !== null && Math.abs(at.key - 20) <= 18) break;
+        lateBy += at.key === null ? -10 : (at.key - 20) * 0.5;
+      }
+      process.stdout.write(`LOGIN KEY at ${at.key}ms, FILL at ${at.fill}ms into the form's motion\n`);
+      expect(at.key, 'the key came 20ms into the motion, ±18').not.toBeNull();
+      expect(Math.abs(at.key! - 20)).toBeLessThanOrEqual(18);
+      expect(at.fill!).toBeGreaterThanOrEqual(20);
+      expect(at.fill!).toBeLessThan(LOGIN_MS);
+      // Hydrated, and past the end: both are still there.
+      await page.waitForFunction(() => Object.keys(document.querySelector('form')!).some((k) => k.startsWith('__react')), undefined, { timeout: 10_000 });
+      await page.waitForTimeout(LOGIN_MS);
+      await expect(page.locator('input[name="email"]')).toHaveValue('k');
+      await expect(page.locator('input[name="password"]')).toHaveValue('filled-by-a-manager');
+      await context.close();
+    }
+  });
+
+  test('Assignments: rows draw on a change of page and not on a load, a pick drops its name and a save’s rebase nothing, the add form and “Saved” drop, nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedBoard();
+    await logPages(page);
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const field = (truck: number) => page.getByRole('combobox', { name: `Driver for truck ${truck}` });
+
+    // asgRows: by the header's link, a change of page.
+    await step('asgRows', async () => {
+      await page.getByRole('link', { name: 'Assignments' }).click();
+      await field(401).waitFor();
+    });
+    const n = await inViewOf(page, '[data-asg-row]', 'main > div.overflow-auto');
+    expect(n).toBeGreaterThan(3);
+    expectDrawn(await paged(page, 'asgRows'), n);
+
+    // The page a load lands on: nothing.
+    await page.reload();
+    await field(401).waitFor();
+    await quiet(page);
+    expect(await paged(page)).toEqual([]);
+
+    // asgDriver: a person's pick. The name and the "was" line that comes with it drop.
+    await step('asgDriver', async () => {
+      await field(401).click();
+      await page.getByRole('option', { name: new RegExp(`^${FREE}`) }).click();
+      await expect(field(401)).toHaveValue(FREE);
+    });
+    expect((await paged(page)).map((p) => p.what)).toEqual(['asgDriver', 'asgDriverWas']);
+    expect(dropsOf(await paged(page))).toEqual(asDrops(2));
+
+    // asgSaved: Save, the save's refresh, and its rebase. "Saved" drops once; the pick does not again.
+    await step('asgSaved', async () => {
+      await page.getByRole('button', { name: 'Save assignments' }).click();
+      await expect(page.locator('footer')).toContainText('Saved — 1 assigned', { timeout: 10_000 });
+    });
+    expect((await paged(page)).map((p) => p.what)).toEqual(['asgDriver', 'asgDriverWas', 'asgSaved']);
+    expect(dropsOf(await paged(page, 'asgSaved'))).toEqual(asDrops(1));
+
+    // asgAdd: "+ Add" in an empty truck's picker. How much of the form shows is reported, not fixed.
+    await page.setViewportSize({ width: 1440, height: 790 });
+    await quiet(page);
+    await step('asgAdd', async () => {
+      await field(410).click();
+      await field(410).fill('Zed Nobody');
+      await page.getByRole('button', { name: /^\+ Add “Zed Nobody”/ }).click();
+      await page.getByRole('textbox', { name: 'New driver name' }).waitFor();
+    });
+    expect((await paged(page, 'asgAdd')).length).toBe(1);
+    expect(dropsOf(await paged(page, 'asgAdd'))).toEqual(asDrops(1));
+    const shown = await page.locator('li:has(input[aria-label="New driver name"])').evaluate((li) => {
+      const box = li.getBoundingClientRect();
+      let top = 0;
+      let bottom = window.innerHeight;
+      for (let el = li.parentElement; el; el = el.parentElement) {
+        const cs = getComputedStyle(el);
+        if (/auto|scroll|hidden/.test(cs.overflowY)) {
+          const r = el.getBoundingClientRect();
+          top = Math.max(top, r.top);
+          bottom = Math.min(bottom, r.bottom);
+        }
+      }
+      return Math.round((100 * Math.max(0, Math.min(bottom, box.bottom) - Math.max(top, box.top))) / box.height);
+    });
+    process.stdout.write(`ASG ADD in view at 1440x790, truck 410: ${shown}% of the form\n`);
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => pagesAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+
+  test('History: rows draw on a change of page and not on a load, a filter or a week; a folded day’s loads drop; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedHistory();
+    await logPages(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const rows = page.locator('main [data-driver-row]');
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+
+    // The page a load lands on: nothing.
+    await page.goto('/history?week=2026-W39');
+    await rows.first().waitFor();
+    await quiet(page);
+    expect(await paged(page)).toEqual([]);
+
+    // To the board, and to the week again by a change of page. The rows in view draw in.
+    await page.locator('[data-board-link]').click();
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    await step('histRows', async () => {
+      await toHistoryWeek(page, '2026-W39');
+      await rows.first().waitFor();
+    });
+    await expect(page).toHaveURL(/week=2026-W39/);
+    const n = await inViewOf(page, 'main [data-driver-row]', 'main');
+    expect(n).toBeGreaterThan(3);
+    expectDrawn(await paged(page, 'histRows'), n);
+
+    // A filter, and a week there and back: nothing more.
+    const filter = page.getByRole('textbox', { name: 'Filter drivers' });
+    await filter.fill('Andre');
+    await expect(rows).toHaveCount(1);
+    await filter.fill('');
+    await page.getByRole('button', { name: 'Previous week' }).click();
+    await expect(page).toHaveURL(/week=2026-W38/);
+    await page.getByRole('button', { name: 'Next week' }).click();
+    await expect(page).toHaveURL(/week=2026-W39/);
+    await rows.first().waitFor();
+    await quiet(page);
+    expect((await paged(page)).map((p) => p.what)).toEqual(Array.from({ length: n }, () => 'histRows'));
+
+    // histFold: Andre's Tuesday, "+2 more". The two loads that were folded drop; the row grows at once.
+    await step('histFold', async () => {
+      await page.locator('main [data-driver-row="Andre Baptiste"]').getByRole('button', { name: '+2 more' }).click();
+    });
+    expect(dropsOf(await paged(page, 'histFold'))).toEqual(asDrops(2));
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => pagesAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+
+  test('a real mouse on the login form, a picked name, the add form, and a drawn and an unfolded row, 20 to 300ms into their motion: every press lands', async ({
+    page,
+    browser,
+  }, info) => {
+    test.setTimeout(20 * 60_000);
+    type Control = {
+      name: string;
+      on: Page;
+      /** What the round is timed by, and the element a press must come down and go up on. */
+      aim: string;
+      zone: string;
+      rounds: number;
+      /** Readies the round and says where the pointer stands. */
+      ready: (i: number) => Promise<{ x: number; y: number }>;
+      /** Starts the control's motion. `waits` starts resolve once it has begun; the rest are fired. */
+      start: (i: number) => Promise<unknown>;
+      waits: boolean;
+      read: () => Promise<string>;
+      landed: (before: string, after: string) => boolean;
+      /** Whether a press holds it: the login form's CSS runs before the page's script, so not until hydration. */
+      held: boolean;
+    };
+    const TIMES = [20, 60, 120, 300];
+    const HOLD = 40;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const tally: { control: string; time: number; ok: boolean; offControl: boolean; moved: number; held: boolean }[] = [];
+    const active = (on: Page) =>
+      on.evaluate(() => {
+        const a = document.activeElement;
+        return a?.getAttribute('data-load') ?? a?.getAttribute('name') ?? a?.getAttribute('aria-label') ?? a?.tagName ?? '';
+      });
+
+    const run = async (control: Control) => {
+      const on = control.on;
+      for (const time of TIMES) {
+        await keepTheFeedFresh();
+        let lateBy = 0;
+        let done = 0;
+        let tries = 0;
+        while (done < control.rounds && tries < control.rounds * 6) {
+          tries += 1;
+          const { x, y } = await control.ready(tries);
+          await on.mouse.move(x, y);
+          const before = await control.read();
+          await arm(on, control.aim, control.zone);
+          const fired = control.start(tries);
+          if (control.waits) await fired;
+          await sleep(Math.max(0, time - lateBy));
+          await on.mouse.down();
+          const pressed = await on.evaluate(() => (window as unknown as { __press: { at: number | null } | null }).__press);
+          const under = (px: number, py: number) =>
+            on.evaluate(
+              ({ px, py }) => {
+                const r = document.elementFromPoint(px, py)?.getBoundingClientRect();
+                return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+              },
+              { px, py },
+            );
+          const box = await under(x, y);
+          await sleep(HOLD);
+          const boxAfter = await under(x, y);
+          await on.mouse.up();
+          const ends = await on.evaluate(() => (window as unknown as { __press: { down: boolean; same: boolean | null } | null }).__press);
+          await fired;
+          await expect.poll(() => control.read().then((after) => control.landed(before, after)), { timeout: 2_000 }).toBe(true).catch(() => {});
+          const after = await control.read();
+          const at = pressed?.at ?? null;
+          if (at === null) lateBy -= 20;
+          else lateBy += (at - time) * 0.4;
+          if (at !== null && Math.abs(at - time) <= 18) {
+            done += 1;
+            tally.push({
+              control: control.name,
+              time,
+              ok: control.landed(before, after),
+              offControl: !ends?.down || ends.same !== true,
+              moved: box && boxAfter ? Math.max(Math.abs(box.x - boxAfter.x), Math.abs(box.y - boxAfter.y)) : -1,
+              held: control.held,
+            });
+          }
+        }
+        const these = tally.filter((t) => t.control === control.name && t.time === time);
+        process.stdout.write(
+          `PAGES PRESS ${control.name} at ${time}ms: ${done} landed on time in ${tries} tries, ${these.filter((t) => !t.ok).length} missed\n`,
+        );
+        expect(done, `${control.name} at ${time}ms: presses on time`).toBe(control.rounds);
+      }
+    };
+
+    /* The login form, signed out, so no load of it asks the hosted auth. */
+    const login = await (await browser.newContext({ ...signedOut, viewport: { width: 1920, height: 1080 } })).newPage();
+    await login.addInitScript(pressWatch);
+    await login.goto('/login');
+    await login.waitForTimeout(LOGIN_MS * 2);
+    const email = await centreOf(login.locator('input[name="email"]'));
+    const password = await centreOf(login.locator('input[name="password"]'));
+    const signInAt = await centreOf(login.getByRole('button', { name: 'Sign in' }));
+    const reload = () => login.goto('/login', { waitUntil: 'commit' });
+    const loginControl = (name: string, zone: string, at: { x: number; y: number }, read: () => Promise<string>, landed: Control['landed']): Control => ({
+      name,
+      on: login,
+      aim: 'login',
+      zone,
+      rounds: 8,
+      ready: async () => at,
+      start: reload,
+      waits: true,
+      read,
+      landed,
+      held: false,
+    });
+    for (const control of [
+      loginControl('login email', 'label:has(input[name="email"])', email, () => active(login), (_b, a) => a === 'email'),
+      loginControl('login password', 'label:has(input[name="password"])', password, () => active(login), (_b, a) => a === 'password'),
+      // Sign in with empty fields: the browser's own check stops it there, so nothing is sent.
+      loginControl('login Sign in', 'button[type="submit"]', signInAt, () => login.evaluate(() => String((window as unknown as { __clicks: number }).__clicks)), (_b, a) => a === '1'),
+    ]) {
+      await run(control);
+    }
+    await login.context().close();
+
+    /* Assignments. */
+    await seedBoard();
+    await logPages(page);
+    await page.addInitScript(pressWatch);
+    let addRequests = 0;
+    // Only the add form's create; the merge prompt reads the same address on every mount.
+    await page.route('**/api/drivers', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      addRequests += 1;
+      return route.fulfill({ status: 400, json: { error: 'Not saved in this test.' } });
+    });
+    const field = (truck: number) => page.getByRole('combobox', { name: `Driver for truck ${truck}` });
+    await page.goto('/assignments');
+    await field(401).waitFor();
+    // Once first, so the "was" line is there in every round and the row keeps its height.
+    await field(401).click();
+    await page.getByRole('option', { name: /^Cleo Varga/ }).click();
+    await quiet(page);
+    const fieldAt = await centreOf(field(401));
+    const expanded = () => field(401).getAttribute('aria-expanded', { timeout: 2_000 }).then(String);
+    await run({
+      name: 'picked name',
+      on: page,
+      aim: 'asgDriver',
+      zone: '[aria-label="Driver for truck 401"]',
+      rounds: 8,
+      ready: async () => {
+        if ((await expanded()) !== 'true') await field(401).click();
+        await page.locator('[role="listbox"]').waitFor({ timeout: 5_000 });
+        await quiet(page);
+        return fieldAt;
+      },
+      // The other of two names, so each pick changes the row and the "was" line stays.
+      start: () =>
+        page.evaluate((free) => {
+          const list = document.querySelector('[aria-label="Driver for truck 401"]')!.parentElement!.querySelector('[role="listbox"]')!;
+          const options = [...list.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+          const next = options.find((o) => o.getAttribute('aria-selected') !== 'true' && [free, 'Cleo Varga'].some((n) => (o.textContent ?? '').startsWith(n)))!;
+          next.click();
+        }, FREE),
+      waits: false,
+      read: expanded,
+      landed: (_b, a) => a === 'true',
+      held: true,
+    });
+    await page.keyboard.press('Escape');
+
+    // The add form: its places measured once, at rest.
+    const addField = field(410);
+    const formRow = page.locator('li:has(input[aria-label="New driver name"])');
+    const offerAdd = async () => {
+      if (await formRow.count()) {
+        await formRow.getByRole('button', { name: 'Cancel' }).click({ timeout: 5_000 });
+        await expect(formRow).toHaveCount(0, { timeout: 5_000 });
+      }
+      if ((await addField.getAttribute('aria-expanded', { timeout: 2_000 })) !== 'true') await addField.click();
+      if ((await addField.inputValue()) !== 'Zed Nobody') await addField.fill('Zed Nobody');
+      await page.getByRole('button', { name: /^\+ Add “Zed Nobody”/ }).waitFor({ timeout: 5_000 });
+      await quiet(page);
+    };
+    await offerAdd();
+    await page.getByRole('button', { name: /^\+ Add “Zed Nobody”/ }).click();
+    await formRow.waitFor();
+    await quiet(page);
+    const phoneAt = await centreOf(page.getByRole('textbox', { name: 'New driver phone' }));
+    const cancelAt = await centreOf(formRow.getByRole('button', { name: 'Cancel' }));
+    const addAt = await centreOf(formRow.getByRole('button', { name: 'Add and assign' }));
+    const plusAdd = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => (b.textContent ?? '').startsWith('+ Add “Zed Nobody”'))!.click(),
+      );
+    const addControl = (name: string, zone: string, at: { x: number; y: number }, read: () => Promise<string>, landed: Control['landed']): Control => ({
+      name,
+      on: page,
+      aim: 'asgAdd',
+      zone,
+      rounds: 8,
+      ready: async () => {
+        await offerAdd();
+        return at;
+      },
+      start: plusAdd,
+      waits: false,
+      read,
+      landed,
+      held: true,
+    });
+    for (const control of [
+      addControl('add form phone', 'input[aria-label="New driver phone"]', phoneAt, () => active(page), (_b, a) => a === 'New driver phone'),
+      addControl('add form Cancel', 'li:has(input[aria-label="New driver name"]) div.flex > button:last-child', cancelAt, async () => String(await formRow.count()), (_b, a) => a === '0'),
+      addControl('add form Add and assign', 'li:has(input[aria-label="New driver name"]) div.flex > button:first-child', addAt, async () => String(addRequests), (b, a) => Number(a) === Number(b) + 1),
+    ]) {
+      await run(control);
+    }
+    await offerAdd();
+    await page.keyboard.press('Escape');
+
+    // A drawn row: the board, then Assignments by its link, a change of page.
+    await page.reload();
+    await field(401).waitFor();
+    await quiet(page);
+    const rowFieldAt = await centreOf(field(401));
+    await run({
+      name: 'drawn Assignments row',
+      on: page,
+      aim: 'asgRows',
+      zone: '[aria-label="Driver for truck 401"]',
+      rounds: 4,
+      ready: async () => {
+        if (page.url().includes('/assignments')) {
+          await page.getByRole('link', { name: 'Back to console' }).click();
+          await page.locator('[data-row-id]').first().waitFor();
+        }
+        await quiet(page);
+        return rowFieldAt;
+      },
+      start: async () => {
+        await page.evaluate(() => document.querySelector<HTMLAnchorElement>('a[href="/assignments"]')!.click());
+        await begun(page, 'asgRows');
+      },
+      waits: true,
+      read: async () => (page.url().endsWith('/assignments') ? await expanded() : 'away'),
+      landed: (_b, a) => a === 'true',
+      held: true,
+    });
+
+    /* History. */
+    await seedHistory();
+    const rows = page.locator('main [data-driver-row]');
+    await page.goto('/history?week=2026-W39');
+    await rows.first().waitFor();
+    await quiet(page);
+    const firstLoad = page.locator('main [data-driver-row]').first().locator('[data-load]:not([data-load="no number"])').first();
+    const firstNumber = (await firstLoad.getAttribute('data-load'))!;
+    const firstAt = await centreOf(firstLoad);
+    await run({
+      name: 'drawn History row',
+      on: page,
+      aim: 'histRows',
+      zone: `[data-load="${firstNumber}"]`,
+      rounds: 4,
+      ready: async () => {
+        if (page.url().includes('/history')) {
+          await page.locator('[data-board-link]').click();
+          await page.locator('[data-row-id]').first().waitFor();
+        }
+        await quiet(page);
+        return firstAt;
+      },
+      start: async () => {
+        await toHistoryWeek(page, '2026-W39');
+        await begun(page, 'histRows');
+      },
+      waits: true,
+      read: () => active(page),
+      landed: (_b, a) => a === firstNumber,
+      held: true,
+    });
+
+    const andre = page.locator('main [data-driver-row="Andre Baptiste"]');
+    const openWeek = async () => {
+      await page.goto('/history?week=2026-W39');
+      await andre.getByRole('button', { name: '+2 more' }).waitFor();
+      await quiet(page);
+    };
+    await openWeek();
+    const day = await andre
+      .locator('[role="cell"]')
+      .evaluateAll((cells) => cells.findIndex((c) => [...c.querySelectorAll('button')].some((b) => b.textContent === '+2 more')));
+    expect(day).toBeGreaterThanOrEqual(0);
+    const cell = andre.locator('[role="cell"]').nth(day);
+    await cell.getByRole('button', { name: '+2 more' }).click();
+    await quiet(page);
+    const third = cell.locator('[data-load]').nth(2);
+    const thirdNumber = (await third.getAttribute('data-load'))!;
+    const thirdAt = await centreOf(third);
+    await run({
+      name: 'unfolded load',
+      on: page,
+      aim: 'histFold',
+      zone: `[data-load="${thirdNumber}"]`,
+      rounds: 8,
+      ready: async () => {
+        await openWeek();
+        return thirdAt;
+      },
+      start: () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLButtonElement>('main [data-driver-row="Andre Baptiste"] button')].find((b) => b.textContent === '+2 more')!.click(),
+        ),
+      waits: false,
+      read: () => active(page),
+      landed: (_b, a) => a === thirdNumber,
+      held: true,
+    });
+
+    const table = tally.reduce<Record<string, { presses: number; misses: number; offTarget: number; mostMoved: number }>>((all, t) => {
+      const key = `${t.control} at ${t.time}ms`;
+      const row = (all[key] ??= { presses: 0, misses: 0, offTarget: 0, mostMoved: 0 });
+      row.presses += 1;
+      if (!t.ok) row.misses += 1;
+      if (t.offControl) row.offTarget += 1;
+      row.mostMoved = Math.max(row.mostMoved, Math.round(t.moved * 10) / 10);
+      return all;
+    }, {});
+    const report = JSON.stringify({ rows: table, misses: tally.filter((t) => !t.ok) }, null, 1);
+    await info.attach('pages-press-table', { body: report, contentType: 'application/json' });
+    process.stdout.write(`PAGES PRESS TABLE\n${report}\nEND PAGES PRESS TABLE\n`);
+
+    expect(tally).toHaveLength(TIMES.length * (8 * 3 + 8 + 8 * 3 + 4 + 4 + 8));
+    expect(tally.filter((t) => !t.ok)).toEqual([]);
+    expect(tally.filter((t) => t.offControl)).toEqual([]);
+    // What a press holds does not move under it; a hovered button's 1px lift may drop as it is pressed.
+    expect(tally.filter((t) => t.held && t.moved > 1.01)).toEqual([]);
   });
 });
