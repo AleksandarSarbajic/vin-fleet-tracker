@@ -7745,6 +7745,8 @@ narrow toolbar fails 768 and 800); the tooltip; the filter; the calendar.
 Baselines: `history-W40-*` at the six widths, frozen clock, fixed seed. The
 console's 54 baselines are unchanged.
 
+**Back and Forward** to History open it on the week and filter its address holds (§12.154).
+
 ## 12.102 Driver history on a phone
 
 Stage 3: the design's phone layout for §12.101, below 768px only. Desktop
@@ -11183,6 +11185,54 @@ do not, and reduced motion starts nothing. `lib/appear-motion.test.ts` (`drawIn`
 `lib/motion.test.ts` (`follow`), `lib/page-arrival.test.ts` and `motion-tokens.test.ts`
 (the tokens, and the login form's Tailwind animation) cover the rest, all with the numbers
 written out. `e2e/new-motion.spec.ts`, "phase 3bk", holds what only a browser shows.
+
+## 12.154 Back to History: History, on the week it was left on
+
+Phase 3bl. Found in 3bk; in the code since History itself (`f06581f`, 2026-10-03).
+
+**The bug.** Back from the board to History went wrong two ways. History opened by its
+address (a load: a bookmark, a sent link, a reload, a typed `/history`), then the board, then
+Back: the address changed and **the board stayed on the screen.** History opened from the
+board (the account menu, G H), or by its address with a change after: History came back,
+but **on the week and filter it was first opened on**, not the ones it was left on, and wrote
+those into the address.
+
+**The cause, two parts,** seen by recording every `pushState`, `replaceState` and `popstate`
+in a real browser:
+
+1. History wrote its address with `history.replaceState(null, …)` in an effect, on mount too.
+   Next hooks `replaceState` so that such a call keeps the router's own state on the entry
+   (`__NA` and its tree) and gives the router the new address. But it hooks it in an effect
+   of the app router, an ancestor of the page, and React runs a child's effects first. On the
+   page a load lands on, History's call reached the browser unhooked, 1ms before the hook
+   (recorded: Next's own write, then History's `null`, then the hook), and the entry's state
+   was `null`. Next's popstate handler does nothing on a `null` state. Reached by a change of
+   page, the hook was already there. A later change of week or filter mended the entry (Next
+   writes it again), which is why the bug hid behind any change.
+2. Back and Forward draw a page again from Next's cache, without the server (no `_rsc`
+   request). The cached page is the server's answer for the address it was first opened on,
+   so its props carry that week and filter, and History took its own from them.
+
+**The fix** (`HistoryPage.tsx`), no server round trip, as before: a typed filter costs none.
+
+- The week and filter come from the address Next holds (`useSearchParams`), parsed as the
+  server parses them, and from the props only when it holds none. On a load the two are the
+  same. Not `window.location`: in a change of page it still shows the page before.
+- The address is written a microtask after the effect, when the router has hooked
+  `replaceState`, so the page a load lands on keeps its entry too. A write still waiting
+  when the week changes again, or the page goes, is dropped.
+
+**§12.29 said `useSearchParams` threw away the board's first paint.** In Next 15.5.28 the hook
+gives up the server's paint only while prerendering, and History is `force-dynamic`. An e2e
+test reads the server's own HTML for a week and finds its rows. The board is unchanged.
+
+**Tests.** e2e `history.spec.ts`, "Back and Forward between the board and History": by the
+account menu and a week change, by G H, by its address with a week and without one, by its
+address with a week and a filter, and the server's HTML. Four failed before the fix.
+`history/history-address.test.tsx`: the week and filter from the address; the address
+written through a stand-in router that hooks `replaceState` in an ancestor's effect, as Next
+does. Six of its seven fail on the code before. `new-motion.spec.ts` reaches History's week
+by Back, as a person does, not by `window.next.router.push`.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

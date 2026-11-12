@@ -108,6 +108,9 @@ Waits on the advisor's verification and Alex's push; (b) is open ("Phase 3bj", "
 **3bk: NOT pushed, NOT live** (2026-11-12): eight small motions at the demo's Bold on History, Assignments and the login page (§12.153):
 the row draws on a change of page, a folded day's loads, a picked driver, the add form, "Saved", the login form (CSS in the server's HTML) and its refusal.
 Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy. See "Phase 3bk" below.
+**At the start of 3bl (2026-11-12): 3bk is NOT pushed**: origin's master was `9af0ea6`, HEAD `4a48477`.
+**3bl: NOT pushed, NOT live** (2026-11-12): Back from the board to History shows History, on the week and filter it was left on (§12.154).
+Not live until pushed. App only (Vercel): one app file changed, no worker file, so no worker deploy. See "Phase 3bl" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11616,7 +11619,7 @@ A first try at (a), depending on `q` and `weekKey`, failed all six histRows test
 
 **Found wrong:**
 
-1. **Not motion, before this phase, not fixed: Back from the board to History shows the board.** In the first targeted run, `page.goBack()` from the board (reached by History's Board link) changed the address to `/history?week=2026-W39` and the board stayed drawn for the two minutes after (the trace: "navigated to …/history?week=2026-W39"; the screenshot: the board). Likely cause, unverified: `HistoryPage` writes its address with `window.history.replaceState(null, …)` on every mount, which drops the router's own state from that history entry. A person pressing Back there would see the same. Worth its own small phase.
+1. **Not motion, before this phase, not fixed: Back from the board to History shows the board.** In the first targeted run, `page.goBack()` from the board (reached by History's Board link) changed the address to `/history?week=2026-W39` and the board stayed drawn for the two minutes after (the trace: "navigated to …/history?week=2026-W39"; the screenshot: the board). Likely cause, unverified: `HistoryPage` writes its address with `window.history.replaceState(null, …)` on every mount, which drops the router's own state from that history entry. A person pressing Back there would see the same. Worth its own small phase. **Fixed in 3bl** (§12.154): two causes, and the second, a wrong week, is on the path from the board too.
 2. **The demo fades Currently on a pick** (`pages.js`, `pickDriver`). Currently is the saved truck's (§12.145) and a pick never changes it; left out.
 3. **The brief, "the poll's rebase":** no poll reaches the draft. The rebase runs when `router.refresh()` brings a new board: after a save, a retire, a new driver, a phone saved. The fleet's poll reaches only Currently.
 4. **The brief, rule 3 named `asgRows` and `loginForm` as in the server's HTML; `histRows` is too** (`initialView` comes from the server). It is built under the same rule.
@@ -11625,6 +11628,73 @@ A first try at (a), depending on `q` and `weekKey`, failed all six histRows test
 **Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone (the login page is the phone's too). **A press on the login form before hydration is not held:** the form's CSS runs from the first paint, and `follow` takes it under a press only once the page's script runs. In this run every login press measured 0px of movement, which suggests the local production build hydrated before the form's first frame; on a slow network a press in the first frames would not be held, and with the pointer on a control's middle it still lands (the form moves at most 16px, its fields are 44px tall). Not measured on a slow network.
 
 **Next:** the advisor verifies; Alex pushes. Then the medium rows, as the build order says; (b) for the chip is its own phase.
+
+### Phase 3bl: Back from the board to History (2026-11-12)
+
+3bk's "Found wrong", 1, fixed. §12.154 is the record. **NOT pushed, NOT live.** App only (Vercel): one app file, `src/components/history/HistoryPage.tsx`; the diff against `4a48477` (origin `9af0ea6` is behind 3bk) under `.taste-skill`, `.samples`, `src/worker` and `supabase` is empty, so no worker deploy. No motion, no migration.
+
+| Commit | What |
+|---|---|
+| `b49e4c9` | `HistoryPage.tsx`, `history-address.test.tsx`, the `useSearchParams` mock in `history-motion.test.tsx`, the e2e tests, `toHistoryWeek` replaced by Back |
+| The docs commit | §12.154, its pointer from §12.101, this section and "What is live" |
+
+**Reproduced first,** at `4a48477`, run `2026-11-12T15-09-05-402Z` (`history.spec.ts`, "Back and Forward between the board and History"): **4 of 6 failed.**
+
+| Test | At `4a48477` |
+|---|---|
+| by the account menu, a week change (W40, then W39), the board, Back | History on screen, but `[data-week-range]` "Nov 9 – 15, 2026" (the server's week when opened), not "Sep 21 – 27, 2026" |
+| by G H, no change of week, the board, Back | passed |
+| by its address `/history?week=2026-W39`, the board, Back | **the board stayed**: no `[data-history-toolbar]`, the address `/history?week=2026-W39` |
+| by its address `/history`, the board, Back | the board stayed, the same |
+| by its address (W40), W39 and the filter "marcus", the board, Back | History on "Sep 28 – Oct 4, 2026" (the week loaded) |
+| the server's own HTML carries the rows | passed (a control for the fix, §12.29) |
+
+So **whether Back without a change of week fails depends on how History was opened:** from the board it works; by a load it does not. The board-stays half needs the write on the mount of the page a load landed on, and no write after it (a later write mends the entry, below).
+
+**The cause, proven** with a diagnostic spec, not committed. An init script recorded each assignment of `history.pushState` / `replaceState` (Next's patch is the one whose source names `__NA`), each call at `History.prototype` with its data and the entry's state before it, each `popstate` with its state, and every `_rsc` request.
+
+1. **A load of `/history?week=2026-W39`** (run `2026-11-12T15-10-47-256Z`): t=339ms Next's `HistoryUpdater` writes `{__NA, tree}`, its patch not installed; t=341 History's effect writes `null`, the patch still not installed (the data reached the browser as `null`, which the patch never passes on); t=342 Next installs its patch (`app-router.js`, an effect of `Router`, an ancestor of the page). Back: `popstate` with state `null`. Next's `onPopState` returns on a null state ("this case only happens when pushState/replaceState was called outside of Next.js"), and the board stayed.
+2. **From the board by the menu** (run `2026-11-12T15-09-05-402Z`, diagnostic C): every write went through the patch and kept `__NA`. Back: `popstate` with that state, **no `_rsc` request**, the tree's page key `__PAGE__` (the bare `/history` the server first answered). History drew that answer's week, W46, and its effect wrote W46 into the address.
+- **A change after a load mends the entry** (diagnostic B): History's write through the patch gives `{}` (no `__NA` to copy), then Next's own write, in the commit of the `ACTION_RESTORE` the patch sends, puts `__NA` back. Back then showed History, on the week loaded.
+- **Both guesses were half right:** Next does copy its state into a `null` call (the advisor), and the `null` did wipe it (3bk); Next copies only once its patch is installed, and on the page a load lands on History's call came first.
+
+**The fix,** no server round trip:
+
+- `HistoryPage.tsx:95-100`: the week and filter from `useSearchParams()`, the `week` parsed by `parseIsoWeek` as `app/history/page.tsx` parses it, the props only when the address holds none or a bad one. On a load the two agree, so hydration is unchanged.
+- `HistoryPage.tsx:148-166`: the address written in `queueMicrotask`, after Next's effect has hooked `replaceState`; a write still waiting when the effect runs again or the page goes is dropped (`live`).
+- After it (run `2026-11-12T15-16-31-962Z`, diagnostic A): History's write at t=259, after the patch at t=257, carrying `__NA` and the tree; Back drew History on W39. Diagnostic C: Back drew W39 from the menu path.
+
+**What each option costs:**
+
+| Option | Cost |
+|---|---|
+| `router.replace` for each change | A server round trip each: a week, and **one per key of a typed filter**, each re-running the page's `loadFleet`, `loadHistoryWeek` and `loadTruckLists`. And the §12.104 lag race. Not chosen |
+| `replaceState(history.state, …)` | None on the wire. But a state with `__NA` makes Next's patch take the call for its own and pass it by without telling the router, so `useSearchParams` and the router's address fall behind and Next's next write puts the old address back. Relies on Next's private key. Not chosen |
+| Skip the write when the address already says it | None. Mends a load with a week; a load of a bare `/history` (typed, a new tab from the menu) or a bad week still writes before the hook. Not chosen alone |
+| Redirect a bare `/history` to its week on the server | A second round trip on every open from the board. Not chosen |
+| **The write a microtask later** (chosen) | None. It relies on React running one commit's effects in one pass, children first, before a microtask: what React does, not a promise it makes. The e2e tests and `history-address.test.tsx`'s stand-in router pin it |
+| Week and filter from `window.location` in the state's initializer | None on the wire. A render reading the URL bar (§12.29), and during a change of page it still holds the page before, so the board's `?q=` would become History's filter. Not chosen |
+| **`useSearchParams`** (chosen) | None on the wire; one more render of the page for each change of address (the hook's context) |
+
+**§12.29 and `useSearchParams`.** §12.29 found the hook threw away the board's first paint. In 15.5.28 the hook bails out of the server's render only in a prerender work unit (`bailout-to-client-rendering.js`: `prerender`, `prerender-runtime`, `prerender-client`, `prerender-ppr`, `prerender-legacy`), and History is `force-dynamic`. The e2e test "the server still draws the week" reads the server's HTML for W39 and finds `data-driver-row="Marcus Reyes"`; it passed before and after. The board was `force-dynamic` in September too (`4dc1365`), so why the hook hurt it then is **unverified** (an older Next is a guess). The board still reads its parameters on the server.
+
+**What a person sees now.** Back or Forward to History: the week and filter it was left on. A week other than the one the cached page was first answered with comes from the week's query cache if it is still there (React Query's default 5 minutes unused; refetched once older than the page's 60s `staleTime`), else it loads as a change of week does, and then its rows do not draw in (§12.153: a week and its fetch play nothing).
+
+**The delayed-`_rsc` race (§12.104 follow-up) does not apply:** the fix makes no RSC request (the patch sends an `ACTION_RESTORE`, which fetches nothing), and the address it reads is the router's, not `window.location`. No test for it.
+
+**Tests.** `npm run check`: **243 files / 4453 tests before, 244 / 4460 after.**
+
+- **Unit, new: `history/history-address.test.tsx` (7).** The week and the filter come from the address: "Back to a week the page was left on: that week, not the one the server first answered"; "and its filter"; "the server's week, at once, when the address holds that week, none, or one that is not a week". The address is written once the router has hooked `replaceState` (a stand-in router that hooks it in an ancestor's effect, as Next does): "on the page a load lands on: through the hook, never around it"; "a week and a filter: the address follows each, the last one last"; "two weeks in one task, each its own commit: only the last is written"; "a write still waiting when the page goes is dropped". **On the code at `4a48477`, 6 of 7 fail** (the third is a control). With the `live` guard taken out, the last two fail.
+- **`history-motion.test.tsx`:** its `next/navigation` mock gains `useSearchParams` (empty); its 10 tests unchanged.
+- **e2e, new (`history.spec.ts`, 6):** the table above, all passing after.
+- **`new-motion.spec.ts`:** `toHistoryWeek` (`window.next.router.push`) is gone. 3bk's History test and the press table's "drawn History row" reach W39 by `page.goBack()` from the board, a change of page as a person makes it. 3bk needed Next's router for no other reason: the account menu opens the server's real week, which the seed leaves empty, and Back reaches the seeded week.
+- **Targeted e2e after the fix:** run `2026-11-12T15-16-31-962Z`, every History spec, `board-return.spec.ts` and the diagnostics: 71 passed (baselines unchanged). Run `2026-11-12T15-21-59-902Z`: 3bk's History test, the 3bk press table and 3bj's (the grep matched both): 3 passed, and the sign-in setup; "drawn History row" 16 presses, 0 missed.
+
+**e2e, full run, once:** **clean.** Run `2026-11-12T15-28-20-897Z` on the default config, started 15:28:20 UTC after the last code write (the code files' last change 15:16:15 UTC; only this file changed during the run). **543 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 54.4 min** against 3bk's 537 in 54.1: the six new tests.
+
+**Unverified:** any browser but Chromium; React's one-pass effects as a promise (above); what wrapped `history` before Next in every recorded page load (t=302ms in the run at `4a48477`; not Next's patch; likely Sentry's browser tracing, which passes calls through); why §12.29's bug happened on a `force-dynamic` board. Not seen in production.
+
+**Next:** the advisor verifies; Alex pushes 3bk and 3bl (app only).
 
 ## Next
 
