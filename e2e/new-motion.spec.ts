@@ -35,7 +35,6 @@ const SMALL_MS = 270;
 const PAL_MS = 180;
 const DROP_PX = 14;
 const POP_FROM = 0.5;
-const CHIP_FROM = 0.75;
 const TOUR_PX = 28;
 
 test.beforeEach(async () => {
@@ -3628,14 +3627,6 @@ const POP_FRAMES = JSON.stringify([
   { opacity: 0, scale: String(POP_FROM) },
   { opacity: 1, scale: '1' },
 ]);
-const CHIP_ON = JSON.stringify([
-  { opacity: 0, scale: String(CHIP_FROM) },
-  { opacity: 1, scale: '1' },
-]);
-const CHIP_OFF = JSON.stringify([
-  { opacity: 1, scale: '1' },
-  { opacity: 0, scale: String(CHIP_FROM) },
-]);
 const drop = { frames: DROP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
 const fade = { frames: FADE_FRAMES, duration: SMALL_MS, easing: 'linear' };
 const pop = { frames: POP_FRAMES, duration: SMALL_MS, easing: DIALOG_CURVE };
@@ -3670,7 +3661,7 @@ const keepTheFeedFresh = async () => {
 };
 
 test.describe('phase 3bj, the small motions (§12.152)', () => {
-  test('the board: each at its length, a chip’s own look held back, nothing grown, nothing left, and no replay on a resize', async ({
+  test('the board: each at its length, a chip’s look at once with nothing played, nothing grown, nothing left, and no replay on a resize', async ({
     page,
     context,
   }) => {
@@ -3685,25 +3676,44 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
     };
 
-    // chip: two frames into Late's arrival, the real CSS holds its own edge back under the overlay.
-    let during: { edge: string; overlays: number } | null = null;
+    /*
+     * chip, taken back (`chipGround: 0`, phase 3bj's finish): on every frame for 400ms after
+     * Late's key, longer than the motion was, nothing plays on the chip or inside it, no
+     * overlay or hold-back is added, and the chip stands where it stood.
+     */
+    type ChipFrames = { frames: number; pressed: boolean; moved: number; played: number; overlays: number; held: boolean };
+    let during = null as ChipFrames | null;
     await step('chip', async () => {
       during = await page.evaluate(
         () =>
-          new Promise<{ edge: string; overlays: number }>((done) => {
+          new Promise<ChipFrames>((done) => {
+            const log = (window as unknown as SmallLog).__small;
+            const since = log.length;
+            const chip = [...document.querySelectorAll('button[aria-pressed]')].find((b) => (b.textContent ?? '').startsWith('Late'))!;
+            const at = chip.getBoundingClientRect();
+            const seen: ChipFrames = { frames: 0, pressed: false, moved: 0, played: 0, overlays: 0, held: false };
+            const end = performance.now() + 400;
+            const look = () => {
+              const now = chip.getBoundingClientRect();
+              seen.frames += 1;
+              seen.moved = Math.max(seen.moved, ...[now.x - at.x, now.y - at.y, now.width - at.width, now.height - at.height].map(Math.abs));
+              seen.overlays = Math.max(seen.overlays, chip.querySelectorAll('[data-ground-pop]').length);
+              seen.held ||= chip.hasAttribute('data-ground-host');
+              if (performance.now() < end) {
+                requestAnimationFrame(look);
+                return;
+              }
+              seen.pressed = chip.getAttribute('aria-pressed') === 'true';
+              seen.played = log.slice(since).filter((s) => s.el === chip || chip.contains(s.el)).length;
+              done(seen);
+            };
             window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
-            requestAnimationFrame(() =>
-              requestAnimationFrame(() => {
-                const chip = [...document.querySelectorAll('button[aria-pressed="true"]')].find((b) =>
-                  (b.textContent ?? '').startsWith('Late'),
-                )!;
-                done({ edge: getComputedStyle(chip).borderTopColor, overlays: chip.querySelectorAll('[data-ground-pop]').length });
-              }),
-            );
+            requestAnimationFrame(look);
           }),
       );
     });
-    expect(during).toEqual({ edge: 'rgba(0, 0, 0, 0)', overlays: 1 });
+    expect(during?.frames, 'frames watched across Late’s arrival').toBeGreaterThan(10);
+    expect(during).toEqual({ frames: during?.frames, pressed: true, moved: 0, played: 0, overlays: 0, held: false });
     const late = page.getByRole('button', { name: /^Late\b/ }).first();
     expect(
       await late.evaluate((b) => ({
@@ -3785,10 +3795,8 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
 
     const seen = (await smallStarted(page)).slice(before);
     const of = (what: string) => seen.filter((s) => s.what === what).map(({ frames: f, duration, easing }) => ({ frames: f, duration, easing }));
-    // Six changes (Late, All, Arrived, All, Drivers only on and off), each two chips' looks.
-    expect(of('chip')).toHaveLength(12);
-    expect(of('chip').every((c) => c.duration === SMALL_MS && c.easing === DIALOG_CURVE)).toBe(true);
-    expect(new Set(of('chip').map((c) => c.frames))).toEqual(new Set([CHIP_ON, CHIP_OFF]));
+    // Six changes (Late, All, Arrived, All, Drivers only on and off), and no chip's look plays: taken back.
+    expect(of('chip')).toEqual([]);
     expect(of('check')).toEqual([pop, pop]);
     expect(of('empty')).toEqual([drop]);
     expect(of('note')).toEqual([drop]);
@@ -3910,11 +3918,13 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
 
   /**
    * The press table for the new controls, as `the press during a glide` has one for rows. A
-   * real mouse, 20, 60, 120 and 300ms into each control's own motion (all four last 270ms,
+   * real mouse, 20, 60, 120 and 300ms into each control's own motion (all three last 270ms,
    * so 300 is just after the end), held 40ms. Landed means the press came at that time, ±18
    * ms, by the motion's own clock; only those are judged, and a miss is never tried again.
+   * The chip's column went with its motion (phase 3bj's finish): with nothing playing there
+   * is no time into it to press at, and a press on a still chip is the board's own tests'.
    */
-  test('a real mouse on the chip, the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands', async ({
+  test('a real mouse on the checkbox, the copy button and the reorder bar, 20 to 300ms into their motion: every press lands', async ({
     page,
     context,
   }, info) => {
@@ -3928,7 +3938,6 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       w.__since = 0;
       /** The control each motion stands on: a press counts only if it came down, and went up, on it. */
       const CONTROL: Record<string, string> = {
-        chip: 'button[aria-pressed]',
         // The box, or its place in its cell, which takes a press for it while it pops.
         check: 'div:has(> input[type="checkbox"])',
         copied: 'button[aria-label="Copy address"]',
@@ -3970,7 +3979,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
     const feedBanner = page.getByText('Position feed unreachable');
 
     type Control = {
-      name: 'chip' | 'check' | 'copied' | 'reorder';
+      name: 'check' | 'copied' | 'reorder';
       /** Where to stand for round `i`, and what to read before and after. */
       aim: (i: number) => Promise<{ x: number; y: number; read: () => Promise<string> }>;
       /** Starts the control's own motion, in the page, not awaited. */
@@ -3983,7 +3992,6 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
       const box = (await locator.boundingBox({ timeout: 5_000 }))!;
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     };
-    const lateChip = page.getByRole('button', { name: /^Late\b/ }).first();
     const rowAt = (i: number) => page.locator('[data-row-id]').nth(1 + (i % 10));
     /** Only a truck with a load has an address to copy. */
     const copyRows = page.locator('[data-row-id]').filter({ has: page.locator('button[aria-label="Copy address"]') });
@@ -4008,16 +4016,6 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
     };
 
     const CONTROLS: Control[] = [
-      {
-        name: 'chip',
-        aim: async () => ({
-          ...(await centre(lateChip)),
-          read: () => lateChip.getAttribute('aria-pressed', { timeout: 2_000 }).then(String),
-        }),
-        start: () => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }))),
-        // The key turned it on, and the press turned it off again.
-        landed: (before, after) => before === after,
-      },
       {
         name: 'check',
         aim: async (i) => {
@@ -4139,7 +4137,7 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
           );
           await page.mouse.up();
           const ends = await page.evaluate(() => (window as unknown as { __press: { down: boolean; up: boolean | null } }).__press);
-          // A press on the reorder bar sorts and glides; a chip toggles and glides.
+          // A press on the reorder bar sorts and glides.
           await expect.poll(() => webMoving(page), { timeout: 3_000 }).toBe(0);
           await expect.poll(async () => control.landed(before, await read()), { timeout: 1_000 }).toBe(true).catch(() => {});
           const after = await read();
@@ -4159,9 +4157,6 @@ test.describe('phase 3bj, the small motions (§12.152)', () => {
             });
           }
           // Put it back for the next round when the press did not.
-          if (control.name === 'chip' && (await lateChip.getAttribute('aria-pressed', { timeout: 2_000 })) === 'true') {
-            await page.keyboard.press('1');
-          }
           if (control.name === 'check' && (await rowAt(tries).locator('input[type="checkbox"]').isChecked({ timeout: 2_000 }))) {
             await rowAt(tries).locator('input[type="checkbox"]').uncheck({ timeout: 5_000 });
           }

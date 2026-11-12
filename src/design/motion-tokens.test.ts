@@ -51,8 +51,8 @@ describe('the numbers of the new motion (§12.149)', () => {
  * one back fails this until it is told.
  */
 describe('the numbers of the small motions (§12.152)', () => {
-  it('a chip’s chosen look: 270ms, from 75%', () => {
-    expect(MOTION_MS.chipGround).toBe(270);
+  it('a chip’s chosen look: taken back (0), its 75% kept for when it returns', () => {
+    expect(MOTION_MS.chipGround).toBe(0);
     expect(MOTION_SHAPE.chipGroundFromScale).toBe(0.75);
   });
 
