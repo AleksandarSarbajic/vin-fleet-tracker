@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { FleetRow } from '@/server/fleet-query';
 import type { Status } from '@/lib/status';
 import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { groundPop } from '@/lib/appear-motion';
 import { RollingNumber } from './RollingNumber';
 
 /**
@@ -275,8 +277,24 @@ function Chip({
   note?: string | undefined;
   onClick: () => void;
 }) {
+  /**
+   * §12.152. The chosen look arrives and leaves by an overlay, so the chip never moves.
+   * Only a person changes `selected`: chips are this console's own state, seeded from the
+   * URL as it renders, and no poll writes them. So any change after mount is a person's.
+   */
+  const self = useRef<HTMLButtonElement | null>(null);
+  const was = useRef(selected);
+  useLayoutEffect(() => {
+    const before = was.current;
+    was.current = selected;
+    if (before !== selected && self.current) {
+      groundPop(self.current, selected, MOTION_MS.chipGround, MOTION_SHAPE.chipGroundFromScale);
+    }
+  });
+
   return (
     <button
+      ref={self}
       type="button"
       onClick={onClick}
       aria-pressed={selected}

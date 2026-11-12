@@ -1,6 +1,8 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useLayoutEffect, useRef } from 'react';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { popIn } from '@/lib/appear-motion';
 import type { FleetRow } from '@/server/fleet-query';
 import {
   basisShort,
@@ -442,6 +444,81 @@ interface Props {
   onEdit: ((id: string) => void) | null;
 }
 
+/**
+ * §12.152. The box a person pressed pops, and only that one. A shift-click checks a range,
+ * and the other boxes in it change with no change event of their own; X and a poll change
+ * none here either. `pressed` is set by this box's own event and spent by the commit it
+ * causes: a toggle is never refused, so that commit always comes.
+ *
+ * While it pops the box is smaller than its place, and a press beside it would land on this
+ * cell and go on to the row, which selects the truck. So the cell hands a click on the
+ * box's resting place to the box, as §12.148's pseudo-element keeps a button's: a quick
+ * second press unchecks it, wherever on its place it comes down, and a double press there
+ * opens nothing. Measured in layout (`offsetWidth`), about the centre a scale keeps.
+ */
+const onBoxPlace = (box: HTMLElement, x: number, y: number) => {
+  const drawn = box.getBoundingClientRect();
+  return (
+    Math.abs(x - (drawn.left + drawn.width / 2)) <= box.offsetWidth / 2 &&
+    Math.abs(y - (drawn.top + drawn.height / 2)) <= box.offsetHeight / 2
+  );
+};
+
+function RowCheck({
+  checked,
+  label,
+  onToggle,
+}: {
+  checked: boolean;
+  label: string;
+  onToggle: (shift: boolean) => void;
+}) {
+  const box = useRef<HTMLInputElement | null>(null);
+  const pressed = useRef(false);
+  const was = useRef(checked);
+  useLayoutEffect(() => {
+    const before = was.current;
+    was.current = checked;
+    const mine = pressed.current;
+    pressed.current = false;
+    if (mine && before !== checked && box.current) {
+      popIn(box.current, MOTION_MS.checkPop, MOTION_SHAPE.checkPopFromScale);
+    }
+  });
+  const onPlace = (e: React.MouseEvent) =>
+    e.target === e.currentTarget && box.current !== null && onBoxPlace(box.current, e.clientX, e.clientY);
+
+  return (
+    <div
+      className="flex h-full items-center justify-center"
+      onClick={(e) => {
+        if (!onPlace(e)) return;
+        e.stopPropagation();
+        pressed.current = true;
+        onToggle(e.shiftKey);
+      }}
+      onDoubleClick={(e) => {
+        if (onPlace(e)) e.stopPropagation();
+      }}
+    >
+      <input
+        ref={box}
+        type="checkbox"
+        checked={checked}
+        aria-label={label}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const native = e.nativeEvent as MouseEvent;
+          pressed.current = true;
+          onToggle(native.shiftKey === true);
+        }}
+        className="h-[13px] w-[13px] cursor-pointer accent-accent"
+      />
+    </div>
+  );
+}
+
 function TruckRowImpl({
   row,
   fetchedAt,
@@ -573,20 +650,11 @@ function TruckRowImpl({
         §14.5. Its own column, sharing no hit area with the row: a click here
         must check without selecting, because selecting also moves the map.
       */}
-      <div className="flex h-full items-center justify-center">
-        <input
-          type="checkbox"
-          checked={checked}
-          aria-label={`Select truck ${row.truckNumber ?? row.samsaraName}`}
-          onClick={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const native = e.nativeEvent as MouseEvent;
-            onCheck(row.id, native.shiftKey === true);
-          }}
-          className="h-[13px] w-[13px] cursor-pointer accent-accent"
-        />
-      </div>
+      <RowCheck
+        checked={checked}
+        label={`Select truck ${row.truckNumber ?? row.samsaraName}`}
+        onToggle={(shift) => onCheck(row.id, shift)}
+      />
 
       {/* Every stripe switches to the dotted stale gradient (§5.9). */}
       <div

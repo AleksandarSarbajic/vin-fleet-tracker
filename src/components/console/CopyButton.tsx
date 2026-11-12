@@ -1,6 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { popIn } from '@/lib/appear-motion';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 
 /**
  * A copy control (§14, feature 3).
@@ -30,6 +33,16 @@ export function CopyButton({
   offset: string;
 }) {
   const [copied, setCopied] = useState(false);
+
+  /**
+   * §12.152. The tick pops inside the button, never the button: it keeps its place by its
+   * own `translate`, which the press rule leaves alone, and would jump. Only a copy that
+   * landed turns `copied` on.
+   */
+  const glyphRef = useRef<SVGSVGElement | null>(null);
+  useOnAppear(copied, () => {
+    if (glyphRef.current) popIn(glyphRef.current, MOTION_MS.copiedPop, MOTION_SHAPE.copiedPopFromScale);
+  });
 
   useEffect(() => {
     if (!copied) return;
@@ -79,7 +92,7 @@ export function CopyButton({
           : 'text-text-muted opacity-0 hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100'
       }`}
     >
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <svg ref={glyphRef} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
         {copied ? (
           <path d="M20 6L9 17l-5-5" />
         ) : glyph === 'address' ? (

@@ -1,7 +1,11 @@
 'use client';
 
+import { useRef } from 'react';
 import { DENSITIES, type Density } from '@/lib/density';
 import { useSegmentSlide } from '@/hooks/useSegmentSlide';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { fadeIn } from '@/lib/appear-motion';
+import { MOTION_MS } from '@/design/tokens';
 import { FleetHealthStrip } from './FleetHealthStrip';
 import type { FleetHealth } from '@/server/health';
 
@@ -43,6 +47,16 @@ export function ListToolbar({
 }) {
   const segments = useSegmentSlide<HTMLDivElement>(density, densityReady);
 
+  /**
+   * §12.152. The offer arrives with a poll, by itself, so it only fades: opacity leaves its
+   * hit area whole, and a click lands on it from its first frame. Not on a change of count
+   * while it is up, and not with the page.
+   */
+  const reorder = useRef<HTMLButtonElement | null>(null);
+  useOnAppear(drift > 0, () => {
+    if (reorder.current) fadeIn(reorder.current, MOTION_MS.reorderFade);
+  });
+
   return (
     <div /*
        * h-8 (32px), not h-7 (28px). The bar was sized around an 18px control;
@@ -60,6 +74,7 @@ export function ListToolbar({
       */}
       {drift > 0 ? (
         <button
+          ref={reorder}
           type="button"
           onClick={onResort}
           className="ml-auto h-[26px] min-w-0 truncate border border-line-soft bg-surface-overlay px-2 font-cond text-micro uppercase tracking-[.08em] text-accent"

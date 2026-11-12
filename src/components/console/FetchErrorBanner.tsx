@@ -1,5 +1,6 @@
 'use client';
 
+import type { Ref } from 'react';
 import { timeInZone } from '@/lib/format';
 
 /**
@@ -24,15 +25,19 @@ export function FetchErrorBanner({
   pollMs,
   onRetry,
   retrying,
+  ref,
 }: {
   fetchedAt: string | null;
   dispatchTz: string;
   pollMs: number;
   onRetry: () => void;
   retrying: boolean;
+  /** §12.152. The board fades it in when it arrives on a board already drawn. */
+  ref?: Ref<HTMLDivElement>;
 }) {
   return (
     <div
+      ref={ref}
       role="status"
       className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg"
     >

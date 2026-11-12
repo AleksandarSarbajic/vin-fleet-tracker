@@ -12,6 +12,9 @@ import type { FleetRow } from '@/server/fleet-query';
 import { ScopeMenu, type ListsMenu } from './SavedViews';
 import { BRAND } from '@/lib/brand';
 import type { SavedView } from '@/lib/views';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { dropIn } from '@/lib/appear-motion';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 
 /**
  * design-spec §12.91 — header option 6a, "scope bar + filter row".
@@ -157,6 +160,21 @@ export function ConsoleHeader({
     return true;
   }, [searchOpen]);
   const filtering = query.trim();
+
+  /**
+   * §12.152. The Drivers only note drops in when it arrives, which only a person does: the
+   * chip, its key, a view. It is one button with both forms in it, and CSS chooses the
+   * short one by width: a resize swaps it with no render at all, and a re-render (a truck
+   * selected, a poll that changes its count) leaves it where it is. Not with the page.
+   */
+  const rowTwo = useRef<HTMLDivElement | null>(null);
+  useOnAppear(
+    notes.some((note) => note.id === 'drivers'),
+    () => {
+      const note = rowTwo.current?.querySelector('[data-note="drivers"]');
+      if (note) dropIn(note, MOTION_MS.noteDrop, MOTION_SHAPE.noteDropPx);
+    },
+  );
 
   return (
     // §12.96: below 768px the phone's top bar and tiles stand in for this.
@@ -305,6 +323,7 @@ export function ConsoleHeader({
       </div>
 
       <div
+        ref={rowTwo}
         data-header-row="2"
         className="flex h-9 items-center gap-[6px] border-b border-line-hair bg-surface-bar px-4 max-[1023px]:h-[72px] max-[1023px]:flex-wrap max-[1023px]:gap-y-0"
       >

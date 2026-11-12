@@ -9,6 +9,9 @@ import { HttpError } from '@/lib/http-error';
 import type { PollHealth } from '@/lib/sync-state';
 import type { FleetRow } from '@/server/fleet-query';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { fadeIn } from '@/lib/appear-motion';
+import { MOTION_MS } from '@/design/tokens';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
 import { passesFilters, type FilterKey } from './FilterChips';
 import type { BoardDriver } from '@/server/assignments';
@@ -332,6 +335,21 @@ export function Console({
   }
 
   const feedStale = data?.feedStale ?? false;
+
+  /**
+   * §12.152. Both banners arrive by themselves, on a poll, so they only fade: no rise, no
+   * scale. The board still moves down by a banner's height at once; only the banner fades.
+   * Not with the page: one in the server's HTML is already painted.
+   */
+  const feedBanner = useRef<HTMLDivElement | null>(null);
+  const fetchBanner = useRef<HTMLDivElement | null>(null);
+  useOnAppear(feedStale, () => {
+    if (feedBanner.current) fadeIn(feedBanner.current, MOTION_MS.feedBannerFade);
+  });
+  useOnAppear(isError, () => {
+    if (fetchBanner.current) fadeIn(fetchBanner.current, MOTION_MS.fetchBannerFade);
+  });
+
   const snapshot = useMemo<FleetSnapshot[]>(
     () =>
       all.map((row) => ({
@@ -987,6 +1005,7 @@ export function Console({
          */}
         {feedStale ? (
           <FeedBanner
+            ref={feedBanner}
             feedNewestAt={data?.feedNewestAt ?? null}
             fetchedAt={data?.fetchedAt ?? null}
             pollMs={FLEET_POLL_MS}
@@ -1003,6 +1022,7 @@ export function Console({
         */}
         {isError ? (
           <FetchErrorBanner
+            ref={fetchBanner}
             fetchedAt={data?.fetchedAt ?? null}
             dispatchTz={dispatchTz}
             pollMs={FLEET_POLL_MS}

@@ -15,6 +15,9 @@ import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
 import type { EmptyAction, EmptyState } from '@/lib/empty-state';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn } from '@/lib/appear-motion';
+import { useOnAppear } from '@/hooks/useOnAppear';
 
 /**
  * design-spec §12.17: the six-column switch keys off the LIST PANEL's width,
@@ -220,6 +223,23 @@ export function FleetList({
   useLayoutEffect(() => {
     idsBefore.current = rows.map((r) => r.id);
     glide.checkTargets();
+  });
+
+  /**
+   * §12.152. The empty list drops in when a person emptied it: a chip, a list or a search,
+   * named the way `glideCause` names a glide. A poll that empties a filtered list changes
+   * none of these, so then it is simply there. Compared with the commit before, never
+   * guessed from timing.
+   */
+  const emptyCause = `${glideCause}|${query}`;
+  const causeBefore = useRef(emptyCause);
+  useOnAppear(empty !== null, () => {
+    if (causeBefore.current === emptyCause) return;
+    const list = scrollRef.current?.querySelector('[data-empty]');
+    if (list) dropIn(list, MOTION_MS.emptyDrop, MOTION_SHAPE.emptyDropPx);
+  });
+  useLayoutEffect(() => {
+    causeBefore.current = emptyCause;
   });
 
   const headers = columns === 8 ? HEADERS_8 : HEADERS_6;

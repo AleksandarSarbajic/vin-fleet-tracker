@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import { timeInZone } from '@/lib/format';
 
 /**
@@ -70,6 +70,8 @@ interface Props {
   dispatchTz: string;
   onRetry: () => void;
   retrying: boolean;
+  /** §12.152. The board fades it in when it arrives on a board already drawn. */
+  ref?: Ref<HTMLDivElement>;
 }
 
 export function FeedBanner({
@@ -79,6 +81,7 @@ export function FeedBanner({
   dispatchTz,
   onRetry,
   retrying,
+  ref,
 }: Props) {
   /**
    * Seeded from the FETCH instant rather than the clock, for the same reason
@@ -111,6 +114,7 @@ export function FeedBanner({
 
   return (
     <div
+      ref={ref}
       role="alert"
       /*
        * §12.96, stage 4. On a phone the sentence WRAPS, whole: cut to one line
