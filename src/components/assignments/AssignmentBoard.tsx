@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -27,6 +27,9 @@ import { LockIcon, SearchIcon, WarningIcon } from './icons';
 import { formatPhone } from '@/lib/dial';
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { Currently } from './Currently';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { drawIn, dropIn } from '@/lib/appear-motion';
+import { cameByPageChange } from '@/lib/page-arrival';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -173,9 +176,17 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
     });
   }, [initial]);
 
+  /**
+   * The trucks a person has just picked for, for the drop below (§12.153). Only `editDraft`
+   * adds to it, so the rebase above, Discard and a save's refresh, which set the draft
+   * themselves, play nothing.
+   */
+  const picks = useRef<Set<string>>(new Set());
+
   /** Every local edit goes through here, so the rebase knows what to keep. */
   const editDraft = useCallback((truckId: string, driverId: string | null) => {
     edited.current.add(truckId);
+    picks.current.add(truckId);
     setDraft((d) => new Map(d).set(truckId, driverId));
   }, []);
 
@@ -428,6 +439,67 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
   };
   const trucksWithoutDriver = board.trucks.filter((t) => !(draft.get(t.id) ?? null));
 
+  /**
+   * §12.153. The rows in view draw in when a change of page opens the board, once, in the
+   * commit it mounts in: never on a refresh, the fleet's poll, a tab or the search. Not on the
+   * page a load lands on: those rows are the server's first paint (§12.106: "CSS, not a width
+   * read"), already on the screen, and starting them from nothing would flash them.
+   */
+  const scroller = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || !cameByPageChange()) return;
+    drawIn(
+      [...box.querySelectorAll('[data-asg-row]')],
+      box,
+      MOTION_MS.asgRowsDraw,
+      MOTION_MS.asgRowsDrawRow,
+      MOTION_MS.asgRowsDrawGapMax,
+    );
+  }, []);
+
+  /**
+   * §12.153. A person's pick: the row's driver drops into its field, and a "was" line that
+   * arrives with it drops in under it. Only for a pick that changed the row (the same driver
+   * again changes nothing), and only in the commit it lands in. The row's ground changes at
+   * once, and Currently is the saved truck's (§12.145), which a pick never reaches.
+   */
+  const drafted = useRef(draft);
+  useLayoutEffect(() => {
+    const before = drafted.current;
+    drafted.current = draft;
+    if (picks.current.size === 0) return;
+    const picked = [...picks.current];
+    picks.current.clear();
+    for (const truckId of picked) {
+      const was = before.get(truckId) ?? null;
+      const now = draft.get(truckId) ?? null;
+      const row = scroller.current?.querySelector(`[data-asg-row="${truckId}"]`);
+      if (was === now || !row) continue;
+      const field = row.querySelector('[role="combobox"]');
+      if (field) dropIn(field, MOTION_MS.asgDriverDrop, MOTION_SHAPE.asgDriverDropPx);
+      const saved = board.trucks.find((t) => t.id === truckId)?.driverId ?? null;
+      const strike = row.querySelector('[data-was]');
+      if (strike && was === saved) dropIn(strike, MOTION_MS.asgDriverDrop, MOTION_SHAPE.asgDriverDropPx);
+    }
+  });
+
+  /**
+   * §12.153. "Saved — …" drops in as its words land in the footer, which is the commit the
+   * saved board's rebase clears the draft in. Keyed by what the footer says, so a re-render
+   * plays nothing, and a second save says it again after "N rows changed" in between.
+   */
+  const savedShown = dirty ? null : saved;
+  const savedWords = useRef<HTMLSpanElement | null>(null);
+  const savedBefore = useRef(savedShown);
+  useLayoutEffect(() => {
+    const before = savedBefore.current;
+    savedBefore.current = savedShown;
+    if (savedShown !== null && savedShown !== before && savedWords.current) {
+      dropIn(savedWords.current, MOTION_MS.asgSavedDrop, MOTION_SHAPE.asgSavedDropPx);
+    }
+  });
+
   return (
     /**
      * §12.131. The window's height, not at least it: the header and the
@@ -597,7 +669,10 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
         has the budget). The DOM order (table, then panels) is kept, so the
         keyboard reaches the pickers first.
       */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5">
+      <div
+        ref={scroller}
+        className="flex min-h-0 flex-1 flex-col overflow-auto px-5 pb-5 max-md:hidden min-[1100px]:flex-row min-[1100px]:gap-5"
+      >
         {/*
           §12.135. From 1100px up the table stops at 1000px and the panels
           follow it: a four-column table stretched to 1600px at 1920 ran its
@@ -633,6 +708,7 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
             return (
               <div
                 key={truck.id}
+                data-asg-row={truck.id}
                 /**
                  * §12.134. The console's 44px row (`row-comfortable`, §14.4),
                  * at least: a row with the phone editor open, or a "was"
@@ -985,7 +1061,7 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
 
         <div className="flex items-center justify-between">
           {/* While rows are changed, this is the sentence that matters: primary ink. */}
-          <span className={`text-body ${dirty ? 'text-text' : 'text-text-secondary'}`}>
+          <span ref={savedWords} className={`text-body ${dirty ? 'text-text' : 'text-text-secondary'}`}>
             {dirty
               ? `${changed.length} row${changed.length === 1 ? '' : 's'} changed${doubleBookedGroups
                   .map((trucks) => ` · a driver is on trucks ${listed(trucks.map(label))}`)

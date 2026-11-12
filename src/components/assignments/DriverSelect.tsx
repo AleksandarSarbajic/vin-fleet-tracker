@@ -15,6 +15,9 @@ import { isEldBacked } from '@/lib/driver';
 import { NoEldTag } from '@/components/DriverName';
 import { AddDriverInline } from './AddDriverInline';
 import { PopFrame } from '@/components/overlay/PopFrame';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { useOnAppear } from '@/hooks/useOnAppear';
+import { dropIn } from '@/lib/appear-motion';
 
 /**
  * Searchable driver picker (design-spec §9.9's assignment group, at board
@@ -227,6 +230,17 @@ export function DriverSelect({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
+  /**
+   * §12.153. "Add a driver" drops in on "+ Add", inside the open list, from above, where
+   * nothing can make the list's scroller grow. Only as `adding` turns true: the list reopened
+   * with the form still open, or a re-render, plays nothing. The same picker is the edit
+   * window's, so it drops there too. Not scrolled into view: that is not motion.
+   */
+  const addForm = useRef<HTMLLIElement | null>(null);
+  useOnAppear(adding, () => {
+    if (addForm.current) dropIn(addForm.current, MOTION_MS.asgAddDrop, MOTION_SHAPE.asgAddDropPx);
+  });
+
   const pick = (driverId: string | null) => {
     onChange(driverId);
     setOpen(false);
@@ -427,7 +441,7 @@ export function DriverSelect({
             </li>
           ) : null}
           {adding ? (
-            <li>
+            <li ref={addForm}>
               <AddDriverInline
                 suggestedName={typed.trim()}
                 assignToTruckId={assignToTruckId}
