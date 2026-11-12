@@ -45,3 +45,67 @@ describe('the numbers of the new motion (§12.149)', () => {
     expect(EASING.dialog).toBe('cubic-bezier(.22,.61,.36,1)');
   });
 });
+
+/**
+ * §12.152. The small motions of phase 3bj, at the demo's Bold, written out here so taking
+ * one back fails this until it is told.
+ */
+describe('the numbers of the small motions (§12.152)', () => {
+  it('a chip’s chosen look: 270ms, from 75%', () => {
+    expect(MOTION_MS.chipGround).toBe(270);
+    expect(MOTION_SHAPE.chipGroundFromScale).toBe(0.75);
+  });
+
+  it('a checkbox pops: 270ms, from 50%', () => {
+    expect(MOTION_MS.checkPop).toBe(270);
+    expect(MOTION_SHAPE.checkPopFromScale).toBe(0.5);
+  });
+
+  it('the empty list drops 14px in 270ms', () => {
+    expect(MOTION_MS.emptyDrop).toBe(270);
+    expect(MOTION_SHAPE.emptyDropPx).toBe(14);
+  });
+
+  it('the two banners and the reorder bar fade in 270ms', () => {
+    expect(MOTION_MS.feedBannerFade).toBe(270);
+    expect(MOTION_MS.fetchBannerFade).toBe(270);
+    expect(MOTION_MS.reorderFade).toBe(270);
+  });
+
+  it('the note beside the chips drops 14px in 270ms', () => {
+    expect(MOTION_MS.noteDrop).toBe(270);
+    expect(MOTION_SHAPE.noteDropPx).toBe(14);
+  });
+
+  it('“Copied” pops: 270ms, from 50%', () => {
+    expect(MOTION_MS.copiedPop).toBe(270);
+    expect(MOTION_SHAPE.copiedPopFromScale).toBe(0.5);
+  });
+
+  it('a field’s message drops 14px in 270ms', () => {
+    expect(MOTION_MS.invalidDrop).toBe(270);
+    expect(MOTION_SHAPE.invalidDropPx).toBe(14);
+  });
+
+  it('the edit window’s three strips drop 14px in 270ms', () => {
+    expect(MOTION_MS.unsavedDrop).toBe(270);
+    expect(MOTION_SHAPE.unsavedDropPx).toBe(14);
+    expect(MOTION_MS.savedDrop).toBe(270);
+    expect(MOTION_SHAPE.savedDropPx).toBe(14);
+    expect(MOTION_MS.rateconDrop).toBe(270);
+    expect(MOTION_SHAPE.rateconDropPx).toBe(14);
+  });
+
+  it('the palette’s results fade in 180ms', () => {
+    expect(MOTION_MS.palResultsFade).toBe(180);
+  });
+
+  it('a tour step comes 28px in 270ms', () => {
+    expect(MOTION_MS.tourStep).toBe(270);
+    expect(MOTION_SHAPE.tourStepPx).toBe(28);
+  });
+
+  it('what only fades is linear', () => {
+    expect(EASING.fade).toBe('linear');
+  });
+});

@@ -268,6 +268,35 @@ export const MOTION_MS = {
   selectionSlide: 280,
   /** §12.149. Rows going to their new places, on a chip, a list or the reorder bar. */
   rowGlide: 380,
+
+  /*
+   * §12.152. The small motions (phase 3bj), at the demo's Bold. One token each, so one can
+   * be taken back on its own: its On value from §12.152's table, or 0, which turns it off.
+   */
+  /** A chip's chosen look arriving or leaving, on a person's click or key. */
+  chipGround: 270,
+  /** The box a person clicked, and only that one. */
+  checkPop: 270,
+  /** The empty list, when a person emptied it. Never on a poll. */
+  emptyDrop: 270,
+  /** The two banners and the reorder bar come by themselves, so they only fade. */
+  feedBannerFade: 270,
+  fetchBannerFade: 270,
+  reorderFade: 270,
+  /** The note beside the chips, when Drivers only hides trucks. */
+  noteDrop: 270,
+  /** The tick on a copy button. */
+  copiedPop: 270,
+  /** A field's message, when it is a new one. */
+  invalidDrop: 270,
+  /** The edit window's strips. */
+  unsavedDrop: 270,
+  savedDrop: 270,
+  rateconDrop: 270,
+  /** The palette's results, on every key: opacity only, and short. */
+  palResultsFade: 180,
+  /** A tour step coming in from the side it is on, on Next and Back. */
+  tourStep: 270,
 } as const;
 
 /**
@@ -288,6 +317,21 @@ export const MOTION_SHAPE = {
   pageRisePx: 10,
   /** The row's grey hover bar, in `text.muted`. */
   rowBarOpacity: 0.8,
+
+  /*
+   * §12.152, beside the durations above. A drop comes from above, because nothing above a
+   * scroller's content can make it grow; a pop and a chip's look grow from smaller.
+   */
+  chipGroundFromScale: 0.75,
+  checkPopFromScale: 0.5,
+  emptyDropPx: 14,
+  noteDropPx: 14,
+  copiedPopFromScale: 0.5,
+  invalidDropPx: 14,
+  unsavedDropPx: 14,
+  savedDropPx: 14,
+  rateconDropPx: 14,
+  tourStepPx: 28,
 } as const;
 
 /**

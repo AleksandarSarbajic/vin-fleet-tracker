@@ -326,6 +326,18 @@
     box-shadow: none !important;
   }
 
+  /*
+   * §12.152. A chip's chosen look is on its way in or out, drawn by an overlay inside it
+   * (`groundPop`). `button` as well as the attribute, to outrank the selected chip's
+   * `!border-accent`. The attribute comes off when the overlay lands.
+   */
+  button[data-ground-host] {
+    position: relative;
+    isolation: isolate;
+    background-color: transparent !important;
+    border-color: transparent !important;
+  }
+
   /* §12.149. The selection's overlay is on its way to this row. */
   [data-selection-target] {
     background-color: transparent !important;
