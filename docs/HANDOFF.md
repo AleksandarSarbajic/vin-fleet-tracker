@@ -104,6 +104,10 @@ Worker `5eff9d7` since 14:01:39 UTC, 0 restarts, polling, `trucksActivated` in t
 **3bj: NOT pushed, NOT live** (2026-11-12): fourteen small motions at the demo's Bold, on the board, in the edit window, the
 palette and the tour (§12.152); finished by (a): the chip motion taken back (`chipGround: 0`), 13 ship. Full e2e clean at `1fa0fe9`: 533 passed, 0 failed (52.0 min).
 Waits on the advisor's verification and Alex's push; (b) is open ("Phase 3bj", "Finish: (a)"). Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy.
+**Update at the start of 3bk (2026-11-12): 3bj is pushed**: origin's master was `9af0ea6`. Its deploy is not checked here.
+**3bk: NOT pushed, NOT live** (2026-11-12): eight small motions at the demo's Bold on History, Assignments and the login page (§12.153):
+the row draws on a change of page, a folded day's loads, a picked driver, the add form, "Saved", the login form (CSS in the server's HTML) and its refusal.
+Not live until pushed. App only (Vercel): no worker file changed, so no worker deploy. See "Phase 3bk" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11513,6 +11517,114 @@ My recommendation: (a) now, and (b) as its own small phase. Both are committed a
 - **Not touched:** 3bg's gap test. **Counts:** `npm run check` 239 files, 4398 tests, as before: tests changed in place.
 - **e2e.** Targeted first, run `2026-11-12T10-36-18-919Z`, covering 3bg's gap test and the four 3bj tests: 6 passed (3.3 min). The gap test passed in 12.1s. **Full run, once: `2026-11-12T10-42-04-744Z` at `1fa0fe9`, default config, started 10:42 UTC after the last code write. 533 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 52.0 min** against 3bg's 49.0, 3.0 over, which is about what this run's four 3bj tests took (23.6s, 3.1s, 4.5s, 2.4 min). "A press behind a cancel" passed in 9.3s. In both runs the press table had 12 cells and 96 presses: 0 missed, 0 off their control, largest move 1px (the reorder bar's hover lift, as above).
 - **Open:** **(b): bring chip back with a gap test that reaches its case; the 3bg guard mutant must still fail it.** Two found here and not fixed are in "Next", "4. Also open": the rate confirmation's strip folding a render late (74px), and a field's accessible name that includes its error.
+
+### Phase 3bk: eight small motions on History, Assignments and the login page, at Bold (2026-11-12)
+
+Motion batch 2b, from the advisor's brief: the 3be demo's eight small rows on the pages that are not the board, at the demo's Bold, after Alex's "i want motion, animations EVERYWHERE" (2026-11-06) and his yes to all eight (2026-11-12), knowing Assignments has had 0 uses in 14 days. None is left off. §12.153 is the record. The board's motions, the six live ones and their tokens are untouched; so is 3bg's gap test. **NOT pushed, NOT live.** App only (Vercel): nothing under `src/worker` reaches a changed file (a script walked the worker's imports: 40 files, none of them), so no worker deploy.
+
+| Commit | What |
+|---|---|
+| `483a0e0` | The tokens, the login form's Tailwind animation, `lib/page-arrival.ts` (`PageRise` keeps its flag there), `drawIn`, `follow`, and their unit tests |
+| `a1ad9d2` | History's two, and `history-motion.test.tsx` |
+| `342827d` | Assignments' four, and `assign-motion.test.tsx` |
+| `3f629c8` | The login page's two, and `login-motion.test.tsx` |
+| `c7697cc` | The e2e tests and the press table |
+| The docs commit | §12.153, its pointer from §12.152, and this section |
+
+**The eight.** Lines as re-grepped at `9af0ea6`, before building (3be's table cites `b45cd15`; the rows moved from `:646` to `:628`, the rebase is still `:163`–`164`). Bold values from `.taste-skill/motion/everywhere/core.js`. Paths as 3be's: `history/` is `src/components/history/`, `assign/` is `src/components/assignments/`.
+
+| Row | File:line at `9af0ea6` | Bold (demo) | Token(s) | What starts it | What must not |
+|---|---|---|---|---|---|
+| histRows | `history/HistoryTable.tsx:57`, `:125` | `DRAW` 450ms, 180 a row, 30 gap | `histRowsDraw`, `histRowsDrawRow`, `histRowsDrawGapMax` | History mounting by a change of page: the rows in view | The page a load lands on; a filter; a week and its fetch; a re-render |
+| histFold | `history/HistoryTable.tsx:212`, `:185` | `DROP` 270ms, 14px | `histFoldDrop`, `histFoldDropPx` | `expanded` turning true ("+N more") | A day drawn folded (a new week, a filter) |
+| asgRows | `assign/AssignmentBoard.tsx:628` | `DRAW` | `asgRowsDraw`, `asgRowsDrawRow`, `asgRowsDrawGapMax` | The board mounting by a change of page | The page a load lands on; a refresh; the fleet's poll; a tab; the search |
+| asgDriver | `assign/AssignmentBoard.tsx:177` (`editDraft`), `:680`, `:744` | `DROP` | `asgDriverDrop`, `asgDriverDropPx` | A person's pick that changes the row: the picker, "Assign to", Add and assign | The rebase `:163`; Discard; the same driver again |
+| asgAdd | `assign/DriverSelect.tsx:422`, `:431`, `assign/AddDriverInline.tsx:84` | `DROP` | `asgAddDrop`, `asgAddDropPx` | `adding` turning true | The list reopened with the form open; a re-render |
+| asgSaved | `assign/AssignmentBoard.tsx:993`, `:279` | `DROP` | `asgSavedDrop`, `asgSavedDropPx` | The footer's words becoming a saved sentence | The same words re-rendered |
+| loginForm | `app/login/page.tsx:21` | 330ms, scale from 0.92, up 16 | `loginFormIn`, `loginFormFromScale`, `loginFormRisePx` | A page load (CSS in the server's HTML) | A change of page to it (signing out); a re-render; reduced motion |
+| loginError | `app/login/page.tsx:66`, `:67` | `DROP` | `loginErrorDrop`, `loginErrorDropPx` | New words in the alert | The same words again |
+
+**`loginForm`'s `from` is a scale.** In the demo the form fades from 0, grows from 0.92 and comes up 16px from below (`translate: 0 16px`), all on the windows' curve.
+
+**How it is built.**
+
+- **The row draws (rule 3).** History's and Assignments' rows are in the server's HTML, so a fade started in hydration would flash them. They draw only on a change of page, when React draws them after a commit and the fade starts ahead of their first frame (`lib/page-arrival.ts`, which `PageRise` now marks, its behaviour unchanged). On the page a load lands on they are there at once, as today. Once per mount, in a layout effect with no dependencies, so nothing after it replays it. `drawIn` (`lib/appear-motion.ts`) is the board opening's arithmetic on the page's own tokens; `board-opening.ts` is not touched.
+- **The login form (rule 3).** CSS in the server's HTML: `motion-safe:animate-login-in`, keyframes `login-in` in `tailwind.config.ts`, made from the tokens. With no script or a failed hydration it plays and ends by itself; under reduced motion `motion-safe:` gives it none. Chosen once in a `useState` initializer: the same on the server and in hydration, and off on a change of page (PageRise's rise is the motion then). From hydration a press holds it: `follow` in `lib/motion.ts`, which `play` now uses for its own, the same statements in the same order.
+- **A pick (rule 2).** Only `editDraft` marks a pick. A layout effect plays the field's drop for each picked row whose driver changed, and the "was" line's only as it arrives.
+- **Keyed by words.** "Saved — …" by the footer's words; a refusal by its words.
+
+**Where the demo's shape changed:** nowhere in the values. Two causes are narrower than the demo shows, both for rule 3: the row draws play on a change of page and not on the page a load lands on, and the login form on a load and not on a change of page. One thing the demo does is left out: it fades Currently on a pick, but Currently is the saved truck's (§12.145), and a pick never changes it.
+
+**The same refusal twice in a row** stays where it is and plays once: nothing new arrived, the alert's words did not change, so it is not read out again either, and a field's message does the same (§12.152).
+
+**The values.** All in `tokens.ts`; all equal the demo's Bold. "On" is the demo's On, for taking one back a step.
+
+| Token | On | Bold |
+|---|---|---|
+| `histRowsDraw` / `histRowsDrawRow` / `histRowsDrawGapMax`, the same for `asgRows…` | 300 / 120 / 20 | **450 / 180 / 30** |
+| `histFoldDrop`, `asgDriverDrop`, `asgAddDrop`, `asgSavedDrop`, `loginErrorDrop` / each `…DropPx` | 180 / 6 | **270 / 14** |
+| `loginFormIn` / `loginFormFromScale` / `loginFormRisePx` | 220 / 0.96 / 8 | **330 / 0.92 / 16** |
+
+**To take one motion back: one line in `tokens.ts`.** Its duration to 0 turns it off (`drawIn` and every drop return at once on 0; for the login form Tailwind writes a 0ms animation, which shows nothing), and its On values above make it weaker. Its number is also written out, on purpose, in these places, which fail until told:
+
+| Motion | Unit test (describe) | e2e (`new-motion.spec.ts`, "phase 3bk") |
+|---|---|---|
+| histRows, histFold | `history/history-motion.test.tsx`, the describe named for it | The History test; the press table's "drawn History row" and "unfolded load" |
+| asgRows, asgDriver, asgAdd, asgSaved | `assignments/assign-motion.test.tsx`, the describe named for it | The Assignments test; the press table's "drawn Assignments row", "picked name", "add form …" |
+| loginForm, loginError | `login/login-motion.test.tsx` (and `motion-tokens.test.ts`'s Tailwind line for the form) | The login page test; the press table's "login …" (loginError is unit only) |
+| every one | `design/motion-tokens.test.ts`, its own line | |
+
+In the e2e file `DRAW_MS`, `DRAW_ROW_MS` and `DRAW_GAP_MS` are shared by the two row draws, and `SMALL_MS` and `DROP_PX` (3bj's) by the five drops: taking one back gives that one its own constant. Turned off (0), its "starts on its cause" tests are the ones to change to "nothing plays", and its press-table control comes out (nothing plays, so no press is ever on time).
+
+**Tests.** With the numbers written out. `npm run check`: **243 files, 4453 tests** (239 files, 4398 tests before): 55 new in 4 new files and three existing ones, and no existing test changed.
+
+- `history/history-motion.test.tsx` (10), on the real page and table: the rows in view drawn at 180ms, 0/30/60; nothing on the page a load lands on, a filter and clearing it, another week and back, a week empty at the open then full; the two folded loads drop, the first two do not; nothing on drawing a folded day, a re-render, a new week; reduced motion nothing.
+- `assignments/assign-motion.test.tsx` (18), on the real board: the rows drawn, nothing on a load, a refresh, a tab, the search; a pick drops the name and the "was" line, a second pick the name only, the same driver nothing, "Assign to" the name; a refresh's rebase nothing, a rebase that keeps a pick nothing more, Discard nothing; the add form once, not on reopening; "Saved" once, not on a re-render; reduced motion nothing, for each.
+- `login/login-motion.test.tsx` (9): the server's HTML carries `motion-safe:animate-login-in` and nothing that hides the form; hydration the same, a change of page none, a refusal keeps the class; from hydration a press holds the form's animation and lets go; the refusal's words in the alert while its drop runs, role as it was; the same refusal once, other words again; reduced motion nothing.
+- `lib/appear-motion.test.ts` (+5, `drawIn`), `lib/motion.test.ts` (+4, `follow`), `lib/page-arrival.test.ts` (1), `design/motion-tokens.test.ts` (+8, with the Tailwind animation).
+
+**Mutations,** each in a worktree at `9af0ea6` with this phase's changes, each file restored byte-identical after (checked with `cmp`), the three suites passing 37/37 there unmutated:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) `histRows` replays on a filter change (the draw's effect depends on `q`) | "a filter typed after it plays nothing more, and neither does clearing it" |
+| (b) `asgDriver` plays on the rebase (the rebase marks its trucks as picks) | "a refresh’s rebase plays nothing: another dispatcher’s change lands at once" |
+| (c) `loginError`'s words written in only when its drop ends | 3: "its words are in the alert in the commit they land in, while the drop of 14px in 270ms is still running"; "the same refusal twice in a row…"; "other words: they drop in again" |
+| (d) The form starts hidden in the server's HTML (`opacity-0`, taken off by a script at hydration) | Unit: "the server’s HTML carries it as CSS, motion-safe only, and nothing in that HTML hides the form". e2e, no script: the login page test, at its no-script step: `toHaveCSS('opacity', '1')` received "0" (run `2026-11-12T13-30-02-175Z`, in the worktree, its `test-db.sh` pointed at the running cluster: a worktree has no `.testdb`) |
+
+A first try at (a), depending on `q` and `weekKey`, failed all six histRows tests because `weekKey` is declared below the effect and the mutant threw; it is not counted.
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3bk, the pages’ small motions (§12.153)"): one test per page and the press table.
+
+- **The login page,** signed out (no load of it asks the hosted auth): at 1920x1080 and at 1280x480 (where the page scrolls at rest) one CSS animation, `login-in`, 330ms, the windows' curve, `backwards`, from opacity 0, scale 0.92, `0 16px`; on no frame could the page scroll further than at rest; nothing left. With no script: a typed value lands at once and the form reaches opacity 1. Reduced motion: no animation, opacity 1 on the first frame. A real key 20ms in (±18) lands in the field, and a password manager's fill on the first frame at 20ms or more (its value and input event) is kept through hydration and the end. In the run that passed: the key 16.7ms in, the fill 33.4ms in.
+- **Assignments:** the rows in view by the header's link, each 180ms, linear, `backwards`, an even gap of 30 at most, the last starting by 270; nothing on a reload; a pick: the name and the "was" line drop; Save: "Saved" drops once and the pick nothing more; "+ Add": the form drops. Nothing grown on any frame of any step, nothing left. **The add form in view:** 100% of it at 1440x790 for truck 410, the third row. 3be's 26% was a lower row; not measured here, and not scrolled (rule 1).
+- **History:** nothing on the page a load lands on; the rows in view drawn on a change of page; nothing on a filter, a week there and back; Andre's "+2 more" drops two. Nothing grown, nothing left. The change of page is Next's own router (`window.next.router.push`, as a `Link` makes it), not the browser's Back: see "Found wrong", 1.
+- **The press table** below.
+
+**The press table,** a real mouse at 20, 60, 120 and 300ms into each control's own motion by its own clock (±18ms), held 40ms; a press that came early or late is tried again, a miss never. 8 presses a cell; 4 for the two row draws, which are opacity only and need a change of page a round.
+
+| Into the motion | login email | login password | login Sign in | picked name | add form phone | add form Cancel | add form Add | drawn Assignments row | drawn History row | unfolded load |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 20ms | 0 missed | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 60ms | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 120ms | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 300ms | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+**288 presses, 0 missed, 0 that came down or went up off their control, largest move of what stood under the pointer between press and release 0px.** Sign in was pressed with the fields empty, so the browser's own check stopped it and nothing was sent; "Add and assign" was answered by a stub, never the server.
+
+**e2e, full run, once:** **clean.** Run `2026-11-12T13-32-08-712Z` on the default config, started 13:32 UTC after the last code write, on the working tree that became `483a0e0`..`c7697cc` (the commits came after it, each file byte-checked against the copy the run used). **537 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 54.1 min** against 3bj's 52.0, 2.1 over, which is about what the four new tests took: the login page 4.9s, Assignments 6.8s, History 4.2s, the press table 2.7 min. 3bg's "a press behind a cancel" passed in 9.4s. In it the press table again had 288 presses, 0 missed, 0 off their control, largest move 0px; the key 16.7ms in and the fill 33.3ms in; the add form 100% in view.
+
+**Found wrong:**
+
+1. **Not motion, before this phase, not fixed: Back from the board to History shows the board.** In the first targeted run, `page.goBack()` from the board (reached by History's Board link) changed the address to `/history?week=2026-W39` and the board stayed drawn for the two minutes after (the trace: "navigated to …/history?week=2026-W39"; the screenshot: the board). Likely cause, unverified: `HistoryPage` writes its address with `window.history.replaceState(null, …)` on every mount, which drops the router's own state from that history entry. A person pressing Back there would see the same. Worth its own small phase.
+2. **The demo fades Currently on a pick** (`pages.js`, `pickDriver`). Currently is the saved truck's (§12.145) and a pick never changes it; left out.
+3. **The brief, "the poll's rebase":** no poll reaches the draft. The rebase runs when `router.refresh()` brings a new board: after a save, a retire, a new driver, a phone saved. The fleet's poll reaches only Currently.
+4. **The brief, rule 3 named `asgRows` and `loginForm` as in the server's HTML; `histRows` is too** (`initialView` comes from the server). It is built under the same rule.
+5. **3be's table, `asgAdd`:** `DriverSelect` is the edit window's picker too, so the add form drops there as well, as 3bj's `Field` messages drop in the bulk window.
+
+**Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone (the login page is the phone's too). **A press on the login form before hydration is not held:** the form's CSS runs from the first paint, and `follow` takes it under a press only once the page's script runs. In this run every login press measured 0px of movement, which suggests the local production build hydrated before the form's first frame; on a slow network a press in the first frames would not be held, and with the pointer on a control's middle it still lands (the form moves at most 16px, its fields are 44px tall). Not measured on a slow network.
+
+**Next:** the advisor verifies; Alex pushes. Then the medium rows, as the build order says; (b) for the chip is its own phase.
 
 ## Next
 

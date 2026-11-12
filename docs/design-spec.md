@@ -11010,6 +11010,7 @@ small rows, at its Bold values: eight on the board, four in the edit window, the
 palette and the tour. **Supersedes in part** §12.148's and §12.149's "a count rolling is
 all a poll ever starts": a poll now also fades in three things, opacity only (below).
 Everything else in both stands, and the six motions of §12.149 are unchanged.
+*(§12.153, phase 3bk: the eight small rows of History, Assignments and the login page, under these rules.)*
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
@@ -11106,6 +11107,82 @@ back:** its token to 0 turns it off, and its On value makes it weaker (both in H
 `overlay/overlay-motion.test.tsx` (each motion: its cause starts it at its length, its
 non-causes do not, reduced motion starts nothing), and `motion-tokens.test.ts`, all with
 the numbers written out.
+
+## 12.153 The pages' small motions: eight things arrive off the board
+
+Phase 3bk. Alex, 2026-11-06: "i want motion, animations EVERYWHERE"; 2026-11-12: yes to
+all eight of batch 2b, knowing Assignments has had 0 uses in 14 days. The 3be demo's
+eight small rows on the pages that are not the board, at its Bold values
+(`.taste-skill/motion/everywhere/core.js`: `DRAW`, `DROP`, and `loginForm`'s own). All
+of §12.152's rules hold for them. The board's motions, the six of §12.149 and their
+tokens are unchanged. None is left off.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **histRows** | Driver history's rows in view | 450ms in all, 180ms a row, gaps of 30ms at most | Opacity only, one after the other | linear | A change of page that opens History: the account menu, G H, Back | The page a load lands on; a filter; another week and its fetch; a re-render |
+| **histFold** | The loads a folded day hid | 270ms | Drops 14px and fades in | `EASING.dialog` | "+N more" | A day drawn folded (a new week, a filter) |
+| **asgRows** | The Assignments rows in view | As histRows | As histRows | linear | A change of page that opens the board | The page a load lands on; a refresh; the fleet's poll; a tab; the search |
+| **asgDriver** | A row's driver, and the "was" line that comes with it | 270ms | Drops 14px and fades in | `EASING.dialog` | A person's pick that changes the row: the picker (a name, Unassigned, Enter, Backspace), "Assign to", Add and assign | The rebase a refresh brings (§12.38); Discard; the driver it already had |
+| **asgAdd** | The picker's "Add a driver" form | 270ms | Drops 14px and fades in | `EASING.dialog` | "+ Add" | The list reopened with the form still open; a re-render |
+| **asgSaved** | "Saved — …" in the footer | 270ms | Drops 14px and fades in | `EASING.dialog` | Its words landing | A re-render with the same words |
+| **loginForm** | The login form | 330ms | Comes up 16px from below and grows from 92%, fading in | `EASING.dialog` | A page load | A change of page to it (signing out); a re-render; a refusal landing |
+| **loginError** | A sign-in's refusal | 270ms | Drops 14px and fades in | `EASING.dialog` | New words | The same words again |
+
+**The rules** (§12.152's, and these):
+
+1. **Opacity and transform only** (`translate`, `scale`). A folded day's row grows at once
+   when it opens, and Sign in moves down at once under a refusal; only what arrives moves.
+   The add form is not scrolled into view: it opens inside the picker's list, which is not
+   motion's to change.
+2. **The row draws are for a change of page only.** The page a load lands on is the server's
+   first paint: its rows are on the screen before any script runs, and a fade started in
+   hydration would show them, hide them and bring them back. `lib/page-arrival.ts` says
+   which page a load landed on (`PageRise` marks it, §12.149). Reached by a change of page,
+   the rows are drawn by React after a commit, and the fade starts ahead of their first
+   frame. It plays once, as the page mounts. History's filter, week and fetch, and the
+   Assignments refresh, poll, tab and search, change the rows after that and play nothing.
+3. **The login form is CSS in the server's HTML** (`motion-safe:animate-login-in`; the
+   `login-in` keyframes in `tailwind.config.ts`, made from the tokens). It starts with the
+   first paint and ends by itself. So with no script, or a hydration that fails, the form is
+   there and usable as it always was, and nothing hides it that a script must undo. Under
+   reduced motion `motion-safe:` gives it no animation at all. It is chosen once, as the page
+   mounts, and only for the page a load lands on. A change of page to it (signing out lands
+   there so) has `PageRise`'s rise instead, as §12.152's tour leaves the window's opening to
+   be the motion. From hydration on, a press holds it (`follow`, `lib/motion.ts`); before
+   hydration nothing can, and the press table measures that. **It comes up from below**,
+   unlike the drops: the demo's shape. A form 400px tall or more starts with its bottom
+   edge higher than at rest (92% takes more off the bottom than 16px adds), so the page
+   never scrolls further while it comes up.
+4. **Keyed by what it says.** "Saved — …" by its words, so a second save says it again
+   after "N rows changed". A refusal by its words, so the same refusal twice in a row stays
+   where it is: nothing new arrived, and the alert, whose words did not change, is not read
+   out again either. Its words are in the alert in the commit they land in. Only its look
+   moves, and its role is as it was.
+5. **A pick, not the draft.** Only `editDraft` marks a pick, so the rebase, Discard and a
+   save's refresh, which set the draft themselves, play nothing. A pick that leaves the row
+   as it was plays nothing. The "was" line drops only as it arrives. Currently is not
+   touched: it is the saved truck's (§12.145), which a pick never changes.
+6. **A press always lands,** as §12.149 says: what a press holds stays where it is drawn.
+7. **Reduced motion: nothing starts** (`mayMove`, or `motion-safe:` for the form).
+
+**Where.** Desktop, except the login page, which is the phone's too. The add form drops in
+the edit window's picker as well: it is the same component.
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token each so that
+each can be taken back alone: `histRowsDraw`, `histRowsDrawRow`, `histRowsDrawGapMax`,
+`histFoldDrop`, `asgRowsDraw`, `asgRowsDrawRow`, `asgRowsDrawGapMax`, `asgDriverDrop`,
+`asgAddDrop`, `asgSavedDrop`, `loginFormIn`, `loginErrorDrop`; and the five `…DropPx`,
+`loginFormRisePx` and `loginFormFromScale`. All equal the demo's Bold. The two row draws
+have their own tokens, at the demo's 450/180/30, not the board opening's 500/200/35.
+**To take one back:** its token to 0 turns it off (HANDOFF, "Phase 3bk"). For the login
+form, `loginFormIn: 0` makes Tailwind write a 0ms animation, which shows nothing.
+
+**Tests.** `history/history-motion.test.tsx`, `assignments/assign-motion.test.tsx` and
+`login/login-motion.test.tsx`: each motion's cause starts it at its length, its non-causes
+do not, and reduced motion starts nothing. `lib/appear-motion.test.ts` (`drawIn`),
+`lib/motion.test.ts` (`follow`), `lib/page-arrival.test.ts` and `motion-tokens.test.ts`
+(the tokens, and the login form's Tailwind animation) cover the rest, all with the numbers
+written out. `e2e/new-motion.spec.ts`, "phase 3bk", holds what only a browser shows.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
