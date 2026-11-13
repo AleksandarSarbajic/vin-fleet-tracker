@@ -124,6 +124,9 @@ Not live until pushed. App only (Vercel): no worker file reaches a changed one, 
 **At the start of 3bp (2026-11-13): 3bo is NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `3e3e1be` (3bo committed as `d6f5444` and `3e3e1be`).
 **3bp: NOT pushed, NOT live** (2026-11-13): the edit window's four medium motions at the demo's Bold (§12.157): a stop added, a stop removed, a stop chosen, and the fields a fill changed. Committed as `e45ec8f` and the docs commit; check 246 files / 4538 tests; full e2e `2026-11-13T14-29-37-071Z` 553 passed, 0 failed, `phone-signout` ran, 62.7 min.
 Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bp" below.
+**At the start of 3bq (2026-11-13): 3bo and 3bp are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `9b226ca`.
+**3bq: NOT pushed, NOT live** (2026-11-13): 3bo's fetched-timeline test no longer flakes (test only), and a note typed on a new load's stop now makes a fill ask Replace or Keep mine (§12.122). Committed as `81f8438`, `d317889` and the docs commit; check 247 files / 4545 tests, three runs in a row.
+Not live until pushed. App only (Vercel): one app file, `EditStopModal.tsx`, which no worker file imports, so no worker deploy. See "Phase 3bq" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -12050,11 +12053,84 @@ Motion batch 3b, from the advisor's brief: the 3be demo's medium rows stopAdd, s
 2. **3be's stopChoose says the form "rises"** as it remounts; the demo drops it (`dropIn`), and a rise from below would grow the window's scroller. Built as the drop.
 3. **The brief names `slideSegment`** for the highlight; it is a live motion's, with its own token and look, and it animates width and height. A new overlay is modelled on it (above).
 4. **§12.119's focus on a new stop's street is not in Add stop's own task** but in a passive effect just after it, before the first frame. Measured with motion on only; the code that does it is unchanged by this phase.
-5. **Not motion, not fixed, reasoned from the code and not tested: a fill can drop a dispatcher note.** A read that lands with nothing to replace rebuilds the first stop (`fillLoad`: `stopFormFrom(null, …)` under its key), and "nothing to replace" does not count the note (`hasEntries`: the load number, the address and the time). So a note typed into the first stop while a read is in flight is gone when it lands, with no question asked.
+5. **Not motion, not fixed, reasoned from the code and not tested: a fill can drop a dispatcher note.** A read that lands with nothing to replace rebuilds the first stop (`fillLoad`: `stopFormFrom(null, …)` under its key), and "nothing to replace" does not count the note (`hasEntries`: the load number, the address and the time). So a note typed into the first stop while a read is in flight is gone when it lands, with no question asked. **Fixed in 3bq** (below), and it was wider than this: every stop's note, on a recognised paste too.
 
 **Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone (the phone's editor shares the window); a real GPU; the cause of the first run's 4 scored misses (above).
 
 **Next:** the advisor's verification and Alex's push (app only): 3bo's `d6f5444` and `3e3e1be`, then 3bp's two. Item 5 above is a decision for Alex: the note is a data question, not motion. Then the next batch, as the build order says.
+
+### Phase 3bq: the flaky timeline test, and a typed note a fill threw away (2026-11-13)
+
+From the advisor's brief. Two things, neither of them motion: 3bo's fetched-timeline test, which failed 5 in 20 runs alone (3bp's "unidentified flake"), and 3bp's found-wrong item 5, a dispatcher note lost on a fill. No motion code or token, worker, migration or outside request was touched. **NOT pushed, NOT live.** App only (Vercel): one app file, `EditStopModal.tsx`; the worker imports nothing from `src/components` (grep), so no worker deploy. Built on `9b226ca`; origin's master was `7464e30` (fetched at the start, nothing new), so 3bo and 3bp are not pushed either.
+
+| Commit | What |
+|---|---|
+| `81f8438` | Part A: `console/medium-motion.test.tsx` only. The fetched test waits on the page and checks its commit |
+| `d317889` | Part B: the note counts in `hasEntries`; `edit/fill-note.test.tsx` (7) |
+| The docs commit | §12.122's sentence, this section and "What is live" |
+
+**Part A: "fetched: nothing at the opening, while it says Loading…, and the draw in the commit it lands in".**
+
+- **Reproduced:** 5 of 20 runs alone at `9b226ca` (`npx vitest run <file> -t "fetched: nothing at the opening"`), as the advisor's count.
+- **The cause, proved:** react-query (5.103.1) tells its observers about new data through its own `setTimeout(0)` (`notifyManager`'s `systemSetTimeoutZero`). That timer is set only once the fetch's promise chain resolves, so it comes after the test's own `setTimeout(0)`. After the test's tick, React's `act` waits a macrotask before it returns. If react-query's timer has not expired by then, the page still says Loading…. In a probe copy of the test (deleted after) that recorded the order, over 20 runs: 16 were "tick, notify, 3 cards" and 4 were "tick, 0 cards", with the notify after `act`. With the notify delayed 20ms (`notifyManager.setScheduler`), 5 of 5 failed.
+- **The fix:** the test waits for the three cards, one `act` at a time with its own 2s timeout, and stops at the first `act` that shows them. Then it checks the same shapes (`DRAWN(0)`, `DRAWN(30)`, `DRAWN(60)`). A `Profiler` around the timeline records, at each commit, the cards on the page and the draws played so far. The first commit with cards must already have all three draws. Before the stops land: Loading…, and no draws.
+- **Could waiting longer let a later commit pass?** Not through the wait itself: it returns at the first `act` that shows the cards. But React can make more than one commit inside one `act`, and the shapes alone cannot tell those commits apart. Neither could the old one-tick test. Planted, a draw one tick late (`setTimeout(() => drawIn(…), 0)`): the shapes passed in 3 of 5 runs, and the commit check failed all 5.
+- **Holds:** 50 runs alone, 0 failures (run alongside the sweep below, so on a busy machine). With the notify delayed 20ms, 5 of 5 pass. The whole file, 20 runs: 0 failures.
+- **Mutation, the draw dropped** (`drawIn` never called): 4 fail by name: "cached: …", "fetched: …", "a refetch while it is open …", "opened again: …".
+- **The other files with the one-tick wait,** 20 runs each, whole file: none failed, so none was changed.
+
+| File | Runs | Failures |
+|---|---|---|
+| `app/login/login-motion.test.tsx` | 20 | 0 |
+| `server/route-failure.test.ts` | 20 | 0 |
+| `components/edit/discard-keyboard.test.tsx` | 20 | 0 |
+| `components/history/history-address.test.tsx` | 20 | 0 |
+| `components/edit/dialog-motion.test.tsx` | 20 | 0 |
+| `components/console/board-motion.test.tsx` | 20 | 0 |
+| `components/history/history-motion.test.tsx` | 20 | 0 |
+| `components/console/WindowsOverPolls.test.tsx` | 20 | 0 |
+| `components/console/ConsoleKeys.test.tsx` | 20 | 0 |
+| `components/console/medium-motion.test.tsx` (fixed) | 20 | 0 |
+
+Not run (unverified), the same `setTimeout(resolve, 0)` in 13 more files, all in `components/edit/`: `EditStopModal`, `add-remove-stop`, `edit-medium-motion`, `fill-outcome-save`, `landed-save`, `multi-stop-modal`, `one-stop-body`, `paste-address`, `ratecon-ai`, `ratecon-scan`, `ratecon-strip`, `strip-motion`, `zone-follows-state`. Most of them wait through a `settle()` of 5 to 8 ticks rather than one (seen in `ratecon-strip`, `ratecon-ai` and `ratecon-scan`; the others not checked).
+
+**Part B: a typed note counts as an entry.** `hasEntries` (`EditStopModal.tsx`, the strip's prop) counted the load number and each stop's street, city, state, ZIP and appointment time. It did not count the note. With nothing else typed, a fill went ahead without asking. `fillLoad` builds every stop afresh (`stopFormFrom(null, …)`, then `addStop`), so every typed note was lost without a question. That held on a recognised paste, a scan landing and an AI read landing alike. Now a note counts once it is more than spaces, so the strip asks Replace or Keep mine. Keep mine keeps every note. Replace replaces the notes with their stops, as with an address. `fillLoad` is unchanged, and no note is carried into a fill. §12.122's sentence names the note now.
+
+- **The failing test first** (`fill-note.test.tsx`, at `81f8438` with no fix): "a note on stop 1 and nothing else …" failed with "Replace or Keep mine was asked: expected false to be true", "stop 1's note: expected '' to be 'Gate code 4471'" and 2 stops where there should be 1, so the fill had gone ahead. 6 of the 7 failed. The 7th, a note of only spaces, passed, as it should.
+- **Tests (7):** a note on stop 1; Keep mine keeps it and fills nothing, then Replace fills and both stops' notes are blank; a note on an added stop 2 with stop 1 blank; Keep mine keeps every note (stops 1 and 2); a note of only spaces fills without asking; a scan with a note typed while it reads, decided when it lands; an AI read the same.
+
+**What a fill still ignores, for Alex to decide.** Everything a dispatcher can type on a new load that `hasEntries` does not count. Read from the code, not tested:
+
+| Field | What a fill does to it |
+|---|---|
+| Stop type (PU / DEL) | Replaced by the read's type |
+| Appointment ticked, nothing else | Replaced: ticked if the read has a time or a date it could not read, unticked if the read has none |
+| Appointment date (ticked, no time typed) | Replaced by the read's date, or blank |
+| APPT / FCFS | Counted by accident: choosing FCFS fills the time with 07:00, and a time counts. A time cleared after that is not counted, and the type is replaced |
+| FCFS latest time | Replaced (the read's, or 15:00), unless the earliest time is also typed, which counts |
+| Window (APPT) | Replaced (the read's, 0 for an exact time, or the default, 30 minutes) |
+| Facility time zone chosen by hand | Replaced: the new stop's zone follows the state the read filled (§12.120); "chosen" is lost |
+| "Zone is right" pressed | Reset |
+| Arrival and departure | Disabled while no load exists (`loadExists`). Where the strip shows on an existing load whose saved stops were all removed in this form, they may be editable (unverified), and a fill resets them to unmarked |
+| Stops added with Add stop, left blank | Replaced by the read's stops |
+| Load status, driver | Kept (`fillLoad` spreads the form) |
+
+Every appointment field above shows only once the appointment is ticked (`AppointmentFields.tsx`, the `draft.enabled` block).
+
+**`npm run check`, three runs in a row, each exit 0:** **247 files, 4545 tests** (246 and 4538 before; +7, the new file, and the one changed test).
+
+**e2e,** no motion or layout code changed, so not a full run. One invocation: `ratecon-fill`, `ratecon-ai`, `ratecon-scan`, `desktop-baseline` and 3bp's two fill tests in `new-motion` (`:5936`, `:6031`), 21 tests. The first run (`2026-11-13T16-56-28-008Z`) had **20 passed and 1 failed**: `ratecon-scan.spec.ts:137`'s "an origin new to the page" listed one request, the browser Sentry SDK's envelope to the e2e's own sink (`127.0.0.1:3199/sentrysink/…`), which that page first sent after the drop. That test types no note, so `hasEntries` is the same there with and without this change. The same invocation run again: **21 passed, 0 failed**, the machine awake throughout. That one test alone, `--repeat-each=5`: 6 of 6 passed. So it failed 1 time in 7.
+
+**Found wrong:**
+
+1. **3bp's item 5 was narrower than the defect.** It named "a note typed into the first stop while a read is in flight". In fact every stop is rebuilt and every note goes, and a recognised paste drops them as well.
+2. **The brief's "route-failure"** names two files. Only `src/server/route-failure.test.ts` has the one-tick wait, so that is the one run.
+3. **The brief's list of one-tick files is not all of them:** 13 more (above), not run.
+4. **`ratecon-scan.spec.ts`'s origin check can count the e2e's own Sentry sink** (above, 1 in 7). The set of known origins is whatever the page happened to fetch before the drop, and the Sentry SDK sends its first envelope when it chooses. Not changed: it is outside this brief. A fix would add the sink's origin to the known set, or count only origins outside the e2e's own servers.
+
+**Unverified:** why the Sentry envelope went when it did (inferred from the timing, not traced); the 13 files not run; whether the strip can show with arrival or departure editable (above); any browser but Chromium.
+
+**Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, then 3bq's three. The table above is for Alex. Then the next motion batch, as the build order says.
 
 ## Next
 

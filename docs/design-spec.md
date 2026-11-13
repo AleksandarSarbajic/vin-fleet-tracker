@@ -9303,8 +9303,10 @@ relationship file — public domain, 7 KB) also speaks under any ZIP entered
 or changed by hand.
 
 A date already past, or more than 30 days out, is marked. More than ten stops
-fills nothing and says so. A fill over a load number or address already
-typed asks first: Replace, or Keep mine.
+fills nothing and says so. A fill over a load number, an address or a stop's
+note already typed asks first: Replace, or Keep mine. A note counts once it is
+more than spaces (phase 3bq): a fill builds every stop afresh, so Replace
+takes the note away with its stop, and Keep mine keeps every note.
 
 ### Counts, not content
 
