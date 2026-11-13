@@ -203,3 +203,24 @@ describe('the numbers of the board’s medium motions (§12.156)', () => {
     expect(MOTION_MS.timelineDrawGapMax).toBe(30);
   });
 });
+
+describe('the numbers of the edit window’s medium motions (§12.157)', () => {
+  it('a stop added drops 14px in 270ms, and Add stop slides in the same', () => {
+    expect(MOTION_MS.stopAddDrop).toBe(270);
+    expect(MOTION_SHAPE.stopAddDropPx).toBe(14);
+  });
+
+  it('a stop removed: its copy fades and the rest slide, in 270ms', () => {
+    expect(MOTION_MS.stopRemoveSlide).toBe(270);
+  });
+
+  it('a stop chosen: the highlight slides and the form drops 14px, in 270ms', () => {
+    expect(MOTION_MS.stopChooseDrop).toBe(270);
+    expect(MOTION_SHAPE.stopChooseDropPx).toBe(14);
+  });
+
+  it('a fill: the fields that changed fade, and their source lines drop 14px, in 270ms', () => {
+    expect(MOTION_MS.loadStripDrop).toBe(270);
+    expect(MOTION_SHAPE.loadStripDropPx).toBe(14);
+  });
+});

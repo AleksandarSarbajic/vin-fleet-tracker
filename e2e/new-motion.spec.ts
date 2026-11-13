@@ -3,6 +3,8 @@ import { IDS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 import { FREE, seedBoard } from './assignments-seed';
 import { seedHistory } from './history-seed';
+import { PU_SO, PU_SO_PASTED, puSoBlocks } from '../src/test/ratecon-fixtures';
+import { tinyPdf } from '../src/test/tiny-pdf';
 
 /**
  * Phase 3bd, the new motion (§12.149), in a real browser with motion on and a real
@@ -5713,6 +5715,675 @@ test.describe('phase 3bo, the board’s medium motions (§12.156)', () => {
     process.stdout.write(`MEDIUM PRESS TABLE\n${report}\nEND MEDIUM PRESS TABLE\n`);
 
     expect(tally).toHaveLength(TIMES.length * ROUNDS * 4);
+    expect(tally.filter((t) => !t.ok)).toEqual([]);
+    expect(tally.filter((t) => t.offControl)).toEqual([]);
+    // What a press holds does not move under it; a hovered button's 1px lift may drop as it is pressed.
+    expect(tally.filter((t) => t.moved > 1.01)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3bp: the edit window's four medium motions, at the demo's Bold (§12.157). What only a
+ * real browser shows: each at its length from the running animation and the right way, in the
+ * column at 1008px and up and the row of tabs below it; the street box focused as a stop is
+ * added; the fields a fill changed, and only those; a poll starting nothing in the window;
+ * reduced motion ending where motion does; nothing grown on any frame, nothing left; and the
+ * press table. Causes and non-causes are `edit/edit-medium-motion.test.tsx`'s.
+ * ------------------------------------------------------------------------------------------ */
+
+const STOP_MS = 270;
+const FILL_MS = 270;
+const FADE_OUT_FRAMES = JSON.stringify([{ opacity: 1 }, { opacity: 0 }]);
+
+/** Every Web Animation the page starts, named for these four, into the log `pressWatch` reads. */
+const logEdit = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as PagedLog;
+    w.__paged = [];
+    const name = (el: Element, frames: Keyframe[]): string => {
+      const fades = frames.some((f) => 'opacity' in f);
+      if (el.getAttribute('role') === 'tab') return fades ? 'stopTab' : 'stopTabSlide';
+      if (el.hasAttribute('data-add-stop')) return 'addSlide';
+      if (el.hasAttribute('data-leaving-copy') && el.closest('[data-stop-tabs]')) return 'stopCopy';
+      if (el.hasAttribute('data-stop-slide')) return 'stopChoose';
+      if (el.getAttribute('role') === 'tabpanel') return 'stopForm';
+      if (el.hasAttribute('data-fill')) return `fillField:${el.getAttribute('data-fill')}`;
+      if (el.hasAttribute('data-fill-source')) return `fillSource:${el.getAttribute('data-fill-source')}`;
+      return el.closest('[role="dialog"]') ? 'inDialog' : 'other';
+    };
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      w.__paged.push({
+        what: name(this, (Array.isArray(frames) ? frames : []) as Keyframe[]),
+        frames: JSON.stringify(frames),
+        duration: Number(timing.duration),
+        delay: Number(timing.delay ?? 0),
+        easing: String(timing.easing ?? ''),
+        fill: String(timing.fill ?? ''),
+        animation,
+      });
+      return animation;
+    };
+  });
+/** What the window started from `from` on: these four by name, and anything else in it. */
+const editSince = async (page: Page, from: number) =>
+  (
+    await page.evaluate(
+      (from) =>
+        (window as unknown as PagedLog).__paged
+          .slice(from)
+          .filter((p) => p.what !== 'other')
+          .map(({ what, frames, duration, delay, easing, fill }) => ({ what, frames, duration, delay, easing, fill })),
+      from,
+    )
+  ).map((p) => ({ ...p, easing: curve(p.easing) }));
+/** Nothing running, and nothing these four add left behind. */
+const editAtRest = (page: Page) =>
+  page.evaluate(() => ({
+    running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    added: document.querySelectorAll('[data-leaving-copy], [data-stop-slide], [data-stop-target], [data-arriving]').length,
+    styled: [
+      ...document.querySelectorAll(
+        '[data-stop-tabs], [data-stop-tabs] [role="tab"], [data-add-stop], [role="tabpanel"], [data-fill], [data-fill-source]',
+      ),
+    ].filter((el) => el.getAttribute('style')).length,
+  }));
+const EDIT_AT_REST = { running: 0, added: 0, styled: 0 };
+/** Where a slide starts, read back from its first frame: across and down. */
+const pathOf = (frames: string) => {
+  const [first] = JSON.parse(frames) as { translate?: string; transform?: string }[];
+  const m = /(-?[\d.]+)px,? (-?[\d.]+)px/.exec(first?.translate ?? first?.transform ?? '');
+  return m ? { dx: Number(m[1]), dy: Number(m[2]) } : null;
+};
+const STREET = '[role="tabpanel"] input[data-fill="addressLine"]';
+
+/** A new load on truck 200, its window open and still. */
+async function openNewLoad(page: Page, width: number) {
+  await resetWorld({ extraTrucks: 1 });
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('/?truck=200');
+  // Below 1086px the board shows the list or the map, not both: the row is chosen, maybe not drawn.
+  await page.locator('[data-row-id][aria-selected="true"]').waitFor({ state: 'attached' });
+  await quiet(page);
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'New load for truck 200' });
+  await dialog.locator('[data-stop-tabs]').waitFor();
+  await expect.poll(() => stillMoving(page)).toBe(0);
+  return dialog;
+}
+
+test.describe('phase 3bp, the edit window’s medium motions (§12.157)', () => {
+  for (const width of [1007, 1008, 1440]) {
+    const column = width >= 1008;
+    test(`the stops at ${width}px (${column ? 'a column' : 'a row of tabs'}): Add stop, a choice and Remove stop, each at its length and its way, the street box focused, nothing grown, nothing left`, async ({
+      page,
+    }) => {
+      test.setTimeout(3 * 60_000);
+      await logEdit(page);
+      const dialog = await openNewLoad(page, width);
+      const tabs = dialog.getByRole('tab');
+      const grew: string[] = [];
+      const along = (p: { dx: number; dy: number } | null, sign: 1 | -1, least: number) => {
+        expect(p).not.toBeNull();
+        if (column) {
+          expect(p!.dx).toBe(0);
+          expect(p!.dy * sign).toBeGreaterThan(least);
+        } else {
+          expect(p!.dy).toBe(0);
+          expect(p!.dx * sign).toBeGreaterThan(least);
+        }
+      };
+
+      /* Add stop, from the page, so the focus is read as it lands and on the first frame drawn. */
+      let from = await logged(page);
+      let stop = await watchFrames(page);
+      const focus = await page.evaluate(
+        (street) =>
+          new Promise<{ now: boolean; frame: boolean }>((done) => {
+            document.querySelector<HTMLButtonElement>('[data-add-stop]')!.click();
+            const now = document.activeElement === document.querySelector(street);
+            requestAnimationFrame(() => done({ now, frame: document.activeElement === document.querySelector(street) }));
+          }),
+        STREET,
+      );
+      // On the first frame drawn: the modal focuses it in an effect after the click, before that frame.
+      expect(focus.frame).toBe(true);
+      process.stdout.write(`EDIT FOCUS at ${width}px: in the click's own task ${focus.now}, on the first frame ${focus.frame}\n`);
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await expect(page.locator(STREET)).toBeFocused();
+      await expect(dialog.locator('[role="tabpanel"]')).toHaveAttribute('data-stop-form', '2');
+      grew.push(...(await stop()).grew);
+      let seen = await editSince(page, from);
+      expect(seen.filter((s) => s.what === 'stopTab')).toEqual([
+        { what: 'stopTab', frames: DROP_FRAMES, duration: STOP_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' },
+      ]);
+      let slides = seen.filter((s) => s.what === 'addSlide');
+      expect(slides).toHaveLength(1);
+      expect(slides[0]).toMatchObject({ duration: STOP_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' });
+      expect(translateOnly(slides[0]!.frames)).toBe(true);
+      // Add stop moved on by a tab: it comes from where it stood, above or to the left.
+      along(pathOf(slides[0]!.frames), -1, column ? 40 : 150);
+      expect(seen.filter((s) => ['stopTabSlide', 'stopChoose', 'stopForm', 'stopCopy'].includes(s.what))).toEqual([]);
+      expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+
+      await page.locator('[data-add-stop]').click();
+      await expect(tabs).toHaveCount(3);
+      await expect.poll(() => stillMoving(page)).toBe(0);
+
+      /* A choice: from the third stop to the first, past the second. The form drops. */
+      from = await logged(page);
+      grew.push(...(await watchStep(page, () => tabs.first().click())));
+      await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+      seen = await editSince(page, from);
+      const chosen = seen.filter((s) => s.what === 'stopChoose');
+      expect(chosen).toHaveLength(1);
+      expect(chosen[0]).toMatchObject({ duration: STOP_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' });
+      // From the third tab: two tabs down the column, or two across the row.
+      along(pathOf(chosen[0]!.frames), 1, column ? 80 : 300);
+      expect(seen.filter((s) => s.what === 'stopForm')).toEqual([
+        { what: 'stopForm', frames: DROP_FRAMES, duration: STOP_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' },
+      ]);
+      expect(seen.filter((s) => ['stopTab', 'stopTabSlide', 'addSlide', 'stopCopy'].includes(s.what))).toEqual([]);
+      expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+
+      /* Remove stop, the first: its copy fades where it stood; the two after it and Add stop come in. */
+      from = await logged(page);
+      stop = await watchFrames(page);
+      const atCopy = await page.evaluate(
+        () =>
+          new Promise<{ copy: boolean; hitCopy: boolean; inBox: boolean }>((done) => {
+            [...document.querySelectorAll<HTMLButtonElement>('[role="tabpanel"] button')]
+              .find((b) => b.textContent?.trim() === 'Remove stop')!
+              .click();
+            requestAnimationFrame(() => {
+              const copy = document.querySelector('[data-stop-tabs] [data-leaving-copy]');
+              const box = copy?.getBoundingClientRect();
+              const hit = box ? document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) : null;
+              done({
+                copy: copy !== null,
+                hitCopy: Boolean(copy && hit && copy.contains(hit)),
+                // What a press there reaches: the stops' box, or a tab sliding through it.
+                inBox: Boolean(hit?.closest('[data-stop-tabs]')),
+              });
+            });
+          }),
+      );
+      expect(atCopy).toEqual({ copy: true, hitCopy: false, inBox: true });
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await expect(tabs).toHaveCount(2);
+      grew.push(...(await stop()).grew);
+      seen = await editSince(page, from);
+      expect(seen.filter((s) => s.what === 'stopCopy')).toEqual([
+        { what: 'stopCopy', frames: FADE_OUT_FRAMES, duration: STOP_MS, delay: 0, easing: 'linear', fill: '' },
+      ]);
+      slides = seen.filter((s) => s.what === 'stopTabSlide' || s.what === 'addSlide');
+      expect(slides.map((s) => s.what).sort()).toEqual(['addSlide', 'stopTabSlide', 'stopTabSlide']);
+      for (const s of slides) {
+        expect(s).toMatchObject({ duration: STOP_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' });
+        expect(translateOnly(s.frames)).toBe(true);
+        // Each comes up, or in from the right, by a tab.
+        along(pathOf(s.frames), 1, column ? 40 : 150);
+      }
+      expect(seen.filter((s) => ['stopTab', 'stopChoose', 'stopForm'].includes(s.what))).toEqual([]);
+
+      expect(grew).toEqual([]);
+      expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+    });
+  }
+
+  test('a fill: a read landing as the person types, then Replace; each field that changed fades with its source line, the rest still, the caret kept, nothing grown, nothing left', async ({
+    page,
+    context,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await logEdit(page);
+    const dialog = await openNewLoad(page, 1440);
+    const strip = dialog.locator('[data-ratecon-strip]');
+    const fillsIn = (seen: Paged[], kind: 'fillField' | 'fillSource') =>
+      seen.filter((s) => s.what.startsWith(`${kind}:`)).map((s) => s.what.slice(kind.length + 1)).sort();
+
+    /* A PDF, read in the browser: its fill lands while the person types in the driver search. */
+    const search = dialog.getByRole('combobox', { name: 'Driver for truck 200' });
+    await search.focus();
+    await page.keyboard.type('Sm');
+    await search.evaluate((el) => (el as HTMLInputElement).setSelectionRange(1, 1));
+    let from = await logged(page);
+    let stop = await watchFrames(page);
+    await strip.getByLabel('Rate confirmation PDF').setInputFiles({
+      name: 'invented-ratecon.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(tinyPdf(puSoBlocks(PU_SO))),
+    });
+    await expect(strip.locator('[data-ratecon-said]')).toContainText('Filled 2 stops', { timeout: 20_000 });
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    expect(
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        return { label: el?.getAttribute('aria-label'), value: el?.value, at: [el?.selectionStart, el?.selectionEnd] };
+      }),
+    ).toEqual({ label: 'Driver for truck 200', value: 'Sm', at: [1, 1] });
+    let seen = await editSince(page, from);
+    const fields = seen.filter((s) => s.what.startsWith('fillField:'));
+    for (const f of fields) expect(f).toMatchObject({ frames: FADE_FRAMES, duration: FILL_MS, delay: 0, easing: 'linear', fill: '' });
+    expect(fillsIn(seen, 'fillField')).toEqual(expect.arrayContaining(['addressLine', 'city', 'loadNumber', 'state', 'zip']));
+    const lines = seen.filter((s) => s.what.startsWith('fillSource:'));
+    for (const l of lines) expect(l).toMatchObject({ frames: DROP_FRAMES, duration: FILL_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' });
+    expect(fillsIn(seen, 'fillSource')).toEqual(expect.arrayContaining(['addressLine', 'city', 'loadNumber', 'state', 'zip']));
+    // A fill moves no stop: its tabs and its form are simply there.
+    expect(seen.filter((s) => ['stopTab', 'stopTabSlide', 'addSlide', 'stopChoose', 'stopForm', 'stopCopy'].includes(s.what))).toEqual([]);
+    expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+
+    /* Two fields changed by hand, then Replace from the pasted text: those two come back, and only they move. */
+    await dialog.locator('input[data-fill="loadNumber"]').fill('VT-3BP');
+    await dialog.locator('[role="tabpanel"] input[data-fill="city"]').fill('Moorhead');
+    await page.evaluate((text) => navigator.clipboard.writeText(text), PU_SO_PASTED);
+    await strip.getByLabel("Or paste the rate confirmation's text").focus();
+    await page.keyboard.press('ControlOrMeta+v');
+    const replace = strip.getByRole('button', { name: 'Replace' });
+    await replace.waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    from = await logged(page);
+    stop = await watchFrames(page);
+    await replace.click();
+    await expect(dialog.locator('input[data-fill="loadNumber"]')).toHaveValue('88123');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    seen = await editSince(page, from);
+    expect(fillsIn(seen, 'fillField')).toEqual(['city', 'loadNumber']);
+    expect(fillsIn(seen, 'fillSource')).toEqual(['city', 'loadNumber']);
+    expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+  });
+
+  test('a poll with changed data while the window is open starts nothing in it', async ({ page }) => {
+    await logEdit(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/?truck=101');
+    await page.locator('[data-row-id][aria-selected="true"]').waitFor();
+    await quiet(page);
+    await keepTheFeedFresh();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Edit load for truck 101' });
+    await dialog.locator('[data-stop-tabs]').waitFor();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const from = await logged(page);
+    // Every truck late, then back as it was: two polls, each with changed data.
+    await pollWith(page, (rows) => rows.forEach((row) => ((row.status = 'LATE'), (row.computed = 'LATE'))));
+    await expect(page.locator(`[data-row-id="${IDS.truckChicago}"]`)).toContainText(/late/i);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await pollWith(page, () => {});
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const inWindow = await page.evaluate(
+      (from) =>
+        (window as unknown as PagedLog).__paged
+          .slice(from)
+          .filter((p) => ((p.animation.effect as KeyframeEffect | null)?.target ?? null)?.closest('[role="dialog"]'))
+          .map((p) => p.what),
+      from,
+    );
+    expect(inWindow).toEqual([]);
+    await expect(dialog).toBeVisible();
+  });
+
+  test('under reduced motion none of the four starts, and each ends where it does with motion', async ({ page, context }) => {
+    test.setTimeout(3 * 60_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await logEdit(page);
+    /** The stops and the fields as they stand once everything is still. */
+    const picture = async () => {
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      return page.evaluate(() => ({
+        tabs: document.querySelector('[data-stop-tabs]')!.outerHTML,
+        form: document.querySelector('[role="tabpanel"]')!.getAttribute('data-stop-form'),
+        fields: [...document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[data-fill], [role="dialog"] select[data-fill]')].map(
+          (el) => `${el.getAttribute('data-fill')}=${el.type === 'checkbox' ? String(el.checked) : el.value}`,
+        ),
+        focused: document.activeElement?.getAttribute('data-fill') ?? document.activeElement?.getAttribute('role') ?? null,
+      }));
+    };
+    const steps = async () => {
+      const dialog = await openNewLoad(page, 1440);
+      const shots = [];
+      await page.locator('[data-add-stop]').click();
+      shots.push(await picture());
+      await page.locator('[data-add-stop]').click();
+      shots.push(await picture());
+      await dialog.getByRole('tab').first().click();
+      shots.push(await picture());
+      await page.keyboard.press('ArrowDown');
+      shots.push(await picture());
+      await dialog.locator('[role="tabpanel"]').getByRole('button', { name: 'Remove stop' }).click();
+      shots.push(await picture());
+      await page.evaluate((text) => navigator.clipboard.writeText(text), PU_SO_PASTED);
+      await dialog.getByLabel("Or paste the rate confirmation's text").focus();
+      await page.keyboard.press('ControlOrMeta+v');
+      await expect(dialog.locator('input[data-fill="loadNumber"]')).toHaveValue('88123');
+      shots.push(await picture());
+      return shots;
+    };
+    const moving = await steps();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const from = await logged(page);
+    const still = await steps();
+    const started = await page.evaluate(
+      (from) => (window as unknown as PagedLog).__paged.slice(from).map((p) => p.what).filter((w) => w !== 'other'),
+      from,
+    );
+    expect(started).toEqual([]);
+    expect(still).toEqual(moving);
+    expect(await editAtRest(page)).toEqual(EDIT_AT_REST);
+  });
+
+  test('a real mouse on a dropping tab, a sliding Add stop, a tab sliding up, a tab under the highlight, a dropping form and a fading field, 20 to 300ms in: every press lands', async ({
+    page,
+    context,
+  }, info) => {
+    test.setTimeout(20 * 60_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    type Control = {
+      name: string;
+      aim: string;
+      zone: string;
+      ready: (i: number) => Promise<{ x: number; y: number }>;
+      start: () => Promise<unknown>;
+      read: () => Promise<string>;
+      landed: (before: string, after: string) => boolean;
+    };
+    const TIMES = [20, 60, 120, 300];
+    const ROUNDS = 8;
+    const HOLD = 40;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const tally: { control: string; time: number; ok: boolean; offControl: boolean; moved: number; read?: string; gap?: boolean }[] = [];
+
+    const run = async (control: Control) => {
+      for (const time of TIMES) {
+        await keepTheFeedFresh();
+        let lateBy = 0;
+        let done = 0;
+        let tries = 0;
+        while (done < ROUNDS && tries < ROUNDS * 6) {
+          tries += 1;
+          const { x, y } = await control.ready(tries);
+          await page.mouse.move(x, y);
+          const before = await control.read();
+          await arm(page, control.aim, control.zone);
+          const fired = control.start();
+          await sleep(Math.max(0, time - lateBy));
+          await page.mouse.down();
+          const pressed = await page.evaluate(() => (window as unknown as { __press: { at: number | null } | null }).__press);
+          const under = () =>
+            page.evaluate(
+              ({ px, py }) => {
+                const r = document.elementFromPoint(px, py)?.getBoundingClientRect();
+                return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+              },
+              { px: x, py: y },
+            );
+          const box = await under();
+          await sleep(HOLD);
+          const boxAfter = await under();
+          await page.mouse.up();
+          const ends = await page.evaluate(() => (window as unknown as { __press: { down: boolean; same: boolean | null } | null }).__press);
+          await fired;
+          await expect
+            .poll(() => control.read().then((after) => control.landed(before, after)), { timeout: 2_000 })
+            .toBe(true)
+            .catch(() => {});
+          const after = await control.read();
+          const at = pressed?.at ?? null;
+          if (at === null) lateBy -= 20;
+          else lateBy += (at - time) * 0.4;
+          if (at !== null && Math.abs(at - time) <= 18) {
+            done += 1;
+            tally.push({
+              control: control.name,
+              time,
+              ok: control.landed(before, after),
+              offControl: !ends?.down || ends.same !== true,
+              moved: box && boxAfter ? Math.max(Math.abs(box.x - boxAfter.x), Math.abs(box.y - boxAfter.y)) : -1,
+              ...(control.landed(before, after) ? {} : { read: `${before} -> ${after}` }),
+              gap: control.name === 'tab sliding up' && after.includes('\\"down\\":null'),
+            });
+          }
+        }
+        const these = tally.filter((t) => t.control === control.name && t.time === time);
+        process.stdout.write(
+          `EDIT PRESS ${control.name} at ${time}ms: ${done} landed on time in ${tries} tries, ${these.filter((t) => !t.ok).length} missed\n`,
+        );
+        expect(done, `${control.name} at ${time}ms: presses on time`).toBe(ROUNDS);
+      }
+    };
+
+    await logEdit(page);
+    await page.addInitScript(pressWatch);
+    // Which tab was drawn under the pointer as it came down, and which tab each click reached.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __downTab: string | null; __tabClicks: string[]; __skipClick: boolean };
+      w.__downTab = null;
+      w.__tabClicks = [];
+      w.__skipClick = false;
+      window.addEventListener(
+        'pointerdown',
+        (event) => {
+          w.__downTab = document.elementFromPoint(event.clientX, event.clientY)?.closest('[role="tab"]')?.id ?? null;
+        },
+        true,
+      );
+      window.addEventListener(
+        'click',
+        (event) => {
+          const tab = (event.target as Element | null)?.closest?.('[role="tab"]');
+          if (!tab) return;
+          // The round's own start, a click from the page: not a press.
+          if (w.__skipClick) {
+            w.__skipClick = false;
+            return;
+          }
+          w.__tabClicks.push(tab.id);
+        },
+        true,
+      );
+    });
+    const dialog = await openNewLoad(page, 1440);
+    const tabs = dialog.getByRole('tab');
+    const toTop = () =>
+      page.evaluate(() => {
+        const scroller = document.querySelector<HTMLElement>('[data-edit-scroll]');
+        if (scroller) scroller.scrollTop = 0;
+      });
+    const still = () => expect.poll(() => stillMoving(page), { timeout: 5_000 }).toBe(0);
+    /** Exactly `n` stops, the first chosen, everything still: by Add stop and Remove stop, as a person would. */
+    const stopsAt = async (n: number) => {
+      while ((await tabs.count()) > n) {
+        await tabs.last().click({ timeout: 5_000 });
+        await dialog.locator('[role="tabpanel"]').getByRole('button', { name: 'Remove stop' }).click({ timeout: 5_000 });
+        await still();
+      }
+      while ((await tabs.count()) < n) {
+        await page.locator('[data-add-stop]').click({ timeout: 5_000 });
+        await still();
+      }
+      await tabs.first().click({ timeout: 5_000 });
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await toTop();
+      await still();
+      await quiet(page);
+    };
+    const clickFromPage = (selector: string) =>
+      page.evaluate((selector) => document.querySelector<HTMLElement>(selector)!.click(), selector);
+    /** The `i`th tab clicked from the page, as a round's start: the tab-click log skips it. */
+    const chooseFromPage = (i: number) =>
+      page.evaluate((i) => {
+        (window as unknown as { __skipClick: boolean }).__skipClick = true;
+        document.querySelectorAll<HTMLElement>('[data-stop-tabs] [role="tab"]')[i]!.click();
+      }, i);
+    const tabClicks = () =>
+      page.evaluate(() => {
+        const w = window as unknown as { __downTab: string | null; __tabClicks: string[] };
+        return JSON.stringify({ n: w.__tabClicks.length, last: w.__tabClicks.at(-1) ?? null, down: w.__downTab });
+      });
+    const tabIds = () => tabs.evaluateAll((all) => all.map((t) => t.id));
+
+    // Where things stand at rest with three stops, measured once.
+    await stopsAt(3);
+    const tabAt = [await centreOf(tabs.nth(0)), await centreOf(tabs.nth(1)), await centreOf(tabs.nth(2))];
+    const addAt3 = await centreOf(page.locator('[data-add-stop]'));
+    const streetAt = await centreOf(page.locator(STREET));
+
+    /* stopAdd: the third tab as it drops, pressed at its place. */
+    await run({
+      name: 'new tab',
+      aim: 'stopTab',
+      zone: '[data-stop-tabs]',
+      ready: async () => {
+        await stopsAt(2);
+        return tabAt[2]!;
+      },
+      start: () => clickFromPage('[data-add-stop]'),
+      read: async () => JSON.stringify({ ids: await tabIds(), clicks: await tabClicks() }),
+      landed: (b, a) => {
+        const was = JSON.parse(b) as { clicks: string };
+        const now = JSON.parse(a) as { ids: string[]; clicks: string };
+        const before = JSON.parse(was.clicks) as { n: number };
+        const after = JSON.parse(now.clicks) as { n: number; last: string | null };
+        return now.ids.length === 3 && after.n === before.n + 1 && after.last === now.ids[2];
+      },
+    });
+
+    /* stopAdd: Add stop as it slides on to its place under the new tab, pressed at that place. */
+    await run({
+      name: 'Add stop',
+      aim: 'addSlide',
+      zone: '[data-stop-tabs]',
+      ready: async () => {
+        await stopsAt(2);
+        return addAt3;
+      },
+      start: () => clickFromPage('[data-add-stop]'),
+      read: async () => String((await tabIds()).length),
+      // Its own Add, and then the press's.
+      landed: (_b, a) => a === '4',
+    });
+
+    /* stopRemove: the first stop removed; a press where the second tab will be lands on what is drawn there. */
+    await run({
+      name: 'tab sliding up',
+      aim: 'stopTabSlide',
+      zone: '[data-stop-tabs]',
+      ready: async () => {
+        await stopsAt(3);
+        return tabAt[1]!;
+      },
+      start: () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLButtonElement>('[role="tabpanel"] button')]
+            .find((b) => b.textContent?.trim() === 'Remove stop')!
+            .click(),
+        ),
+      read: async () => JSON.stringify({ ids: await tabIds(), clicks: await tabClicks() }),
+      // The tab drawn under the pointer as it came down; or, coming down between the drawn tabs, the
+      // tab arriving in that place (the second, once the first is gone), as §12.156 rule 10 says.
+      landed: (b, a) => {
+        const before = JSON.parse((JSON.parse(b) as { clicks: string }).clicks) as { n: number };
+        const now = JSON.parse(a) as { ids: string[]; clicks: string };
+        const after = JSON.parse(now.clicks) as { n: number; last: string | null; down: string | null };
+        return after.n === before.n + 1 && after.last === (after.down ?? now.ids[1]);
+      },
+    });
+
+    /* stopChoose: the third stop chosen from the first; the second tab pressed as the highlight goes under it. */
+    await run({
+      name: 'tab under the highlight',
+      aim: 'stopChoose',
+      zone: '[data-stop-tabs]',
+      ready: async () => {
+        await stopsAt(3);
+        return tabAt[1]!;
+      },
+      start: () => chooseFromPage(2),
+      read: async () => JSON.stringify({ ids: await tabIds(), clicks: await tabClicks() }),
+      landed: (b, a) => {
+        const before = JSON.parse((JSON.parse(b) as { clicks: string }).clicks) as { n: number };
+        const now = JSON.parse(a) as { ids: string[]; clicks: string };
+        const after = JSON.parse(now.clicks) as { n: number; last: string | null };
+        return after.n === before.n + 1 && after.last === now.ids[1];
+      },
+    });
+
+    /* stopChoose: the form as it drops, its street box pressed at its place. */
+    let next = 1;
+    await run({
+      name: 'dropping form',
+      aim: 'stopForm',
+      zone: '[role="tabpanel"]',
+      ready: async () => {
+        await stopsAt(3);
+        next = next === 1 ? 2 : 1;
+        return streetAt;
+      },
+      start: () => chooseFromPage(next),
+      read: () =>
+        page.evaluate(() => {
+          const el = document.activeElement;
+          return `${el?.closest('[role="tabpanel"]')?.getAttribute('data-stop-form') ?? '-'}:${el?.getAttribute('data-fill') ?? '-'}`;
+        }),
+      landed: (_b, a) => a === `${next + 1}:addressLine`,
+    });
+
+    /* loadStrip: the load number as it fades on Replace, pressed at its place. */
+    await stopsAt(1);
+    const loadNumber = dialog.locator('input[data-fill="loadNumber"]');
+    const loadNumberAt = await centreOf(loadNumber);
+    const strip = dialog.locator('[data-ratecon-strip]');
+    await run({
+      name: 'fading field',
+      aim: 'fillField:loadNumber',
+      zone: 'input[data-fill="loadNumber"]',
+      ready: async (i) => {
+        await loadNumber.fill(`VT-${i}`, { timeout: 5_000 });
+        await page.evaluate((text) => navigator.clipboard.writeText(text), PU_SO_PASTED);
+        await strip.getByLabel("Or paste the rate confirmation's text").focus({ timeout: 5_000 });
+        await page.keyboard.press('ControlOrMeta+v');
+        await strip.getByRole('button', { name: 'Replace' }).waitFor({ timeout: 5_000 });
+        await toTop();
+        await still();
+        await quiet(page);
+        return loadNumberAt;
+      },
+      start: () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLButtonElement>('[data-ratecon-strip] button')]
+            .find((b) => b.textContent?.trim() === 'Replace')!
+            .click(),
+        ),
+      read: () =>
+        page.evaluate(() => {
+          const el = document.activeElement as HTMLInputElement | null;
+          return `${el?.getAttribute('data-fill') ?? '-'}:${el?.value ?? ''}`;
+        }),
+      landed: (_b, a) => a === 'loadNumber:88123',
+    });
+
+    const table = tally.reduce<Record<string, { presses: number; misses: number; offTarget: number; mostMoved: number }>>((all, t) => {
+      const key = `${t.control} at ${t.time}ms`;
+      const row = (all[key] ??= { presses: 0, misses: 0, offTarget: 0, mostMoved: 0 });
+      row.presses += 1;
+      if (!t.ok) row.misses += 1;
+      if (t.offControl) row.offTarget += 1;
+      row.mostMoved = Math.max(row.mostMoved, Math.round(t.moved * 10) / 10);
+      return all;
+    }, {});
+    const report = JSON.stringify({ rows: table, misses: tally.filter((t) => !t.ok) }, null, 1);
+    await info.attach('edit-press-table', { body: report, contentType: 'application/json' });
+    process.stdout.write(`EDIT PRESS TABLE\n${report}\nEND EDIT PRESS TABLE\n`);
+    // Of the tab sliding up: the presses that came down between the drawn tabs, on the box.
+    const gaps = tally.filter((t) => t.control === 'tab sliding up' && t.gap).length;
+    process.stdout.write(`EDIT PRESS gaps: ${gaps} of ${tally.filter((t) => t.control === 'tab sliding up').length} came down between the drawn tabs\n`);
+
+    expect(tally).toHaveLength(TIMES.length * ROUNDS * 6);
     expect(tally.filter((t) => !t.ok)).toEqual([]);
     expect(tally.filter((t) => t.offControl)).toEqual([]);
     // What a press holds does not move under it; a hovered button's 1px lift may drop as it is pressed.

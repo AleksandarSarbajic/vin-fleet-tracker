@@ -1,9 +1,19 @@
 'use client';
 
-import { useRef, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore, type MutableRefObject } from 'react';
 import { isIanaZone } from '@/lib/appointment';
 import { timeInZone, zoneAbbreviation } from '@/lib/format';
 import { ADD_STOP_FULL, type StopForm, type StopFlags } from './load-form';
+import {
+  beforeAdd,
+  beforeChoose,
+  landChosen,
+  restingButton,
+  stopAdded,
+  stopChosen,
+  stopRemoved,
+  type StopCause,
+} from './stop-motion';
 
 /**
  * §12.119. The load's stops, beside the form at 1008px and up — the 960px
@@ -72,6 +82,7 @@ export function StopList({
   mayEdit,
   addBlocked,
   onAdd,
+  motion,
 }: {
   stops: StopForm[];
   flags: StopFlags[];
@@ -83,15 +94,65 @@ export function StopList({
   /** Why Add stop is off — a full load, or the role — or null. */
   addBlocked: string | null;
   onAdd: () => void;
+  /**
+   * §12.157. What a person just did to the stops: set in their own handler (Add stop and a tab's
+   * click or arrow key here, Remove stop in the modal), and spent by the commit it causes.
+   */
+  motion: MutableRefObject<StopCause | null>;
 }) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const box = useRef<HTMLDivElement | null>(null);
+  const tablist = useRef<HTMLDivElement | null>(null);
   const twoPane = useTwoPane();
 
+  /** A person's choice: a tab's click, or an arrow key. Only another stop may slide. */
+  const choose = (index: number) => {
+    if (index !== selected && box.current) motion.current = beforeChoose(box.current);
+    onSelect(index);
+  };
   const move = (to: number) => {
     const index = (to + stops.length) % stops.length;
-    onSelect(index);
+    choose(index);
     tabs.current[index]?.focus();
   };
+
+  /**
+   * §12.157. The commit a person's change lands in, compared with the one before: a stop added,
+   * a stop gone, another stop chosen. Anything else that changes the stops or the choice (a fill,
+   * a save's refusal choosing the stop it names, a reload) has no cause here and plays nothing,
+   * and ends a highlight still on its way.
+   */
+  const last = useRef<{ keys: string[]; selectedKey: string | null } | null>(null);
+  useLayoutEffect(() => {
+    const keys = stops.map((s) => s.key);
+    const selectedKey = stops[selected]?.key ?? null;
+    const was = last.current;
+    last.current = { keys, selectedKey };
+    const cause = motion.current;
+    motion.current = null;
+    if (!was) return;
+    const sameStops = keys.length === was.keys.length && keys.every((k, i) => k === was.keys[i]);
+    if (sameStops && selectedKey === was.selectedKey) return;
+    const list = tablist.current;
+    if (cause?.kind === 'choose' && sameStops && list && was.selectedKey !== null && selectedKey !== null) {
+      const from = document.getElementById(stopTabId(was.selectedKey));
+      const to = document.getElementById(stopTabId(selectedKey));
+      if (from && to) {
+        stopChosen(list, from, to);
+        return;
+      }
+    }
+    if (list) landChosen(list);
+    if (cause?.kind === 'add') {
+      const added = keys.filter((k) => !was.keys.includes(k));
+      const tab = added.length === 1 ? document.getElementById(stopTabId(added[0]!)) : null;
+      if (tab && keys.length === was.keys.length + 1) stopAdded(cause, tab);
+    } else if (cause?.kind === 'remove') {
+      if (keys.length === was.keys.length - 1 && document.getElementById(cause.gone) === null) {
+        stopRemoved(cause);
+      }
+    }
+  });
 
   return (
     <div
@@ -107,11 +168,23 @@ export function StopList({
           </span>
           <span className="text-small text-text-mutedOnOverlay">{stops.length}</span>
         </div>
+        {/*
+          §12.157. The box the tabs and Add stop move in, measured against and clipped while
+          something comes into it, never the scroller around it. A click on it where nothing is
+          drawn yet goes to the button arriving in that place.
+        */}
         <div
+          ref={box}
+          data-stop-tabs=""
+          className="relative isolate flex gap-1.5 min-[1008px]:flex-col"
+          onClick={(event) => restingButton(event.currentTarget, event.nativeEvent)?.click()}
+        >
+        <div
+          ref={tablist}
           role="tablist"
           aria-label="Stops on this load"
           aria-orientation={twoPane ? 'vertical' : 'horizontal'}
-          className="flex gap-1.5 min-[1008px]:flex-col"
+          className="relative isolate z-[1] flex gap-1.5 min-[1008px]:flex-col"
           onKeyDown={(event) => {
             const back = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
             const ahead = event.key === 'ArrowDown' || event.key === 'ArrowRight';
@@ -151,7 +224,7 @@ export function StopList({
                 tabIndex={isSelected ? 0 : -1}
                 data-stop-row={i + 1}
                 data-departed={f.departed ? '' : undefined}
-                onClick={() => onSelect(i)}
+                onClick={() => choose(i)}
                 className={`flex min-w-[200px] shrink-0 items-center gap-2 border p-2 text-left min-[1008px]:min-w-0 ${
                   isSelected
                     ? 'border-accent bg-accent-veil'
@@ -205,11 +278,15 @@ export function StopList({
           data-add-stop=""
           disabled={!mayEdit || addBlocked !== null}
           title={addBlocked ?? undefined}
-          onClick={onAdd}
+          onClick={() => {
+            if (box.current) motion.current = beforeAdd(box.current);
+            onAdd();
+          }}
           className="flex h-9 min-w-[120px] shrink-0 items-center justify-center gap-1.5 border border-dashed border-line-hair px-3 font-cond text-micro font-semibold uppercase tracking-[.09em] text-text-secondary hover:border-accent hover:text-accent disabled:opacity-45 disabled:hover:border-line-hair disabled:hover:text-text-secondary min-[1008px]:min-w-0"
         >
           <span aria-hidden="true">+</span> Add stop
         </button>
+        </div>
         {addBlocked === ADD_STOP_FULL ? (
           <p className="shrink-0 self-center text-small text-text-mutedOnOverlay min-[1008px]:self-auto">
             {ADD_STOP_FULL}

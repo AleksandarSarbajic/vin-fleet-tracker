@@ -34,6 +34,15 @@ export function fadeIn(el: Element, ms: number): Animation | null {
   return play(el, [{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: EASING.fade });
 }
 
+/**
+ * §12.157. A fade reversed: goes out where it stands and goes nowhere. For a copy of what a
+ * person took away, never for the thing itself.
+ */
+export function fadeOut(el: Element, ms: number): Animation | null {
+  if (taken(ms)) return null;
+  return play(el, [{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: EASING.fade });
+}
+
 /** Grows into its place from `from` of its size. Smaller, so it never reaches past its box. */
 export function popIn(el: Element, ms: number, from: number): Animation | null {
   if (taken(ms)) return null;

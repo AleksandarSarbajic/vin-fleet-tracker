@@ -179,7 +179,11 @@ export function AppointmentFields({
               {fillCheck}
             </p>
           ) : null}
-          {fillSource ? <p className="break-words text-text-mutedOnOverlay">{fillSource}</p> : null}
+          {fillSource ? (
+            <p data-fill-source="appointment" className="break-words text-text-mutedOnOverlay">
+              {fillSource}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -187,13 +191,14 @@ export function AppointmentFields({
         <label className="flex items-center gap-2 text-body text-text-secondary">
           <input
             type="checkbox"
+            data-fill="appointment.enabled"
             checked={draft.enabled}
             onChange={(e) => set({ enabled: e.target.checked })}
           />
           This stop has an appointment
         </label>
         {draft.enabled ? (
-          <div className="ml-auto flex border border-line-hair">
+          <div data-fill="appointment.type" className="ml-auto flex border border-line-hair">
             {(['APPT', 'FCFS'] as const).map((type) => (
               <button
                 key={type}
@@ -234,6 +239,7 @@ export function AppointmentFields({
               </span>
               <input
                 type="date"
+                data-fill="appointment.date"
                 data-initial-focus={initialFocus ? '' : undefined}
                 value={draft.date}
                 onChange={(e) => set({ date: e.target.value })}
@@ -255,6 +261,7 @@ export function AppointmentFields({
               <span className="relative block">
                 <input
                   type="time"
+                  data-fill="appointment.time"
                   value={draft.time}
                   onChange={(e) => set({ time: e.target.value })}
                   aria-describedby="appt-help"
@@ -284,6 +291,7 @@ export function AppointmentFields({
                 <span className="relative block">
                   <input
                     type="time"
+                    data-fill="appointment.endTime"
                     value={draft.endTime}
                     onChange={(e) => set({ endTime: e.target.value })}
                     aria-describedby="appt-help"
@@ -297,6 +305,7 @@ export function AppointmentFields({
                 </span>
               ) : (
                 <select
+                  data-fill="appointment.windowMinutes"
                   value={draft.windowMinutes}
                   onChange={(e) => set({ windowMinutes: Number(e.target.value) })}
                   className="h-10 w-full border border-line-hair bg-surface-sunken px-2 text-body text-text"
@@ -335,6 +344,7 @@ export function AppointmentFields({
                 Facility time zone
               </span>
               <select
+                data-fill="tz"
                 value={draft.tz}
                 aria-describedby={zoneCheck ? 'zone-check' : undefined}
                 onChange={(e) => set({ tz: e.target.value })}
@@ -359,7 +369,7 @@ export function AppointmentFields({
           </div>
 
           {zoneSource && !zoneCheck ? (
-            <p data-zone-source="" className="mt-1.5 text-small text-text-mutedOnOverlay">
+            <p data-zone-source="" data-fill-source="zone" className="mt-1.5 text-small text-text-mutedOnOverlay">
               Zone: {zoneSource}
             </p>
           ) : null}

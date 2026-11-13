@@ -119,6 +119,7 @@ export function LoadStrip({
           onChange={onLoadNumber}
           error={loadNumberError}
           source={loadNumberSource}
+          fill="loadNumber"
           check={loadNumberCheck}
           ai={loadNumberAi}
           help="Any format the broker uses, or leave it blank (§12.21)"

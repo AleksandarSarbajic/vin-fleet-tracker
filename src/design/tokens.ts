@@ -354,6 +354,25 @@ export const MOTION_MS = {
   timelineDraw: 450,
   timelineDrawCard: 180,
   timelineDrawGapMax: 30,
+
+  /*
+   * §12.157. The edit window's medium motions (phase 3bp), at the demo's Bold. One token each,
+   * as above: 0 turns one off, its On value weakens it.
+   */
+  /** A stop a person added: its tab drops into the list, and Add stop slides to its new place. */
+  stopAddDrop: 270,
+  /**
+   * A stop a person removed: a copy of its tab fades where it was, nothing can use it, and the
+   * tabs after it and Add stop slide into their new places.
+   */
+  stopRemoveSlide: 270,
+  /** A stop a person chose: the highlight slides to its tab, and its form drops in. */
+  stopChooseDrop: 270,
+  /**
+   * A fill from a rate confirmation, on Replace or a read landing: each field whose value
+   * changed fades in, and its source line drops in under it.
+   */
+  loadStripDrop: 270,
 } as const;
 
 /**
@@ -408,6 +427,11 @@ export const MOTION_SHAPE = {
   viewsDropPx: 14,
   /** A truck pops in from this scale, and a removed one pops out to it. */
   listChipsPopFromScale: 0.5,
+
+  /** §12.157, beside its durations above. Each drops from above, this far. */
+  stopAddDropPx: 14,
+  stopChooseDropPx: 14,
+  loadStripDropPx: 14,
 } as const;
 
 /**

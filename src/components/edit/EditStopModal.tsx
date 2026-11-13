@@ -80,7 +80,15 @@ import {
   type StopForm as StopFormState,
 } from './load-form';
 import { LoadStrip } from './LoadStrip';
-import { STOP_FORM_ID, StopList } from './StopList';
+import { STOP_FORM_ID, StopList, stopTabId } from './StopList';
+import {
+  beforeRemove,
+  fillValues,
+  filled,
+  formChosen,
+  type FillValues,
+  type StopCause,
+} from './stop-motion';
 import { RateconStrip } from './RateconStrip';
 import { fillSnapshot } from './fill-outcome';
 import { recordFillOutcome, type PendingOutcome } from './record-outcome';
@@ -454,10 +462,29 @@ function LoadEditor({
     setSelected(added.form.stops.length - 1);
     setFocusAddressOf(added.key);
   }, [form, openedAt]);
+  /**
+   * §12.157. What a person just did to the stops, for the list (`StopList`); whether the form now
+   * on screen was chosen, so it drops; and what the fields drew before a fill, so the changed
+   * ones fade. Each set in the person's own handler and spent by the commit it causes.
+   */
+  const stopMotion = useRef<StopCause | null>(null);
+  const formDrops = useRef(false);
+  const fillFrom = useRef<FillValues | null>(null);
+  const chooseStop = useCallback(
+    (index: number) => {
+      if (index !== selected) formDrops.current = true;
+      setSelected(index);
+    },
+    [selected],
+  );
   const removeOne = useCallback(
     (key: string) => {
       const index = form.stops.findIndex((s) => s.key === key);
       if (index === -1) return;
+      // Taken before React removes the tab: where everything stands, and a copy of it.
+      const tab = document.getElementById(stopTabId(key));
+      const tabsBox = tab?.closest<HTMLElement>('[data-stop-tabs]');
+      stopMotion.current = tab && tabsBox ? beforeRemove(tabsBox, tab) : null;
       setForm(removeStop(form, key));
       // The stop below takes its place; the last one's place is taken by the one above.
       setSelected(Math.min(index, form.stops.length - 2));
@@ -651,6 +678,28 @@ function LoadEditor({
   const current = form.stops[selected] ?? form.stops[0]!;
   const currentFlags = flags[selected] ?? flags[0]!;
   const initialCurrent = initialForm.stops.find((s) => s.key === current.key);
+
+  /**
+   * §12.157. The commit a person's choice or a fill lands in, compared with the one before. The
+   * chosen stop's form, remounted by its key, drops in; any other new form (a stop added or
+   * removed, a fill, a save's refusal naming a stop) is simply there. After a fill, each field
+   * whose value changed fades in with its source line. A poll changes none of it: the form is
+   * frozen at the first read (§12.119), and neither cause is ever set by one.
+   */
+  const drawnKey = useRef(current.key);
+  useLayoutEffect(() => {
+    const wasKey = drawnKey.current;
+    drawnKey.current = current.key;
+    const chose = formDrops.current;
+    formDrops.current = false;
+    const before = fillFrom.current;
+    fillFrom.current = null;
+    const formEl = document.getElementById(STOP_FORM_ID);
+    if (chose && wasKey !== current.key && formEl) formChosen(formEl);
+    if (before && formEl) {
+      filled(formEl.closest('[role="dialog"]') ?? formEl, before, fillValues(form.loadNumber, current));
+    }
+  });
 
   /* ------------------------------- Clear now ---------------------------- */
 
@@ -1334,6 +1383,8 @@ function LoadEditor({
               onFill={(read, meta, from) => {
                 const filled = fillLoad(form, read, openedAt, new Date(), from);
                 if (!filled.ok) return filled.message;
+                // §12.157. What the fields draw now, for the commit this fill lands in.
+                fillFrom.current = fillValues(form.loadNumber, current);
                 setForm(filled.form);
                 setSelected(0);
                 // An AI read that filled the form waits for the first save after it; any other fill replaces it.
@@ -1351,10 +1402,11 @@ function LoadEditor({
               selected={selected}
               dirtyKeys={new Set(dirty.stops.keys())}
               errorKeys={errorKeys}
-              onSelect={setSelected}
+              onSelect={chooseStop}
               mayEdit={mayEdit && !saving}
               addBlocked={mayEdit ? addBlocked(form) : lockedReason}
               onAdd={addOne}
+              motion={stopMotion}
             />
             <StopForm
               key={current.key}

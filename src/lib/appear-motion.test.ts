@@ -8,6 +8,7 @@ import {
   dropIn,
   dropOn,
   dropOut,
+  fadeOut,
   fadeIn,
   groundPop,
   popIn,
@@ -287,6 +288,22 @@ describe('the medium motions’ shapes (§12.156)', () => {
     const called: Element[] = [];
     drawIn([placed(0)], placed(0, 600), 450, 180, 30, (row) => called.push(row));
     expect(called).toEqual([]);
+    expect(recorder.played).toEqual([]);
+  });
+});
+
+describe('the edit window’s medium motions’ shapes (§12.157)', () => {
+  it('a fade reversed goes out where it stands in 270ms, linear, and goes nowhere', () => {
+    fadeOut(el(), 270);
+    expect(recorder.played.map((p) => ({ keyframes: p.keyframes, ...p.options }))).toEqual([
+      { keyframes: [{ opacity: 1 }, { opacity: 0 }], duration: 270, easing: 'linear' },
+    ]);
+  });
+
+  it('taken back (0) or reduced, it does not run', () => {
+    expect(fadeOut(el(), 0)).toBeNull();
+    unreduce = reduceMotion();
+    expect(fadeOut(el(), 270)).toBeNull();
     expect(recorder.played).toEqual([]);
   });
 });

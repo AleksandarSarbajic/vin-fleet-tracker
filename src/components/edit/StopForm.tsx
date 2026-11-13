@@ -124,7 +124,7 @@ export function StopForm({
         <span className="font-cond text-[15px] font-semibold uppercase tracking-[.07em] text-text">
           Stop {index + 1}
         </span>
-        <div role="group" aria-label="Stop type" className="flex">
+        <div role="group" aria-label="Stop type" data-fill="stopType" className="flex">
           {(
             [
               ['PU', 'Pick up'],
@@ -193,7 +193,11 @@ export function StopForm({
         <div data-type-fill="" className="flex flex-col gap-0.5 text-small">
           {fill.checks.stopType ? <p className="text-status-risk-fg">{checkSaid(fill.checks.stopType)}</p> : null}
           {fill.sources.stopType ? (
-            <p {...(aiFields.has('stopType') ? { 'data-field-ai': '' } : {})} className="break-words text-text-mutedOnOverlay">
+            <p
+              data-fill-source="stopType"
+              {...(aiFields.has('stopType') ? { 'data-field-ai': '' } : {})}
+              className="break-words text-text-mutedOnOverlay"
+            >
               {sourceOf('stopType')}
             </p>
           ) : null}
@@ -254,6 +258,7 @@ export function StopForm({
               check={checkOf('addressLine')}
               source={sourceOf('addressLine')}
               ai={aiFields.has('addressLine')}
+              fill="addressLine"
             />
           </div>
           <Field
@@ -264,6 +269,7 @@ export function StopForm({
             check={checkOf('zip') ?? zipState ?? undefined}
             source={sourceOf('zip')}
             ai={aiFields.has('zip')}
+            fill="zip"
           />
           <div className="col-span-2">
             <Field
@@ -274,6 +280,7 @@ export function StopForm({
               check={checkOf('city')}
               source={sourceOf('city')}
               ai={aiFields.has('city')}
+              fill="city"
             />
           </div>
           <Field
@@ -285,6 +292,7 @@ export function StopForm({
             check={checkOf('state')}
             source={sourceOf('state')}
             ai={aiFields.has('state')}
+            fill="state"
           />
         </div>
       </fieldset>

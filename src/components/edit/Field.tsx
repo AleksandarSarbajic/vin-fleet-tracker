@@ -20,6 +20,7 @@ export function Field({
   check,
   source,
   ai = false,
+  fill,
 }: {
   label: string;
   value: string;
@@ -36,6 +37,8 @@ export function Field({
   source?: string | undefined;
   /** The language-model reader filled it, and nobody has confirmed it yet: the source is its AI mark. */
   ai?: boolean;
+  /** §12.157. The fill's name for this field: its input fades, and its source drops, when a fill changes it. */
+  fill?: string;
 }) {
   /**
    * §12.152. A new message drops in under its field: keyed by its words, so a re-render
@@ -59,6 +62,7 @@ export function Field({
       <input
         ref={inputRef}
         type="text"
+        data-fill={fill}
         value={value}
         placeholder={placeholder}
         disabled={disabled}
@@ -82,6 +86,7 @@ export function Field({
       {source ? (
         <span
           data-field-source=""
+          data-fill-source={fill}
           {...(ai ? { 'data-field-ai': '' } : {})}
           className={`mt-1 block break-words text-small ${ai ? 'text-text-secondary' : 'text-text-mutedOnOverlay'}`}
         >

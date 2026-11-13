@@ -349,6 +349,12 @@
     background-color: transparent !important;
   }
 
+  /* §12.157. The chosen stop's highlight is on its way to this tab: its look arrives with it. */
+  [data-stop-target] {
+    background-color: transparent !important;
+    border-color: transparent !important;
+  }
+
   /*
    * The row's grey hover bar: a state, not motion, so it stays under reduced
    * motion, where it simply appears. A pseudo-element, so the row itself has
