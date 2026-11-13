@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { can, type Role } from '@/lib/roles';
+import { MOTION_MS } from '@/design/tokens';
+import { fadeIn } from '@/lib/appear-motion';
+import { mayMove } from '@/lib/motion';
+import { glideFrom, placesOf } from '@/components/console/list-motion';
 import type { OpenMergeCandidate } from '@/server/drivers';
 
 /**
@@ -17,7 +21,13 @@ import type { OpenMergeCandidate } from '@/server/drivers';
  * was asked, and nobody was asked anything. Without this the duplicate sits
  * there silently while assignment history accrues against the wrong row.
  */
-export function MergePrompt({ role }: { role: Role }) {
+/** §12.158. What stands below the prompt, and the box it is measured in and clipped by. */
+export type MergeBelow = () => { box: HTMLElement; items: HTMLElement[] } | null;
+
+const belowKey = (el: HTMLElement) =>
+  el.hasAttribute('data-asg-head') ? 'head' : el.hasAttribute('data-asg-rows') ? 'rows' : null;
+
+export function MergePrompt({ role, below }: { role: Role; below?: MergeBelow }) {
   const [candidates, setCandidates] = useState<OpenMergeCandidate[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +41,31 @@ export function MergePrompt({ role }: { role: Role }) {
    */
   const [checked, setChecked] = useState<'loading' | 'ready' | 'failed'>('loading');
 
+  /**
+   * §12.158, asgMerge. The prompt arrives by itself, from a fetch, so it only fades in where it
+   * lands (opacity, nothing moves), and what is below it jumps down, as the feed banner's rows
+   * do. A person's answer is the other cause: set in `act`, the person's own handler, and read
+   * in `load` just before the answer's new list lands, where what stood below the prompt is
+   * still drawn. The commit that list lands in slides those up from there. A failed answer
+   * leaves the list as it was, and spends it.
+   */
+  const shownBox = useRef<HTMLDivElement | null>(null);
+  const answering = useRef(false);
+  const stood = useRef<{ places: Map<string, DOMRect>; box: HTMLElement; items: HTMLElement[] } | null>(null);
+  const wasShown = useRef(false);
+  // In a ref, so `load` never changes with it: a new `load` would check again.
+  const belowNow = useRef(below);
+  useLayoutEffect(() => {
+    belowNow.current = below;
+  });
+  const standing = useCallback(() => {
+    if (!answering.current || MOTION_MS.asgMergeFade <= 0) return;
+    answering.current = false;
+    const under = belowNow.current?.();
+    if (!under || !mayMove(under.box)) return;
+    stood.current = { places: placesOf(under.items, belowKey, under.box), ...under };
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const response = await fetch('/api/drivers', { cache: 'no-store' });
@@ -40,6 +75,7 @@ export function MergePrompt({ role }: { role: Role }) {
       const body = (await response.json()) as { candidates?: OpenMergeCandidate[] };
       // `{}` from a route handler is not "no candidates" either.
       if (!Array.isArray(body.candidates)) throw new Error('/api/drivers returned no candidate list');
+      standing();
       setCandidates(body.candidates);
       setChecked('ready');
     } catch (cause: unknown) {
@@ -49,15 +85,27 @@ export function MergePrompt({ role }: { role: Role }) {
        * whoever has to find out why. Neither one alone is a handler.
        */
       console.error('merge candidate check failed', cause);
+      standing();
       setChecked('failed');
     }
-  }, []);
+  }, [standing]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const shown = checked === 'ready' && candidates.length > 0;
+  useLayoutEffect(() => {
+    const was = wasShown.current;
+    wasShown.current = shown;
+    const slide = stood.current;
+    stood.current = null;
+    if (slide) glideFrom(slide.places, slide.items, belowKey, slide.box, MOTION_MS.asgMergeFade);
+    if (shown && !was && shownBox.current) fadeIn(shownBox.current, MOTION_MS.asgMergeFade);
+  });
+
   const act = async (body: Record<string, unknown>, id: string) => {
+    answering.current = true;
     setBusy(id);
     setError(null);
     try {
@@ -78,6 +126,7 @@ export function MergePrompt({ role }: { role: Role }) {
       console.error('merge action failed', cause);
       setError('That could not be completed.');
     } finally {
+      answering.current = false;
       setBusy(null);
     }
   };
@@ -120,7 +169,7 @@ export function MergePrompt({ role }: { role: Role }) {
   const mayLink = can(role, 'admin');
 
   return (
-    <div className="mb-4 border border-status-risk-bd bg-status-risk-bg p-3">
+    <div ref={shownBox} data-merge-prompt="" className="mb-4 border border-status-risk-bd bg-status-risk-bg p-3">
       <h2 className="mb-2 font-cond text-micro uppercase tracking-[.11em] text-status-risk-fg">
         Possible duplicate {candidates.length === 1 ? 'driver' : 'drivers'}
       </h2>

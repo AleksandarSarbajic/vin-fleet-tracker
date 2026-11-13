@@ -10,8 +10,8 @@ import { HeaderClocks, HeaderSync, useHeaderNow } from '@/components/console/Hea
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { useGoKeys } from '@/hooks/useGoKeys';
 import { FILTER_KEYS } from '@/components/console/FilterChips';
-import { MOTION_MS, palette } from '@/design/tokens';
-import { drawIn } from '@/lib/appear-motion';
+import { MOTION_MS, MOTION_SHAPE, palette } from '@/design/tokens';
+import { drawIn, slideIn } from '@/lib/appear-motion';
 import { cameByPageChange } from '@/lib/page-arrival';
 import { BRAND } from '@/lib/brand';
 import { timeInZone } from '@/lib/format';
@@ -181,6 +181,37 @@ export function HistoryPage({
   });
   const view = query.data;
 
+  /**
+   * §12.158, histWeek. A week a person moved to on the desktop page (the arrows, This week, the
+   * picker, a state's own Previous week or first week) swings its rows in from the side it lies
+   * on: an earlier week from the left, where Previous is, a later one from the right. The cause
+   * is set here, in the person's own handler, with the week it is for and its side, and spent in
+   * the first commit after it that is no longer waiting for that week: the commit its rows land
+   * in, from the cache at once or from the network after the skeleton (which keeps its pulse and
+   * nothing more). A week that lands with no rows, or fails, spends it with nothing played. So a
+   * refetch or a poll of the same week, the page a load lands on, Back to History (a remount, with
+   * no cause) and the phone's week (`phoneWeek`, below) play nothing.
+   */
+  const swing = useRef<{ week: string; dx: number } | null>(null);
+  const toWeek = (to: IsoWeek) => {
+    const step = weeksFrom(week, to);
+    if (step !== 0) swing.current = { week: formatIsoWeek(to), dx: Math.sign(step) * MOTION_SHAPE.histWeekSwingPx };
+    setWeek(to);
+  };
+  const waitingForWeek = !beforeRecords && view === undefined && !(query.isError && !query.isFetching);
+  useLayoutEffect(() => {
+    const cause = swing.current;
+    if (!cause) return;
+    if (cause.week === weekKey && waitingForWeek) return;
+    swing.current = null;
+    if (cause.week !== weekKey) return;
+    const rows = [...(scroller.current?.querySelectorAll<HTMLElement>('[data-driver-row]') ?? [])];
+    const table = rows[0]?.closest<HTMLElement>('[role="table"]');
+    if (!table) return;
+    // Each row, not their group: on screen the group is `display: contents`, with no box to move.
+    for (const row of rows) slideIn(row, table, MOTION_MS.histWeekSwing, cause.dx);
+  });
+
   const needle = q.trim().toLowerCase();
   const rows = useMemo(
     () => (view ? view.rows.filter((r) => !needle || r.name.toLowerCase().includes(needle)) : []),
@@ -334,7 +365,7 @@ export function HistoryPage({
           current={current}
           today={today}
           firstDay={FIRST_DAY}
-          onWeek={setWeek}
+          onWeek={toWeek}
           q={q}
           onQ={setQ}
         />
@@ -397,8 +428,8 @@ export function HistoryPage({
               <Frame view={null} week={week} todayIndex={todayIndex}>
                 <BeforeRecords
                   firstWeekLabel={rangeLabel(isoWeekOf(FIRST_DAY)).replace(/, \d{4}$/, '')}
-                  onFirstWeek={() => setWeek(isoWeekOf(FIRST_DAY))}
-                  onThisWeek={() => setWeek(current)}
+                  onFirstWeek={() => toWeek(isoWeekOf(FIRST_DAY))}
+                  onThisWeek={() => toWeek(current)}
                 />
               </Frame>
             ) : view && rows.length > 0 && view.counts.loads > 0 ? (
@@ -421,7 +452,7 @@ export function HistoryPage({
                 <EmptyWeek
                   range={view.range}
                   drivers={driverCount}
-                  onPrevious={() => setWeek(shiftWeek(week, -1))}
+                  onPrevious={() => toWeek(shiftWeek(week, -1))}
                 />
               </Frame>
             ) : query.isError ? (
@@ -430,7 +461,7 @@ export function HistoryPage({
                   range={rangeLabel(week)}
                   detail={errorDetail}
                   onRetry={() => void query.refetch()}
-                  onPrevious={() => setWeek(shiftWeek(week, -1))}
+                  onPrevious={() => toWeek(shiftWeek(week, -1))}
                 />
               </Frame>
             ) : (

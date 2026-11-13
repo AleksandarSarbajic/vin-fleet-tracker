@@ -149,7 +149,7 @@ describe('asgRows: the rows in view draw in when a change of page opens the boar
     expect(recorder.played).toEqual([]);
   });
 
-  it('a refresh, a tab and the search play nothing more', async () => {
+  it('a refresh, a tab and the search draw no rows: a tab plays only its own glide (§12.158)', async () => {
     await render();
     const before = recorder.played.length;
     await render({ ...BOARD, trucks: BOARD.trucks.map((t) => ({ ...t })) });
@@ -157,7 +157,8 @@ describe('asgRows: the rows in view draw in when a change of page opens the boar
     await act(async () => button(/^All/).click());
     await typeInto(container!.querySelector<HTMLInputElement>('input[aria-label="Search trucks, drivers or phones"]')!, '14');
     expect(container!.querySelectorAll('[data-asg-row]')).toHaveLength(1);
-    expect(recorder.played.slice(before)).toEqual([]);
+    // Phase 3br: a tab now glides (asgTab, 390ms, `assign-medium-motion.test.tsx`); nothing else plays.
+    expect(recorder.played.slice(before).filter((p) => p.options.duration !== 390)).toEqual([]);
   });
 
   it('under reduced motion nothing plays, and the rows are there', async () => {

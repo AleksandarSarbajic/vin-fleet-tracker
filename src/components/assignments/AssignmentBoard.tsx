@@ -28,8 +28,10 @@ import { formatPhone } from '@/lib/dial';
 import { useFleet, type FleetResponse } from '@/hooks/useFleet';
 import { Currently } from './Currently';
 import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
-import { drawIn, dropIn } from '@/lib/appear-motion';
+import { drawIn, dropIn, fadeIn } from '@/lib/appear-motion';
+import { mayMove } from '@/lib/motion';
 import { cameByPageChange } from '@/lib/page-arrival';
+import { glideFrom, placesOf } from '@/components/console/list-motion';
 
 /**
  * Day-one data entry, and the screen a dispatcher returns to whenever the
@@ -485,6 +487,52 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
   });
 
   /**
+   * §12.158, asgTab. A tab a person chose: where each row was drawn in the rows' box is read in
+   * its own handler, before the commit, and the commit it causes spends it. The rows that stay
+   * glide from there to their new places, the rows that come fade in where they land, and the
+   * rows that go are gone at once, as the demo has it. Only this handler sets it, so the picker's
+   * own `setFilter('all')` (`openPickerFor`, above), the search, a refresh and a poll play nothing.
+   * The sticky column header is a sibling before the box, drawn over it at `z-10`.
+   */
+  const rowsBox = useRef<HTMLDivElement | null>(null);
+  const tabbed = useRef<Map<string, DOMRect> | null>(null);
+  const rowKey = (el: HTMLElement) => el.getAttribute('data-asg-row');
+  const chooseTab = (key: BoardFilter) => {
+    const box = rowsBox.current;
+    if (key !== filter && box && MOTION_MS.asgTabGlide > 0 && mayMove(box)) {
+      tabbed.current = placesOf(box.querySelectorAll<HTMLElement>('[data-asg-row]'), rowKey, box);
+    }
+    setFilter(key);
+  };
+  useLayoutEffect(() => {
+    const before = tabbed.current;
+    const box = rowsBox.current;
+    if (!before) return;
+    tabbed.current = null;
+    if (!box) return;
+    const rows = [...box.querySelectorAll<HTMLElement>('[data-asg-row]')];
+    glideFrom(before, rows, rowKey, box, MOTION_MS.asgTabGlide);
+    for (const row of rows) {
+      if (!before.has(rowKey(row) ?? '')) fadeIn(row, MOTION_MS.asgTabGlide);
+    }
+  });
+
+  /**
+   * §12.158, asgMerge. What stands below the duplicate-driver prompt, for the slide when a person
+   * answers it: the column header and the rows' box, measured in the table's section, which
+   * clips while they move. The prompt's own fade and the answer's cause are `MergePrompt`'s.
+   */
+  const section = useRef<HTMLElement | null>(null);
+  const mergeBelow = useCallback(() => {
+    const box = section.current;
+    if (!box) return null;
+    return {
+      box,
+      items: [...box.querySelectorAll<HTMLElement>(':scope > [data-asg-head], :scope > [data-asg-rows]')],
+    };
+  }, []);
+
+  /**
    * §12.153. "Saved — …" drops in as its words land in the footer, which is the commit the
    * saved board's rebase clears the draft in. Keyed by what the footer says, so a re-render
    * plays nothing, and a second save says it again after "N rows changed" in between.
@@ -635,7 +683,7 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
               key={key}
               type="button"
               aria-pressed={filter === key}
-              onClick={() => setFilter(key)}
+              onClick={() => chooseTab(key)}
               className={`flex h-7 shrink-0 items-center gap-[6px] whitespace-nowrap border px-[9px] font-cond text-[11.5px] font-semibold uppercase leading-none tracking-[.08em] transition-colors duration-ground ${
                 filter === key
                   ? 'border-accent bg-surface-overlay text-text'
@@ -679,15 +727,16 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
           rules 900px past its last value, and put the gaps panel 900px from
           the phone column. The ground beyond the panels is left empty.
         */}
-        <section className="min-w-0 min-[1100px]:max-w-[1000px] min-[1100px]:flex-1">
+        <section ref={section} className="min-w-0 min-[1100px]:max-w-[1000px] min-[1100px]:flex-1">
           {/* §12.37: above the board, where a dispatcher is already thinking
               about who is on what. Renders nothing when there is nothing to
               ask. */}
           <div className="pt-5 empty:hidden">
-            <MergePrompt role={role} />
+            <MergePrompt role={role} below={mergeBelow} />
           </div>
           {/* Sticky, so a dispatcher 15 rows down still knows which name is the picker's. */}
           <div
+            data-asg-head=""
             className={`sticky top-0 z-10 grid ${COLUMNS} items-center gap-x-4 border-b border-l-[3px] border-line-hair border-l-transparent bg-surface-base pb-2 pt-5 font-cond text-micro uppercase tracking-[.11em] text-text-muted`}
           >
             {/* 8px clear of the rows' 3px left edge, on every row, so the numbers line up. */}
@@ -699,6 +748,11 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
             <span className={CURRENTLY_SHOWN}>Currently</span>
           </div>
 
+          {/*
+            §12.158. The rows' own box: what a tab's glide measures in and clips, never the
+            scroller. A plain block, so the rows are laid out as they were.
+          */}
+          <div ref={rowsBox} data-asg-rows="">
           {/* §12.106: a row's `driver` is the picker's, so the phone shown is theirs, not the truck's. */}
           {visible.map(({ truck, driverId: value, driver }) => {
             const isChanged = value !== truck.driverId;
@@ -866,6 +920,7 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
           {visible.length === 0 ? (
             <p className="px-2.5 py-6 text-body text-text-muted">No trucks match.</p>
           ) : null}
+          </div>
         </section>
 
         {/*

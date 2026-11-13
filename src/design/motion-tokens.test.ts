@@ -224,3 +224,18 @@ describe('the numbers of the edit window’s medium motions (§12.157)', () => {
     expect(MOTION_SHAPE.loadStripDropPx).toBe(14);
   });
 });
+
+describe('the numbers of the last medium motions off the map and the phone (§12.158)', () => {
+  it('a change of week swings its rows in from 40px to the side, in 270ms', () => {
+    expect(MOTION_MS.histWeekSwing).toBe(270);
+    expect(MOTION_SHAPE.histWeekSwingPx).toBe(40);
+  });
+
+  it('the duplicate-driver prompt fades in, and an answer slides what was below it, in 270ms', () => {
+    expect(MOTION_MS.asgMergeFade).toBe(270);
+  });
+
+  it('a tab on Assignments glides its rows and fades in the new ones, in 390ms', () => {
+    expect(MOTION_MS.asgTabGlide).toBe(390);
+  });
+});

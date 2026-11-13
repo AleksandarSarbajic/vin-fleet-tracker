@@ -373,6 +373,26 @@ export const MOTION_MS = {
    * changed fades in, and its source line drops in under it.
    */
   loadStripDrop: 270,
+
+  /*
+   * §12.158. The last medium motions off the map and the phone (phase 3br), at the demo's
+   * Bold. One token each, as above: 0 turns one off, its On value weakens it.
+   */
+  /**
+   * A week a person moved to on History: its rows come in from the side of the arrow, in the
+   * commit they land in, from the cache or the network. Never a refetch, a poll or Back.
+   */
+  histWeekSwing: 270,
+  /**
+   * The duplicate-driver prompt on Assignments: it fades in where it arrives (opacity only: it
+   * comes by itself, from a fetch), and when a person answers it what stood below it slides up.
+   */
+  asgMergeFade: 270,
+  /**
+   * A tab on Assignments a person chose: the rows that stay glide to their new places, and the
+   * rows that come fade in. Never the tab a picker sets back to All, a search or a poll.
+   */
+  asgTabGlide: 390,
 } as const;
 
 /**
@@ -432,6 +452,9 @@ export const MOTION_SHAPE = {
   stopAddDropPx: 14,
   stopChooseDropPx: 14,
   loadStripDropPx: 14,
+
+  /** §12.158, beside its duration above. A week's rows come in from this far to the side. */
+  histWeekSwingPx: 40,
 } as const;
 
 /**

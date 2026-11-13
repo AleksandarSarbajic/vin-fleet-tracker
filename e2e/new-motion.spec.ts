@@ -4267,7 +4267,9 @@ const logPages = (page: Page) =>
   page.addInitScript(() => {
     const w = window as unknown as PagedLog;
     w.__paged = [];
-    const name = (el: Element): string => {
+    const name = (el: Element, frames: Keyframe[] | PropertyIndexedKeyframes | null): string => {
+      // Phase 3br: a History row that moves sideways is a change of week (§12.158), not the draw.
+      if (el.hasAttribute('data-driver-row') && JSON.stringify(frames).includes('translate')) return 'histWeek';
       if (el.hasAttribute('data-driver-row')) return 'histRows';
       if (el.parentElement?.getAttribute('role') === 'cell' && el.firstElementChild?.hasAttribute('data-load')) return 'histFold';
       if (el.hasAttribute('data-asg-row')) return 'asgRows';
@@ -4283,7 +4285,7 @@ const logPages = (page: Page) =>
       const animation = real.call(this, frames, options);
       const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
       w.__paged.push({
-        what: name(this),
+        what: name(this, frames),
         frames: JSON.stringify(frames),
         duration: Number(timing.duration),
         delay: Number(timing.delay ?? 0),
@@ -4733,7 +4735,11 @@ test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
     expect(n).toBeGreaterThan(3);
     expectDrawn(await paged(page, 'histRows'), n);
 
-    // A filter, and a week there and back: nothing more.
+    /*
+     * A filter, and a week there and back: no row draws again. Phase 3br: the week back is a
+     * person's change of week, so W39's rows swing in (histWeek, §12.158, its own test below);
+     * W38 has no loads, so going there swings nothing.
+     */
     const filter = page.getByRole('textbox', { name: 'Filter drivers' });
     await filter.fill('Andre');
     await expect(rows).toHaveCount(1);
@@ -4744,7 +4750,10 @@ test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
     await expect(page).toHaveURL(/week=2026-W39/);
     await rows.first().waitFor();
     await quiet(page);
-    expect((await paged(page)).map((p) => p.what)).toEqual(Array.from({ length: n }, () => 'histRows'));
+    expect((await paged(page)).filter((p) => p.what !== 'histWeek').map((p) => p.what)).toEqual(
+      Array.from({ length: n }, () => 'histRows'),
+    );
+    expect(await paged(page, 'histWeek')).toHaveLength(await rows.count());
 
     // histFold: Andre's Tuesday, "+2 more". The two loads that were folded drop; the row grows at once.
     await step('histFold', async () => {
@@ -6388,5 +6397,465 @@ test.describe('phase 3bp, the edit window’s medium motions (§12.157)', () => 
     expect(tally.filter((t) => t.offControl)).toEqual([]);
     // What a press holds does not move under it; a hovered button's 1px lift may drop as it is pressed.
     expect(tally.filter((t) => t.moved > 1.01)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3br (§12.158): the last medium motions off the map and the phone, at Bold: histWeek,
+ * asgMerge and asgTab. The numbers are written out, as above. What happy-dom cannot show is
+ * here: the lengths a real browser was given, the frame the rows land on, where the prompt's
+ * rows are drawn on the first frame after it goes, the column header over the rows while they
+ * glide under it, nothing grown and nothing left. The causes and non-causes are the unit
+ * tests' (`week-motion.test.tsx`, `assign-medium-motion.test.tsx`).
+ * ------------------------------------------------------------------------------------------ */
+
+const WEEK_MS = 270;
+const WEEK_PX = 40;
+const MERGE_MS = 270;
+const TAB_MS = 390;
+
+type Br = { what: string; frames: string; duration: number; easing: string; key: string; clip: string };
+type BrLog = { __br: Br[] };
+
+/** Every Web Animation the page starts, named by what it is on, and the inline clip of its box a microtask on. */
+const logBr = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as BrLog;
+    w.__br = [];
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      const f = JSON.stringify(frames);
+      const sideways = f.includes('translate');
+      const what = this.hasAttribute('data-driver-row')
+        ? sideways
+          ? 'histWeek'
+          : 'histRows'
+        : this.hasAttribute('data-asg-row')
+          ? sideways
+            ? 'asgTabGlide'
+            : timing.fill === 'backwards'
+              ? 'asgRows'
+              : 'asgTabFade'
+          : this.hasAttribute('data-merge-prompt')
+            ? 'asgMergeFade'
+            : this.hasAttribute('data-asg-head') || this.hasAttribute('data-asg-rows')
+              ? 'asgMergeSlide'
+              : 'other';
+      const entry: Br = {
+        what,
+        frames: f,
+        duration: Number(timing.duration),
+        easing: String(timing.easing ?? ''),
+        key: this.getAttribute('data-asg-row') ?? this.getAttribute('data-driver-row') ?? '',
+        clip: '',
+      };
+      queueMicrotask(() => {
+        const box =
+          what === 'histWeek'
+            ? this.closest('[role="table"]')
+            : what.startsWith('asgTab')
+              ? this.closest('[data-asg-rows]')
+              : what === 'asgMergeSlide'
+                ? this.closest('section')
+                : null;
+        entry.clip = box instanceof HTMLElement ? `${box.style.overflowX},${box.style.overflowY}` : '';
+      });
+      w.__br.push(entry);
+      return animation;
+    };
+  });
+const br = async (page: Page, what?: string) =>
+  (await page.evaluate(() => (window as unknown as BrLog).__br.map((e) => ({ ...e })))).filter(
+    (e) => e.what !== 'other' && (what === undefined || e.what === what),
+  );
+/** The distance in a `translate` keyframe pair, as numbers. */
+const fromOf = (frames: string) => {
+  const [first] = JSON.parse(frames) as { translate: string }[];
+  const [x, y] = first!.translate.split(' ').map((v) => Number.parseFloat(v));
+  return { x: x!, y: y ?? 0 };
+};
+const brAtRest = (page: Page) =>
+  page.evaluate(() => ({
+    running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    styled: [
+      ...document.querySelectorAll(
+        'main [role="table"], [data-driver-row], section, [data-asg-head], [data-asg-rows], [data-asg-row], [data-merge-prompt]',
+      ),
+    ].filter((el) => el.getAttribute('style')).length,
+  }));
+
+test.describe('phase 3br, the last medium motions off the map and the phone (§12.158)', () => {
+  test('histWeek: a week swings in from the side of its arrow, 40px in 270ms, on the frame its rows land, after the skeleton; Back and a poll play nothing; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedHistory();
+    await logBr(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const rows = page.locator('main [data-driver-row]');
+    const toolbar = page.locator('[data-history-toolbar]');
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+
+    // The page a load lands on: nothing.
+    await page.goto('/history?week=2026-W40');
+    await rows.first().waitFor();
+    await quiet(page);
+    expect(await br(page)).toEqual([]);
+
+    // Previous, from the network: the answer held, so the skeleton is on screen first.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/history?week=2026-W39', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await step('Previous', async () => {
+      await toolbar.getByRole('button', { name: 'Previous week' }).click();
+      await expect(page.locator('main [aria-busy="true"]')).toBeVisible();
+      expect(await br(page, 'histWeek')).toEqual([]);
+      // Each frame from here: how many rows are drawn, and how many of them are moving.
+      await page.evaluate(() => {
+        const w = window as unknown as { __landing: { rows: number; moving: number }[] };
+        w.__landing = [];
+        const tick = () => {
+          const drawn = [...document.querySelectorAll('main [data-driver-row]')];
+          w.__landing.push({ rows: drawn.length, moving: drawn.filter((r) => r.getAnimations().length > 0).length });
+          if (w.__landing.length < 600 && !(drawn.length > 0 && w.__landing.at(-1)!.moving === 0)) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      release();
+      await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0);
+      await rows.first().waitFor();
+    });
+    const w39 = await rows.count();
+    expect(w39).toBeGreaterThan(3);
+    const back = await br(page, 'histWeek');
+    expect(back).toHaveLength(w39);
+    for (const e of back) {
+      expect(e.frames).toBe(JSON.stringify([{ opacity: 0, translate: `${-WEEK_PX}px 0` }, { opacity: 1, translate: '0 0' }]));
+      expect(e.duration).toBe(WEEK_MS);
+      expect(curve(e.easing)).toBe(curve(DIALOG_CURVE));
+      expect(e.clip).toBe('clip,');
+    }
+    // The first frame that draws any of W39's rows draws all of them already moving.
+    const landing = await page.evaluate(() => (window as unknown as { __landing: { rows: number; moving: number }[] }).__landing);
+    expect(landing.find((f) => f.rows > 0)).toEqual({ rows: w39, moving: w39 });
+
+    // Next, back to W40, the page's own week from its cache: at once, from the right.
+    await step('Next', async () => {
+      await toolbar.getByRole('button', { name: 'Next week' }).click();
+      await expect(page).toHaveURL(/week=2026-W40/);
+    });
+    const w40 = await rows.count();
+    const forward = (await br(page, 'histWeek')).slice(w39);
+    expect(forward).toHaveLength(w40);
+    for (const e of forward) {
+      expect(e.frames).toBe(JSON.stringify([{ opacity: 0, translate: `${WEEK_PX}px 0` }, { opacity: 1, translate: '0 0' }]));
+      expect(e.duration).toBe(WEEK_MS);
+    }
+
+    // A poll of the fleet: nothing more.
+    const swung = (await br(page, 'histWeek')).length;
+    await page.waitForResponse((r) => r.url().includes('/api/fleet'), { timeout: 30_000 });
+    await quiet(page);
+    expect(await br(page, 'histWeek')).toHaveLength(swung);
+
+    // To the board and Back: the page again from Next's cache, a change of page. Its rows draw; none swings.
+    await page.locator('[data-board-link]').click();
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+    await step('Back', async () => {
+      await page.goBack();
+      await rows.first().waitFor();
+    });
+    await expect(page).toHaveURL(/week=2026-W40/);
+    expect(await br(page, 'histWeek')).toHaveLength(swung);
+    expect((await br(page, 'histRows')).length).toBeGreaterThan(0);
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+
+  test('asgTab: a tab glides the rows that stay in 390ms and fades in the rows that come, the header over them; the picker’s own All plays nothing; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedBoard();
+    await logBr(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const tab = (name: RegExp) => page.getByRole('group', { name: 'Filter the trucks' }).getByRole('button', { name });
+    const ids = () => page.locator('[data-asg-row]').evaluateAll((all) => all.map((r) => r.getAttribute('data-asg-row')!));
+    /** Where each row stands in the rows' own box, by its id. */
+    const places = () =>
+      page.evaluate(() => {
+        const box = document.querySelector('[data-asg-rows]')!.getBoundingClientRect();
+        return Object.fromEntries(
+          [...document.querySelectorAll('[data-asg-row]')].map((r) => [r.getAttribute('data-asg-row'), r.getBoundingClientRect().top - box.top]),
+        );
+      });
+
+    await page.goto('/assignments');
+    await page.getByRole('combobox', { name: 'Driver for truck 401' }).waitFor();
+    await quiet(page);
+    expect(await br(page)).toEqual([]);
+
+    // No driver: the three empty trucks stay and glide up; the eleven others are gone at once.
+    const all = await ids();
+    const before = await places();
+    await step('No driver', async () => {
+      await tab(/^No driver/).click();
+      await expect(page.locator('[data-asg-row]')).toHaveCount(3);
+    });
+    const after = await places();
+    const stayed = await ids();
+    const glides = await br(page, 'asgTabGlide');
+    expect(glides.map((e) => e.key)).toEqual(stayed);
+    for (const e of glides) {
+      expect(fromOf(e.frames).x).toBe(0);
+      expect(fromOf(e.frames).y).toBeCloseTo(before[e.key]! - after[e.key]!, 0);
+      expect(e.duration).toBe(TAB_MS);
+      expect(curve(e.easing)).toBe(curve(DIALOG_CURVE));
+      expect(e.clip).toBe('clip,clip');
+    }
+    expect(await br(page, 'asgTabFade')).toEqual([]);
+
+    /*
+     * All again, with the board short and scrolled to its end, so the column header is stuck
+     * over the rows: the three glide back down under it and the eleven fade in. On every frame,
+     * what is drawn at a point the header shares with a moving row is the header.
+     */
+    await page.setViewportSize({ width: 1440, height: 420 });
+    await quiet(page);
+    await page.locator('main > div.overflow-auto').evaluate((s) => (s.scrollTop = s.scrollHeight));
+    await quiet(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { __over: { overlapped: number; covered: number } };
+      w.__over = { overlapped: 0, covered: 0 };
+      let frames = 0;
+      const tick = () => {
+        frames += 1;
+        const head = document.querySelector('[data-asg-head]')!;
+        const h = head.getBoundingClientRect();
+        for (const row of document.querySelectorAll('[data-asg-row]')) {
+          if (row.getAnimations().length === 0) continue;
+          const r = row.getBoundingClientRect();
+          const top = Math.max(h.top, r.top);
+          const bottom = Math.min(h.bottom, r.bottom);
+          if (bottom - top < 2) continue;
+          w.__over.overlapped += 1;
+          const hit = document.elementFromPoint(h.left + h.width / 2, (top + bottom) / 2);
+          if (hit && !head.contains(hit)) w.__over.covered += 1;
+        }
+        if (frames < 120) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const fadesBefore = (await br(page, 'asgTabFade')).length;
+    const glidesBefore = (await br(page, 'asgTabGlide')).length;
+    await step('All', async () => {
+      await tab(/^All/).click();
+      await expect(page.locator('[data-asg-row]')).toHaveCount(all.length);
+    });
+    const over = await page.evaluate(() => (window as unknown as { __over: { overlapped: number; covered: number } }).__over);
+    // The case was reached: a moving row stood under the header on some frame, and never over it.
+    expect(over.overlapped).toBeGreaterThan(0);
+    expect(over.covered).toBe(0);
+    expect((await br(page, 'asgTabGlide')).slice(glidesBefore).map((e) => e.key).sort()).toEqual([...stayed].sort());
+    const fades = (await br(page, 'asgTabFade')).slice(fadesBefore);
+    expect(fades.map((e) => e.key).sort()).toEqual(all.filter((id) => !stayed.includes(id)).sort());
+    for (const e of fades) {
+      expect(e.frames).toBe(JSON.stringify([{ opacity: 0 }, { opacity: 1 }]));
+      expect(e.duration).toBe(TAB_MS);
+      expect(e.easing).toBe('linear');
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await quiet(page);
+
+    // No phone, then a chip in the panel for a truck that tab hides: the picker sets All by code. Nothing glides.
+    await step('No phone', async () => {
+      await tab(/^No phone/).click();
+    });
+    const played = (await br(page)).length;
+    await step('chip', async () => {
+      await page.getByRole('button', { name: 'Assign a driver to truck 410' }).click();
+      await expect(page.locator('[data-asg-row]')).toHaveCount(all.length);
+    });
+    expect((await br(page)).slice(played)).toEqual([]);
+    await page.keyboard.press('Escape');
+
+    // A poll: nothing.
+    await page.waitForResponse((r) => r.url().includes('/api/fleet'), { timeout: 30_000 });
+    await quiet(page);
+    expect((await br(page)).slice(played)).toEqual([]);
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+
+  test('asgMerge: the prompt arrives by itself and only fades, 270ms; answered, the header and the rows slide up from where they stood, 270ms; a poll plays nothing; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedBoard();
+    await logBr(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    let answered = false;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/drivers', async (route) => {
+      if (route.request().method() === 'POST') {
+        answered = true;
+        await route.fulfill({ json: { ok: true } });
+        return;
+      }
+      await held;
+      await route.fulfill({
+        json: {
+          candidates: answered
+            ? []
+            : [
+                {
+                  id: 'c-e2e',
+                  appDriverId: 'app-e2e',
+                  samsaraDriverId: 'sam-e2e',
+                  samsaraDriverName: 'Mina Radic',
+                  appDriverName: 'Mina Radic',
+                  appDriverCreatedAt: '2026-10-14T12:00:00.000Z',
+                },
+              ],
+        },
+      });
+    });
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const prompt = page.locator('[data-merge-prompt]');
+    const headTop = () => page.locator('[data-asg-head]').evaluate((h) => h.getBoundingClientRect().top);
+
+    await page.goto('/assignments');
+    await page.getByRole('combobox', { name: 'Driver for truck 401' }).waitFor();
+    await quiet(page);
+    expect(await br(page)).toEqual([]);
+
+    // It arrives by itself: a fade, opacity only. What is below it jumps down, with nothing on it.
+    const restBefore = await headTop();
+    await step('arrives', async () => {
+      release();
+      await prompt.waitFor();
+    });
+    const fade = await br(page, 'asgMergeFade');
+    expect(fade).toHaveLength(1);
+    expect(fade[0]).toMatchObject({ frames: JSON.stringify([{ opacity: 0 }, { opacity: 1 }]), duration: MERGE_MS, easing: 'linear' });
+    expect(await br(page, 'asgMergeSlide')).toEqual([]);
+    const stood = await headTop();
+    expect(stood).toBeGreaterThan(restBefore + 40);
+
+    // Answered: on the first frame without it, the header is drawn where it stood; then both slide up.
+    await page.evaluate(() => {
+      const w = window as unknown as { __gone: number | null };
+      w.__gone = null;
+      const tick = () => {
+        if (!document.querySelector('[data-merge-prompt]')) {
+          w.__gone = document.querySelector('[data-asg-head]')!.getBoundingClientRect().top;
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await step('answered', async () => {
+      await prompt.getByRole('button', { name: 'Different people' }).click();
+      await expect(prompt).toHaveCount(0);
+    });
+    const rest = await headTop();
+    expect(rest).toBeCloseTo(restBefore, 0);
+    const slides = await br(page, 'asgMergeSlide');
+    expect(slides).toHaveLength(2);
+    for (const e of slides) {
+      expect(fromOf(e.frames).x).toBe(0);
+      expect(fromOf(e.frames).y).toBeCloseTo(stood - rest, 0);
+      expect(e.duration).toBe(MERGE_MS);
+      expect(curve(e.easing)).toBe(curve(DIALOG_CURVE));
+      expect(e.clip).toBe('clip,clip');
+    }
+    const gone = await page.evaluate(() => (window as unknown as { __gone: number | null }).__gone);
+    expect(gone).not.toBeNull();
+    expect(Math.abs(gone! - stood)).toBeLessThan(2);
+    expect(await br(page, 'asgMergeFade')).toHaveLength(1);
+
+    // A poll: nothing.
+    const played = (await br(page)).length;
+    await page.waitForResponse((r) => r.url().includes('/api/fleet'), { timeout: 30_000 });
+    await quiet(page);
+    expect(await br(page)).toHaveLength(played);
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+
+  test('reduced motion: a week, two tabs, the prompt arriving and answered play nothing, and end where they would with motion', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await seedHistory();
+    await logBr(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const rows = page.locator('main [data-driver-row]');
+    await page.goto('/history?week=2026-W40');
+    await rows.first().waitFor();
+    await page.locator('[data-history-toolbar]').getByRole('button', { name: 'Previous week' }).click();
+    await expect(page).toHaveURL(/week=2026-W39/);
+    await rows.first().waitFor();
+    expect(await rows.count()).toBeGreaterThan(3);
+    expect(await br(page)).toEqual([]);
+
+    await seedBoard();
+    let answered = false;
+    await page.route('**/api/drivers', async (route) => {
+      if (route.request().method() === 'POST') {
+        answered = true;
+        await route.fulfill({ json: { ok: true } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          candidates: answered
+            ? []
+            : [
+                {
+                  id: 'c-e2e',
+                  appDriverId: 'app-e2e',
+                  samsaraDriverId: 'sam-e2e',
+                  samsaraDriverName: 'Mina Radic',
+                  appDriverName: 'Mina Radic',
+                  appDriverCreatedAt: '2026-10-14T12:00:00.000Z',
+                },
+              ],
+        },
+      });
+    });
+    await page.goto('/assignments');
+    await page.locator('[data-merge-prompt]').waitFor();
+    const tab = (name: RegExp) => page.getByRole('group', { name: 'Filter the trucks' }).getByRole('button', { name });
+    await tab(/^No driver/).click();
+    await expect(page.locator('[data-asg-row]')).toHaveCount(3);
+    await tab(/^All/).click();
+    await expect(page.locator('[data-asg-row]')).toHaveCount(14);
+    await page.locator('[data-merge-prompt]').getByRole('button', { name: 'Different people' }).click();
+    await expect(page.locator('[data-merge-prompt]')).toHaveCount(0);
+    expect(await br(page)).toEqual([]);
+    await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
   });
 });
