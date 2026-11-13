@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement, useState } from 'react';
+import { createElement, Profiler, useState } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -875,6 +875,7 @@ describe('timeline: the stop cards, when it opens', () => {
   const mount = (
     cached: TimelineStop[] | null,
     fetched: Promise<TimelineStop[]> = Promise.resolve(THREE),
+    onCommit: () => void = () => {},
   ) => {
     restores.push(stubLayout({ width: 1100, height: 600 }));
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -886,15 +887,34 @@ describe('timeline: the stop cards, when it opens', () => {
     act(() => {
       root.render(
         <QueryClientProvider client={client}>
-          <TruckTimeline
-            truckId="truck-1"
-            truckLabel="101"
-            dispatchTz="America/Chicago"
-            onClose={() => {}}
-          />
+          {/* A Profiler's onRender runs in each commit, after its children's layout effects. */}
+          <Profiler id="timeline" onRender={onCommit}>
+            <TruckTimeline
+              truckId="truck-1"
+              truckLabel="101"
+              dispatchTz="America/Chicago"
+              onClose={() => {}}
+            />
+          </Profiler>
         </QueryClientProvider>,
       );
     });
+  };
+  /**
+   * Phase 3bq. A fetch lands on the page through react-query's own `setTimeout(0)`,
+   * set only once the fetch resolves, so one tick of the test's own is not always enough:
+   * 5 in 20 runs, the test's tick and act's end came first and the page still said Loading….
+   * This waits on the page instead, an act at a time, and returns at the first act that shows
+   * it, so a later act cannot stand in for the one that showed it.
+   */
+  const untilShown = async (what: string, shown: () => boolean, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (!shown()) {
+      if (Date.now() > deadline) throw new Error(`not shown within ${timeoutMs}ms: ${what}`);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
   };
   const cards = () => on((el) => el.hasAttribute('data-stop-state'));
   const lines = () => on((el) => el.hasAttribute('data-stop-line'));
@@ -923,15 +943,22 @@ describe('timeline: the stop cards, when it opens', () => {
 
   it('fetched: nothing at the opening, while it says Loading…, and the draw in the commit it lands in', async () => {
     let land: (stops: TimelineStop[]) => void = () => {};
-    mount(null, new Promise((resolve) => (land = resolve)));
+    const onPage = () => container.querySelectorAll('[data-stop-state]').length;
+    // Each commit as React makes it: the cards on the page then, and the draws played by then.
+    const commits: { cards: number; drawn: number }[] = [];
+    mount(
+      null,
+      new Promise((resolve) => (land = resolve)),
+      () => void commits.push({ cards: onPage(), drawn: cards().length }),
+    );
     expect(container.textContent).toContain('Loading…');
     expect(cards()).toEqual([]);
-    await act(async () => {
-      land(THREE);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(container.querySelectorAll('[data-stop-state]')).toHaveLength(3);
+    land(THREE);
+    await untilShown('the three stop cards', () => onPage() === 3);
     expect(cards().map(shape)).toEqual([DRAWN(0), DRAWN(30), DRAWN(60)]);
+    // The commit the stops land in is the first with cards, and it already has all three
+    // draws: a draw in any commit after it, however soon, leaves this one at 0.
+    expect(commits.find((c) => c.cards > 0)).toEqual({ cards: 3, drawn: 3 });
   });
 
   it('a refetch while it is open draws nothing: the cards change at once', async () => {
