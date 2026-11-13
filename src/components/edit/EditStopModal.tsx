@@ -1370,9 +1370,10 @@ function LoadEditor({
           {mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null) ? (
             <RateconStrip
               hasEntries={
+                // §12.122. A fill builds every stop afresh, so a typed note is an entry too (3bq).
                 form.loadNumber.trim() !== '' ||
                 form.stops.some((s) =>
-                  [s.addressLine, s.city, s.state, s.zip, s.appointment.time].some((v) => v.trim() !== ''),
+                  [s.addressLine, s.city, s.state, s.zip, s.appointment.time, s.note].some((v) => v.trim() !== ''),
                 )
               }
               toCheck={form.fill ? fieldsToCheck(form) : null}
