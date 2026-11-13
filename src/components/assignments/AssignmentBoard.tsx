@@ -519,15 +519,19 @@ export function AssignmentBoard({ board, role, initialFleet }: Props) {
 
   /**
    * §12.158, asgMerge. What stands below the duplicate-driver prompt, for the slide when a person
-   * answers it: the column header and the rows' box, measured in the table's section, which
-   * clips while they move. The prompt's own fade and the answer's cause are `MergePrompt`'s.
+   * answers it: the column header and the rows' box, clipped by the table's section while they
+   * move. Measured in the scroller (phase 3bs): when the answer leaves less than a view to scroll,
+   * the scroller clamps its scrollTop in the same commit, which moves the section on screen.
+   * The prompt's own fade and the answer's cause are `MergePrompt`'s.
    */
   const section = useRef<HTMLElement | null>(null);
   const mergeBelow = useCallback(() => {
     const box = section.current;
-    if (!box) return null;
+    const frame = scroller.current;
+    if (!box || !frame) return null;
     return {
       box,
+      frame,
       items: [...box.querySelectorAll<HTMLElement>(':scope > [data-asg-head], :scope > [data-asg-rows]')],
     };
   }, []);

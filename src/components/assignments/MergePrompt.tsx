@@ -21,8 +21,11 @@ import type { OpenMergeCandidate } from '@/server/drivers';
  * was asked, and nobody was asked anything. Without this the duplicate sits
  * there silently while assignment history accrues against the wrong row.
  */
-/** §12.158. What stands below the prompt, and the box it is measured in and clipped by. */
-export type MergeBelow = () => { box: HTMLElement; items: HTMLElement[] } | null;
+/**
+ * §12.158. What stands below the prompt, the box that clips it, and the frame it is measured in:
+ * the scroller, which does not move when the answer makes it clamp its scrollTop (phase 3bs).
+ */
+export type MergeBelow = () => { box: HTMLElement; frame: HTMLElement; items: HTMLElement[] } | null;
 
 const belowKey = (el: HTMLElement) =>
   el.hasAttribute('data-asg-head') ? 'head' : el.hasAttribute('data-asg-rows') ? 'rows' : null;
@@ -51,7 +54,12 @@ export function MergePrompt({ role, below }: { role: Role; below?: MergeBelow })
    */
   const shownBox = useRef<HTMLDivElement | null>(null);
   const answering = useRef(false);
-  const stood = useRef<{ places: Map<string, DOMRect>; box: HTMLElement; items: HTMLElement[] } | null>(null);
+  const stood = useRef<{
+    places: Map<string, DOMRect>;
+    box: HTMLElement;
+    frame: HTMLElement;
+    items: HTMLElement[];
+  } | null>(null);
   const wasShown = useRef(false);
   // In a ref, so `load` never changes with it: a new `load` would check again.
   const belowNow = useRef(below);
@@ -63,7 +71,7 @@ export function MergePrompt({ role, below }: { role: Role; below?: MergeBelow })
     answering.current = false;
     const under = belowNow.current?.();
     if (!under || !mayMove(under.box)) return;
-    stood.current = { places: placesOf(under.items, belowKey, under.box), ...under };
+    stood.current = { places: placesOf(under.items, belowKey, under.frame), ...under };
   }, []);
 
   const load = useCallback(async () => {
@@ -100,7 +108,9 @@ export function MergePrompt({ role, below }: { role: Role; below?: MergeBelow })
     wasShown.current = shown;
     const slide = stood.current;
     stood.current = null;
-    if (slide) glideFrom(slide.places, slide.items, belowKey, slide.box, MOTION_MS.asgMergeFade);
+    if (slide) {
+      glideFrom(slide.places, slide.items, belowKey, slide.box, MOTION_MS.asgMergeFade, slide.frame);
+    }
     if (shown && !was && shownBox.current) fadeIn(shownBox.current, MOTION_MS.asgMergeFade);
   });
 

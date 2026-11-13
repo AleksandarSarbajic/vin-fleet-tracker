@@ -147,6 +147,11 @@ const gliding = new WeakMap<Element, Animation>();
 /**
  * Each element whose key was drawn somewhere else before the change slides from there to its
  * place. One that is still sliding from the change before starts again from where it is drawn.
+ *
+ * `frame` is what `before` was measured in, `box` by default. Phase 3bs: a box inside a scroller
+ * moves on screen when the change makes the scroller clamp its scrollTop, so a slide measured in
+ * that box would start off where it was drawn by the clamp. Measured in the scroller, which does
+ * not move with its own scroll, it starts where it was drawn. `box` still clips.
  */
 export function glideFrom(
   before: Map<string, DOMRect>,
@@ -154,13 +159,14 @@ export function glideFrom(
   keyOf: (el: HTMLElement) => string | null,
   box: HTMLElement,
   ms: number,
+  frame: HTMLElement = box,
 ): void {
   for (const el of els) {
     const key = keyOf(el);
     const was = key === null ? undefined : before.get(key);
     if (!was) continue;
     gliding.get(el)?.cancel();
-    const now = placeIn(el, box);
+    const now = placeIn(el, frame);
     const dx = was.left - now.left;
     const dy = was.top - now.top;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
