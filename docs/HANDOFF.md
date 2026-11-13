@@ -130,6 +130,9 @@ Not live until pushed. App only (Vercel): one app file, `EditStopModal.tsx`, whi
 **At the start of 3br (2026-11-13): 3bo, 3bp and 3bq are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `e9f9b2f`.
 **3br: NOT pushed, NOT live** (2026-11-13): the last three medium motions off the map and the phone at the demo's Bold (§12.158): History's week swings in from the side of its arrow, the merge prompt fades in and an answer slides the board up, and a tab glides the board's rows. Committed as `04f2fc1` and the docs commit; check 249 files / 4575 tests; full e2e `2026-11-13T17-58-13-649Z` 557 passed, 0 failed, `phone-signout` ran, 1.1 h.
 Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3br" below.
+**At the start of 3bs (2026-11-13): 3bo, 3bp, 3bq and 3br are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `a55b390`.
+**3bs: NOT pushed, NOT live** (2026-11-13): 3br's merge slide while scrolled is measured in the scroller (fixed), and the board's pin and density glide at the demo's Bold (§12.159). Committed as `13f5132`, `31f5b70`, `0866849` and the docs commit; check 252 files / 4600 tests; full e2e `2026-11-13T22-05-53-333Z` 567 passed, 0 failed, `phone-signout` ran, 1.1 h.
+Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bs" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -12240,6 +12243,98 @@ Motion batch 3c, from the advisor's brief: the 3be demo's last three medium rows
 **Unverified:** the feel (Alex's), including rows that glide past rows that fade in on a tab, where the rows' grounds are see-through; Chromium's scroll anchoring on a merge answer while scrolled; any browser but Chromium; a real GPU.
 
 **Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, then 3br's two. Item 5 is Alex's. Then the map and the phone rows, as the build order says.
+
+### Phase 3bs: 3br's scroll anchoring checked (and fixed), then pin and density, at Bold (2026-11-13)
+
+From the advisor's brief: close 3br's unverified scroll anchoring first, then the board's two large motions, pin and density, at the demo's Bold, after Alex's "i want motion, animations EVERYWHERE" with All bold (2026-11-06). §12.159 is the record; its pointers stand under §12.149's two bullets. **NOT pushed, NOT live.** App only (Vercel): a script walked the worker's imports from `src/worker` (12 entry files, 40 reached), and none of the ten changed app files is among them, so no worker deploy. Built on `a55b390`; origin's master was `7464e30` (fetched at the start, nothing new), so 3bo, 3bp, 3bq and 3br are not pushed either.
+
+| Commit | What |
+|---|---|
+| `13f5132` | Part 1's fix: a merge answer's slide is measured in the scroller, not the section |
+| `31f5b70` | Part 1's test |
+| `0866849` | The tokens, the two motions, the causes, the new unit test files, two narrowed 3bd e2e tests, the e2e tests |
+| The docs commit | §12.159, its two pointers from §12.149, this section and "What is live" |
+
+**Part 1: 3br's merge answer while scrolled. It was wrong; fixed.** A new e2e test answers Different people with the prompt half out of view, twice: under reduced motion (which plays nothing, the stand-in for `asgMergeFade` at 0: a token cannot change without a rebuild), then with motion, recording scrollTop and where the header and the rows' box are drawn on every frame. Two widths, because Chromium does two different things:
+
+- **1440x520, the scroller clamps.** The answer leaves less than a view to scroll, so scrollTop goes from 70 to 0 in the answer's commit. 3br measured in the section, which the clamp moved 70px down on screen: the first frame without the prompt drew the header at 241.6 where it stood at 171.6 (the slide's distance read 136.6, not 66.6), and it slid from there. Fixed (`13f5132`): measured in the scroller, which does not move with its own scroll (`glideFrom` takes the frame as an optional last argument, defaulting to the box; the section still clips). Now: stood 171.625, first frame 171.625, then 160.3, 149.7, 140.3 … 105, slide `0px 66.625px`; scrollTop 0 on every frame from the answer on; ends at 105 / 144.5 / scrollTop 0, as with no motion.
+- **1060x520, Chromium anchors.** With the panels under the table there is room left, and Chromium's scroll anchoring holds the header (171.56 to 171.94) and moves scrollTop by the prompt's height (228 to 91), with no motion and with motion alike. Measured in the scroller nothing moved on screen, so nothing slides (0 slides), which is right; 3br's section-measured slide would have started 137px low here too.
+- **Controls, each restored byte-identical:** the fix taken out fails at 1440 ("Expected < 2, Received 70" on the first frame); the slide dropped (length 0) fails ("Expected length: 2, Received length: 0").
+- 3br's four e2e tests and the new one: 6 passed with the sign-in (`2026-11-13T20-13-34-401Z`).
+
+**The lines, re-grepped at `a55b390`.** 3be's table cites `b45cd15`.
+
+| Row | At `b45cd15` | At `a55b390` | What is there |
+|---|---|---|---|
+| pin | `console/TruckRow.tsx:618` | `:686` | `onPin(row.id);` in the star's `onClick` |
+| pin | `console/FleetList.tsx:274` | `:297` | `{pinnedRows.length > 0 ? (` |
+| density | `console/FleetList.tsx:156` | `:162` | `estimateSize: () => ROW_HEIGHT[density],` |
+| density | `console/TruckRow.tsx:536` | `:613` | `style={{ height: ROW_HEIGHT[density] }}` |
+| density | `console/Console.tsx:570` | `:594` | `const { density, ready: densityReady, setDensity } = useDensity();` |
+
+**The two.** Bold from `.taste-skill/motion/everywhere/core.js` (`GLIDE`: On 260ms, Bold 390ms), shapes from `page.js` (`togglePin`, `drawPinned`, `setDensity`).
+
+| Motion | Token(s) | What moves | Cause: set, spent | What must not |
+|---|---|---|---|---|
+| pin | `pinGlide` 390, `pinStarFromScale` 0.2 | The truck from where it was drawn to its place, across the block and the list, on a solid ground at `z-index` 3; the rows it pushes from where they stood (from just past the edge if far away); a truck new to the drawn rows fades in (linear); the star grows from 0.2 | `usePinned`'s `moved` (count and truck), set in `toggle` only, in the batch with the pins: the star's click (`TruckRow` `onPin`), P (`usePinned`'s key), the palette's Pin or Unpin (`onTogglePin`). Captured by a `BeforeCommit` on its count, spent in that commit's layout effect | A poll; a chip hiding a pinned truck (at once, §12.149); stored pins; the cap refusing |
+| density | `densityGlide` 390 | Each row whose new place is in view, from its old top; height, rows out of view and rows new to the window jump | `useDensity`'s `moves`, set in `setDensity` (only on a change) and `toggle`: the Density control, D, the palette, the phone's More sheet (plays nothing there). Captured and spent the same way | A stored density; the density already chosen; a resize; a poll |
+
+**Every way a person pins, and which are wired:** the star's click (wired), P on the selected truck (wired), the palette's Pin/Unpin (wired). All three go through `usePinned.toggle`, which is where the cause is set. A key on the focused star itself: Space reaches the row's own handler first (it selects the row and prevents the default), and Enter is Console's; neither was traced (unverified).
+
+**Helpers, and why.** `slideFrom` and `fadeIn` (`lib/appear-motion.ts`): the shapes, by `translate` and opacity, through `play`, so reduced motion and a press hold them. `play` itself for the star's scale, the one shape with no helper. Not `glideFrom` (`list-motion.ts`): it knows one box and none of what these need (the truck lifted over the rest, a start clamped to the view's edge, landing on a target change, handing a held edge over). So `board-move.ts` keeps its own bookkeeping, as `row-glide.ts` does.
+
+**How the scroll holds.** Nothing is measured in a box that scrolls: both are read where they are drawn in the scroller's box on screen, after the commit's own layout, so a clamp or an anchor is in what is read. Nothing moves layout but the scroller's `min-height` (§12.149's held bottom edge, set before the commit's layout is read, adding nothing scrollable) and the rows' box's `min-height` (to the view's bottom, likewise); both go when the rows land. In e2e, in the middle of a 60-truck list, a pin and Compact end in scrollTop 865 with motion and without, the same markup, and one scrollTop on every frame they glide; at the end of the list Compact clamps 1729 to 1009, once, in the commit, with motion and without.
+
+**Mid-flight.** A pin or density during any glide lands it and glides every row from where it was drawn (five pairs in e2e, two frames apart, each row within its own speed of the frame before). A chip during one of these lands it (`BoardMove.settle`) before its own glide, which captured where the rows were drawn. Found by those tests and fixed before committing: landing a chip's glide let go of its held bottom edge at once, so the footer jumped up and rows near the bottom were cut off; `RowGlide.settle` now hands the hold over, and these let it go when they land.
+
+**New markup.** `[data-board-rows]`, a plain `div` with no class around the pinned block, the empty list and the list; `data-pinned-host` on a plain `div` around each pinned row; `data-pinned-bar` on the bar. No text node moved. `desktop-baseline` passed with nothing re-saved, twice (`2026-11-13T20-48-04-542Z` and `2026-11-13T22-03-18-776Z`, 13 passed).
+
+**Tests.** With the numbers written out. `npm run check`: **252 files, 4600 tests** (249 / 4575 before: +3 files, +25 tests).
+
+- **`console/board-large-motion.test.tsx`** (new, 19), on the real Console, FleetList and TruckRow, a layout stub placing each host as the board lays it out, a Profiler on each commit: pin by the star (each distance written out), P and the palette's Unpin (both directions), the unpin from the block, a poll during the glide (no new animation, none cancelled), stored pins, the cap refusing, a chip hiding a pinned truck, a chip during the glide, a second pin during the first, reduced motion (same markup); Compact, D (the other direction), the palette's density, rows out of view and from past the edge, a stored density, a poll and a resize, the density already chosen, density during a pin's glide, reduced motion (same markup).
+- **`console/board-large-motion-off.test.tsx`** (new, 1): both tokens at 0, a pin, an unpin and two density changes play nothing and read no row's place.
+- **`hooks/board-causes.test.tsx`** (new, 3): the two causes, counted where a person acts and not on a stored value, a refusal or the density already chosen.
+- **`design/motion-tokens.test.ts`** (+2): the numbers.
+- **Narrowed, because a motion now plays or a box now stands where they said:** 3bd's "pinned rows stay put…" waits for P's glide to land before it reads the pinned row's place; 3bd's "scrolled to the end, a chip that shortens the list…" finds the scroller by its class, since the rows' box now stands between it and the list.
+
+**Each new file alone, 20 runs, after the last change to it:**
+
+| File | Runs | Failures |
+|---|---|---|
+| `components/console/board-large-motion.test.tsx` | 20 | 0 |
+| `components/console/board-large-motion-off.test.tsx` | 20 | 0 |
+| `hooks/board-causes.test.tsx` | 20 | 0 |
+| `design/motion-tokens.test.ts` | 20 | 0 |
+
+**Mutations,** in a worktree with this phase's changes, each file restored byte-identical after (checked with `filecmp`), the seven suites (the three new files, `motion-tokens`, `board-motion`, `medium-motion`, `window-keys-guard`) passing 145/145 there unmutated before and after; the e2e ones on the ten "phase 3bs" tests:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) pin dropped | 7: "the star pins a truck: it glides from its row to the block, 390ms, …"; "P pins the selected truck the same way, and the palette’s Unpin takes it back the other way"; "the star in the block unpins it: …"; "a poll while it glides neither restarts nor doubles it"; "a chip during a pin’s glide lands it at once, …"; "a second pin during the first’s glide lands the first and starts its own"; "density during a pin’s glide lands it, …" |
+| (b) density dropped | 5: "Compact: each row in view glides from its old top to its new one, 390ms, …"; "D goes back the same way, the other direction"; "the palette’s density does it too"; "rows whose new place is out of view jump; …"; "density during a pin’s glide lands it, …" |
+| (c) a glide flipped | 9: the four pin tests above that measure a distance, and the five density tests that do |
+| (d) the pin cause on a poll | 1: "a poll while it glides neither restarts nor doubles it" |
+| (e) the density cause on the stored load | 1: "a stored density counts nothing; a change counts one; the density already chosen counts nothing". It first survived: `render` cleared what played at load, and in happy-dom the rows are not yet drawn when the stored density lands. Both read as the test being wrong: `render` now keeps this phase's motions from the load, and the hook test was added. In e2e it still plays nothing (the reload check passes with it): Chromium has not drawn the rows either when the stored density lands, so nothing a person sees changes |
+| (e′) the pin cause on the stored load (e2e) | 2: "pin: the star pins a truck: …" and "density: Compact glides …", by their reload checks |
+| (f) the star dropped | 3: "the star pins a truck: …"; "the star in the block unpins it: …"; "a poll while it glides neither restarts nor doubles it" |
+| (g) density skips the scroll hold: measured in the rows' box, so a clamped scrollTop is ignored (e2e) | 1: "density at the end of the list, where Compact makes the scroller clamp its scrollTop: …" |
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3bs, the board’s large motions (§12.159)", ten tests, 1440x900 unless said): pin by the star and P back, every distance as measured on screen, the bar over the rows passing under it on every frame (overlaps seen, covered 0), and a reload with a stored pin; density by the control and D, and a reload with a stored density; the scroll holding mid-list against no motion; density at the end, where the scroller clamps; 1440x500, scrolled, P up out of the view under the header and back from just past its edge; five mid-flight pairs; a poll held by a press mid-glide (no animation added or cancelled) and rows the virtualizer draws during density's glide (none with anything on it); a truck pinned while not drawn fades in; reduced motion. Targeted run (`2026-11-13T21-48-31-458Z`): 10 passed; the two with reload checks again after (`2026-11-13T21-53-34-106Z`, 2 passed). Early runs: "a press behind a cancel" 16 of 16 presses in the gap; step 7's rows glide, the press tests and the chip tests with the baselines, 52 run, 2 failed (the two narrowed above), then the P and D specs (`shortcuts-behind-windows`, `poll-never-closes-a-window`) with step 2, 6 and 7, 109 run, 107 passed, the 2 in item 4 below.
+
+**Full e2e** (one invocation, `phone-signout` in it, after `0866849` and the `desktop-baseline` run, which passed 13 and re-saved nothing, `2026-11-13T22-03-18-776Z`): `test-results/2026-11-13T22-05-53-333Z`, 567 passed, 0 failed; `.last-run.json` status `passed`, failedTests `[]`; `phone-signout` ran (1 passed, signed the e2e account out); 1.1 h. `ratecon-scan.spec.ts:137` passed, so it was not re-run. `git status` clean under `e2e/` after it.
+
+**Found wrong:**
+
+1. **3br's merge slide while scrolled** (Part 1, above). Fixed.
+2. **With no motion (Alex's, not changed):** in the middle of a long list a pin moves the view (scrollTop stays, the row at the top is drawn 69px lower), and a density change shows another part of the list (scrollTop stays, every row's place is its index times the new height, so what was at the top goes out of the drawn rows). The glides end exactly there.
+3. **3bd's row glide leaves `class=""` on every wrapper it moved** (`row-glide.ts`, `land`: the class list emptied, the attribute kept). Not changed (an older motion); `board-move.ts` removes an emptied attribute.
+4. **3bp's narrow-width setup is flaky by itself** (`openNewLoad` at 1007 and 1008px): below 1086px the board opens on the map when nothing is stored, the list is hidden, and the selected row it waits for is drawn only until the virtualizer drops it. At HEAD without this phase: 3 of 10 failed (`2026-11-13T21-38-02-732Z`); with it, 1 of 6. Not changed.
+5. **A glide's own first frame.** The dialog curve starts fast: a fresh glide's first frame covers 10 to 20% of its trip, so a mid-flight check has to allow for it (it does, a quarter of the trip); a jump would be the whole trip.
+6. **3be's line references have moved** (the table above).
+
+**Unverified:** the feel, which is Alex's; a key on the focused star itself (above); any browser but Chromium; a real GPU; a real phone (the phone's More sheet changes density with no desktop list drawn: nothing plays, read from the code, not tested).
+
+**Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, 3br's two, then 3bs's four. Item 2 is Alex's. Then the map and the phone rows, as the build order says.
 
 ## Next
 

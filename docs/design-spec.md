@@ -10748,8 +10748,10 @@ typing would start one on every key while someone looks for a truck.
 - **Pinned rows do not glide.** They are outside the virtualizer. A chip that hides one takes it
   away at once, and the rows below go from where they were drawn, so a block that changes height
   does not make them jump.
+  *(§12.159, phase 3bs: a person's pin or unpin now glides, across the block and the list; a chip that hides a pinned truck still takes it away at once.)*
 - **A row's place changing mid-flight** (a poll that changes who is in the list, a density change)
   sends it there at once.
+  *(§12.159, phase 3bs: a person's density change now glides the rows in view; a poll mid-flight still sends a row there at once.)*
 
 **The selection** and **a segment's highlight** are overlays: the real look is on the row or the
 button all along, held back by `data-selection-target` or `data-segment-target` so the overlay
@@ -11541,6 +11543,102 @@ markup. `design/motion-tokens.test.ts`: the numbers. In a browser: each motion's
 distances as given, the frame History's rows land on, the header where it stood on the first
 frame after the prompt goes, the header drawn over the rows gliding under it, a poll, reduced
 motion, nothing grown on any frame, nothing left.
+
+## 12.159 The board's large motions: a pin and a density move rows across boxes
+
+Phase 3bs. The board's two large rows from the 3be demo, at its Bold (`.taste-skill/motion/everywhere/core.js`:
+`GLIDE`, On 260ms, Bold 390ms; `page.js`, `togglePin`, `drawPinned`, `setDensity`). Alex, 2026-11-06: "i want
+motion, animations EVERYWHERE", with All bold. Bold turns on every row but the ones marked `never` (search), so
+both are in. **Supersedes in part** §12.149: its "Pinned rows do not glide" and its density lines (a density change
+"can never start one", and one mid-flight "sends it there at once") no longer hold for a person's pin or density. A
+chip that hides a pinned truck still takes it away at once, and a poll still never starts one. §12.152's six rules,
+§12.156's four, §12.157's four and §12.158's three hold; three more are below. Nothing else changes: every motion
+already built keeps its token and its code, but for the hand-over named under rule 20.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **pin** | The truck pinned or unpinned, the rows it pushes, its star | 390ms (On 260) | The truck glides from where it was drawn to its new place, across the pinned block and the list, drawn over the rest on a solid ground. Rows already drawn that move glide from where they stood; one coming from far away starts just past the edge of the view (§12.149). A truck new to the drawn rows fades in where it belongs. The star grows from 0.2. The rows' box clips | Glide and star `EASING.dialog`; fade linear | A person's pin or unpin: a click on the row's star, P on the selected truck, the palette's Pin or Unpin (a key on the focused star itself is unverified: HANDOFF, "Phase 3bs") | A poll; a chip that hides a pinned truck (it still goes at once); pins read from storage; the cap refusing ("unpin one first") |
+| **density** | The rows in view | 390ms (On 260) | Each row whose new place is in view glides from its old top to it (from just past the edge, if it was out of view). The rows' own height jumps, and so do rows whose new place is out of view and rows new to the drawn window. The rows' box clips | `EASING.dialog` | A person's density: the Density control, D, the palette's density, the phone's More sheet (which plays nothing: no desktop list is drawn there) | A stored density on load; the density already chosen; a resize; a poll |
+
+**The rules this batch adds,** each held by a test (`console/board-large-motion.test.tsx` and
+`console/board-large-motion-off.test.tsx` for causes, `e2e/new-motion.spec.ts`, "phase 3bs", for what only a
+browser shows):
+
+18. **A cause a hook owns is counted where the person acts, and only there.** `usePinned`'s `moved` counts the
+    pins and unpins that went through, with the truck of the last; `useDensity`'s `moves` counts the density
+    changes. Each is set in the hook's own handler (`toggle`, `setDensity`), in the same batch as what it changes,
+    so it changes in the commit that change lands in. A handler knows at once whether this one goes through (a ref
+    of the last value), so a refusal at the cap and the density already chosen count nothing. What is read from
+    storage after load never counts. `FleetList` captures where every row is drawn just before that commit
+    (`BeforeCommit`, as §12.149's glide does) and spends it in the commit.
+19. **Two boxes, one frame.** The pinned block is outside the virtualizer and the list's rows are its wrappers.
+    Both are measured where they are drawn in the scroller's box on screen, which does not move with its own
+    scroll, so a scrollTop the commit clamps or Chromium anchors is read for what a person sees (phase 3bs found
+    3br's merge slide measured in a box that moves, and fixed it). What moves is a row's host: its wrapper in the
+    list, by `translate`, which composes with the virtualizer's inline transform, or its pinned host in the block
+    (a plain `div` around each pinned row). One box clips while a row crosses: `[data-board-rows]`, a plain block
+    around the pinned block, the empty list and the list. Never the scroller. It is `isolate` for those frames, so
+    the truck drawn over the rest (`z-index` 3) stays under the column header, which is outside it, and under the
+    "Pinned n of 5" bar, lifted to 4 inside it.
+20. **What is in flight is taken on from where it is drawn.** A pin or a density change during any glide (a chip's,
+    a pin's, density's) captures where every row is drawn, mid-glide included, lands what was moving, and glides
+    from there. A chip during one of these lands it first (`BoardMove.settle`); its own capture has already read
+    where the rows were drawn. A chip's glide that a pin or density lands hands over its held bottom edge
+    (`RowGlide.settle`), and these hold it until they land, as the chip would have. A list that gets shorter holds
+    its bottom edge until the rows land (§12.149's rule, now these motions' too), by the scroller's `min-height`,
+    set before the commit's layout is read: it adds nothing that can be scrolled. A row whose place changes in
+    flight (a poll) goes there at once. One that leaves the drawn window goes with its node, and one the
+    virtualizer draws fresh is at its place, with nothing on it: nothing flashes at an old place.
+
+**What a person sees in the cases around them.**
+
+- **pin.** The first pin brings in the block (its bar and the row): the rows above the pinned truck pass under the
+  bar, which stays on top. Scrolled, the truck pinned glides up out of the view under the column header; unpinned, it
+  comes down from just past the top edge. A truck selected and then scrolled out of the drawn rows, pinned by P or the
+  palette, fades into the block.
+- **density.** At the top of the list each row in view moves by its index times 12px. In the middle of a long list
+  most of what was in view goes out of it (below).
+- **mid-flight.** Five pairs, two frames apart, take every row on from where it is drawn: a pin during a chip's glide,
+  density during a pin's, a pin during density's, an unpin during a pin's, a chip during density's.
+
+**The scroll holds.** At a scroll in the middle of a 60-truck list, a pin and a density change end in the same
+scrollTop and the same markup as with no motion, and scrollTop holds while they glide. At the end of the list,
+Compact makes the scroller clamp its scrollTop: it changes once, in the commit, as with no motion, and each row
+glides from where it was drawn on screen.
+
+**What they do with no motion, unchanged (Alex's).** A pin in the middle of a long list moves the view: scrollTop
+stays, and the row at the top of the view is drawn 69px lower (the block's bar, its row and its rule). A density
+change there keeps scrollTop too, so each row's place is its index times the new height: what was at the top of the
+view goes out of it, and another part of the list is shown. Neither was changed; the glides end exactly where these
+do.
+
+**Where.** The desktop board. The phone's cards, the map and its markers are not touched.
+
+**Where the demo's shape changed,** the durations and the scale kept: (1) density glides the pinned rows too, where
+the demo glides only the list's (its pinned rows jump), so the block and the list move as one; (2) a row coming from
+far away starts just past the edge of the view (§12.149), where the demo starts it at its old place, however far;
+(3) the demo has no overscan, scrolled list or selection out of view: a truck pinned while not drawn fades into the
+block here; (4) the demo's clip is the list's own body; here it is the box around the block and the list, so a row
+is seen crossing from one to the other.
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token for each motion so that each can be
+taken back alone: `pinGlide` (its glide, its fade and its star; and `pinStarFromScale`) and `densityGlide`. Both equal
+the demo's Bold; On is 260ms. **To take one back:** its token to 0 turns it off and skips its measuring
+(`board-large-motion-off.test.tsx`), and its On value makes it weaker.
+
+**Tests.** `console/board-large-motion.test.tsx`, on the real console: the pin's glide from each place and the
+rows it pushes, the star, the truck lifted over the rest, the box's clip and the bar's lift, the commit it lands in
+(a Profiler), P and the palette, an unpin from the block, a second pin during the first, a chip during one, a poll
+during one, stored pins, the cap refusing, a chip hiding a pinned truck; density from each place at the top of the
+list and past the edge of the view, D and the palette, the commit the rows change height in, density during a pin's
+glide, a stored density, the density already chosen, a poll and a resize; under reduced motion, each ending in the
+same markup. `console/board-large-motion-off.test.tsx`: both tokens at 0 play nothing and read no row's place.
+`hooks/board-causes.test.tsx`: the two causes counted where a person acts and nowhere else.
+`design/motion-tokens.test.ts`: the numbers. In a browser: each glide's distance, measured on screen, its length
+and curve, the truck over the rest and under the bar and the header, scrolled and in a short view, the scroll
+holding in the middle and clamping at the end as with no motion, five mid-flight pairs, a held poll, rows drawn fresh
+during a glide, a truck pinned while not drawn, stored pins and density on a reload, reduced motion, nothing grown on
+any frame, nothing left.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
