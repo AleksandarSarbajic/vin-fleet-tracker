@@ -2847,7 +2847,8 @@ test.describe('step 7, rows glide', () => {
     await page.keyboard.press('1');
     const going = await page.locator('[data-glide-copy]').first().evaluate((el) => {
       const r = el.getBoundingClientRect();
-      const view = el.parentElement!.parentElement!.getBoundingClientRect();
+      // The scroller: since §12.159 the rows' box stands between it and the list.
+      const view = el.closest('.overflow-y-auto')!.getBoundingClientRect();
       return r.bottom > view.top && r.top < view.bottom;
     });
     expect(going).toBe(true);
@@ -2909,6 +2910,8 @@ test.describe('step 7, rows glide', () => {
     await page.locator('[data-row-id]').nth(0).click();
     await page.keyboard.press('p');
     await expect(page.getByText(/^Pinned$/)).toBeVisible();
+    // Since §12.159 a pin glides: its place is read once it has landed.
+    await expect.poll(() => stillMoving(page)).toBe(0);
     await quiet(page);
     const pinned = await page.locator('[aria-selected="true"][data-row-id]').getAttribute('data-row-id');
     const before = (await page.locator(`[data-row-id="${pinned}"]`).boundingBox())!.y;
@@ -6989,5 +6992,770 @@ test.describe('phase 3br, the last medium motions off the map and the phone (§1
     await expect(page.locator('[data-merge-prompt]')).toHaveCount(0);
     expect(await br(page)).toEqual([]);
     await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3bs (§12.159): the board's two large motions, at Bold: a truck a person pins or
+ * unpins, and the density a person chooses. The numbers are written out. What happy-dom cannot
+ * show is here: where each row is drawn on the frame after its cause, the column header and the
+ * "Pinned n of 5" bar over a row passing under them, the scroll holding, and the page ending
+ * exactly as it does with no motion. The causes and non-causes are `board-large-motion.test.tsx`'s.
+ * ------------------------------------------------------------------------------------------ */
+
+const PIN_MS = 390;
+const DENSITY_MS = 390;
+
+type Bs = {
+  what: string;
+  frames: string;
+  duration: number;
+  easing: string;
+  key: string;
+  z: string;
+  ground: boolean;
+  clip: string;
+  /** Ended by a cancel before it finished: restarted, or taken away. */
+  cancelled: boolean;
+  /** `performance.now()` when it started, to tell one cause's motions from the next's. */
+  t: number;
+};
+type BsLog = { __bs: Bs[] };
+
+/** Every Web Animation on a row's host or a star, with what its box and host had a microtask on. */
+const logBs = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as BsLog;
+    w.__bs = [];
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      const f = JSON.stringify(frames);
+      const host =
+        this.hasAttribute('data-pinned-host') ||
+        (this.firstElementChild?.hasAttribute('data-row-id') === true &&
+          this.parentElement?.parentElement?.hasAttribute('data-board-rows') === true);
+      const star = this.tagName.toLowerCase() === 'svg' && this.closest('button[aria-pressed]') !== null;
+      const what = star
+        ? 'star'
+        : host
+          ? f.includes('"translate"')
+            ? 'slide'
+            : f.includes('"transform"')
+              ? 'chipGlide'
+              : 'fade'
+          : 'other';
+      const entry: Bs = {
+        what,
+        frames: f,
+        duration: Number(timing.duration),
+        easing: String(timing.easing ?? ''),
+        key: (star ? this.closest('[data-row-id]') : this.firstElementChild)?.getAttribute('data-row-id') ?? '',
+        z: '',
+        ground: false,
+        clip: '',
+        cancelled: false,
+        t: performance.now(),
+      };
+      queueMicrotask(() => {
+        const el = this as HTMLElement;
+        entry.z = el.style?.zIndex ?? '';
+        entry.ground = el.classList.contains('bg-surface-base');
+        const box = el.closest('[data-board-rows]') as HTMLElement | null;
+        entry.clip = box ? `${box.style.overflow}|${box.style.isolation}` : '';
+      });
+      let finished = false;
+      animation.addEventListener('finish', () => (finished = true));
+      // `land` cancels what has finished, to drop it: only a cancel before the finish counts.
+      animation.addEventListener('cancel', () => (entry.cancelled ||= !finished));
+      w.__bs.push(entry);
+      return animation;
+    };
+  });
+const bs = async (page: Page, what?: string) =>
+  (await page.evaluate(() => (window as unknown as BsLog).__bs.map((e) => ({ ...e })))).filter(
+    (e) => e.what !== 'other' && (what === undefined || e.what === what),
+  );
+const clearBs = (page: Page) => page.evaluate(() => ((window as unknown as BsLog).__bs = []));
+/** Where each row's host is drawn in the scroller's box, by row id. */
+const hostTops = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.querySelector('[data-board-rows]')!;
+    const frame = box.parentElement!.getBoundingClientRect();
+    const tops: Record<string, number> = {};
+    for (const row of box.querySelectorAll('[data-row-id]')) {
+      tops[row.getAttribute('data-row-id')!] = row.parentElement!.getBoundingClientRect().top - frame.top;
+    }
+    return tops;
+  });
+/** The board's rows' box, its pinned hosts, its bar and every wrapper, with nothing on them. */
+const bsAtRest = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.querySelector('[data-board-rows]') as HTMLElement;
+    const hosts = [...box.querySelectorAll('[data-row-id]')].map((r) => r.parentElement as HTMLElement);
+    return {
+      running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+      box: box.getAttribute('style'),
+      bar: document.querySelector('[data-pinned-bar]')?.getAttribute('style') ?? null,
+      pinnedHosts: [...box.querySelectorAll('[data-pinned-host]')].filter((h) => h.getAttribute('style')).length,
+      lifted: hosts.filter((h) => h.style.zIndex).length,
+      solid: hosts.filter((h) => h.classList.contains('bg-surface-base')).length,
+      copies: document.querySelectorAll('[data-glide-copy]').length,
+    };
+  });
+const BS_REST = { running: 0, box: null, bar: null, pinnedHosts: 0, lifted: 0, solid: 0, copies: 0 };
+/** The distance in a `translate` keyframe pair, as numbers. */
+const dyOf = (frames: string) => {
+  const [first] = JSON.parse(frames) as { translate: string }[];
+  const [x, y] = first!.translate.split(' ').map((v) => Number.parseFloat(v));
+  return { x: x!, y: y ?? 0 };
+};
+/**
+ * On every frame: at each point a row moving under it shares with the column header or the
+ * "Pinned" bar, which is drawn there. A covered point is a row drawn over the header or the bar.
+ */
+const overFrame = () => {
+  const box = document.querySelector('[data-board-rows]');
+  const head = box?.parentElement?.querySelector(':scope > [role="row"]');
+  const bar = document.querySelector('[data-pinned-bar]');
+  const out = { overlaps: 0, covered: 0, moving: 0 };
+  if (!box || !head) return out;
+  const lids = [head, bar].filter((el): el is Element => el !== null);
+  for (const row of box.querySelectorAll('[data-row-id]')) {
+    const host = row.parentElement as HTMLElement;
+    if (!host.getAnimations().some((a) => JSON.stringify((a.effect as KeyframeEffect).getKeyframes()).includes('translate'))) {
+      continue;
+    }
+    out.moving += 1;
+    const r = host.getBoundingClientRect();
+    for (const lid of lids) {
+      const l = lid.getBoundingClientRect();
+      const top = Math.max(r.top, l.top);
+      const bottom = Math.min(r.bottom, l.bottom);
+      if (bottom - top < 2) continue;
+      out.overlaps += 1;
+      const hit = document.elementFromPoint(l.left + 200, (top + bottom) / 2);
+      if (!hit || !lid.contains(hit)) out.covered += 1;
+    }
+  }
+  return out;
+};
+
+/**
+ * The board's markup where a motion can reach it, every attribute: the scroller, the column
+ * header, the rows' box, the pinned block and its bar, each host and wrapper, each row, its star
+ * and the star's drawing. Not what a row says, which moves with the clock (a status changed
+ * minutes ago), and is not a motion's.
+ */
+const boardMarkup = (page: Page) =>
+  page.evaluate(() => {
+    const tag = (el: Element | null | undefined) =>
+      el
+        ? `<${el.tagName.toLowerCase()}${[...el.attributes]
+            .map((a) => ` ${a.name}="${a.value}"`)
+            .sort()
+            .join('')}>`
+        : '<none>';
+    const box = document.querySelector('[data-board-rows]')!;
+    const scroller = box.parentElement!;
+    const parts = [tag(scroller), tag(scroller.querySelector(':scope > [role="row"]')), tag(box)];
+    for (const child of box.children) {
+      parts.push(tag(child));
+      for (const inner of child.children) {
+        parts.push(tag(inner));
+        const row = inner.matches('[data-row-id]') ? inner : inner.firstElementChild;
+        if (row?.matches('[data-row-id]') && row !== inner) parts.push(tag(row));
+        const star = row?.querySelector('button[aria-pressed]');
+        if (star) parts.push(tag(star), tag(star.querySelector('svg')), tag(star.querySelector('path')));
+      }
+    }
+    // A reset seeds new ids each time: each is numbered in the order it first appears.
+    const seen = new Map<string, number>();
+    return parts.join('\n').replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
+      (id) => `#${seen.get(id) ?? seen.set(id, seen.size).get(id)!}`,
+    );
+  });
+type ScrollFrame = { scrollTop: number; moving: number };
+const scrollFrame = (): ScrollFrame => {
+  const scroller = document.querySelector('[data-board-rows]')!.parentElement!;
+  return {
+    scrollTop: scroller.scrollTop,
+    moving: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+  };
+};
+/** The row at the top of the view, under the column header, and where it is: what a person was looking at. */
+const topRow = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.querySelector('[data-board-rows]')!;
+    const scroller = box.parentElement!;
+    const head = scroller.querySelector(':scope > [role="row"]')!.getBoundingClientRect().bottom;
+    const r = scroller.getBoundingClientRect();
+    const row = document.elementFromPoint(r.left + 300, head + 2)?.closest('[data-row-id]');
+    return row ? { id: row.getAttribute('data-row-id')!, top: row.getBoundingClientRect().top - r.top } : null;
+  });
+/** Where the row with this id is drawn in the scroller's box now, or null if it is not drawn. */
+const rowTop = (page: Page, id: string) =>
+  page.evaluate((rowId) => {
+    const row = document.querySelector(`[data-row-id="${rowId}"]`);
+    const r = document.querySelector('[data-board-rows]')!.parentElement!.getBoundingClientRect();
+    return row ? row.getBoundingClientRect().top - r.top : null;
+  }, id);
+
+test.describe('phase 3bs, the board’s large motions (§12.159)', () => {
+  test('pin: the star pins a truck: it glides from its row to the block, 390ms, over the rest and under the bar; the rows it pushes glide from where they stood; its star grows from .2; P unpins it back; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logBs(page);
+    await openMixed(page);
+    await clearBs(page);
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const ids = await page.locator('[data-board-rows] [data-row-id]').evaluateAll((els) => els.map((e) => e.getAttribute('data-row-id')!));
+    const target = ids[5]!;
+
+    // Pin, by its star.
+    const before = await hostTops(page);
+    const over = await record(page, overFrame);
+    await step('pin', async () => {
+      await page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click();
+      await expect(page.locator('[data-pinned-host]')).toHaveCount(1);
+    });
+    const pinFrames = await over();
+    const after = await hostTops(page);
+    const slides = await bs(page, 'slide');
+    const moved = Object.keys(after).filter((id) => before[id] !== undefined && Math.abs(before[id]! - after[id]!) >= 0.5);
+    // Every row drawn before that has a new place, in view, slides from where it stood.
+    const view = await page.locator('[data-board-rows]').evaluate((b) => b.parentElement!.clientHeight);
+    const inView = (y: number) => y + 44 > 0 && y < view;
+    const expected = moved.filter((id) => inView(before[id]!) || inView(after[id]!));
+    expect(expected.length).toBeGreaterThan(10);
+    expect(slides.map((e) => e.key).sort()).toEqual([...expected].sort());
+    for (const e of slides) {
+      expect(dyOf(e.frames).x).toBe(0);
+      // One coming from past the edge of the view starts just past it (§12.149).
+      const from = Math.max(-44, Math.min(view, before[e.key]!));
+      expect(dyOf(e.frames).y).toBeCloseTo(from - after[e.key]!, 0);
+      expect(e.duration).toBe(PIN_MS);
+      expect(curve(e.easing)).toBe(curve(DIALOG_CURVE));
+      expect(e.ground).toBe(true);
+      expect(e.clip).toBe('clip|isolate');
+      // The truck pinned is drawn over the rest; the rest are not lifted.
+      expect(e.z).toBe(e.key === target ? '3' : '');
+    }
+    const star = await bs(page, 'star');
+    expect(star).toHaveLength(1);
+    expect(star[0]).toMatchObject({
+      key: target,
+      frames: JSON.stringify([{ scale: '0.2' }, { scale: '1' }]),
+      duration: PIN_MS,
+    });
+    expect(curve(star[0]!.easing)).toBe(curve(DIALOG_CURVE));
+    // The rows pushed down by the block's arrival pass under its bar, which stays on top.
+    const moving = pinFrames.filter((f) => f.moving > 0);
+    expect(moving.length).toBeGreaterThan(5);
+    expect(moving.reduce((n, f) => n + f.overlaps, 0)).toBeGreaterThan(0);
+    expect(moving.reduce((n, f) => n + f.covered, 0)).toBe(0);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+
+    // Unpin, by P on the selected pinned truck: it glides back to its place in the list.
+    await page.locator(`[data-pinned-host] [data-row-id="${target}"]`).click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    await clearBs(page);
+    const pinned = await hostTops(page);
+    await step('unpin', async () => {
+      await page.keyboard.press('p');
+      await expect(page.locator('[data-pinned-host]')).toHaveCount(0);
+    });
+    const back = await hostTops(page);
+    expect(back[target]).toBeCloseTo(before[target]!, 0);
+    const home = (await bs(page, 'slide')).find((e) => e.key === target)!;
+    expect(dyOf(home.frames).y).toBeCloseTo(pinned[target]! - back[target]!, 0);
+    expect(home.z).toBe('3');
+    expect((await bs(page, 'star')).map((e) => e.key)).toEqual([target]);
+
+    expect(grew).toEqual([]);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+
+    // Pinned again, and a reload: the stored pin lands a moment after the rows, and glides nothing.
+    await page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click();
+    await expect(page.locator('[data-pinned-host]')).toHaveCount(1);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await page.reload();
+    await expect(page.locator(`[data-pinned-host] [data-row-id="${target}"]`)).toHaveCount(1);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    // The board's own opening, once per load (§12.149: 200ms, opacity only), and nothing else.
+    expect((await bs(page)).filter((e) => !(e.what === 'fade' && e.duration === 200))).toEqual([]);
+  });
+
+  test('density: Compact glides each row in view from its old top to its new one, 390ms; D goes back the same way; rows out of view jump; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logBs(page);
+    await openMixed(page);
+    await clearBs(page);
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const view = await page.locator('[data-board-rows]').evaluate((b) => b.parentElement!.clientHeight);
+    for (const [name, act] of [
+      ['Compact', () => page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click()],
+      ['D', () => page.keyboard.press('d')],
+    ] as const) {
+      await clearBs(page);
+      const before = await hostTops(page);
+      await step(name, act);
+      const after = await hostTops(page);
+      const slides = await bs(page, 'slide');
+      const h = name === 'Compact' ? 32 : 44;
+      const expected = Object.keys(after).filter(
+        (id) => before[id] !== undefined && Math.abs(before[id]! - after[id]!) >= 0.5 && after[id]! + h > 0 && after[id]! < view,
+      );
+      expect(expected.length).toBeGreaterThan(5);
+      expect(slides.map((e) => e.key).sort()).toEqual([...expected].sort());
+      for (const e of slides) {
+        const from = Math.max(-h, Math.min(view, before[e.key]!));
+        expect(dyOf(e.frames).y).toBeCloseTo(from - after[e.key]!, 0);
+        expect(e.duration).toBe(DENSITY_MS);
+        expect(curve(e.easing)).toBe(curve(DIALOG_CURVE));
+        expect(e.z).toBe('');
+        expect(e.clip).toBe('clip|isolate');
+      }
+      expect(await bs(page, 'fade')).toEqual([]);
+      expect(await bs(page, 'star')).toEqual([]);
+      await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+    }
+    expect(grew).toEqual([]);
+
+    // Compact again, and a reload: the stored density lands a moment after the rows, and glides nothing.
+    await page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await page.reload();
+    await page.locator('[data-row-id]').first().waitFor();
+    await expect(page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    // The board's own opening, once per load (§12.149: 200ms, opacity only), and nothing else.
+    expect((await bs(page)).filter((e) => !(e.what === 'fade' && e.duration === 200))).toEqual([]);
+  });
+
+  test('the scroll holds: in the middle of the list a pin and a density change end in the same scrollTop and markup as with no motion, and scrollTop never jumps while they glide', async ({
+    page,
+  }) => {
+    test.setTimeout(4 * 60_000);
+    await logBs(page);
+    type End = { scrollTop: number; markup: string; looked: number | null; lookedAfter: number | null };
+    /** Opens 60 trucks, scrolls to the middle, pins the row in the middle of the view, then goes Compact. */
+    const run = async () => {
+      await page.evaluate(() => {
+        localStorage.removeItem('ft.pinned');
+        localStorage.removeItem('ft.density');
+      });
+      // Not `openMixed`: its two chips glide the rows, and a chip's glide leaves `class=""` on every
+      // wrapper it moved (3bd's row-glide, found wrong in 3bs), which no motion here would add.
+      await resetWorld({ extraTrucks: 57 });
+      await page.goto('/');
+      await page.locator('[data-row-id]').first().waitFor();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+      await scroller.evaluate((s) => (s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2)));
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const target = await page.evaluate(() => {
+        const s = document.querySelector('[data-board-rows]')!.parentElement!;
+        const r = s.getBoundingClientRect();
+        return document.elementFromPoint(r.left + 300, r.top + r.height / 2)!.closest('[data-row-id]')!.getAttribute('data-row-id')!;
+      });
+      await clearBs(page);
+      const ends: End[] = [];
+      const framesOf: ScrollFrame[][] = [];
+      for (const act of [
+        () => page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click(),
+        () => page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click(),
+      ]) {
+        const looked = await topRow(page);
+        const frames = await record(page, scrollFrame);
+        await act();
+        await expect.poll(() => stillMoving(page)).toBe(0);
+        await quiet(page);
+        framesOf.push(await frames());
+        ends.push({
+          scrollTop: await scroller.evaluate((s) => s.scrollTop),
+          markup: await boardMarkup(page),
+          // The row that was at the top of the view: where it was, and where it is now.
+          looked: looked?.top ?? null,
+          lookedAfter: looked ? await rowTop(page, looked.id) : null,
+        });
+      }
+      return { ends, framesOf, played: await bs(page) };
+    };
+
+    await page.goto('/');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await run();
+    expect(still.played).toEqual([]);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const moved = await run();
+    process.stdout.write(
+      `3bs scroll hold: no motion ${JSON.stringify(still.ends.map(({ markup: _m, ...e }) => e))}; with motion ${JSON.stringify(
+        moved.ends.map(({ markup: _m, ...e }) => e),
+      )}\n`,
+    );
+    for (const [i, name] of ['pin', 'density'].entries()) {
+      // Each glided.
+      expect(moved.played.filter((e) => e.what === 'slide').length).toBeGreaterThan(0);
+      // The same scrollTop and the same markup as with no motion.
+      expect(moved.ends[i]!.scrollTop, name).toBe(still.ends[i]!.scrollTop);
+      const [m, n] = [moved.ends[i]!.markup, still.ends[i]!.markup];
+      if (m !== n) {
+        let at = 0;
+        while (m[at] === n[at]) at += 1;
+        const fs = await import('node:fs');
+        fs.writeFileSync(test.info().outputPath(`${name}-motion.txt`), m);
+        fs.writeFileSync(test.info().outputPath(`${name}-still.txt`), n);
+        process.stdout.write(`3bs DIFF ${name} at ${at}: ${test.info().outputPath(name)}\n`);
+      }
+      expect(m, name).toBe(n);
+      // While it glides, scrollTop is one value, the one it ends in.
+      const gliding = moved.framesOf[i]!.filter((f) => f.moving > 0);
+      expect(gliding.length, name).toBeGreaterThan(5);
+      expect([...new Set(gliding.map((f) => f.scrollTop))], name).toEqual([moved.ends[i]!.scrollTop]);
+    }
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+
+  test('density at the end of the list, where Compact makes the scroller clamp its scrollTop: each row glides from where it was drawn on screen, scrollTop changes once, in the commit, and it ends as with no motion', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logBs(page);
+    const run = async () => {
+      await page.evaluate(() => localStorage.removeItem('ft.density'));
+      await resetWorld({ extraTrucks: 57 });
+      await page.goto('/');
+      await page.locator('[data-row-id]').first().waitFor();
+      const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+      await scroller.evaluate((s) => (s.scrollTop = s.scrollHeight));
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      await clearBs(page);
+      const scrolledTo = await scroller.evaluate((s) => s.scrollTop);
+      const before = await hostTops(page);
+      const frames = await record(page, scrollFrame);
+      await page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      return {
+        scrolledTo,
+        before,
+        after: await hostTops(page),
+        frames: await frames(),
+        end: await scroller.evaluate((s) => s.scrollTop),
+        view: await scroller.evaluate((s) => s.clientHeight),
+        markup: await boardMarkup(page),
+        slides: await bs(page, 'slide'),
+      };
+    };
+    await page.goto('/');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await run();
+    expect(still.slides).toEqual([]);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const moved = await run();
+    process.stdout.write(`3bs density at the end: scrollTop ${moved.scrolledTo} -> ${moved.end} (no motion ${still.scrolledTo} -> ${still.end})\n`);
+    // Compact leaves less than a view below: the scroller clamps.
+    expect(moved.end).toBeLessThan(moved.scrolledTo);
+    // Each row glides from where it was drawn on screen, the clamp included.
+    expect(moved.slides.length).toBeGreaterThan(5);
+    for (const e of moved.slides) {
+      const from = Math.max(-32, Math.min(moved.view, moved.before[e.key]!));
+      expect(dyOf(e.frames).y, e.key).toBeCloseTo(from - moved.after[e.key]!, 0);
+    }
+    // scrollTop changes once, in the commit, and then holds while they glide.
+    const gliding = moved.frames.filter((f) => f.moving > 0);
+    expect(gliding.length).toBeGreaterThan(5);
+    expect([...new Set(gliding.map((f) => f.scrollTop))]).toEqual([moved.end]);
+    // And it ends where the same change with no motion leaves it.
+    expect(moved.end).toBe(still.end);
+    expect(moved.markup).toBe(still.markup);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+
+  test('a short view, scrolled: P pins the truck and it glides up out of the view under the column header; P again brings it down from just past the top edge, under the header; scrollTop holds; nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logBs(page);
+    await resetWorld({ extraTrucks: 37 });
+    await page.setViewportSize({ width: 1440, height: 500 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+    await scroller.evaluate((s) => (s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2)));
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const target = await page.evaluate(() => {
+      const s = document.querySelector('[data-board-rows]')!.parentElement!;
+      const r = s.getBoundingClientRect();
+      return document.elementFromPoint(r.left + 300, r.top + r.height / 2)!.closest('[data-row-id]')!.getAttribute('data-row-id')!;
+    });
+    await page.locator(`[data-row-id="${target}"]`).click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    const grew: string[] = [];
+    const step = async (name: string, act: () => Promise<unknown>) => {
+      grew.push(...(await watchStep(page, act)).map((g) => `${name}: ${g}`));
+    };
+    const scrollTop = await scroller.evaluate((s) => s.scrollTop);
+    const view = await scroller.evaluate((s) => s.clientHeight);
+
+    for (const [name, pinnedAfter] of [
+      ['pin', 1],
+      ['unpin', 0],
+    ] as const) {
+      await clearBs(page);
+      const over = await record(page, overFrame);
+      const scrolls = await record2(page, scrollFrame);
+      const before = await hostTops(page);
+      await step(name, async () => {
+        await page.keyboard.press('p');
+        await expect(page.locator('[data-pinned-host]')).toHaveCount(pinnedAfter);
+      });
+      const frames = (await over()).filter((f) => f.moving > 0);
+      const tops = (await scrolls()).filter((f) => f.moving > 0);
+      const after = await hostTops(page);
+      const flight = (await bs(page, 'slide')).find((e) => e.key === target)!;
+      expect(flight, name).toBeDefined();
+      expect(flight.z, name).toBe('3');
+      // Pinned, it leaves from where it stood in the view for its place in the block, far above.
+      // Unpinned, it comes from the block, far above, so it starts just past the top edge.
+      const from = Math.max(-44, Math.min(view, before[target]!));
+      expect(dyOf(flight.frames).y, name).toBeCloseTo(from - after[target]!, 0);
+      expect(name === 'pin' ? after[target]! < -44 : before[target]! < -44, name).toBe(true);
+      // It passes under the column header, which stays over it on every frame.
+      expect(frames.length, name).toBeGreaterThan(5);
+      expect(frames.reduce((n, f) => n + f.overlaps, 0), name).toBeGreaterThan(0);
+      expect(frames.reduce((n, f) => n + f.covered, 0), name).toBe(0);
+      expect([...new Set(tops.map((f) => f.scrollTop))], name).toEqual([scrollTop]);
+      await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+    }
+    expect(await scroller.evaluate((s) => s.scrollTop)).toBe(scrollTop);
+    expect(grew).toEqual([]);
+  });
+
+  test('mid-flight: a pin during a chip’s glide, density during a pin’s, a pin during density’s, an unpin during a pin’s and a chip during density’s each take every row on from where it is drawn; nothing is left', async ({
+    page,
+  }) => {
+    test.setTimeout(4 * 60_000);
+    await logBs(page);
+    await openMixed(page);
+    // An at-risk truck, selected, so P has a truck and At risk (2) keeps it in the list.
+    const atRisk = await page.locator('[data-board-rows] [data-row-id]').nth(14).getAttribute('data-row-id');
+    await page.locator(`[data-row-id="${atRisk}"]`).click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    type Drawn = { t: number; view: number; tops: Record<string, number> };
+    const drawnFrame = (): Drawn => {
+      const box = document.querySelector('[data-board-rows]')!;
+      const frame = box.parentElement!.getBoundingClientRect();
+      const tops: Record<string, number> = {};
+      for (const row of box.querySelectorAll('[data-row-id]')) {
+        tops[row.getAttribute('data-row-id')!] = row.parentElement!.getBoundingClientRect().top - frame.top;
+      }
+      // The scroller is only as tall as what is in it (§12.149), so its height is this frame's.
+      return { t: performance.now(), view: box.parentElement!.clientHeight, tops };
+    };
+    for (const [keys, second] of [
+      [['2', 'p'], 'slide'],
+      [['p', 'd'], 'slide'],
+      [['d', 'p'], 'slide'],
+      [['p', 'p'], 'slide'],
+      [['d', '0'], 'chipGlide'],
+    ] as const) {
+      const name = keys.join(' then ');
+      await clearBs(page);
+      const drawn = await record(page, drawnFrame);
+      await keysTwoFramesApart(page, [...keys]);
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const frames = await drawn();
+      // The second cause's own motions: of its kind, and started after the first cause's had.
+      const played = await bs(page);
+      const firstAt = played[0]!.t;
+      const secondAt = played.find((e) => e.what === second && e.t > firstAt + 8)?.t;
+      expect(secondAt, name).toBeDefined();
+      // The first frame drawn after they started.
+      const f = frames.findIndex((fr) => fr.t > secondAt!);
+      expect(f, name).toBeGreaterThan(1);
+      // Each row there is drawn within its own speed of where it was a frame before, plus the
+      // first frame of its new glide (the curve starts fast: a quarter of its trip at most): taken
+      // on from where it is drawn, never sent back to where it started or on to where it rests,
+      // either of which is the whole trip.
+      const trip = new Map(
+        played
+          .filter((e) => e.t >= secondAt! && e.t < secondAt! + 8 && (e.what === 'slide' || e.what === 'chipGlide'))
+          .map((e) => {
+            if (e.what === 'slide') return [e.key, Math.abs(dyOf(e.frames).y)];
+            // A chip's glide runs over the wrapper's transform, from one translateY to the next.
+            const [from, to] = (JSON.parse(e.frames) as { transform: string }[]).map((k) =>
+              Number.parseFloat(k.transform.replace('translateY(', '')),
+            );
+            return [e.key, Math.abs(from! - to!)];
+          }),
+      );
+      const jumps: string[] = [];
+      // Seen on one of the two frames: a step between two places out of view is drawn nowhere.
+      const seen = (y: number, view: number) => y + 44 > 0 && y < view;
+      for (const [id, y] of Object.entries(frames[f]!.tops)) {
+        const a = frames[f - 2]?.tops[id];
+        const b = frames[f - 1]?.tops[id];
+        if (a === undefined || b === undefined || !(seen(b, frames[f - 1]!.view) || seen(y, frames[f]!.view))) continue;
+        const step = Math.abs(y - b);
+        if (step > Math.abs(b - a) * 2.5 + (trip.get(id) ?? 0) / 4 + 3) jumps.push(`${id.slice(0, 8)}: ${a.toFixed(1)} ${b.toFixed(1)} ${y.toFixed(1)}`);
+      }
+      expect(jumps, name).toEqual([]);
+      await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+    }
+  });
+
+  test('a poll while a pin glides, and the rows the virtualizer draws while density glides: the poll neither restarts nor doubles the glide; a row drawn fresh is at its place, with nothing on it', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logBs(page);
+    await openMixed(page, 60);
+    const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+
+    // A press holds the pin's glide (lib/motion), and a poll comes in under it.
+    await clearBs(page);
+    const target = await page.locator('[data-board-rows] [data-row-id]').nth(4).getAttribute('data-row-id');
+    await page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click();
+    const footer = page.getByText(/^Showing\b/).first();
+    await footer.hover();
+    await page.mouse.down();
+    const held = await page.evaluate(() =>
+      document.getAnimations().filter((a) => a.playState === 'paused' && !(a instanceof CSSTransition)).length,
+    );
+    // The control that the press came down mid-glide.
+    expect(held).toBeGreaterThan(5);
+    const playedBefore = (await bs(page)).length;
+    await pollWith(page, () => {});
+    await page.mouse.up();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const after = await bs(page);
+    expect(after).toHaveLength(playedBefore);
+    expect(after.filter((e) => e.cancelled)).toEqual([]);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+
+    // Density, then a scroll two frames on: what the virtualizer draws new has nothing on it.
+    await scroller.evaluate((s) => (s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2)));
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await quiet(page);
+    await clearBs(page);
+    const fresh = await record(page, () => {
+      const box = document.querySelector('[data-board-rows]')!;
+      const w = window as unknown as { __seen?: Set<string> };
+      const first = !w.__seen;
+      w.__seen ??= new Set();
+      const out: { id: string; moving: number }[] = [];
+      for (const row of box.querySelectorAll('[data-row-id]')) {
+        const id = row.getAttribute('data-row-id')!;
+        if (w.__seen.has(id)) continue;
+        w.__seen.add(id);
+        if (!first) out.push({ id, moving: (row.parentElement as HTMLElement).getAnimations().length });
+      }
+      return out;
+    });
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }));
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const s = document.querySelector('[data-board-rows]')!.parentElement!;
+              s.scrollTop += 500;
+              done();
+            }),
+          );
+        }),
+    );
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const appeared = (await fresh()).flat();
+    expect((await bs(page, 'slide')).length).toBeGreaterThan(5);
+    expect(appeared.length).toBeGreaterThan(5);
+    expect(appeared.filter((a) => a.moving > 0)).toEqual([]);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+
+  test('a truck not drawn when it is pinned arrives in the block by a fade, 390ms, linear, with nothing sliding on it', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await logBs(page);
+    await openMixed(page, 60);
+    const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+    // Selected at the end of the list, then the list scrolled back to its top: no longer drawn.
+    await scroller.evaluate((s) => (s.scrollTop = s.scrollHeight));
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const last = page.locator('[data-board-rows] [data-row-id]').last();
+    await expect
+      .poll(() =>
+        last.evaluate((r) => {
+          const s = r.closest('.overflow-y-auto')!.getBoundingClientRect();
+          return Math.abs(r.getBoundingClientRect().bottom - s.bottom) < 2;
+        }),
+      )
+      .toBe(true);
+    const target = (await last.getAttribute('data-row-id'))!;
+    await last.click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await scroller.evaluate((s) => (s.scrollTop = 0));
+    await expect(page.locator(`[data-row-id="${target}"]`)).toHaveCount(0);
+    await quiet(page);
+    await clearBs(page);
+    await page.keyboard.press('p');
+    await expect(page.locator('[data-pinned-host]')).toHaveCount(1);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const fades = await bs(page, 'fade');
+    expect(fades.map((e) => ({ key: e.key, frames: e.frames, duration: e.duration, easing: e.easing }))).toEqual([
+      { key: target, frames: JSON.stringify([{ opacity: 0 }, { opacity: 1 }]), duration: PIN_MS, easing: 'linear' },
+    ]);
+    expect((await bs(page, 'slide')).filter((e) => e.key === target)).toEqual([]);
+    // The rows the block pushed down glide; the star grows where it now is.
+    expect((await bs(page, 'slide')).length).toBeGreaterThan(5);
+    expect((await bs(page, 'star')).map((e) => e.key)).toEqual([target]);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+
+  test('reduced motion: a pin, an unpin, Compact and D play nothing, and leave nothing', async ({ page }) => {
+    test.setTimeout(2 * 60_000);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await logBs(page);
+    await openMixed(page);
+    await clearBs(page);
+    const target = await page.locator('[data-board-rows] [data-row-id]').nth(5).getAttribute('data-row-id');
+    await page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click();
+    await expect(page.locator('[data-pinned-host]')).toHaveCount(1);
+    await page.locator(`[data-pinned-host] [data-row-id="${target}"]`).click();
+    await page.keyboard.press('p');
+    await expect(page.locator('[data-pinned-host]')).toHaveCount(0);
+    await page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click();
+    await page.keyboard.press('d');
+    await expect(page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /comfortable/i })).toHaveAttribute('aria-pressed', 'true');
+    await quiet(page);
+    expect(await bs(page)).toEqual([]);
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
   });
 });

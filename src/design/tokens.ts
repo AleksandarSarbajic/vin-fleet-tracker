@@ -393,6 +393,22 @@ export const MOTION_MS = {
    * rows that come fade in. Never the tab a picker sets back to All, a search or a poll.
    */
   asgTabGlide: 390,
+
+  /*
+   * §12.159. The board's two large motions (phase 3bs), at the demo's Bold (GLIDE, 390ms; On
+   * is 260). One token each: 0 turns one off and skips its measuring.
+   */
+  /**
+   * A truck a person pinned or unpinned: it glides from where it was drawn to its new place,
+   * across the pinned block and the list, drawn over the rest; the rows it pushes glide from
+   * where they stood, and rows that come into view fade in. Never a poll, a chip, stored pins.
+   */
+  pinGlide: 390,
+  /**
+   * The density a person chose: each row in view glides from its old top to its new one. The
+   * rows' own height, and rows out of view, jump. Never a stored density, a resize or a poll.
+   */
+  densityGlide: 390,
 } as const;
 
 /**
@@ -455,6 +471,9 @@ export const MOTION_SHAPE = {
 
   /** §12.158, beside its duration above. A week's rows come in from this far to the side. */
   histWeekSwingPx: 40,
+
+  /** §12.159, beside its duration above. A pinned or unpinned truck's star grows from this scale. */
+  pinStarFromScale: 0.2,
 } as const;
 
 /**

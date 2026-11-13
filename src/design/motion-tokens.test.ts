@@ -239,3 +239,14 @@ describe('the numbers of the last medium motions off the map and the phone (§12
     expect(MOTION_MS.asgTabGlide).toBe(390);
   });
 });
+
+describe('the numbers of the board’s two large motions (§12.159)', () => {
+  it('a truck pinned or unpinned glides in 390ms, and its star grows from 0.2', () => {
+    expect(MOTION_MS.pinGlide).toBe(390);
+    expect(MOTION_SHAPE.pinStarFromScale).toBe(0.2);
+  });
+
+  it('a density a person chose glides its rows in view in 390ms', () => {
+    expect(MOTION_MS.densityGlide).toBe(390);
+  });
+});

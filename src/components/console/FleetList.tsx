@@ -11,6 +11,7 @@ import { BulkBarSlot } from './BulkBarSlot';
 import { openBoardOnce } from './board-opening';
 import { landSelection, slideSelection } from './selection-slide';
 import { createRowGlide } from './row-glide';
+import { createBoardMove } from './board-move';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -63,6 +64,10 @@ interface Props {
   glideCause: string;
   /** §12.156. The chips alone, by name: what may roll the footer's numbers. */
   chipCause: string;
+  /** §12.159. A person's pins and unpins, counted, and the last one's truck: the pin glide. */
+  pinCause: { count: number; id: string | null };
+  /** §12.159. A person's density changes, counted: the density glide. */
+  densityCause: number;
   rows: FleetRow[];
   /** Reference instant for every age on a row — see TruckRow. */
   fetchedAt: string | null;
@@ -117,6 +122,8 @@ interface Props {
 export function FleetList({
   glideCause,
   chipCause,
+  pinCause,
+  densityCause,
   rows,
   fetchedAt,
   feedStale,
@@ -140,6 +147,8 @@ export function FleetList({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  /** §12.159. The pinned block, the empty list and the list: what a pin or density glide clips. */
+  const rowsRef = useRef<HTMLDivElement | null>(null);
   const [columns, setColumns] = useState<6 | 8>(8);
 
   useLayoutEffect(() => {
@@ -192,6 +201,14 @@ export function FleetList({
       () => bodyRef.current,
     ),
   );
+  /* §12.159. A truck pinned or unpinned and a density chosen glide, each on its own cause. */
+  const [move] = useState(() =>
+    createBoardMove(
+      () => scrollRef.current,
+      () => rowsRef.current,
+      () => bodyRef.current,
+    ),
+  );
 
   /** §12.149. In the commit that changes it, ahead of the frame that would show it. */
   const lastDrawnSelection = useRef(selectedId);
@@ -201,7 +218,9 @@ export function FleetList({
     const box = scrollRef.current;
     if (!box || was === selectedId) return;
     // Selected during a glide, it just appears: the rows are on their way somewhere else.
-    if (was && selectedId && !glide.isMoving()) slideSelection(box, was, selectedId);
+    if (was && selectedId && !glide.isMoving() && !move.isMoving()) {
+      slideSelection(box, was, selectedId);
+    }
     else landSelection(box);
     // Rows are drawn by the commit that changes it, so this runs with them in place.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,6 +235,8 @@ export function FleetList({
   const idsBefore = useRef<string[]>([]);
   useLayoutEffect(() => {
     if (scrollRef.current) landSelection(scrollRef.current);
+    // §12.159. A pin or density glide it finds lands first, where it is going.
+    move.settle();
     glide.run(
       rows.map((r) => r.id),
       ROW_HEIGHT[density],
@@ -223,9 +244,27 @@ export function FleetList({
     // The cause alone. Everything else that changes a row's place must not start one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [glideCause]);
+  /**
+   * §12.159. Spent in the commit its cause lands in. A chip's glide in flight lands first, so
+   * what was captured mid-glide is where those rows were drawn and nothing is moved twice.
+   */
+  const spendMove = () =>
+    move.run(() => {
+      if (scrollRef.current) landSelection(scrollRef.current);
+      return glide.settle();
+    });
+  useLayoutEffect(() => {
+    spendMove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinCause.count]);
+  useLayoutEffect(() => {
+    spendMove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [densityCause]);
   useLayoutEffect(() => {
     idsBefore.current = rows.map((r) => r.id);
     glide.checkTargets();
+    move.checkTargets();
   });
 
   /**
@@ -255,6 +294,8 @@ export function FleetList({
           glide.capture(new Set(items.map((item) => String(item.key))), idsBefore.current)
         }
       />
+      <BeforeCommit cause={String(pinCause.count)} onCause={() => move.capture('pin', pinCause.id)} />
+      <BeforeCommit cause={String(densityCause)} onCause={() => move.capture('density', null)} />
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto">
         {/* Sticky INSIDE the scroller, so it survives every scroll position. */}
         <div
@@ -294,9 +335,18 @@ export function FleetList({
           are removed from the list below, never repeated in it, so every
           count below still describes what is below.
         */}
+        {/*
+          §12.159. The rows' box: the pinned block, the empty list and the list, in one plain
+          block with no style of its own, so all three are laid out as they were. A pin or a
+          density glide clips it while a row crosses from one to the other, never the scroller.
+        */}
+        <div ref={rowsRef} data-board-rows="">
         {pinnedRows.length > 0 ? (
           <div className="border-b border-line-hair">
-            <div className="relative flex h-6 items-center gap-2 bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.11em] text-text-muted">
+            <div
+              data-pinned-bar=""
+              className="relative flex h-6 items-center gap-2 bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.11em] text-text-muted"
+            >
               <span className="text-accent">Pinned</span>
               <span className="tabular-nums">
                 {pinnedRows.length} of {PIN_CAP}
@@ -309,8 +359,9 @@ export function FleetList({
               ) : null}
             </div>
             {pinnedRows.map((row) => (
+              // §12.159. Its host, as a list row's wrapper is: what a pin glide moves.
+              <div key={row.id} data-pinned-host="">
               <TruckRow
-                key={row.id}
                 row={row}
                 fetchedAt={fetchedAt}
                 feedStale={feedStale}
@@ -327,6 +378,7 @@ export function FleetList({
                 onSelect={onSelect}
                 onEdit={onEdit}
               />
+              </div>
             ))}
           </div>
         ) : null}
@@ -343,7 +395,7 @@ export function FleetList({
         {/* The body dims as a whole: the schedule is not to be trusted. */}
         <div
           ref={bodyRef}
-          onPointerDownCapture={(event) => glide.pressed(event.nativeEvent)}
+          onPointerDownCapture={(event) => glide.pressed(event.nativeEvent, move.isMoving())}
           onClick={(event) => {
             const id = glide.clicked(event.nativeEvent);
             if (id) onSelect(id);
@@ -385,6 +437,7 @@ export function FleetList({
               </div>
             );
           })}
+        </div>
         </div>
       </div>
 

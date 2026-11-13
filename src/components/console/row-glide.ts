@@ -70,7 +70,16 @@ export interface RowGlide {
   /** After every commit. A row whose place changed mid-flight goes there at once. */
   checkTargets(): void;
   isMoving(): boolean;
-  pressed(event: PointerEvent): void;
+  /**
+   * §12.159. Everything in flight lands where it is going, at once, and the copies go: what a
+   * pin or a density change does to a chip's glide it finds, before it measures. A list that got
+   * shorter still holds its bottom edge (the footer comes up as the rows land, above): that hold
+   * is handed over, with the scroller's `min-height`, and goes when the returned function is
+   * called, unless a glide of its own holds it again by then.
+   */
+  settle(): () => void;
+  /** `moving`: the rows are on their way for another cause (§12.159's glides). */
+  pressed(event: PointerEvent, moving?: boolean): void;
   /** The row a press meant, if this click ends one and did not reach it by itself. */
   clicked(event: MouseEvent): string | null;
 }
@@ -293,9 +302,23 @@ export function createRowGlide(
 
     isMoving: () => flights.size > 0 || ghosts.size > 0,
 
-    pressed(event) {
+    settle() {
+      snapshot = null;
+      for (const flight of [...flights.values()]) land(flight);
+      for (const [id, ghost] of [...ghosts]) dropGhost(id, ghost);
+      const style = getBody()?.style;
+      style?.removeProperty('overflow');
+      style?.removeProperty('isolation');
+      style?.removeProperty('min-height');
+      const scroller = getScroller();
+      return () => {
+        if (flights.size === 0 && ghosts.size === 0 && scroller?.style.minHeight) clearStyle(scroller);
+      };
+    },
+
+    pressed(event, moving = false) {
       press = null;
-      if (flights.size === 0 && ghosts.size === 0) return;
+      if (flights.size === 0 && ghosts.size === 0 && !moving) return;
       const body = getBody();
       const scroller = getScroller();
       if (!body || !scroller) return;

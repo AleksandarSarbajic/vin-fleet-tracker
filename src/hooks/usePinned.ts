@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PIN_CAP, readPinned, togglePin, writePinned } from '@/lib/pinned';
 import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 
@@ -18,23 +18,37 @@ export function usePinned(selectedId: string | null): {
   /** Set for a moment when a pin was refused at the cap, so the UI can say so. */
   refused: boolean;
   atCap: boolean;
+  /**
+   * §12.159. A person's pins and unpins that went through, counted, with the truck of the last:
+   * the cause of the pin glide. Set only in `toggle` (the star, P, the palette), in the same
+   * batch as the pins it changed, so it changes in the commit they land in. Pins read from
+   * storage and a refusal at the cap leave it as it is.
+   */
+  moved: { count: number; id: string | null };
 } {
   const [pinned, setPinned] = useState<string[]>([]);
   const [refused, setRefused] = useState(false);
+  const [moved, setMoved] = useState<{ count: number; id: string | null }>({ count: 0, id: null });
+  /** The pins as last set, so `toggle` knows at once whether this one goes through. */
+  const latest = useRef<string[]>([]);
 
-  useEffect(() => setPinned(readPinned()), []);
+  useEffect(() => {
+    const stored = readPinned();
+    latest.current = stored;
+    setPinned(stored);
+  }, []);
 
   const toggle = useCallback((id: string) => {
-    setPinned((current) => {
-      const result = togglePin(current, id);
-      if (result.refused) {
-        setRefused(true);
-        return current;
-      }
-      setRefused(false);
-      writePinned(result.ids);
-      return result.ids;
-    });
+    const result = togglePin(latest.current, id);
+    if (result.refused) {
+      setRefused(true);
+      return;
+    }
+    latest.current = result.ids;
+    setRefused(false);
+    writePinned(result.ids);
+    setPinned(result.ids);
+    setMoved((last) => ({ count: last.count + 1, id }));
   }, []);
 
   /** The refusal is a flash, not a state — it clears itself. */
@@ -65,5 +79,6 @@ export function usePinned(selectedId: string | null): {
     toggle,
     refused,
     atCap: pinned.length >= PIN_CAP,
+    moved,
   };
 }

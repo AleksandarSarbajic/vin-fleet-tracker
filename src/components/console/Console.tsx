@@ -591,7 +591,7 @@ export function Console({
   const { data: health } = useFleetHealth(initialHealth);
 
   /** §14 feature 5. Persisted, and bound to D. */
-  const { density, ready: densityReady, setDensity } = useDensity();
+  const { density, ready: densityReady, setDensity, moves: densityMoves } = useDensity();
 
   /**
    * §14 feature 2. A second cursor over the same list: `selectedId` drives
@@ -1123,6 +1123,8 @@ export function Console({
                     <FleetList
                       glideCause={glideCause}
                       chipCause={chipCause}
+                      pinCause={pins.moved}
+                      densityCause={densityMoves}
                       density={density}
                       checked={bulk.checked}
                       onCheck={bulk.toggle}

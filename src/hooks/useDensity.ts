@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   nextDensity,
   readDensity,
@@ -23,29 +23,43 @@ export function useDensity(): {
   ready: boolean;
   setDensity: (density: Density) => void;
   toggle: () => void;
+  /**
+   * §12.159. How many times a person changed the density: the cause of the density glide. Set
+   * only in `setDensity` and `toggle` (the Density control, D, the palette, the phone's More
+   * sheet), in the same batch as the density, and only when it changes. The stored density
+   * read after load leaves it as it is.
+   */
+  moves: number;
 } {
   const [density, setState] = useState<Density>('comfortable');
+  const [moves, setMoves] = useState(0);
+  /** The density as last set, so a handler knows at once whether this one changes it. */
+  const latest = useRef<Density>('comfortable');
 
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setState(readDensity());
+    const stored = readDensity();
+    latest.current = stored;
+    setState(stored);
     setReady(true);
   }, []);
 
   const setDensity = useCallback((next: Density) => {
+    const changed = next !== latest.current;
+    latest.current = next;
     setState(next);
     writeDensity(next);
+    if (changed) setMoves((n) => n + 1);
   }, []);
 
-  const toggle = useCallback(
-    () => setState((current) => {
-      const next = nextDensity(current);
-      writeDensity(next);
-      return next;
-    }),
-    [],
-  );
+  const toggle = useCallback(() => {
+    const next = nextDensity(latest.current);
+    latest.current = next;
+    setState(next);
+    writeDensity(next);
+    setMoves((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -59,5 +73,5 @@ export function useDensity(): {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggle]);
 
-  return { density, ready, setDensity, toggle };
+  return { density, ready, setDensity, toggle, moves };
 }
