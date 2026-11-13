@@ -121,6 +121,9 @@ Not live until pushed. App only (Vercel): one app file, no worker file, so no wo
 **3bo: NOT pushed, NOT live** (2026-11-12): the board's five medium motions at the demo's Bold (§12.156): a saved view saved or deleted in the Fleet menu, the list footer on a person's chip, the palette's cursor on the arrow keys, trucks added or removed in the list editor, the timeline's stop cards.
 **Committed (2026-11-13), `d6f5444` and the docs commit:** the first full e2e failed on nine screenshot baselines at "of" in the list footer; the footer's two lines are back as at `7464e30`, nothing re-saved, and the full e2e again is clean: 546 passed, 0 failed, `phone-signout` ran, 58.0 min (`2026-11-13T09-19-29-160Z`). See "Phase 3bo".
 Not live until pushed. App only (Vercel): no worker file reaches a changed one, so no worker deploy. See "Phase 3bo" below.
+**At the start of 3bp (2026-11-13): 3bo is NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `3e3e1be` (3bo committed as `d6f5444` and `3e3e1be`).
+**3bp: NOT pushed, NOT live** (2026-11-13): the edit window's four medium motions at the demo's Bold (§12.157): a stop added, a stop removed, a stop chosen, and the fields a fill changed. Committed as `e45ec8f` and the docs commit; check 246 files / 4538 tests; full e2e `2026-11-13T14-29-37-071Z` 553 passed, 0 failed, `phone-signout` ran, 62.7 min.
+Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bp" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11937,6 +11940,121 @@ Turned off (0), its "starts on its cause" tests are the ones to change to "nothi
 **Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone; a real GPU.
 
 **Next:** the advisor's verification and Alex's push (app only). Origin's master is now `7464e30` (pushed 2026-11-13 00:17 UTC, by the local reflog), so 3bo's two commits are the only ones not pushed. Then the next medium batch, as the build order says.
+
+### Phase 3bp: the edit window's four medium motions, at Bold (2026-11-13)
+
+Motion batch 3b, from the advisor's brief: the 3be demo's medium rows stopAdd, stopRemove, stopChoose and loadStrip, at the demo's Bold, after Alex's "i want motion, animations EVERYWHERE" with All bold (2026-11-06). None is left off. §12.157 is the record. The six live motions, 3bj's and 3bk's small ones, the chip and its gap test, and 3bo's five are untouched. **NOT pushed, NOT live.** App only (Vercel): no worker file reaches a changed one (a script walked the worker's imports from `src/worker`: 40 files, none of them changed; 3bo's walk counted 84 by another method), so no worker deploy. Built on `3e3e1be`; origin's master was `7464e30` (fetched at the start, nothing new), so 3bo is not pushed either.
+
+| Commit | What |
+|---|---|
+| `e45ec8f` | The tokens, `fadeOut`, `edit/stop-motion.ts`, the four in `StopList`, `EditStopModal` and the fields, `[data-stop-target]`, the unit tests and the e2e tests |
+| The docs commit | §12.157, its pointer from §12.152, this section and "What is live" |
+
+**The lines, re-grepped at `3e3e1be` before building.** 3be's table cites `b45cd15`. Each cited line was found by its text; the ones in `EditStopModal.tsx` moved with 3bj (`709c9b1`, the one commit to touch `edit/` since), the others are where they were. Paths as 3be's: `edit/` is `src/components/edit/`.
+
+| Row | At `b45cd15` | At `3e3e1be` | What is there |
+|---|---|---|---|
+| stopAdd | `edit/EditStopModal.tsx:435` | `:452` | `const added = addStop(form, openedAt);` (Add stop's handler) |
+| stopAdd | `edit/StopList.tsx:208` | `:208` | `onClick={onAdd}` (the Add stop button) |
+| stopRemove | `edit/EditStopModal.tsx:444` | `:461` | `setForm(removeStop(form, key));` |
+| stopRemove | `edit/EditStopModal.tsx:446` | `:463` | `setSelected(Math.min(index, form.stops.length - 2));` |
+| stopChoose | `edit/StopList.tsx:154` | `:154` | `onClick={() => onSelect(i)}` (a tab) |
+| stopChoose | `edit/EditStopModal.tsx:1301` | `:1354` | `onSelect={setSelected}` |
+| stopChoose | `edit/EditStopModal.tsx:1307` | `:1360` | `key={current.key}` (the form remounts by key) |
+| loadStrip | `edit/EditStopModal.tsx:1282` | `:1335` | `const filled = fillLoad(form, read, openedAt, new Date(), from);` (the fill, in `onFill`) |
+| loadStrip | `edit/LoadStrip.tsx:121` | `:121` | `source={loadNumberSource}` (the load number's source line) |
+
+**The four.** Bold values from `.taste-skill/motion/everywhere/core.js` (`DROP` 270ms 14px for stopAdd, stopChoose and loadStrip; `SLIDE` 270ms for stopRemove), and the demo's shapes from `windows.js` (`addStopUi`, `removeStopUi`, `chooseStop`, `fillLoad`).
+
+| Row | Bold (demo) | Token(s) | What moves | What starts it | What must not |
+|---|---|---|---|---|---|
+| stopAdd | `DROP` 270ms, 14px | `stopAddDrop`, `stopAddDropPx` | The new tab drops; Add stop slides from where it stood (down the column, across the row) | A person's Add stop | A fill's stops; the focus (§12.119: the street box, as before) |
+| stopRemove | `SLIDE` 270ms | `stopRemoveSlide` | A copy of the tab fades where it stood (linear); the tabs after it and Add stop slide in (up, or from the right) | A person's Remove stop | A fill that replaces the stops |
+| stopChoose | `DROP` 270ms, 14px | `stopChooseDrop`, `stopChooseDropPx` | The highlight slides tab to tab behind the tabs; the form, remounted by key, drops | A person's tab click or arrow key | The stop already chosen; Add stop; Remove stop; a fill; a refused save choosing the stop it names |
+| loadStrip | `DROP` 270ms, 14px | `loadStripDrop`, `loadStripDropPx` | Each field the fill changed fades (the control itself, linear, its own start); its source line drops | A fill: Replace, or a read landing with nothing to replace | A field it did not change; typing; Keep mine; a paste not recognised; an address pasted into Street; a poll |
+
+**How it is built.**
+
+- **`edit/stop-motion.ts`**, new: the stops' box is `[data-stop-tabs]`, a new `div` around the tablist and Add stop (`relative isolate flex gap-1.5 min-[1008px]:flex-col`), inside the row's scroller below 1008px and the sticky column above. Drawn pixel for pixel as before: `desktop-baseline.spec.ts` 13 of 13, the edit windows among them, nothing re-saved (run `2026-11-13T14-26-20-715Z`). The tablist is now `relative isolate z-[1]`, so the tabs are drawn over Add stop where they cross. Places are offsets summed up to the box, and what is already moving is taken from where it is drawn.
+- **The causes**, each set in the person's own handler and spent by the commit it causes, compared with the commit before: Add stop's click and a tab's click or arrow key in `StopList`; Remove stop in the modal (`removeOne`, which takes the copy before React removes the tab); the form's drop flag in the modal's `chooseStop`; the fill's "what the fields drew before" in `onFill`, after a fill that worked.
+- **The copy** of a removed tab is a `span` with the tab's classes and words (`makeInert`, then not a `button`), `data-leaving-copy`, `inert`, `aria-hidden`, no pointer, `-z-10` behind the tabs. It goes when its fade ends.
+- **The highlight** is an overlay inside the tablist with the chosen look (`border-accent bg-accent-veil`), the tab it goes to held back by `[data-stop-target]` (`globals.css`), as the palette cursor's. Not `slideSegment` itself, which the brief names: that one's token (260ms) and look are the segments' own, a live motion's, and it animates width and height, which §12.152 rule 1 rules out. This is modelled on it.
+- **The fill**: `data-fill` on each control a fill writes (the load number, street, ZIP, city, state, the stop type's buttons, the appointment's tick, APPT/FCFS, date, time, end time, window, and the zone) and `data-fill-source` on each source line. `Field` takes a new optional `fill` for both.
+- **A press on a place where nothing is drawn yet** (the box itself) goes to the button arriving there: Add stop or a tab sliding into it (`restingButton`, §12.156 rule 10). A press on anything drawn is that thing's.
+
+**The values.** All in `tokens.ts`; all equal the demo's Bold. "On" is the demo's On, for taking one back a step.
+
+| Token | On | Bold |
+|---|---|---|
+| `stopAddDrop` / `stopAddDropPx` | 180 / 6 | **270 / 14** |
+| `stopRemoveSlide` | 180 | **270** |
+| `stopChooseDrop` / `stopChooseDropPx` | 180 / 6 | **270 / 14** |
+| `loadStripDrop` / `loadStripDropPx` | 180 / 6 | **270 / 14** |
+
+**To take one motion back: one line in `tokens.ts`.** Its duration to 0 turns it off (each `before…` returns null on 0, the shapes return at once on 0), and its On values above make it weaker. Its number is also written out in these places, which fail until told:
+
+| Motion | Unit test (`edit/edit-medium-motion.test.tsx`, describe) | e2e (`new-motion.spec.ts`, "phase 3bp") |
+|---|---|---|
+| stopAdd | "stopAdd: a stop added, on Add stop" | `STOP_MS`; the press table's "new tab" and "Add stop" |
+| stopRemove | "stopRemove: a stop removed, on Remove stop" | `STOP_MS`; the press table's "tab sliding up" |
+| stopChoose | "stopChoose: another stop chosen, by its tab or an arrow key" | `STOP_MS`; the press table's "tab under the highlight" and "dropping form" |
+| loadStrip | "loadStrip: a fill, on Replace or a read landing" | `FILL_MS`; the press table's "fading field" |
+| every one | `design/motion-tokens.test.ts`, "the numbers of the edit window’s medium motions (§12.157)" | |
+
+**Tests.** With the numbers written out. `npm run check`: **246 files, 4538 tests** (245 and 4508 before): 30 new, in one new file and two existing ones, and no existing test changed.
+
+- `edit/edit-medium-motion.test.tsx` (24), on the real `EditStopModal`, with layout stated (tabs 56px apart down the column, 206px across the row). **stopAdd** (6): the tab drops 14px in 270ms and Add stop slides 56px down; in the row 206px across; §12.119, every change of focus from the press on is the street box's and it holds when the motions end; a click on the box at Add stop's place reaches it; a fill's stops drop nothing; reduced motion. **stopRemove** (5): the copy fades where it stood (270ms, linear), the tab after it and Add stop slide up 56px, the box clips, nothing left; the copy is a `span` with no id, no role, no control, `inert`, hidden, no pointer, behind; in the row from the right, 206px; the last stop removed moves no tab; reduced motion. **stopChoose** (6): a click slides the highlight 56px in 270ms behind the tabs and drops the form; an arrow key in the row, 206px across, the focus on the tab as always; a second choice, one highlight at a time; the stop already chosen, Add stop, Remove stop and a fill play nothing; a save the server refused, naming stop 2, chooses it and plays nothing; reduced motion. **loadStrip** (5): Replace fades each changed field (270ms, linear, one animation each) with its line dropping 14px, the city it did not change still; an AI read landing while the person types in the driver search keeps the focus and the caret (1, 1); a focused field the fill changes keeps the focus, opacity only; typing, Keep mine, a paste not recognised and an address pasted into Street play nothing; reduced motion. **A poll** (1): changed data on a load and on a new one, 0 animations. **Reduced motion** (1): Add stop twice, a click, an arrow key, Remove stop and a fill end in the same markup with motion and without.
+- `lib/appear-motion.test.ts` (+2): `fadeOut`, and 0 or reduced motion running none.
+- `design/motion-tokens.test.ts` (+4): the numbers.
+
+**Mutations,** each in a worktree at `3e3e1be` with this phase's changes, each file restored byte-identical after (checked with `cmp` against the main tree), the four suites passing 87/87 there unmutated before and after:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) stopAdd takes the focus: the new tab focused as it drops | 1: "§12.119: the new stop’s street box has the focus as the stop is added, and when every motion has ended". On the first try it failed nothing: the modal's own effect puts the focus back in the street box, so the end state looked right. The test now records every change of focus, and fails. |
+| (a2) stopAdd takes the focus as it ends: the new tab focused when its drop lands | 1: the same |
+| (b) stopRemove the wrong way: each slide from the other side | 5: both stopAdd slides, "in the column: a copy of its tab fades … slide up 56px", "in the row below 1008px … from the right, 206px", "the last stop removed …" |
+| (c) stopChoose's highlight on any change of stop, its cause not asked | 1: "a save the server refused, naming the second stop, chooses it: no highlight slides and no form drops" (written for it: Add, Remove and a fill change the stops too, so they could not show it) |
+| (d) the form drops on any new form, its cause not asked | 4: the stopAdd column test, the save refused, "the stop already chosen, Add stop, Remove stop and a fill …", the stopRemove column test |
+| (e) loadStrip moves every field, changed or not | 1: "Replace: each field whose value changed fades in … a field that did not change does not move" |
+| (f) loadStrip under reduced motion: the fade started past `play` | 3: "reduced motion: the values are simply there", "… the same window after each", and `reduced-motion-rule.test.ts` "nothing outside lib/motion.ts starts a Web Animation" |
+| (g) stopAdd with no motion: the new tab does not drop | 3: both stopAdd slide tests, "the new tab’s place reaches it while it drops …" |
+| (h) a re-render plays the highlight, what a poll would start: no change, no cause asked | 4: "a poll with changed data, on a load and on a new one: 0 animations", the stopAdd column test, the save refused, "the stop already chosen …" |
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3bp, the edit window’s medium motions (§12.157)"), eight tests:
+
+- **The stops at 1007px (a row of tabs), 1008px and 1440px (a column)**, one test each: Add stop drops the new tab (270ms, 14px) and slides Add stop the layout's way (across in the row, down in the column); the street box has the focus on the first frame drawn and at the end (in the click's own task, at all three, it does not yet: the modal's effect just after it focuses it); a choice from the third stop to the first slides the highlight that way and drops the form; Remove stop of the first leaves a copy that fades (270ms, linear), and on its first frame what stands at its centre is the stops' box, not the copy; the two tabs after it and Add stop slide in. Nothing grown on any frame, nothing left.
+- **A fill:** a PDF read in the browser lands while the person types in the driver search: the changed fields fade (270ms, linear) with their lines (270ms, 14px), no stop moves, the focus and the caret (1, 1) stay; then the load number and the city changed by hand and Replace from the pasted text: those two fade with their lines, and only they. Nothing grown, nothing left.
+- **A poll:** with truck 101's window open, two polls with changed data (every truck late, then back): 0 animations in the window.
+- **Reduced motion:** the same steps (Add stop twice, a click, an arrow key, Remove stop, a fill) with motion and under reduced motion: none of the four starts, and after each step the stops' box, the chosen form, every field's value and what has the focus are the same.
+- **The press table** below.
+
+**The press table,** as 3bo's: a real mouse at 20, 60, 120 and 300ms into each control's own motion by its own clock (±18ms), held 40ms; a press early or late is tried again, a miss never. 8 presses a cell, at 1440x900. The new tab pressed at its place as it drops; Add stop pressed at its new place as it slides there; the first stop removed and its place pressed as the two after it slide up (landed: the tab drawn under the pointer as it came down, or, coming down between two drawn tabs, the tab arriving in that place); the second tab pressed as the highlight goes under it from the first to the third; the street box pressed as the chosen form drops; the load number pressed as it fades on Replace.
+
+| Into the motion | new tab | Add stop | tab sliding up | tab under the highlight | dropping form | fading field |
+|---|---|---|---|---|---|---|
+| 20ms | 0 missed | 0 | 0 | 0 | 0 | 0 |
+| 60ms | 0 | 0 | 0 | 0 | 0 | 0 |
+| 120ms | 0 | 0 | 0 | 0 | 0 | 0 |
+| 300ms | 0 | 0 | 0 | 0 | 0 | 0 |
+
+**192 presses, 0 missed, 0 that came down or went up off their control, largest move of what stood under the pointer between press and release 0.8px** (Add stop at 300ms, inside the 1px a hovered button's lift may drop as it is pressed), in the full run. **6 of the 32 presses on the tab sliding up came down between the drawn tabs**, and each reached the tab arriving in that place. In the first targeted run (`2026-11-13T14-05-59-948Z`), before the table counted that, 4 of 8 at 60ms there were scored missed with nothing moved under them; the test then took a press between the tabs as §12.156 rule 10 says, and counted them. That those 4 were such presses is inferred from the count, not recorded (unverified). The second targeted run (`2026-11-13T14-20-21-694Z`) and the full run: 0 missed.
+
+**Found by the first targeted run, fixed in the tests before the full run:** below 1086px the board shows the list or the map, so at 1007px and 1008px the chosen row was not drawn and the test waited for it to be visible (it is attached); and the test's demand that the street box be focused in the click's own task (above).
+
+**e2e, full run, once: clean.** Run `2026-11-13T14-29-37-071Z` on the default config, from the terminal, one invocation, started 14:29:36 UTC after the last code write (`e2e/new-motion.spec.ts`, 14:26:10 UTC); nothing was written during it. **553 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 62.7 min** against 3bo's 58.0: +4.7, the eight new tests (5.3 min alone). 3bg's "a press behind a cancel" printed "16 of 16 presses in the gap". All twelve `desktop-baseline.spec.ts` tests passed against the baselines as they were.
+
+**Found wrong:**
+
+1. **3be's table cites lines at `b45cd15`** that have moved (the table above).
+2. **3be's stopChoose says the form "rises"** as it remounts; the demo drops it (`dropIn`), and a rise from below would grow the window's scroller. Built as the drop.
+3. **The brief names `slideSegment`** for the highlight; it is a live motion's, with its own token and look, and it animates width and height. A new overlay is modelled on it (above).
+4. **§12.119's focus on a new stop's street is not in Add stop's own task** but in a passive effect just after it, before the first frame. Measured with motion on only; the code that does it is unchanged by this phase.
+5. **Not motion, not fixed, reasoned from the code and not tested: a fill can drop a dispatcher note.** A read that lands with nothing to replace rebuilds the first stop (`fillLoad`: `stopFormFrom(null, …)` under its key), and "nothing to replace" does not count the note (`hasEntries`: the load number, the address and the time). So a note typed into the first stop while a read is in flight is gone when it lands, with no question asked.
+
+**Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone (the phone's editor shares the window); a real GPU; the cause of the first run's 4 scored misses (above).
+
+**Next:** the advisor's verification and Alex's push (app only): 3bo's `d6f5444` and `3e3e1be`, then 3bp's two. Item 5 above is a decision for Alex: the note is a data question, not motion. Then the next batch, as the build order says.
 
 ## Next
 

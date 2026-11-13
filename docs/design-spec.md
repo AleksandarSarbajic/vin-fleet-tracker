@@ -11014,6 +11014,7 @@ all a poll ever starts": a poll now also fades in three things, opacity only (be
 Everything else in both stands, and the six motions of §12.149 are unchanged.
 *(§12.153, phase 3bk: the eight small rows of History, Assignments and the login page, under these rules.)*
 *(§12.156, phase 3bo: the board's five medium rows, under these rules and four more.)*
+*(§12.157, phase 3bp: the edit window's four medium rows, under these rules, §12.156's and four more.)*
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
@@ -11384,6 +11385,82 @@ the recentring window. `lib/appear-motion.test.ts`: `dropOut`, `popOut`, `slideF
 `drawIn`'s company for a row. `design/motion-tokens.test.ts`: the numbers. In a browser: each at
 its length from the running animation, nothing grown on any frame, nothing left, the copy out of
 the way of a press, and the press table.
+
+## 12.157 The edit window's medium motions: four things move on a person's cause
+
+Phase 3bp. The second medium batch after §12.156, from the same build order: the edit window's
+four medium rows of the 3be demo, at its Bold (`.taste-skill/motion/everywhere/core.js`: `DROP`
+for stopAdd, stopChoose and loadStrip, `SLIDE` for stopRemove). §12.152's six rules and
+§12.156's four hold for them; four more are below. Nothing else changes: the six motions of
+§12.149, the small ones of §12.152 and §12.153, the chip and its gap test, and the board's five of
+§12.156 keep their tokens and their code. None is left off.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **stopAdd** | The new stop's tab, and Add stop | 270ms | The tab drops 14px and fades in. Add stop slides from where it stood to its new place: down the column at 1008px and up, across the row of tabs below it | `EASING.dialog` | A person's Add stop | A fill's stops; a load read with several |
+| **stopRemove** | A copy of the removed tab, the tabs after it, and Add stop | 270ms | The copy fades out where the tab stood. The rest slide into their places: up the column, in from the right in the row | Copy linear; slides `EASING.dialog` | A person's Remove stop | A fill that replaces the stops |
+| **stopChoose** | The chosen look, and the stop's form | 270ms | The highlight slides from tab to tab behind the tabs, at the chosen tab's size; the form, remounted by its key, drops 14px and fades in | `EASING.dialog` | A person's tab click, or an arrow key in the tablist | The stop already chosen; Add stop and Remove stop, which choose one too; a fill; a save the server refused, which chooses the stop it names |
+| **loadStrip** | Each field a fill changed, and its source line | 270ms | The field (the control itself) fades in where it stands, each with its own start; its source line drops 14px and fades in | Field linear; line `EASING.dialog` | A fill: Replace, or a read landing with nothing to replace | A field it did not change; typing; Keep mine; a paste not recognised; an address pasted into Street |
+
+**The rules this batch adds,** each held by a test (`edit/edit-medium-motion.test.tsx` for
+causes, `e2e/new-motion.spec.ts`, "phase 3bp", for what only a browser shows):
+
+11. **Measured in layout, against the stops' own box** (`[data-stop-tabs]`, around the tablist
+    and Add stop: `offsetLeft`, `offsetTop`, summed up to it; `edit/stop-motion.ts`). Never on
+    the screen: a tab just pressed is at 99.5%, a hovered button is lifted 1px, and the row of
+    tabs scrolls. So one path serves both layouts, and below 1008px every one runs sideways. The
+    box clips while anything comes into it from below or from the right (a removal), never the
+    row's scroller or the window's; an addition comes from above or the left and clips nothing.
+12. **The tabs stand above Add stop** (the tablist is `relative isolate z-[1]`). Add stop slides
+    out from where the new tab now stands, so a second press at the same spot reaches the new tab,
+    as it did with no motion, not Add stop on its way out (a second stop added by surprise).
+13. **A choice is a person's tab click or arrow key, and nothing else.** Add stop, Remove stop, a
+    fill and a refused save also change the chosen stop; each is compared with the commit before
+    and plays nothing, and a highlight still on its way lands at once. The form drops only in the
+    commit of a person's choice (the modal's own flag, spent by that commit).
+14. **A fill moves what it changed, on the control itself, by opacity only.** What the window drew
+    in each field before the fill is compared with what it draws after (`fillValues`: the load
+    number, and the stop on screen: type, street, ZIP, city, state, each of the appointment's
+    controls, the zone). Nothing is focused and nothing moves, so the focus and the caret stay
+    where the person left them, a field being typed in included. A control the fill brings into
+    view (the appointment's, once it is ticked) appears with its value; it fades only if that
+    value changed.
+
+**What a person sees in the cases around them.**
+
+- **stopAdd.** The street box has the focus as before (§12.119): not in the click's own task but
+  in an effect just after it, before the first frame is drawn (measured at 1007, 1008 and
+  1440px). The motion takes none: every change of focus from the press on is the street box's
+  alone. At ten stops Add stop is off and nothing plays.
+- **stopRemove.** The last stop removed: its copy fades where Add stop now slides up into; no tab
+  moves. The stop below takes the choice, with its look on it as it slides up.
+- **stopChoose.** A second choice while the highlight slides takes it up from where it is drawn:
+  one highlight at a time. In the row a longer place name makes a wider tab, and the highlight
+  travels at the chosen tab's width, since nothing animates a width (§12.152 rule 1).
+- **loadStrip.** A fill that changes nothing moves nothing. Its source lines change their words in
+  place where the value did not change (a PDF's "From p.1" giving way to the pasted text's).
+
+**Where.** Desktop. The phone's editor is the same window, so a phone shares the four by sharing
+it; not looked at on a phone (unverified).
+
+**Where the demo's shape changed,** the durations all kept: (1) the highlight and Add stop go
+sideways below 1008px; the demo draws the column only, and slides the highlight by `translateY`;
+(2) the fill fades every field it changed, with its own start; the demo fades the load number
+alone; (3) 3be's table says the form "rises" as it remounts; the demo drops it from above, and a
+rise from below would grow the window's scroller for its frames, so it drops.
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token for each motion so
+that each can be taken back alone: `stopAddDrop` (and `stopAddDropPx`), `stopRemoveSlide`,
+`stopChooseDrop` (and `stopChooseDropPx`), `loadStripDrop` (and `loadStripDropPx`). A slide that
+comes with a motion takes that motion's token. All equal the demo's Bold. **To take one back:**
+its token to 0 turns it off, and its On value makes it weaker (HANDOFF, "Phase 3bp").
+
+**Tests.** `edit/edit-medium-motion.test.tsx`: each motion's cause at its length and its way in
+the column and the row, each non-cause above, the focus under §12.119, the copy's identity, a poll
+starting nothing, and reduced motion starting nothing and ending in the same markup.
+`lib/appear-motion.test.ts`: `fadeOut`. `design/motion-tokens.test.ts`: the numbers. In a
+browser: the three stop motions at 1007, 1008 and 1440px, a fill as a person types, a poll, reduced
+motion, nothing grown on any frame, nothing left, and the press table.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
