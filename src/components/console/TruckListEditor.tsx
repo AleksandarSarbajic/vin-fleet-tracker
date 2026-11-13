@@ -1,7 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { popIn, popOut } from '@/lib/appear-motion';
+import {
+  glideFrom,
+  leave,
+  markArriving,
+  placesOf,
+  restingControl,
+  takeLeaving,
+  type Leaving,
+} from './list-motion';
 import { LISTS_KEY, writeList } from '@/hooks/useTruckLists';
 import {
   LIST_NAME_MAX,
@@ -86,6 +97,66 @@ export function TruckListEditor({
       ),
     [members, byId],
   );
+
+  /**
+   * §12.156. A truck a person added pops in, one a person removed pops out as a copy, and the
+   * trucks that moved for it slide to their new places. Marked in the person's own handler (Add,
+   * Add the checked rows, ×) and spent by the commit it causes. Nothing else plays: not the
+   * editor opening, "Reload the current list" (someone else's list, not this person's change),
+   * or what the paste box holds, which Save includes without ever drawing it as a chip: the
+   * editor closes on that save, so there is no chip to pop.
+   */
+  const chipBox = useRef<HTMLUListElement>(null);
+  const changing = useRef<{
+    removed: string | null;
+    leaving: Leaving | null;
+    places: Map<string, DOMRect>;
+  } | null>(null);
+  const chipsBefore = useRef(sorted);
+  useLayoutEffect(() => {
+    const had = new Set(chipsBefore.current);
+    chipsBefore.current = sorted;
+    const change = changing.current;
+    changing.current = null;
+    const list = chipBox.current;
+    if (!change || !list) return;
+    const chips = [...list.querySelectorAll<HTMLElement>('[data-list-chip]')];
+    for (const chip of chips) {
+      if (had.has(chip.dataset.listChip ?? '')) continue;
+      markArriving(
+        chip,
+        popIn(chip, MOTION_MS.listChipsPop, MOTION_SHAPE.listChipsPopFromScale),
+      );
+    }
+    if (change.leaving && change.removed !== null && !sorted.includes(change.removed)) {
+      leave(change.leaving, list, (copy) =>
+        popOut(copy, MOTION_MS.listChipsPop, MOTION_SHAPE.listChipsPopFromScale),
+      );
+    }
+    glideFrom(
+      change.places,
+      chips,
+      (el) => el.dataset.listChip ?? null,
+      list,
+      MOTION_MS.listChipsPop,
+    );
+  }, [sorted]);
+
+  /** Where the chips stand before a person's change, and a copy of the one going, if any. */
+  const markChange = (removed: { id: string; chip: HTMLElement | null } | null) => {
+    const list = chipBox.current;
+    changing.current = {
+      removed: removed?.id ?? null,
+      leaving: list && removed?.chip ? takeLeaving(removed.chip, list) : null,
+      places: list
+        ? placesOf(
+            list.querySelectorAll<HTMLElement>('[data-list-chip]'),
+            (el) => el.dataset.listChip ?? null,
+            list,
+          )
+        : new Map(),
+    };
+  };
 
   const overCap = finalIds.length > LIST_TRUCK_CAP;
   const nameEmpty = name.trim() === '';
@@ -202,13 +273,25 @@ export function TruckListEditor({
             </span>
           </div>
           {sorted.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5" aria-label="Trucks in this list">
+            <ul
+              ref={chipBox}
+              className="relative isolate flex flex-wrap gap-1.5"
+              aria-label="Trucks in this list"
+              // §12.156: a click on an arriving chip's × place reaches its ×.
+              onClick={(event) => {
+                const control = restingControl(event.currentTarget, event.nativeEvent);
+                if (!control) return;
+                event.stopPropagation();
+                control.click();
+              }}
+            >
               {sorted.map((id) => {
                 const t = byId.get(id);
                 const label = labelOf(byId, id);
                 return (
                   <li
                     key={id}
+                    data-list-chip={id}
                     className="flex items-center gap-1 border border-line-hair bg-surface-raised py-0.5 pl-2 pr-1 font-sans text-small tabular-nums text-text"
                   >
                     {label}
@@ -219,7 +302,15 @@ export function TruckListEditor({
                       type="button"
                       disabled={!canEdit}
                       aria-label={`Remove truck ${label}`}
-                      onClick={() => setMembers((m) => m.filter((x) => x !== id))}
+                      onClick={(event) => {
+                        markChange({
+                          id,
+                          chip: event.currentTarget.closest<HTMLElement>(
+                            '[data-list-chip]',
+                          ),
+                        });
+                        setMembers((m) => m.filter((x) => x !== id));
+                      }}
                       className="px-1 text-text-muted hover:text-status-late-fg"
                     >
                       ×
@@ -260,6 +351,7 @@ export function TruckListEditor({
                 <button
                   type="button"
                   onClick={() => {
+                    markChange(null);
                     setMembers((m) => [...m, ...parsed.fresh]);
                     setPasted('');
                   }}
@@ -271,7 +363,10 @@ export function TruckListEditor({
               {checkedFresh.length > 0 ? (
                 <button
                   type="button"
-                  onClick={() => setMembers((m) => [...m, ...checkedFresh])}
+                  onClick={() => {
+                    markChange(null);
+                    setMembers((m) => [...m, ...checkedFresh]);
+                  }}
                   className="h-8 border border-line-hair px-3 font-cond text-micro uppercase tracking-[.09em] text-accent hover:border-accent"
                 >
                   Add the {checkedFresh.length} checked{' '}

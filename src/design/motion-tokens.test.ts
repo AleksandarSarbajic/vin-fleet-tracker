@@ -176,3 +176,30 @@ describe('the numbers of the pages’ small motions (§12.153)', () => {
     });
   });
 });
+
+describe('the numbers of the board’s medium motions (§12.156)', () => {
+  it('a saved view drops 14px in 270ms, and leaves by the same', () => {
+    expect(MOTION_MS.viewsDrop).toBe(270);
+    expect(MOTION_SHAPE.viewsDropPx).toBe(14);
+  });
+
+  it('the list footer rolls and fades in 360ms: its own, not a count’s 400', () => {
+    expect(MOTION_MS.footRoll).toBe(360);
+    expect(MOTION_MS.countRoll).toBe(400);
+  });
+
+  it('the palette’s cursor slides in 270ms', () => {
+    expect(MOTION_MS.palCursorSlide).toBe(270);
+  });
+
+  it('a truck in the list editor pops from 50% in 270ms', () => {
+    expect(MOTION_MS.listChipsPop).toBe(270);
+    expect(MOTION_SHAPE.listChipsPopFromScale).toBe(0.5);
+  });
+
+  it('the timeline’s cards draw in 450ms, a card in 180ms, with gaps of 30ms at most', () => {
+    expect(MOTION_MS.timelineDraw).toBe(450);
+    expect(MOTION_MS.timelineDrawCard).toBe(180);
+    expect(MOTION_MS.timelineDrawGapMax).toBe(30);
+  });
+});

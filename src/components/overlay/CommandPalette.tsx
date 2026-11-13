@@ -5,6 +5,7 @@ import { isWindowOpen } from '@/lib/keymap';
 import { MOTION_MS } from '@/design/tokens';
 import { fadeIn } from '@/lib/appear-motion';
 import { Overlay, useOverlay } from './OverlayLayer';
+import { landCursor, slideCursor } from './palette-cursor';
 import {
   ACTION,
   KIND_LABEL,
@@ -142,6 +143,31 @@ export function CommandPalette<T extends PaletteTruck>({
   const safeCursor = commands.length === 0 ? 0 : Math.min(cursor, commands.length - 1);
   const sections = useMemo(() => sectionsOf(commands), [commands]);
 
+  /**
+   * §12.156. The cursor slides from row to row on ArrowUp and ArrowDown, and on nothing else.
+   * `arrows` counts those keys, so a change of row in a commit without one lands at once: the
+   * mouse pointing at a row, a key typed in the box (back to the first row), the opening's reset,
+   * a poll's new trucks. Compared by the row drawn, so an arrow that wraps on a one-row list, or
+   * finds the same row, plays nothing. No focus moves: the box keeps its caret (§12.155).
+   */
+  const [arrows, setArrows] = useState(0);
+  const arrowsBefore = useRef(arrows);
+  const cursorBefore = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const was = cursorBefore.current;
+    const now = isOpen ? (commands[safeCursor]?.id ?? null) : null;
+    cursorBefore.current = now;
+    const byArrow = arrowsBefore.current !== arrows;
+    arrowsBefore.current = arrows;
+    const list = results.current;
+    if (!list || was === now) return;
+    const rows = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+    const from = rows.find((row) => row.id === was);
+    const to = rows.find((row) => row.id === now);
+    if (byArrow && from && to) slideCursor(list, from, to);
+    else landCursor(list);
+  });
+
   const run = (command: Command) => {
     // "Jumps and closes" (§14.5). One overlay at a time, so a command that
     // opens another surface must replace this one rather than race it.
@@ -173,6 +199,7 @@ export function CommandPalette<T extends PaletteTruck>({
             setCursor(
               moveCursor(safeCursor, event.key === 'ArrowDown' ? 1 : -1, commands.length),
             );
+            setArrows((n) => n + 1);
             return;
           }
           if (event.key === 'Enter') {
@@ -211,7 +238,8 @@ export function CommandPalette<T extends PaletteTruck>({
           id={listId}
           role="listbox"
           aria-label="Commands"
-          className="max-h-[420px] overflow-auto py-1"
+          // `relative isolate`: the cursor's overlay rides in this content, behind the rows (§12.156).
+          className="relative isolate max-h-[420px] overflow-auto py-1"
         >
           {commands.length === 0 ? (
             <p className="px-3 py-6 text-center text-body text-text-mutedOnOverlay">

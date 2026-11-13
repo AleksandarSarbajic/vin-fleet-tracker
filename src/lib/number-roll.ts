@@ -16,7 +16,18 @@ export const ROLL_COPY = 'data-roll-copy';
 
 const rolling = new WeakMap<HTMLElement, () => void>();
 
-export function rollNumber(box: HTMLElement, number: HTMLElement, from: number): void {
+/** Ends a roll in flight in `box` at once, on the number React drew: what changed it was no cause. */
+export function settleRoll(box: HTMLElement): void {
+  rolling.get(box)?.();
+}
+
+/** `ms` is the count's own unless a caller has its own token (§12.156, the list footer's). */
+export function rollNumber(
+  box: HTMLElement,
+  number: HTMLElement,
+  from: number,
+  ms: number = MOTION_MS.countRoll,
+): void {
   rolling.get(box)?.();
   if (!mayMove(box) || document.hidden || box.offsetWidth === 0) return;
   const to = Number(number.textContent);
@@ -31,7 +42,7 @@ export function rollNumber(box: HTMLElement, number: HTMLElement, from: number):
   number.style.display = 'inline-block';
   box.append(copy);
 
-  const options = { duration: MOTION_MS.countRoll, easing: EASING.dialog };
+  const options = { duration: ms, easing: EASING.dialog };
   const coming = play(
     number,
     [{ transform: `translateY(${way * 100}%)`, opacity: 0 }, { transform: 'none', opacity: 1 }],

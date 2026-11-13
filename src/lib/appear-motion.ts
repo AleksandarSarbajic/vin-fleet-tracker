@@ -47,6 +47,47 @@ export function popIn(el: Element, ms: number, from: number): Animation | null {
   );
 }
 
+/**
+ * §12.156. A drop reversed: goes back up `px` the way it came and fades out. For a copy of
+ * what a person took away, never for the thing itself.
+ */
+export function dropOut(el: Element, ms: number, px: number): Animation | null {
+  if (taken(ms)) return null;
+  return play(
+    el,
+    [
+      { opacity: 1, translate: '0 0' },
+      { opacity: 0, translate: `0 ${-px}px` },
+    ],
+    { duration: ms, easing: EASING.dialog },
+  );
+}
+
+/** §12.156. A pop reversed: shrinks to `to` of its size and fades out. For a copy, as `dropOut`. */
+export function popOut(el: Element, ms: number, to: number): Animation | null {
+  if (taken(ms)) return null;
+  return play(
+    el,
+    [
+      { opacity: 1, scale: '1' },
+      { opacity: 0, scale: String(to) },
+    ],
+    { duration: ms, easing: EASING.dialog },
+  );
+}
+
+/**
+ * §12.156. Goes from `dx`, `dy` away to its place: what moved because something beside it came
+ * or went, starting from where it was drawn. `translate` only, so it composes with a pop.
+ */
+export function slideFrom(el: Element, dx: number, dy: number, ms: number): Animation | null {
+  if (taken(ms)) return null;
+  return play(el, [{ translate: `${dx}px ${dy}px` }, { translate: '0 0' }], {
+    duration: ms,
+    easing: EASING.dialog,
+  });
+}
+
 /** How many motions each clipping box is clipping for: it lets go after the last. */
 const clipping = new WeakMap<HTMLElement, number>();
 
@@ -131,6 +172,8 @@ export function drawIn(
   ms: number,
   rowMs: number,
   gapMax: number,
+  /** §12.156: for what draws with each row, at its delay (the timeline's line under each card). */
+  withRow?: (row: Element, delay: number) => void,
 ): Animation[] {
   if (taken(ms)) return [];
   const view = scroller.getBoundingClientRect();
@@ -146,6 +189,7 @@ export function drawIn(
       easing: EASING.fade,
       fill: 'backwards',
     });
+    if (animation) withRow?.(row, i * gap);
     return animation ? [animation] : [];
   });
 }

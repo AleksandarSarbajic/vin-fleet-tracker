@@ -500,6 +500,12 @@ export function Console({
    * nothing else changes this: not a poll, a density, a resize or a scroll.
    */
   const glideCause = `${[...chips].sort().join(',')}|${listId ?? ''}|${resorts}`;
+  /**
+   * §12.156. The chips alone: what may roll the list footer's numbers. Only a person changes
+   * them (a chip, its key, Clear filters, a view); a list and the reorder bar change the footer
+   * too, and it then changes at once.
+   */
+  const chipCause = [...chips].sort().join(',');
 
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
@@ -1116,6 +1122,7 @@ export function Console({
                   <div className="contents max-md:hidden">
                     <FleetList
                       glideCause={glideCause}
+                      chipCause={chipCause}
                       density={density}
                       checked={bulk.checked}
                       onCheck={bulk.toggle}

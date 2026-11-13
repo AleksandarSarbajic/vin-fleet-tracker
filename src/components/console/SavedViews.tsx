@@ -1,11 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useReturnFocus } from '@/components/edit/useModalChrome';
 import { isTypingTarget, isWindowOpen } from '@/lib/keymap';
 import { VIEW_NAME_MAX, type SavedView } from '@/lib/views';
 import type { TruckList } from '@/lib/truck-lists';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn, dropOut } from '@/lib/appear-motion';
 import { chipLabel } from './FilterChips';
+import {
+  glideFrom,
+  leave,
+  markArriving,
+  placesOf,
+  restingControl,
+  takeLeaving,
+  type Leaving,
+} from './list-motion';
 import { PopFrame } from '@/components/overlay/PopFrame';
 
 /**
@@ -225,9 +236,75 @@ export function ScopeMenu({
     if (naming) field.current?.focus();
   }, [naming]);
 
+  /**
+   * §12.156. A view a person saved drops into the list, and one a person deleted leaves the way
+   * it came while the rows below it slide up into its place. Each is marked in the person's own
+   * handler and spent by the commit it causes, so nothing else plays them: not the menu opening
+   * (its rows are simply there), a rename, the find box, or another tab, which this menu never
+   * hears from (the views are read from this browser's storage once, as the board mounts).
+   */
+  const rowsBox = useRef<HTMLDivElement>(null);
+  const saving = useRef(false);
+  const deleting = useRef<{
+    id: string;
+    leaving: Leaving | null;
+    places: Map<string, DOMRect>;
+  } | null>(null);
+  const idsBefore = useRef(views.map((v) => v.id));
+  useLayoutEffect(() => {
+    const had = new Set(idsBefore.current);
+    idsBefore.current = views.map((v) => v.id);
+    const saved = saving.current;
+    saving.current = false;
+    const took = deleting.current;
+    deleting.current = null;
+    const list = rowsBox.current;
+    if (!list) return;
+    const rows = [...list.querySelectorAll<HTMLElement>('[data-view-row]')];
+    if (saved) {
+      for (const row of rows) {
+        if (had.has(row.dataset.viewRow ?? '')) continue;
+        markArriving(row, dropIn(row, MOTION_MS.viewsDrop, MOTION_SHAPE.viewsDropPx));
+      }
+    }
+    if (took && !idsBefore.current.includes(took.id)) {
+      if (took.leaving) {
+        leave(took.leaving, list, (copy) =>
+          dropOut(copy, MOTION_MS.viewsDrop, MOTION_SHAPE.viewsDropPx),
+        );
+      }
+      glideFrom(
+        took.places,
+        rows,
+        (el) => el.dataset.viewRow ?? null,
+        list,
+        MOTION_MS.viewsDrop,
+      );
+    }
+  }, [views]);
+
+  /** Taken in the Delete's own handler, while the row still has its place. */
+  const remove = (id: string, row: HTMLElement | null) => {
+    const list = rowsBox.current;
+    if (list && row) {
+      deleting.current = {
+        id,
+        leaving: takeLeaving(row, list),
+        places: placesOf(
+          list.querySelectorAll<HTMLElement>('[data-view-row]'),
+          (el) => el.dataset.viewRow ?? null,
+          list,
+        ),
+      };
+    }
+    onRemove(id);
+  };
+
   const commit = () => {
+    saving.current = true;
     const refusal = onSave(name);
     if (refusal !== null) {
+      saving.current = false;
       setError(refusal);
       return;
     }
@@ -472,91 +549,124 @@ export function ScopeMenu({
                * stays outside the scroll, always one reach away.
                */
               <div data-view-list="" className="max-h-[min(40vh,280px)] overflow-y-auto">
-                {shownViews.map((view) =>
-                  renaming?.id === view.id ? (
-                    <div key={view.id} className="px-3 py-1.5">
-                      <input
-                        autoFocus
-                        value={renaming.name}
-                        maxLength={VIEW_NAME_MAX}
-                        aria-label={`New name for ${view.name}`}
-                        onChange={(e) =>
-                          setRenaming({ ...renaming, name: e.target.value, error: null })
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter') return;
-                          e.preventDefault();
-                          const refusal = onRename(view.id, renaming.name);
-                          if (refusal === null) {
-                            refocus();
-                            setRenaming(null);
-                          } else setRenaming({ ...renaming, error: refusal });
-                        }}
-                        className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none"
-                      />
-                      {renaming.error ? (
-                        <p role="alert" className="mt-1 text-small text-status-risk-fg">
-                          {renaming.error}
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-small text-text-mutedOnSelected">
-                          Enter to rename · Esc to cancel
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div key={view.id} className="group/view flex items-center">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          onApply(view);
-                          setOpen(false);
-                        }}
-                        className={`flex min-w-0 flex-1 items-center gap-[10px] px-3 py-1.5 text-left hover:bg-row-hover ${
-                          view.id === active?.id ? 'text-accent' : 'text-text'
-                        } ${phone ? 'min-h-11' : ''}`}
+                {/*
+                  §12.156. The rows' own box: it clips while a row leaves or the rows below
+                  it slide, never the scroller, which would lose its place, and it hands a
+                  click on an arriving row's control to that control.
+                */}
+                <div
+                  ref={rowsBox}
+                  data-view-rows=""
+                  className="relative isolate"
+                  onClick={(event) => {
+                    const control = restingControl(
+                      event.currentTarget,
+                      event.nativeEvent,
+                    );
+                    if (!control) return;
+                    event.stopPropagation();
+                    control.click();
+                  }}
+                >
+                  {shownViews.map((view) =>
+                    renaming?.id === view.id ? (
+                      <div key={view.id} data-view-row={view.id} className="px-3 py-1.5">
+                        <input
+                          autoFocus
+                          value={renaming.name}
+                          maxLength={VIEW_NAME_MAX}
+                          aria-label={`New name for ${view.name}`}
+                          onChange={(e) =>
+                            setRenaming({
+                              ...renaming,
+                              name: e.target.value,
+                              error: null,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            const refusal = onRename(view.id, renaming.name);
+                            if (refusal === null) {
+                              refocus();
+                              setRenaming(null);
+                            } else setRenaming({ ...renaming, error: refusal });
+                          }}
+                          className="w-full border border-line-hair bg-surface-base px-2 py-1 font-sans text-body text-text outline-none"
+                        />
+                        {renaming.error ? (
+                          <p role="alert" className="mt-1 text-small text-status-risk-fg">
+                            {renaming.error}
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-small text-text-mutedOnSelected">
+                            Enter to rename · Esc to cancel
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div
+                        key={view.id}
+                        data-view-row={view.id}
+                        className="group/view flex items-center"
                       >
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate font-sans text-[13px]">
-                            {view.name}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            onApply(view);
+                            setOpen(false);
+                          }}
+                          className={`flex min-w-0 flex-1 items-center gap-[10px] px-3 py-1.5 text-left hover:bg-row-hover ${
+                            view.id === active?.id ? 'text-accent' : 'text-text'
+                          } ${phone ? 'min-h-11' : ''}`}
+                        >
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="truncate font-sans text-[13px]">
+                              {view.name}
+                            </span>
+                            <span className="truncate font-sans text-small text-text-mutedOnSelected">
+                              {describe(view)}
+                            </span>
                           </span>
-                          <span className="truncate font-sans text-small text-text-mutedOnSelected">
-                            {describe(view)}
-                          </span>
-                        </span>
-                        <Count>{viewCount(view)}</Count>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Rename the view ${view.name}`}
-                        onClick={() =>
-                          setRenaming({ id: view.id, name: view.name, error: null })
-                        }
-                        // On a phone there is no hover to reveal it: shown, 44px.
-                        className={
-                          phone
-                            ? 'min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
-                            : 'shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100'
-                        }
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete the view ${view.name}`}
-                        onClick={() => onRemove(view.id)}
-                        className={
-                          phone
-                            ? 'mr-1 min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
-                            : 'mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100'
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  ),
-                )}
+                          <Count>{viewCount(view)}</Count>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Rename the view ${view.name}`}
+                          onClick={() =>
+                            setRenaming({ id: view.id, name: view.name, error: null })
+                          }
+                          // On a phone there is no hover to reveal it: shown, 44px.
+                          className={
+                            phone
+                              ? 'min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
+                              : 'shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-text focus-visible:opacity-100 group-hover/view:opacity-100'
+                          }
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete the view ${view.name}`}
+                          onClick={(event) =>
+                            remove(
+                              view.id,
+                              event.currentTarget.closest<HTMLElement>('[data-view-row]'),
+                            )
+                          }
+                          className={
+                            phone
+                              ? 'mr-1 min-h-11 min-w-11 shrink-0 px-2 font-cond text-micro uppercase tracking-[.08em] text-text-secondary'
+                              : 'mr-2 shrink-0 px-2 py-1 font-cond text-micro uppercase tracking-[.08em] text-text-mutedOnSelected opacity-0 hover:text-status-late-fg focus-visible:opacity-100 group-hover/view:opacity-100'
+                          }
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ),
+                  )}
+                </div>
               </div>
             )}
           </Section>

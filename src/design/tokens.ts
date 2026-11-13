@@ -328,6 +328,32 @@ export const MOTION_MS = {
   loginFormIn: 330,
   /** The sign-in's refusal, under the password. */
   loginErrorDrop: 270,
+
+  /*
+   * §12.156. The board's medium motions (phase 3bo), at the demo's Bold. One token each, as
+   * above: 0 turns one off, its On value weakens it.
+   */
+  /**
+   * A saved view a person added drops into the Fleet menu; one a person deleted leaves the way
+   * it came, as a copy nothing can use, and the rows below it slide up into its place.
+   */
+  viewsDrop: 270,
+  /** The list footer's numbers roll and its words fade, on a person's chip. Never on a scroll or a poll. */
+  footRoll: 360,
+  /** The palette's cursor slides from row to row, on the arrow keys and nothing else. */
+  palCursorSlide: 270,
+  /**
+   * A truck a person added to a list pops in, one a person removed pops out as a copy nothing
+   * can use, and the trucks that moved slide to their new places.
+   */
+  listChipsPop: 270,
+  /**
+   * The timeline's stop cards in view draw in, once per opening, when its first answer lands:
+   * all of it, each card's share, and the gap's ceiling.
+   */
+  timelineDraw: 450,
+  timelineDrawCard: 180,
+  timelineDrawGapMax: 30,
 } as const;
 
 /**
@@ -377,6 +403,11 @@ export const MOTION_SHAPE = {
   loginFormRisePx: 16,
   loginFormFromScale: 0.92,
   loginErrorDropPx: 14,
+
+  /** §12.156, beside its durations above. A view leaves by its drop reversed: up this far. */
+  viewsDropPx: 14,
+  /** A truck pops in from this scale, and a removed one pops out to it. */
+  listChipsPopFromScale: 0.5,
 } as const;
 
 /**

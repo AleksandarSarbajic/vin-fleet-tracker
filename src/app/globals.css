@@ -344,6 +344,11 @@
     border-left-color: transparent !important;
   }
 
+  /* §12.156. The palette cursor's overlay is on its way to this row. */
+  [data-cursor-target] {
+    background-color: transparent !important;
+  }
+
   /*
    * The row's grey hover bar: a state, not motion, so it stays under reduced
    * motion, where it simply appears. A pseudo-element, so the row itself has

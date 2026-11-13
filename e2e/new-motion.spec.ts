@@ -5092,3 +5092,630 @@ test.describe('phase 3bk, the pages’ small motions (§12.153)', () => {
     expect(tally.filter((t) => t.held && t.moved > 1.01)).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------------------------------
+ * Phase 3bo: the board's five medium motions, at the demo's Bold (§12.156). What only a real
+ * browser shows: each at its length from the running animation, on its cause, nothing grown on
+ * any frame, nothing left, the leaving copy out of the way of a press; and the press table.
+ * Causes and non-causes are `console/medium-motion.test.tsx`'s.
+ * ------------------------------------------------------------------------------------------ */
+
+const VIEWS_MS = 270;
+const VIEWS_PX = 14;
+const FOOT_MS = 360;
+const CURSOR_MS = 270;
+const CHIPS_MS = 270;
+const CHIPS_FROM = 0.5;
+const TL_MS = 450;
+const TL_CARD_MS = 180;
+const TL_GAP_MS = 30;
+
+/** Every Web Animation the page starts, named by what it is on, into the log `pressWatch` reads. */
+const logMedium = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as PagedLog;
+    w.__paged = [];
+    const name = (el: Element, frames: Keyframe[]): string => {
+      const fades = frames.some((f) => 'opacity' in f);
+      if (el.hasAttribute('data-view-row')) return fades ? 'views' : 'viewsSlide';
+      if (el.hasAttribute('data-leaving-copy')) return el.closest('[data-view-rows]') ? 'viewsCopy' : 'listChipsCopy';
+      if (el.closest('[data-foot]')) return 'foot';
+      if (el.hasAttribute('data-cursor-slide')) return 'palCursor';
+      if (el.hasAttribute('data-list-chip')) return fades ? 'listChips' : 'listChipsSlide';
+      if (el.hasAttribute('data-stop-state')) return 'timeline';
+      if (el.hasAttribute('data-stop-line')) return 'timelineLine';
+      return 'other';
+    };
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+      w.__paged.push({
+        what: name(this, (Array.isArray(frames) ? frames : []) as Keyframe[]),
+        frames: JSON.stringify(frames),
+        duration: Number(timing.duration),
+        delay: Number(timing.delay ?? 0),
+        easing: String(timing.easing ?? ''),
+        fill: String(timing.fill ?? ''),
+        animation,
+      });
+      return animation;
+    };
+  });
+/** How many the page has started so far, to read only what one step starts. */
+const logged = (page: Page) => page.evaluate(() => (window as unknown as PagedLog).__paged.length);
+const loggedSince = async (page: Page, from: number, what: string) =>
+  (
+    await page.evaluate(
+      ({ from, what }) =>
+        (window as unknown as PagedLog).__paged
+          .slice(from)
+          .filter((p) => p.what === what)
+          .map(({ what, frames, duration, delay, easing, fill }) => ({ what, frames, duration, delay, easing, fill })),
+      { from, what },
+    )
+  ).map((p) => ({ ...p, easing: curve(p.easing) }));
+/** Nothing running, and nothing these five add left behind. */
+const mediumAtRest = (page: Page) =>
+  page.evaluate(() => ({
+    running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length,
+    added: document.querySelectorAll('[data-leaving-copy], [data-cursor-slide], [data-cursor-target], [data-arriving], [data-roll-copy]').length,
+    styled: [
+      ...document.querySelectorAll('[data-view-rows], [data-view-row], ul[aria-label="Trucks in this list"], [data-list-chip], [data-foot], [data-stop-state], [data-stop-line]'),
+    ].filter((el) => el.getAttribute('style')).length,
+  }));
+const MEDIUM_AT_REST = { running: 0, added: 0, styled: 0 };
+const SEEDED_VIEWS = [1, 2, 3].map((i) => ({ id: `v${i}`, name: `View ${i}`, query: `q${i}`, chips: [] as string[] }));
+const seedViews = (page: Page) =>
+  page.addInitScript((views) => window.localStorage.setItem('ft.views', JSON.stringify(views)), SEEDED_VIEWS);
+const scopeButton = (page: Page) => page.locator('[data-scope] [aria-haspopup="menu"]');
+const translateOnly = (frames: string) => (JSON.parse(frames) as Keyframe[]).every((k) => Object.keys(k).join() === 'translate');
+
+test.describe('phase 3bo, the board’s medium motions (§12.156)', () => {
+  test('the footer, the Fleet menu and the palette: each at its length on its cause, never on a scroll, a poll or a mouse, nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(4 * 60_000);
+    await logMedium(page);
+    await seedViews(page);
+    await openMixed(page);
+    await keepTheFeedFresh();
+
+    /* The footer. A scroll and a poll change it at once. */
+    const shown = (part: string) =>
+      page.locator(`[data-foot="${part}"] > span:not([data-roll-copy])`).first().textContent({ timeout: 2_000 });
+    const scroller = page.locator('[data-row-id]').first();
+    let from = await logged(page);
+    // A poll, at the top: the last truck, below the fold and on time, turns late.
+    const wordsBefore = await page.locator('[data-foot="problems"]').textContent();
+    // The board's mix as `openMixed` set it, and its last truck late: every later poll the same.
+    await pollWith(page, (rows) => {
+      mixed(rows);
+      const last = rows.at(-1)!;
+      last.status = 'LATE';
+      last.computed = 'LATE';
+    });
+    await expect.poll(() => page.locator('[data-foot="problems"]').textContent()).not.toBe(wordsBefore);
+    // A scroll further than the 8 rows the list draws past each edge, which its range counts.
+    const rangeBefore = `${await shown('from')}–${await shown('to')}`;
+    await scroller.evaluate((row) => {
+      row.closest<HTMLElement>('.overflow-y-auto')!.scrollTop = 600;
+    });
+    await expect.poll(async () => `${await shown('from')}–${await shown('to')}`).not.toBe(rangeBefore);
+    expect(await shown('from')).not.toBe('1');
+    await scroller.evaluate((row) => {
+      row.closest<HTMLElement>('.overflow-y-auto')!.scrollTop = 0;
+    });
+    await expect.poll(() => shown('from')).toBe('1');
+    expect(await loggedSince(page, from, 'foot')).toEqual([]);
+
+    // A chip: the numbers that changed roll, the words that changed fade, in 360ms.
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    from = await logged(page);
+    const totalBefore = Number(await shown('total'));
+    let stop = await watchFrames(page);
+    await page.getByRole('button', { name: /^Late\b/ }).first().click();
+    await expect.poll(() => shown('total')).not.toBe(String(totalBefore));
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    const foot = await loggedSince(page, from, 'foot');
+    const rolls = foot.filter((f) => f.frames.includes('translateY'));
+    const fades = foot.filter((f) => f.frames === FADE_FRAMES);
+    expect(rolls.length).toBeGreaterThanOrEqual(2);
+    expect(rolls.length + fades.length).toBe(foot.length);
+    for (const r of rolls) expect(r).toMatchObject({ duration: FOOT_MS, easing: curve(DIALOG_CURVE) });
+    for (const f of fades) expect(f).toMatchObject({ duration: FOOT_MS, easing: 'linear' });
+    expect(await mediumAtRest(page)).toEqual(MEDIUM_AT_REST);
+
+    /* The Fleet menu: its opening plays nothing; a Save drops the new row; a Delete leaves. */
+    from = await logged(page);
+    await scopeButton(page).click();
+    const menu = page.locator('[data-views-menu]');
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('[data-view-row]')).toHaveCount(3);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await loggedSince(page, from, 'views')).toEqual([]);
+
+    from = await logged(page);
+    stop = await watchFrames(page);
+    await menu.getByRole('menuitem', { name: 'Save current view…' }).click();
+    await menu.getByLabel('Name this view').fill('Morning');
+    await page.keyboard.press('Enter');
+    await expect(menu.locator('[data-view-row]')).toHaveCount(4);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    expect(await loggedSince(page, from, 'views')).toEqual([
+      { what: 'views', frames: DROP_FRAMES, duration: VIEWS_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' },
+    ]);
+
+    // A Delete, started in the page so what stands at the copy's place is read on its first frame.
+    from = await logged(page);
+    stop = await watchFrames(page);
+    const atCopy = await page.evaluate(
+      () =>
+        new Promise<{ copy: boolean; hitCopy: boolean; inBox: boolean }>((done) => {
+          document.querySelector<HTMLButtonElement>('button[aria-label="Delete the view View 1"]')!.click();
+          requestAnimationFrame(() => {
+            const copy = document.querySelector('[data-leaving-copy]');
+            const box = copy?.getBoundingClientRect();
+            const hit = box ? document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) : null;
+            done({
+              copy: copy !== null,
+              hitCopy: Boolean(copy && hit && copy.contains(hit)),
+              // What a press there reaches: the rows' box or the row sliding up through it.
+              inBox: Boolean(hit?.closest('[data-view-rows]')),
+            });
+          });
+        }),
+    );
+    expect(atCopy).toEqual({ copy: true, hitCopy: false, inBox: true });
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    const outFrames = JSON.stringify([
+      { opacity: 1, translate: '0 0' },
+      { opacity: 0, translate: `0 -${VIEWS_PX}px` },
+    ]);
+    expect(await loggedSince(page, from, 'viewsCopy')).toEqual([
+      { what: 'viewsCopy', frames: outFrames, duration: VIEWS_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' },
+    ]);
+    const slid = await loggedSince(page, from, 'viewsSlide');
+    expect(slid).toHaveLength(3);
+    for (const s of slid) {
+      expect(s).toMatchObject({ duration: VIEWS_MS, easing: curve(DIALOG_CURVE) });
+      expect(translateOnly(s.frames)).toBe(true);
+    }
+    expect(await mediumAtRest(page)).toEqual(MEDIUM_AT_REST);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    /* The palette: the arrow keys slide the cursor; the box keeps the caret; the mouse is at once. */
+    // The pointer out of the palette's way, so nothing it rests on moves the cursor.
+    await page.mouse.move(4, 4);
+    await page.keyboard.press('Control+k');
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    const box = palette.getByRole('combobox');
+    await expect(box).toBeFocused();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const options = palette.getByRole('option');
+    const tops = await options.evaluateAll((all) => all.map((o) => (o as HTMLElement).offsetTop));
+    expect(tops[1]! - tops[0]!).toBeGreaterThan(0);
+    from = await logged(page);
+    stop = await watchFrames(page);
+    await page.keyboard.press('ArrowDown');
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('combobox');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    await expect(box).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    const slide = (dy: number) => ({
+      what: 'palCursor',
+      frames: JSON.stringify([{ transform: `translateY(${dy}px)` }, { transform: 'none' }]),
+      duration: CURSOR_MS,
+      delay: 0,
+      easing: curve(DIALOG_CURVE),
+      fill: '',
+    });
+    expect(await loggedSince(page, from, 'palCursor')).toEqual([slide(tops[0]! - tops[1]!), slide(tops[1]! - tops[0]!)]);
+    // The mouse pointing at a row: the cursor is there at once.
+    from = await logged(page);
+    const third = await centreOf(options.nth(2));
+    await page.mouse.move(third.x, third.y);
+    await expect(options.nth(2)).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect(await loggedSince(page, from, 'palCursor')).toEqual([]);
+    expect(await mediumAtRest(page)).toEqual(MEDIUM_AT_REST);
+    await page.keyboard.press('Escape');
+  });
+
+  test('the list editor and the timeline: trucks pop and leave, cards draw once per opening, nothing grown, nothing left', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    await logMedium(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+
+    /* The list editor. */
+    await scopeButton(page).click();
+    await page.getByRole('menuitem', { name: 'New list…' }).click();
+    const editor = page.getByRole('dialog', { name: 'New list' });
+    await expect(editor).toBeVisible();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const paste = editor.getByLabel('Truck numbers to add');
+    const chips = editor.locator('[data-list-chip]');
+    const popFrames = JSON.stringify([
+      { opacity: 0, scale: String(CHIPS_FROM) },
+      { opacity: 1, scale: '1' },
+    ]);
+    let from = await logged(page);
+    let stop = await watchFrames(page);
+    await paste.fill('101, 103');
+    await editor.getByRole('button', { name: 'Add 2' }).click();
+    await expect(chips).toHaveCount(2);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    const popped = { what: 'listChips', frames: popFrames, duration: CHIPS_MS, delay: 0, easing: curve(DIALOG_CURVE), fill: '' };
+    expect(await loggedSince(page, from, 'listChips')).toEqual([popped, popped]);
+
+    // One between them: it pops, and 103 slides along its line to make room.
+    from = await logged(page);
+    stop = await watchFrames(page);
+    await paste.fill('102');
+    await editor.getByRole('button', { name: 'Add 1' }).click();
+    await expect(chips).toHaveCount(3);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    expect(await loggedSince(page, from, 'listChips')).toEqual([popped]);
+    const pushed = await loggedSince(page, from, 'listChipsSlide');
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toMatchObject({ duration: CHIPS_MS, easing: curve(DIALOG_CURVE) });
+    expect(translateOnly(pushed[0]!.frames)).toBe(true);
+
+    // ×: a copy shrinks away, and 103 slides back.
+    from = await logged(page);
+    stop = await watchFrames(page);
+    await editor.getByRole('button', { name: 'Remove truck 102' }).click();
+    await expect(chips).toHaveCount(2);
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    expect((await stop()).grew).toEqual([]);
+    expect(await loggedSince(page, from, 'listChipsCopy')).toEqual([
+      {
+        what: 'listChipsCopy',
+        frames: JSON.stringify([
+          { opacity: 1, scale: '1' },
+          { opacity: 0, scale: String(CHIPS_FROM) },
+        ]),
+        duration: CHIPS_MS,
+        delay: 0,
+        easing: curve(DIALOG_CURVE),
+        fill: '',
+      },
+    ]);
+    expect(await loggedSince(page, from, 'listChipsSlide')).toHaveLength(1);
+    expect(await mediumAtRest(page)).toEqual(MEDIUM_AT_REST);
+    await editor.getByRole('button', { name: 'Cancel' }).click();
+    await expect(editor).toHaveCount(0);
+
+    /* The timeline: fetched on the first opening, cached on the second; each draws once. */
+    await page.locator(`[data-row-id="${IDS.truckChicago}"]`).click();
+    const openTimeline = async () => {
+      const from = await logged(page);
+      const stop = await watchFrames(page);
+      await page.getByRole('button', { name: 'Timeline' }).click();
+      const timeline = page.getByRole('dialog', { name: /Timeline for truck 101/ });
+      await expect(timeline).toBeVisible();
+      await expect(timeline.getByText('Loading…')).toHaveCount(0, { timeout: 15_000 });
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      expect((await stop()).grew).toEqual([]);
+      const cards = await loggedSince(page, from, 'timeline');
+      const lines = await loggedSince(page, from, 'timelineLine');
+      const inView = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"][aria-label^="Timeline"]')!;
+        const scroller = dialog.querySelector('.overflow-auto')!.getBoundingClientRect();
+        return [...dialog.querySelectorAll('[data-stop-state]')].filter((c) => {
+          const box = c.getBoundingClientRect();
+          return box.bottom > scroller.top && box.top < scroller.bottom;
+        }).length;
+      });
+      expect(inView).toBeGreaterThan(0);
+      expect(cards).toHaveLength(inView);
+      expect(lines).toHaveLength(inView);
+      const delays = cards.map((c) => c.delay);
+      expect(delays[0]).toBe(0);
+      for (const [i, c] of cards.entries()) {
+        expect(c).toMatchObject({ frames: DRAW_FRAMES, duration: TL_CARD_MS, easing: 'linear', fill: 'backwards' });
+        if (i > 0) expect(c.delay - delays[i - 1]!).toBeLessThanOrEqual(TL_GAP_MS);
+        expect(lines[i]).toMatchObject({
+          frames: JSON.stringify([{ scale: '1 0' }, { scale: '1 1' }]),
+          duration: TL_CARD_MS,
+          delay: c.delay,
+          easing: curve(DIALOG_CURVE),
+          fill: 'backwards',
+        });
+      }
+      expect(delays.at(-1)!).toBeLessThanOrEqual(TL_MS - TL_CARD_MS);
+      expect(await mediumAtRest(page)).toEqual(MEDIUM_AT_REST);
+      await timeline.getByRole('button', { name: 'Close' }).click();
+      await expect(timeline).toHaveCount(0);
+    };
+    await openTimeline();
+    await openTimeline();
+  });
+
+  /**
+   * The press table for these motions' controls, as 3bk's. A real mouse at 20, 60, 120 and 300ms
+   * into each control's own motion by its own clock (±18ms), held 40ms; a press that came early
+   * or late is tried again, a miss never. The timeline's cards have no control.
+   */
+  test('a real mouse on a dropping view and its Delete, a popping truck’s ×, and a palette row under a sliding cursor, 20 to 300ms in: every press lands', async ({
+    page,
+  }, info) => {
+    test.setTimeout(20 * 60_000);
+    type Control = {
+      name: string;
+      aim: string;
+      zone: string;
+      ready: (i: number) => Promise<{ x: number; y: number }>;
+      start: () => Promise<unknown>;
+      read: () => Promise<string>;
+      landed: (before: string, after: string) => boolean;
+    };
+    const TIMES = [20, 60, 120, 300];
+    const ROUNDS = 8;
+    const HOLD = 40;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const tally: { control: string; time: number; ok: boolean; offControl: boolean; moved: number }[] = [];
+
+    const run = async (control: Control) => {
+      for (const time of TIMES) {
+        await keepTheFeedFresh();
+        let lateBy = 0;
+        let done = 0;
+        let tries = 0;
+        while (done < ROUNDS && tries < ROUNDS * 6) {
+          tries += 1;
+          const { x, y } = await control.ready(tries);
+          await page.mouse.move(x, y);
+          const before = await control.read();
+          await arm(page, control.aim, control.zone);
+          const fired = control.start();
+          await sleep(Math.max(0, time - lateBy));
+          await page.mouse.down();
+          const pressed = await page.evaluate(() => (window as unknown as { __press: { at: number | null } | null }).__press);
+          const under = () =>
+            page.evaluate(
+              ({ px, py }) => {
+                const r = document.elementFromPoint(px, py)?.getBoundingClientRect();
+                return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+              },
+              { px: x, py: y },
+            );
+          const box = await under();
+          await sleep(HOLD);
+          const boxAfter = await under();
+          await page.mouse.up();
+          const ends = await page.evaluate(() => (window as unknown as { __press: { down: boolean; same: boolean | null } | null }).__press);
+          await fired;
+          await expect
+            .poll(() => control.read().then((after) => control.landed(before, after)), { timeout: 2_000 })
+            .toBe(true)
+            .catch(() => {});
+          const after = await control.read();
+          const at = pressed?.at ?? null;
+          if (at === null) lateBy -= 20;
+          else lateBy += (at - time) * 0.4;
+          if (at !== null && Math.abs(at - time) <= 18) {
+            done += 1;
+            tally.push({
+              control: control.name,
+              time,
+              ok: control.landed(before, after),
+              offControl: !ends?.down || ends.same !== true,
+              moved: box && boxAfter ? Math.max(Math.abs(box.x - boxAfter.x), Math.abs(box.y - boxAfter.y)) : -1,
+            });
+          }
+        }
+        const these = tally.filter((t) => t.control === control.name && t.time === time);
+        process.stdout.write(
+          `MEDIUM PRESS ${control.name} at ${time}ms: ${done} landed on time in ${tries} tries, ${these.filter((t) => !t.ok).length} missed\n`,
+        );
+        expect(done, `${control.name} at ${time}ms: presses on time`).toBe(ROUNDS);
+      }
+    };
+
+    await resetWorld();
+    await logMedium(page);
+    await page.addInitScript(pressWatch);
+    await seedViews(page);
+    // Which palette row a click reached, and how many there have been.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __options: string[] };
+      w.__options = [];
+      window.addEventListener(
+        'click',
+        (event) => {
+          const option = (event.target as Element | null)?.closest?.('[role="option"]');
+          if (option) w.__options.push(option.id);
+        },
+        true,
+      );
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await page.locator('[data-row-id]').first().waitFor();
+    await quiet(page);
+
+    /* The Fleet menu. A new view is saved each round and is the list's last row. */
+    const menu = page.locator('[data-views-menu]');
+    const openMenu = async () => {
+      if ((await menu.count()) === 0) await scopeButton(page).click();
+      await menu.waitFor({ timeout: 5_000 });
+    };
+    const clearPressed = async () => {
+      const left = menu.getByRole('button', { name: /^Delete the view Press/ });
+      if ((await left.count()) > 0) {
+        await left.first().click({ timeout: 5_000 });
+        await expect(left).toHaveCount(0, { timeout: 5_000 });
+      }
+      await expect.poll(() => stillMoving(page), { timeout: 5_000 }).toBe(0);
+    };
+    const nameIt = async (name: string) => {
+      await menu.getByRole('menuitem', { name: 'Save current view…' }).click({ timeout: 5_000 });
+      await menu.getByLabel('Name this view').fill(name, { timeout: 5_000 });
+      await quiet(page);
+    };
+    const enter = () =>
+      page.evaluate(() =>
+        document
+          .querySelector('input[aria-label="Name this view"]')!
+          .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })),
+      );
+    // Where the new row stands at rest, measured once.
+    await openMenu();
+    await nameIt('Press 0');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const last = menu.locator('[data-view-rows] > [data-view-row]:last-child');
+    const rowAt = await centreOf(last.getByRole('menuitem'));
+    const deleteAt = await centreOf(last.getByRole('button', { name: /^Delete the view/ }));
+    await clearPressed();
+    const viewState = () =>
+      page.evaluate(() =>
+        JSON.stringify({
+          applied: document.querySelector('[data-view-title]')?.textContent ?? null,
+          pressRows: [...document.querySelectorAll('[data-view-row]')].filter((r) => (r.textContent ?? '').includes('Press')).length,
+          menu: document.querySelector('[data-views-menu]') !== null,
+        }),
+      );
+    const readyView = (at: { x: number; y: number }) => async (i: number) => {
+      await openMenu();
+      await clearPressed();
+      await nameIt(`Press ${i}`);
+      return at;
+    };
+    await run({
+      name: 'view row',
+      aim: 'views',
+      zone: '[data-view-rows]',
+      ready: readyView(rowAt),
+      start: enter,
+      read: viewState,
+      landed: (_b, a) => (JSON.parse(a) as { applied: string | null }).applied?.startsWith('Press') === true,
+    });
+    await run({
+      name: 'view Delete',
+      aim: 'views',
+      zone: '[data-view-rows]',
+      ready: readyView(deleteAt),
+      start: enter,
+      read: viewState,
+      landed: (_b, a) => {
+        const s = JSON.parse(a) as { pressRows: number; menu: boolean };
+        return s.menu && s.pressRows === 0;
+      },
+    });
+    await openMenu();
+    await clearPressed();
+    await page.keyboard.press('Escape');
+
+    /* The list editor: 103 is added each round, last on the line, so nothing slides by it. */
+    await openMenu();
+    await menu.getByRole('menuitem', { name: 'New list…' }).click();
+    const editor = page.getByRole('dialog', { name: 'New list' });
+    const paste = editor.getByLabel('Truck numbers to add');
+    await paste.fill('101, 102');
+    await editor.getByRole('button', { name: 'Add 2' }).click();
+    await paste.fill('103');
+    await editor.getByRole('button', { name: 'Add 1' }).click();
+    await expect.poll(() => stillMoving(page)).toBe(0);
+    const removeAt = await centreOf(editor.getByRole('button', { name: 'Remove truck 103' }));
+    await editor.getByRole('button', { name: 'Remove truck 103' }).click();
+    // The trucks on the list, by their × buttons' names: the copy has none.
+    const chipsNow = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-list-chip] button')].map((b) => b.getAttribute('aria-label')).join(','),
+      );
+    const remove103 = editor.getByRole('button', { name: 'Remove truck 103' });
+    await run({
+      name: 'truck ×',
+      aim: 'listChips',
+      zone: 'ul[aria-label="Trucks in this list"]',
+      ready: async () => {
+        // A press that missed leaves 103 on the list: take it off as a person would.
+        if ((await remove103.count()) > 0) await remove103.click({ timeout: 5_000 });
+        await expect(remove103).toHaveCount(0, { timeout: 5_000 });
+        await expect.poll(() => stillMoving(page), { timeout: 5_000 }).toBe(0);
+        await paste.fill('103', { timeout: 5_000 });
+        await editor.getByRole('button', { name: 'Add 1' }).waitFor({ timeout: 5_000 });
+        await quiet(page);
+        return removeAt;
+      },
+      start: () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLButtonElement>('[data-list-editor] button')].find((b) => b.textContent?.trim() === 'Add 1')!.click(),
+        ),
+      read: chipsNow,
+      // Read before the Add: 101 and 102. Landed: 103 came and went again, and the rest are as they were.
+      landed: (b, a) => a === b && a === 'Remove truck 101,Remove truck 102',
+    });
+    await editor.getByRole('button', { name: 'Cancel' }).click();
+    await expect(editor).toHaveCount(0);
+
+    /* The palette: the pointer on its third row; an arrow key slides the cursor off it or onto it. */
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    const openPalette = async () => {
+      if ((await palette.count()) === 0) await page.keyboard.press('Control+k');
+      await palette.getByRole('option').nth(2).waitFor({ timeout: 5_000 });
+      await quiet(page);
+    };
+    await openPalette();
+    const optionAt = await centreOf(palette.getByRole('option').nth(2));
+    const optionId = (await palette.getByRole('option').nth(2).getAttribute('id'))!;
+    await page.keyboard.press('Escape');
+    const clicked = () =>
+      page.evaluate(() => {
+        const w = window as unknown as { __options: string[] };
+        return `${w.__options.length}:${w.__options.at(-1) ?? ''}`;
+      });
+    await run({
+      name: 'palette row',
+      aim: 'palCursor',
+      zone: '[role="option"]',
+      ready: async () => {
+        await openPalette();
+        return optionAt;
+      },
+      start: () =>
+        page.evaluate(() =>
+          document
+            .querySelector('input[role="combobox"]')!
+            .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })),
+        ),
+      read: clicked,
+      landed: (b, a) => Number(a.split(':')[0]) === Number(b.split(':')[0]) + 1 && a.endsWith(`:${optionId}`),
+    });
+
+    const table = tally.reduce<Record<string, { presses: number; misses: number; offTarget: number; mostMoved: number }>>((all, t) => {
+      const key = `${t.control} at ${t.time}ms`;
+      const row = (all[key] ??= { presses: 0, misses: 0, offTarget: 0, mostMoved: 0 });
+      row.presses += 1;
+      if (!t.ok) row.misses += 1;
+      if (t.offControl) row.offTarget += 1;
+      row.mostMoved = Math.max(row.mostMoved, Math.round(t.moved * 10) / 10);
+      return all;
+    }, {});
+    const report = JSON.stringify({ rows: table, misses: tally.filter((t) => !t.ok) }, null, 1);
+    await info.attach('medium-press-table', { body: report, contentType: 'application/json' });
+    process.stdout.write(`MEDIUM PRESS TABLE\n${report}\nEND MEDIUM PRESS TABLE\n`);
+
+    expect(tally).toHaveLength(TIMES.length * ROUNDS * 4);
+    expect(tally.filter((t) => !t.ok)).toEqual([]);
+    expect(tally.filter((t) => t.offControl)).toEqual([]);
+    // What a press holds does not move under it; a hovered button's 1px lift may drop as it is pressed.
+    expect(tally.filter((t) => t.moved > 1.01)).toEqual([]);
+  });
+});

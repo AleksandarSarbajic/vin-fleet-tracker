@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { EASING, MOTION_MS } from '@/design/tokens';
+import { drawIn } from '@/lib/appear-motion';
+import { play } from '@/lib/motion';
 import { useFocusTrap, useReturnFocus } from '@/components/edit/useModalChrome';
 import { DialogFrame } from '@/components/overlay/DialogFrame';
 import { useTruckTimeline } from '@/hooks/useTruckTimeline';
@@ -102,6 +105,41 @@ export function TruckTimeline({
   const current = currentStopId(stops);
   const now = Date.now();
 
+  /**
+   * §12.156. The stop cards in view draw in, each with its line growing down from its dot, once
+   * per opening: in the commit its first answer lands in, cards or not. Cached, that is the
+   * opening's own commit; fetched, the commit the fetch lands in, however late. After it nothing
+   * draws, so a refetch on the window's focus, or the edit window's own read of the same truck,
+   * changes the cards at once. Opacity and `scale` only, and nothing on a card can be pressed.
+   */
+  const body = useRef<HTMLDivElement | null>(null);
+  const answered = useRef(false);
+  const hasCards = !isPending && !isError && loads.length > 0;
+  useLayoutEffect(() => {
+    if (answered.current || isPending) return;
+    answered.current = true;
+    const scroller = body.current;
+    if (!hasCards || !scroller) return;
+    const cards = [...scroller.querySelectorAll<HTMLElement>('[data-stop-state]')];
+    drawIn(
+      cards,
+      scroller,
+      MOTION_MS.timelineDraw,
+      MOTION_MS.timelineDrawCard,
+      MOTION_MS.timelineDrawGapMax,
+      (card, delay) => {
+        const line = card.querySelector('[data-stop-line]');
+        if (!line) return;
+        play(line, [{ scale: '1 0' }, { scale: '1 1' }], {
+          duration: MOTION_MS.timelineDrawCard,
+          delay,
+          easing: EASING.dialog,
+          fill: 'backwards',
+        });
+      },
+    );
+  });
+
   return (
     <DialogFrame
       /*
@@ -133,7 +171,7 @@ export function TruckTimeline({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
+      <div ref={body} className="min-h-0 flex-1 overflow-auto px-4 py-3">
         {isPending ? (
           <p className="py-8 text-center text-body text-text-mutedOnOverlay">
             Loading…
@@ -205,7 +243,11 @@ function StopCard({
           className={`h-[9px] w-[9px] shrink-0 ${STATE_DOT[state]}`}
           aria-hidden="true"
         />
-        <span className="mt-1 w-px flex-1 bg-line-soft" aria-hidden="true" />
+        <span
+          data-stop-line=""
+          className="mt-1 w-px flex-1 origin-top bg-line-soft"
+          aria-hidden="true"
+        />
       </div>
 
       <div className="min-w-0 flex-1">

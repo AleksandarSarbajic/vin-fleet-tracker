@@ -61,6 +61,8 @@ class BeforeCommit extends Component<{ cause: string; onCause: () => void }> {
 interface Props {
   /** §12.149. Changes when rows are to glide to their new places, and at no other time. */
   glideCause: string;
+  /** §12.156. The chips alone, by name: what may roll the footer's numbers. */
+  chipCause: string;
   rows: FleetRow[];
   /** Reference instant for every age on a row — see TruckRow. */
   fetchedAt: string | null;
@@ -114,6 +116,7 @@ interface Props {
 
 export function FleetList({
   glideCause,
+  chipCause,
   rows,
   fetchedAt,
   feedStale,
@@ -403,7 +406,12 @@ export function FleetList({
           />
         </BulkBarSlot>
       ) : (
-        <ListFooter rows={rows} firstVisible={firstVisible} lastVisible={lastVisible} />
+        <ListFooter
+          rows={rows}
+          firstVisible={firstVisible}
+          lastVisible={lastVisible}
+          cause={chipCause}
+        />
       )}
     </div>
   );
