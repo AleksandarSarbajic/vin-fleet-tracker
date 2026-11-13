@@ -6804,6 +6804,138 @@ test.describe('phase 3br, the last medium motions off the map and the phone (§1
     await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
   });
 
+  /*
+   * Phase 3bs, Part 1: 3br left "Chromium's scroll anchoring on a merge answer while scrolled"
+   * unverified. The same answer is given twice at the same scroll: once with motion, once under
+   * reduced motion, which plays nothing and so stands in for `asgMergeFade` at 0 (a token cannot
+   * change without a rebuild). Every frame records the scroller's scrollTop and where the header
+   * and the rows' box are drawn. Two widths: at 1440 the panels stand beside the table and the
+   * answer leaves less than a view to scroll, so the scroller clamps its scrollTop in that commit;
+   * at 1060 the panels stand under it, there is room left, and scroll anchoring is what could act.
+   */
+  test('asgMerge while scrolled: the header is drawn where it stood on the first frame without the prompt, scrollTop never jumps, and it ends where the same answer with no motion leaves it (§12.158, 3bs)', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    await seedBoard();
+    await logBr(page);
+    let answered = false;
+    await page.route('**/api/drivers', async (route) => {
+      if (route.request().method() === 'POST') {
+        answered = true;
+        await route.fulfill({ json: { ok: true } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          candidates: answered
+            ? []
+            : [
+                {
+                  id: 'c-e2e',
+                  appDriverId: 'app-e2e',
+                  samsaraDriverId: 'sam-e2e',
+                  samsaraDriverName: 'Mina Radic',
+                  appDriverName: 'Mina Radic',
+                  appDriverCreatedAt: '2026-10-14T12:00:00.000Z',
+                },
+              ],
+        },
+      });
+    });
+    type Frame = { scrollTop: number; head: number; rows: number; prompt: boolean };
+    const prompt = page.locator('[data-merge-prompt]');
+
+    /** Loads, scrolls the prompt half out of view, answers, and returns every frame from the click on. */
+    const answerScrolled = async (width: number) => {
+      answered = false;
+      await page.setViewportSize({ width, height: 520 });
+      await page.goto('/assignments');
+      await prompt.waitFor();
+      await quiet(page);
+      await expect.poll(() => webMoving(page)).toBe(0);
+      const scrolled = await prompt.evaluate((p) => {
+        const scroller = p.closest('section')!.parentElement!;
+        const box = p.getBoundingClientRect();
+        const view = scroller.getBoundingClientRect();
+        scroller.scrollTop += Math.round(box.top - view.top + box.height / 2);
+        const after = p.getBoundingClientRect();
+        return { scrollTop: scroller.scrollTop, promptTop: after.top - view.top, promptBottom: after.bottom - view.top };
+      });
+      // Scrolled, and the prompt still partly in view: its top above the scroller's, its bottom below.
+      expect(scrolled.scrollTop).toBeGreaterThan(0);
+      expect(scrolled.promptTop).toBeLessThan(0);
+      expect(scrolled.promptBottom).toBeGreaterThan(0);
+      await quiet(page);
+      await page.evaluate(() => {
+        const w = window as unknown as { __frames: Frame[]; __stop: boolean };
+        w.__frames = [];
+        w.__stop = false;
+        const scroller = document.querySelector('[data-asg-head]')!.closest('section')!.parentElement!;
+        const tick = () => {
+          w.__frames.push({
+            scrollTop: scroller.scrollTop,
+            head: document.querySelector('[data-asg-head]')!.getBoundingClientRect().top,
+            rows: document.querySelector('[data-asg-rows]')!.getBoundingClientRect().top,
+            prompt: document.querySelector('[data-merge-prompt]') !== null,
+          });
+          if (!w.__stop) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      await prompt.getByRole('button', { name: 'Different people' }).click();
+      await expect(prompt).toHaveCount(0);
+      await expect.poll(() => webMoving(page)).toBe(0);
+      await quiet(page);
+      return page.evaluate(() => {
+        const w = window as unknown as { __frames: Frame[]; __stop: boolean };
+        w.__stop = true;
+        return w.__frames;
+      });
+    };
+
+    const clamps: Record<number, boolean> = {};
+    for (const width of [1440, 1060]) {
+      // No motion first: where the same answer leaves the page.
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      const still = await answerScrolled(width);
+      expect(await br(page)).toEqual([]);
+      const stillEnd = still.at(-1)!;
+      clamps[width] = stillEnd.scrollTop === 0;
+
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.evaluate(() => ((window as unknown as BrLog).__br = []));
+      const frames = await answerScrolled(width);
+      const slides = await br(page, 'asgMergeSlide');
+      const stood = frames.find((f) => f.prompt)!;
+      const first = frames.findIndex((f) => !f.prompt);
+      expect(first).toBeGreaterThan(0);
+      process.stdout.write(
+        `3bs Part 1 at ${width}x520: stood ${JSON.stringify(stood)}; no motion ends ${JSON.stringify(stillEnd)}; with motion ${JSON.stringify(
+          frames.slice(first - 1, first + 4),
+        )} … ${JSON.stringify(frames.at(-1))} (${frames.length} frames); slides ${JSON.stringify(slides.map((e) => e.frames))}\n`,
+      );
+      const clamped = stillEnd.scrollTop !== still[0]!.scrollTop && stillEnd.scrollTop === 0;
+      // Clamped, the header and the rows' box move on screen and slide; anchored, Chromium keeps
+      // them where they were drawn, and there is nothing to slide.
+      expect(slides).toHaveLength(clamped ? 2 : 0);
+      // On the first frame without the prompt, the header is drawn where it stood.
+      expect(Math.abs(frames[first]!.head - stood.head)).toBeLessThan(2);
+      // scrollTop never jumps while the slide runs: every frame from the answer on has the same one.
+      expect([...new Set(frames.slice(first).map((f) => f.scrollTop))]).toEqual([stillEnd.scrollTop]);
+      // It ends where the same answer with no motion leaves it.
+      const end = frames.at(-1)!;
+      expect(end.scrollTop).toBe(stillEnd.scrollTop);
+      expect(end.head).toBeCloseTo(stillEnd.head, 1);
+      expect(end.rows).toBeCloseTo(stillEnd.rows, 1);
+      // Clamped, the slide ran: the header was on its way. Anchored, it never moved.
+      expect(frames.slice(first).some((f) => Math.abs(f.head - end.head) > 10)).toBe(clamped);
+      await expect.poll(() => brAtRest(page)).toEqual({ running: 0, styled: 0 });
+    }
+    // Both cases were met: at 1440 the answer clamps the scroll to 0, at 1060 it does not.
+    expect(clamps).toEqual({ 1440: true, 1060: false });
+  });
+
   test('reduced motion: a week, two tabs, the prompt arriving and answered play nothing, and end where they would with motion', async ({
     page,
   }) => {
