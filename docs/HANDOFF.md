@@ -117,6 +117,10 @@ now reaches its case with it on (16 of 16), and 3bg's guard mutant fails it. **N
 **At the start of 3bn (2026-11-12): 3bk, 3bl and 3bm are NOT pushed**: origin's master was `9af0ea6`, HEAD `54ca873` (3bm committed as `bb6d5c9` and `54ca873`).
 **3bn: NOT pushed, NOT live** (2026-11-12): the command palette's box is focused once as it opens, not twice (§12.155), which explains and fixes the e2e palette failure of 3bi and 3bm.
 Not live until pushed. App only (Vercel): one app file, no worker file, so no worker deploy. Its full e2e is the clean run for 3bk, 3bl and 3bm. See "Phase 3bn" below.
+**At the start of 3bo (2026-11-12): 3bk, 3bl, 3bm and 3bn are NOT pushed**: origin's master was `9af0ea6`, HEAD `7464e30`.
+**3bo: NOT pushed, NOT live** (2026-11-12): the board's five medium motions at the demo's Bold (§12.156): a saved view saved or deleted in the Fleet menu, the list footer on a person's chip, the palette's cursor on the arrow keys, trucks added or removed in the list editor, the timeline's stop cards.
+**Committed (2026-11-13), `d6f5444` and the docs commit:** the first full e2e failed on nine screenshot baselines at "of" in the list footer; the footer's two lines are back as at `7464e30`, nothing re-saved, and the full e2e again is clean: 546 passed, 0 failed, `phone-signout` ran, 58.0 min (`2026-11-13T09-19-29-160Z`). See "Phase 3bo".
+Not live until pushed. App only (Vercel): no worker file reaches a changed one, so no worker deploy. See "Phase 3bo" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -11825,6 +11829,114 @@ From the advisor's brief. One e2e test had failed two full runs the same way: `s
 **Unverified:** that a person was never affected; why the timer ran late (85ms after the trap's focus in one run here, and after the option's check in the 3bm trace, where the page was busy: the map's software frames are the likeliest, not measured); any browser but Chromium.
 
 **Next:** the advisor verifies; Alex pushes 3bk, 3bl, 3bm and 3bn together (app only).
+
+### Phase 3bo: the board's five medium motions, at Bold (2026-11-12)
+
+Motion batch 3a, from the advisor's brief: the first five of the 3be demo's 18 medium rows, the ones on the board and its windows, at the demo's Bold, after Alex's "i want motion, animations EVERYWHERE" with All bold (2026-11-06). None is left off. §12.156 is the record. The six live motions, the small ones of 3bj and 3bk, the chip and 3bg's and 3bm's gap test are untouched. **NOT pushed, NOT live.** App only (Vercel): nothing under `src/worker` reaches a changed file (a script walked the worker's imports: 84 files, none of them), so no worker deploy. Built on `7464e30`; origin's master was `9af0ea6` (3bk–3bn not pushed).
+
+| Commit | What |
+|---|---|
+| `d6f5444` | The tokens, the shapes, `list-motion.ts`, `palette-cursor.ts`, the five, their unit tests and the e2e tests; the footer's two lines as at `7464e30` (below) |
+| The docs commit | §12.156, its pointer from §12.152, this section and "What is live" |
+
+**The five.** Lines as re-grepped at `7464e30`, before building (3be's table cites `b45cd15`: the views list moved from `:475` to `:474` and its Delete from `:547` to `:548`, the palette's two from `:152`/`:215` to `:171`/`:238`, the timeline's cards from `:160` to `:159`). Bold values from `.taste-skill/motion/everywhere/core.js`. Paths as 3be's: `console/` is `src/components/console/`, `overlay/` is `src/components/overlay/`.
+
+| Row | File:line at `7464e30` | Bold (demo) | Token(s) | What starts it | What must not |
+|---|---|---|---|---|---|
+| views | `console/SavedViews.tsx:474` (the 40vh list), `:228` (`commit`), `:548` (Delete) | `DROP` 270ms, 14px | `viewsDrop`, `viewsDropPx` | A person's Save in the menu (the new row drops); a person's Delete (a copy leaves, the rows below slide up) | The menu opening; a rename; the find box; another tab (views are read from this browser's storage once per mount and never synced) |
+| foot | `console/ListFooter.tsx:43`, `:48`–`60`; `console/FleetList.tsx:406` | 360ms (its own) | `footRoll` | A person's chip: a click, its key, Clear filters, a view (the chip set, compared with the commit before) | A scroll; a poll; a resize; a list; the reorder bar; the search |
+| palCursor | `overlay/CommandPalette.tsx:171` (arrows), `:238` (mouse), `:195` and `:128` (resets) | `SLIDE` 270ms | `palCursorSlide` | ArrowUp, ArrowDown | The mouse; a key typed (the cursor back to 0); the opening's reset; a poll's new trucks |
+| listChips | `console/TruckListEditor.tsx:210` (chip), `:222` (×), `:263` (Add N), `:274` (Add the checked rows) | `POP` 270ms, from 0.5 | `listChipsPop`, `listChipsPopFromScale` | A person's Add N, Add the checked rows, or × | The editor opening; "Reload the current list"; numbers waiting in the paste box; Save |
+| timeline | `console/TruckTimeline.tsx:81` (its query), `:159` (the cards), `:202`, `:208` (the line) | `DRAW` 450ms, 180 a card, 30 gap | `timelineDraw`, `timelineDrawCard`, `timelineDrawGapMax` | The first answer of an opening that has cards, from the cache or a fetch | A refetch or any later answer while it is open; a re-render |
+
+**How it is built.**
+
+- **views and listChips** share `console/list-motion.ts`. In the person's own handler, before React removes anything: where each row or truck is drawn in the list's own box (`placesOf`) and a copy of the one going (`takeLeaving`: `makeInert`, every control turned into a `span`, `inert`, `aria-hidden`, `pointer-events-none`, `-z-10` behind the live list). In the commit it causes: the new one drops or pops (`dropIn`, `popIn`), the copy leaves by that arrival reversed (`dropOut`, `popOut`, new in `lib/appear-motion.ts`), and what moved slides from where it was (`glideFrom`, `slideFrom`, `translate` only). The list's own box (`[data-view-rows]`, new, inside the 40vh scroller; the editor's `ul`) is `relative isolate` and clips while anything is on its way, never the scroller. **The rest slides rather than jumps** (rule 1's choice): a copy leaving where another row had already jumped in would draw the two on top of each other. A flag (`saving`, `deleting`, `changing`) is set in the handler and spent by the commit, so nothing else plays it.
+- **A press on an arriving control's place reaches it** (`restingControl`, the list box's click handler): a click on the box, or on the arriving thing away from its controls, goes to the control whose layout place it came down on, as 3bj's checkbox keeps its place. Shown to be needed: with it switched off (planted in a worktree, run `2026-11-12T23-09-35-318Z`), the press table missed **8 of 8 on the view's Delete at 20ms and 8 of 8 on the truck's × at 20ms**, and failed on its "no misses" assertion; with it on, none.
+- **foot:** `Console` passes the chips alone (`chipCause`) through `FleetList` to `ListFooter`, which compares it with the commit before in one layout effect. Changed: each of its three numbers that changed rolls by `rollNumber` (now with a length, the count's 400 by default) and the words that changed fade (`fadeIn`). The same: what changed lands at once and ends any roll or fade in it (`settleRoll`, new).
+- **palCursor:** `overlay/palette-cursor.ts`, modelled on the selection's slide: an overlay `span` with the cursor's ground, in the results list's content (now `relative isolate`), behind the rows, no pointer; the target row's own ground held back by `[data-cursor-target]` (`globals.css`). `arrows` counts the arrow keys, so a change of row in a commit without one lands at once. The box keeps the focus: nothing is focused.
+- **timeline:** a layout effect, once per mount, in the commit its first answer lands (`answered`): `drawIn` on the cards in view with the timeline's own tokens, and its new `withRow` draws each card's line (`scale` from `1 0`, `origin-top`) at the card's delay. 3bk's two callers of `drawIn` pass nothing new.
+
+**Where the demo's shape changed,** the durations all kept: (1) a delete or a removal leaves a copy, which the demo does not have: a view goes back up 14px, a truck down to 50%, each fading in 270ms; (2) the footer's range rolls as three numbers, not as one text, so a "1" that stays does not move; (3) the demo scrolls the cursor's row into view; the palette here never did, and does not now.
+
+**The values.** All in `tokens.ts`; all equal the demo's Bold. "On" is the demo's On, for taking one back a step.
+
+| Token | On | Bold |
+|---|---|---|
+| `viewsDrop` / `viewsDropPx` | 180 / 6 | **270 / 14** |
+| `footRoll` | 240 | **360** |
+| `palCursorSlide` | 180 | **270** |
+| `listChipsPop` / `listChipsPopFromScale` | 180 / 0.7 | **270 / 0.5** |
+| `timelineDraw` / `timelineDrawCard` / `timelineDrawGapMax` | 300 / 120 / 20 | **450 / 180 / 30** |
+
+**To take one motion back: one line in `tokens.ts`.** Its duration to 0 turns it off (every shape returns at once on 0; the footer and the cursor check their own token; the timeline's lines go with its cards), and its On values above make it weaker. A slide that comes with a motion takes that motion's token. Its number is also written out, on purpose, in these places, which fail until told:
+
+| Motion | Unit test (`console/medium-motion.test.tsx`, describe) | e2e (`new-motion.spec.ts`, "phase 3bo") |
+|---|---|---|
+| views | "views: a saved view added or deleted, in the Fleet menu" | `VIEWS_MS`, `VIEWS_PX`; the press table's "view row" and "view Delete" |
+| foot | "foot: the list footer’s numbers and words, on a person’s chip", and "foot, on the real board" | `FOOT_MS` |
+| palCursor | "palCursor: the palette’s cursor, on the arrow keys" | `CURSOR_MS`; the press table's "palette row" |
+| listChips | "listChips: trucks added or removed in the truck list editor" | `CHIPS_MS`, `CHIPS_FROM`; the press table's "truck ×" |
+| timeline | "timeline: the stop cards, when it opens" | `TL_MS`, `TL_CARD_MS`, `TL_GAP_MS` |
+| every one | `design/motion-tokens.test.ts`, "the numbers of the board’s medium motions (§12.156)" | |
+
+Turned off (0), its "starts on its cause" tests are the ones to change to "nothing plays", and its press-table control comes out (nothing plays, so no press is ever on time).
+
+**Tests.** With the numbers written out. `npm run check`: **245 files, 4508 tests** (244 files, 4467 tests before): 41 new in one new file and two existing ones, and no existing test changed.
+
+- `console/medium-motion.test.tsx` (31), each surface mounted alone and the footer on the real `Console` too. **views** (6): a Save drops the new row 14px in 270ms and no other; the menu opening, a rename and the find box play nothing; a Delete's copy goes back up 14px in 270ms, the rows below slide up 40px, the box clips (never the scroller), nothing left; the copy is `inert`, hidden, takes no pointer, stands behind the rows, with no control and no identity; the last view deleted leaves nothing; reduced motion. **foot** (7): a chip rolls the numbers that changed (360ms, the curve) and fades the words that changed (360ms, linear), unchanged words stay; a scroll and a poll change it at once; a scroll mid-roll ends the roll on the new number with no copy; reduced motion; on the board, the Late chip rolls the total 3 to 2 in 360ms, and a poll that changes the total does it at once. **palCursor** (6): ArrowDown slides 36px in 270ms behind the rows, nothing left; ArrowUp, and a second key from where it is drawn, one overlay at a time; the mouse moves it at once and lands a slide in flight; typing and the opening's reset slide nothing; the box keeps the focus; reduced motion. **listChips** (6): Add pops only the added truck (from 50%, 270ms) and slides the one it pushed 60px; × leaves a copy (to 50%, 270ms, inert, no control) and slides the next one back; Add the checked rows pops those only; the window moving as a whole as the paste box empties slides nothing more (below); the editor opening, its name and the paste box pop nothing; reduced motion. **timeline** (6): cached, the cards draw at the opening (180ms, linear, 0/30/60) with their lines (`scale`, the curve); fetched, nothing at "Loading…" and the draw when it lands; a refetch draws nothing; a first answer with no cards spends it; opened again, once more; reduced motion.
+- `lib/appear-motion.test.ts` (+5): `dropOut`, `popOut`, `slideFrom`, `drawIn`'s `withRow`, and 0 or reduced motion running none of them.
+- `design/motion-tokens.test.ts` (+5): the numbers.
+
+**Mutations,** each in a worktree at `7464e30` with this phase's changes, each file restored byte-identical after (checked with `cmp`), the three suites passing 84/84 there unmutated:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) `foot` rolls on a scroll: its cause no longer compared | 4: "a scroll changes the numbers at once: nothing rolls or fades"; "a poll changes them at once: nothing rolls or fades"; "a scroll in the middle of a roll ends it at once, on the new number, with no copy left"; "a poll that changes the total changes it at once" |
+| (b) `palCursor` slides on a mouse move: the arrows no longer asked | 2: "the mouse pointing at a row moves the cursor at once: nothing slides, and a slide in flight lands"; "typing, back to the first row, and the opening’s reset slide nothing" |
+| (c) `timeline` draws again on a refetch: spent per answer, not per opening | 2: "a refetch while it is open draws nothing: the cards change at once"; "a first answer with no cards spends it: cards that come later are simply there" |
+| (d) `listChips` pops every chip on a re-render: no flag, no "had", no dependency | 4: "Add: only the truck added pops in from 50% in 270ms, and the truck it pushed slides 60px"; "×: …"; "Add the checked rows: those pop, and only those"; "the editor opening, its name typed, and numbers waiting in the paste box pop nothing: no chip is drawn for them" |
+| (e) a views delete's copy takes a press: `inert` and `pointer-events-none` taken off | 2: "the copy can take no press: inert, hidden, no pointer, behind the rows, with no control and nothing to find it by"; listChips' "×: …" (the same copy) |
+
+**Found by the first targeted run, fixed before the full run:** measured on the screen, adding a truck between two slid every truck 26.6px down. The list editor is centred on the screen, and when its paste box emptied the whole window moved down. Places are now measured in the list's own box. "the window moving as a whole as the paste box empties slides nothing more: only the truck pushed along its line, 60px across and none down" was written for it and fails on the code before the fix (shown in the worktree).
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3bo, the board’s medium motions (§12.156)"), three tests:
+
+- **The footer, the Fleet menu and the palette:** a poll and a scroll change the footer with nothing started; the Late chip rolls its numbers (360ms, the curve) and fades its words (360ms, linear); the menu opening with three views plays nothing; Save drops the new row (270ms, 14px); a Delete leaves a copy (270ms, back up 14px) and slides the three rows below, and on the copy's first frame what stands at its centre is in the rows' box and is not the copy (`elementFromPoint`); the palette's ArrowDown and ArrowUp slide by the rows' own distance in 270ms with the box keeping the focus; the mouse moves the cursor with nothing started. Nothing grown on any frame of any step, nothing left.
+- **The list editor and the timeline:** two trucks pop; one between them pops and the one after it slides along its line; × leaves a copy and slides it back; the timeline, fetched on its first opening and cached on its second, draws the cards in view once each time (180ms, linear, gaps of 30 at most, the last by 270) with each line at its card's delay. Nothing grown, nothing left.
+- **The press table** below.
+
+**The press table,** a real mouse at 20, 60, 120 and 300ms into each control's own motion by its own clock (±18ms), held 40ms; a press that came early or late is tried again, a miss never. 8 presses a cell. The view row and its Delete are pressed on a view just saved, as it drops; the truck's × on a truck just added, as it pops (last on its line, so nothing slides by it); the palette row under the pointer as the cursor slides off it.
+
+| Into the motion | view row | view Delete | truck × | palette row |
+|---|---|---|---|---|
+| 20ms | 0 missed | 0 | 0 | 0 |
+| 60ms | 0 | 0 | 0 | 0 |
+| 120ms | 0 | 0 | 0 | 0 |
+| 300ms | 0 | 0 | 0 | 0 |
+
+**128 presses, 0 missed, 0 that came down or went up off their control, largest move of what stood under the pointer between press and release 0.9px** (the truck's × at 300ms, inside the 1px a hovered button's lift may drop as it is pressed), in the full run. The targeted run before it gave the same, largest 0.6px. With the hand-off switched off, 16 missed, all at 20ms (above).
+
+**e2e, full run, the first: FAILED, nine screenshot baselines, this phase's.** Run `2026-11-12T23-14-30-277Z` on the default config, from the terminal, started 23:14:29 UTC after the last code write (23:13:22 UTC; only these docs changed during it). **536 passed, 9 failed, `phone-signout` did not run** (it depends on the rest). **57.5 min** against 3bn's 55.8: +1.7, the three new tests (18.2s, 6.9s, 1.8 min).
+
+- **The nine,** all `desktop-baseline.spec.ts`: "desktop at 1280px / 1440px / 1680px / 1920px matches its baseline", "edit stop with a +30 window at 1440px", "edit load with two stops at 1280x720" and "at 1440x900", "a stop the truck has left, at 1440px", "a new load right after Add stop, at 1440px". Every shot in them read "11 pixels (ratio 0.01 of all image pixels) are different". The diff images show the same few pixels in each, at the word "of" in the list footer's "Showing 1–15 of 15", behind a window or not.
+- **The cause, proven.** The footer's new markup wrote `Showing{' '}` and `</span>{' '}` / `of{' '}` where it had `Showing <span…>` and `</span> of{' '}`: the same words, but " of" became two text nodes, " " and "of", and Chromium places "of" a fraction of a pixel differently. In the worktree, with only those two lines put back as they were, `desktop-baseline.spec.ts` passed whole, its 12 and the sign-in (run `2026-11-13T00-12-26-153Z`), with no baseline re-saved.
+- **Applied (2026-11-13, on Alex's yes):** those two lines in `ListFooter.tsx` are back as at `7464e30`, `Showing <span className="tabular-nums text-text">` and `</span> of{' '}`, the text outside the spans the same character for character; the boxes, refs and layout effect inside them unchanged. No baseline re-saved, updated or deleted. `npm run check`: 245 files, 4508 tests, as before.
+- **What passed in it:** the three new tests; the press table above; 3bg's "a press behind a cancel", "16 of 16 presses in the gap"; every 3bj, 3bk, 3bl and 3bn test.
+
+**e2e, full run, again: clean.** Run `2026-11-13T09-19-29-160Z` on the default config, from the terminal, one invocation, started 09:19:28 UTC after the last code write (`ListFooter.tsx`, 09:18:28 UTC); nothing was written during it. **546 passed, 0 failed, 0 skipped, 0 flaky, `phone-signout` ran. 58.0 min** against the first run's 57.5 (+0.5) and 3bn's 55.8. All twelve `desktop-baseline.spec.ts` tests passed, the nine among them, against the baselines as they were; "a press behind a cancel" printed "16 of 16 presses in the gap".
+
+**Found wrong:**
+
+1. **3be's table cites lines at `b45cd15`** that have moved (above). Its foot note says a roll "needs the glide's named cause"; the glide's cause also holds the list and the reorder bar, and the brief names the chip only, so the footer takes the chips alone.
+2. **Not motion, before this phase, not fixed: the footer's "Showing a–b" counts the 8 rows the list draws past each edge** as shown (`FleetList.tsx:165`, the virtualizer's items with their overscan). A scroll of six rows leaves "Showing 1–…" as it was. Found writing the e2e test, which now scrolls further.
+3. **Not motion, reasoned from the code, not measured: the palette never scrolls its cursor into view.** The results list is 420px tall at most, and the arrow keys can move the cursor past it. The demo scrolls; the app never did.
+4. **The brief, "a 40vh scroller":** it is `max-h-[min(40vh,280px)]`, so 280px at most.
+5. **The phone shares two of these** (the Fleet menu's phone copy, the sheet's Timeline), by sharing the components; the brief's "phone last" names two other rows. Not looked at on a phone.
+
+**Unverified:** the feel, which is Alex's; any browser but Chromium; a real phone; a real GPU.
+
+**Next:** the advisor's verification and Alex's push (app only). Origin's master is now `7464e30` (pushed 2026-11-13 00:17 UTC, by the local reflog), so 3bo's two commits are the only ones not pushed. Then the next medium batch, as the build order says.
 
 ## Next
 

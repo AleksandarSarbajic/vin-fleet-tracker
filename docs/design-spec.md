@@ -11013,6 +11013,7 @@ palette and the tour. **Supersedes in part** §12.148's and §12.149's "a count 
 all a poll ever starts": a poll now also fades in three things, opacity only (below).
 Everything else in both stands, and the six motions of §12.149 are unchanged.
 *(§12.153, phase 3bk: the eight small rows of History, Assignments and the login page, under these rules.)*
+*(§12.156, phase 3bo: the board's five medium rows, under these rules and four more.)*
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
@@ -11282,6 +11283,107 @@ timer run; a row keeps it when every pending timer runs; focused once, without a
 the search field, and back to it on Esc; reopened empty on the first row; from the sheet, and
 during the tour. With the timer put back, "focus moved to a row stays there when every pending
 timer runs" fails. The e2e test is unchanged but for its comment.
+
+## 12.156 The board's medium motions: five things move on a person's cause
+
+Phase 3bo. Alex, 2026-11-06: "i want motion, animations EVERYWHERE", with All bold. The build
+order after the small rows (§12.152, §12.153): the demo's 18 medium rows, then the large ones,
+phone and map last. This is the first medium batch, the five on the board and its windows, at
+the demo's Bold (`.taste-skill/motion/everywhere/core.js`: `DROP`, `SLIDE`, `POP`, `DRAW`, and
+`foot`'s own 360). §12.152's six rules hold for them; four more are below. The motions of
+§12.149, §12.152 and §12.153 and their tokens are unchanged. None is left off. The other 13
+medium rows are later batches: the map's four (popup, ring, trail, the map toggle) wait for a
+measure on a real GPU, the phone's two go last, the edit window's four and the pages' three are
+their own batches.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **views** | A saved view in the Fleet menu | 270ms | Saved: drops 14px and fades in. Deleted: a copy goes back up 14px and fades out, and the rows below slide up into its place | `EASING.dialog` | A person's Save; a person's Delete | The menu opening; a rename; the find box; another tab |
+| **foot** | The list footer's numbers and words | 360ms | Each number that changed rolls, as a count does (§12.149); words that changed fade in | `EASING.dialog`; the words linear | A person's chip: a click, its key, Clear filters, a view | A scroll; a poll; a resize; a list; the reorder bar; the search |
+| **palCursor** | The palette's cursor | 270ms | Its ground slides from row to row, behind the rows | `EASING.dialog` | ArrowUp, ArrowDown | The mouse; a key typed in the box (back to the first row); the opening's reset; a poll's new trucks |
+| **listChips** | A truck in the list editor | 270ms | Added: pops from 50% and fades in. Removed: a copy shrinks to 50% and fades out. The trucks that moved for it slide to their places | `EASING.dialog` | A person's Add, Add the checked rows, × | The editor opening; "Reload the current list"; numbers in the paste box; Save |
+| **timeline** | The timeline's stop cards in view, and each card's line | 450ms in all, 180ms a card, gaps of 30ms at most | Cards: opacity only, one after the other. Each line grows down from its dot (`scale`), with its card | Cards linear; lines `EASING.dialog` | The first answer of an opening: from the cache at the opening, from a fetch when it lands | A refetch or any later answer while it is open; a re-render |
+
+**The rules this batch adds,** each held by a test (`console/medium-motion.test.tsx` for causes,
+`e2e/new-motion.spec.ts`, "phase 3bo", for what only a browser shows):
+
+7. **What a person took away leaves as a copy nothing can use** (views, listChips). It is taken
+   in the person's own handler, before React removes the thing (`list-motion.ts`, `takeLeaving`):
+   no identity (`makeInert`), every control turned into a `span` with its classes and words (a
+   copied `button` is found by anything looking for the real one, §12.152 rule 4), `inert`,
+   `aria-hidden`, no pointer, and behind the live list (`-z-10` in the list's `isolate` box). So
+   whatever slides over its place is drawn on top of it, and a press there lands on that, as
+   §12.149's rule says: what is drawn under the pointer is what a press reaches.
+8. **What moved for it slides** (views' rows below a delete, listChips' trucks pushed or pulled
+   along the line), by `translate`, from where it was drawn in the list's own box (`glideFrom`).
+   Measured against that box, not the screen: the list editor is centred on the screen and moves
+   as a whole when its paste box empties, and measured on the screen every truck in it read as
+   having moved (the first targeted run, 26.6px). One still sliding from the change before
+   starts again from where it is drawn. Chosen over keeping the jump because a copy leaving in a
+   place another row has already jumped into would draw the two on top of each other.
+9. **The list's own box clips** while either is on its way (`[data-view-rows]`, the editor's
+   `ul`), never the scroller it stands in, so nothing grows a scroller. The views' 40vh scroller
+   is kept as it is: the first frames of a drop at its top are cut by its edge, and so is a
+   delete's copy where the box no longer reaches (below).
+10. **A press on an arriving control's place reaches that control** (`restingControl`). A drop
+    draws its controls 14px above their places at first, and a pop from half their size, so a
+    press on a control's place could land beside it. A click on the list's box itself, or on the
+    arriving thing away from its controls, goes to the control whose place (measured in layout,
+    `offsetLeft`/`offsetTop`) it came down on, as 3bj's checkbox keeps its place (§12.152 rule 4).
+    A click on a control as drawn is that control's, and a click on anything else drawn over the
+    place is that thing's.
+
+**What a person sees in the cases around them.**
+
+- **views.** The first view saved: the list appears with it, and it drops. The last view in the
+  list deleted: its copy stands where the list's box no longer reaches, so it is cut away and the
+  view simply goes, as before; nothing below it moves. Holding the box open for the copy would
+  move "Save current view…" up 270ms later, under a pointer, so it is not held. The only view
+  deleted: the list goes and "No saved views yet." is there at once. Views are this browser's,
+  read from its storage once as the board mounts and never synced between tabs, so another
+  tab's change is not seen until a reload and cannot play anything.
+- **foot.** The rows the footer counts as shown include the 8 the list draws past each edge, as
+  before. A chip that shortens a list scrolled down: the browser pulls the scroll back, that
+  scroll is no cause, and it ends the roll at once, so the new numbers are simply there. A list
+  or the reorder bar changes the footer at once: the batch names the chip, and only the chip.
+- **palCursor.** From the last row to the first (the keys wrap), it slides back across the list.
+  The palette does not scroll to its cursor, as before, so a slide to a row out of view goes on
+  out of view. The box keeps its caret through every slide (§12.155): nothing is focused.
+- **listChips.** Numbers waiting in the paste box are included by Save without ever being drawn
+  as trucks, and the editor closes on that save, so there is nothing to pop. The last truck
+  removed: the list goes and "No trucks yet." is there at once.
+- **timeline.** From the cache, the cards draw at the opening, inside the window's own opening
+  (§12.148). From a fetch, "Loading…" first, and the draw in the commit the answer lands in,
+  however late. A first answer with no cards (or an error) spends it: cards that come later, from
+  a refetch, are simply there. Opened again, it draws again, once. A card has no control.
+
+**Where.** Desktop, except two the phone shares by sharing the component: the Fleet menu (its
+phone copy is the same menu, `PhoneTopBar.tsx`) and the timeline (the sheet's Timeline opens the
+same window). Neither was looked at on a phone (unverified).
+
+**Where the demo's shape changed,** the durations all kept:
+
+1. **A copy for what goes.** The demo removes a view or a truck at once and slides the rest; rule
+   7 needs a copy, so it leaves by its own arrival reversed: a view back up 14px, a truck down to
+   50%, each fading out in 270ms.
+2. **The footer's range.** The demo rolls "1–23" as one piece of text; here each of the three
+   numbers rolls by itself, as a count does, so a "1" that stays does not move.
+3. **The cursor's row in view.** The demo scrolls the new row into view; the palette here never
+   did, and a scroll is not this batch's to add (rule 1: nothing moves a scroller).
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token for each motion so
+that each can be taken back alone: `viewsDrop` (and `viewsDropPx`), `footRoll`,
+`palCursorSlide`, `listChipsPop` (and `listChipsPopFromScale`), `timelineDraw`,
+`timelineDrawCard`, `timelineDrawGapMax`. A slide that comes with a motion (views' rows,
+listChips' trucks) takes that motion's token. All equal the demo's Bold. **To take one back:** its
+token to 0 turns it off, and its On value makes it weaker (HANDOFF, "Phase 3bo").
+
+**Tests.** `console/medium-motion.test.tsx`: each motion's cause starts it at its length, each
+non-cause above does not, reduced motion starts nothing and adds no copy; the copy's identity;
+the recentring window. `lib/appear-motion.test.ts`: `dropOut`, `popOut`, `slideFrom`, and
+`drawIn`'s company for a row. `design/motion-tokens.test.ts`: the numbers. In a browser: each at
+its length from the running animation, nothing grown on any frame, nothing left, the copy out of
+the way of a press, and the press table.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
