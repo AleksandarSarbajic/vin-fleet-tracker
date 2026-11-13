@@ -5816,8 +5816,16 @@ async function openNewLoad(page: Page, width: number) {
   await resetWorld({ extraTrucks: 1 });
   await page.setViewportSize({ width, height: 900 });
   await page.goto('/?truck=200');
-  // Below 1086px the board shows the list or the map, not both: the row is chosen, maybe not drawn.
-  await page.locator('[data-row-id][aria-selected="true"]').waitFor({ state: 'attached' });
+  // Phase 3bt: below 1086px the board opens on the map when no pane is stored (§12.105), and a
+  // hidden list draws no rows, so the chosen row is in the page only until the board has measured
+  // itself, 10 to 25ms after the first rows (a probe, 10 of 10 loads). Waiting for it passed only
+  // when a look fell in that window. What the page shows at every width is the selection, in the
+  // header, once it has landed; and then the board measured: the map toggle below 1086px, the row
+  // itself above.
+  // The header draws the line in one of two places, by width: the one drawn.
+  await expect(page.locator('[data-selection-hint]').filter({ visible: true })).toContainText('1 selected');
+  if (width < 1086) await expect(page.getByRole('button', { name: 'Hide map' })).toBeVisible();
+  else await expect(page.locator('[data-row-id][aria-selected="true"]')).toBeVisible();
   await quiet(page);
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'New load for truck 200' });
