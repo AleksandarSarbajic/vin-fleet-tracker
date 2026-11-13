@@ -11017,6 +11017,7 @@ Everything else in both stands, and the six motions of §12.149 are unchanged.
 *(§12.153, phase 3bk: the eight small rows of History, Assignments and the login page, under these rules.)*
 *(§12.156, phase 3bo: the board's five medium rows, under these rules and four more.)*
 *(§12.157, phase 3bp: the edit window's four medium rows, under these rules, §12.156's and four more.)*
+*(§12.158, phase 3br: histWeek, asgMerge and asgTab, the last medium rows off the map and the phone, under these rules, §12.156's, §12.157's and three more.)*
 
 | Motion | What moves | Length | Shape | Curve | What starts it | What never does |
 |---|---|---|---|---|---|---|
@@ -11463,6 +11464,83 @@ starting nothing, and reduced motion starting nothing and ending in the same mar
 `lib/appear-motion.test.ts`: `fadeOut`. `design/motion-tokens.test.ts`: the numbers. In a
 browser: the three stop motions at 1007, 1008 and 1440px, a fill as a person types, a poll, reduced
 motion, nothing grown on any frame, nothing left, and the press table.
+
+## 12.158 The last medium motions off the map and the phone: three things move
+
+Phase 3br. The third medium batch after §12.156 and §12.157, from the same build order: the 3be
+demo's three medium rows that are neither the map's nor the phone's, at its Bold
+(`.taste-skill/motion/everywhere/core.js`: `SWING` for histWeek, `FADE` for asgMerge, `GLIDE` for
+asgTab; `pages.js`, `changeWeek`, `askMerge`, `answerMerge`, `chooseTab`). §12.152's six rules,
+§12.156's four and §12.157's four hold for them; three more are below. Nothing else changes: the
+six motions of §12.149, the small ones of §12.152 and §12.153, the chip and its gap test, and the
+nine medium ones of §12.156 and §12.157 keep their tokens and their code. None is left off. Left
+of the 18 medium rows: the map's four (popup, ring, trail, mapToggle), which wait on a measure on
+a real GPU, and the phone's two (phPane, phSheet), last by the build order.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **histWeek** | Each of the week's driver rows on History | 270ms | Comes in from 40px to the side the week lies on (an earlier week from the left, where Previous is; a later one from the right) and fades in, inside the table, which clips sideways | `EASING.dialog` | A person's change of week on the desktop page: the arrows, This week, the picker, a state's own Previous week or first week. It plays in the commit that week's rows land in, from the cache at once or the network after the skeleton | A refetch or a poll of the same week; the page a load lands on; Back to History; a week that lands with no rows, or fails; the phone's week; the skeleton itself (its pulse stays) |
+| **asgMerge** | The duplicate-driver prompt arriving; the column header and the rows when it is answered | 270ms | Arriving: fades in where it stands, opacity only, and what is below it jumps down. Answered: the header and the rows slide up from where they stood, inside the table's section, which clips | Arrival linear; slide `EASING.dialog` | Arrival: its list landing from a fetch. The slide: a person's answer (Same person, Different people) | A poll; a refresh; an answer that fails; a second answer's prompt fading again |
+| **asgTab** | The board's rows | 390ms | The rows that stay glide from where they were drawn to their new places; the rows that come fade in where they land; the rows that go are gone at once. The rows' own box clips | Glide `EASING.dialog`; fade linear | A person's tab | The tab already chosen; the picker's own `setFilter('all')` for a truck the tab hides; the search; a refresh; a poll |
+
+**The rules this batch adds,** each held by a test (`history/week-motion.test.tsx` and
+`assignments/assign-medium-motion.test.tsx` for causes, `e2e/new-motion.spec.ts`, "phase 3br",
+for what only a browser shows):
+
+15. **A cause that waits on a fetch carries what it is for, and is spent by the first commit that
+    is no longer waiting for it.** histWeek's cause holds the week and its side, set in the
+    person's handler. A commit still waiting for that week (the skeleton) keeps it; the commit its
+    rows land in plays it; one that lands with no rows or an error spends it with nothing played;
+    a later week asked for replaces it. So the side survives the fetch, and a refetch or a poll of
+    the same week, which come after it is spent, play nothing. A remount (Back) has no cause.
+16. **What arrives by itself only fades; what a person's answer takes away slides what stood
+    below it, from where it was drawn just before the answer landed.** The prompt's answer is a
+    POST and then a new list: where the header and the rows stand is read in `load`, just before
+    that list is set, so the slide starts from the frame the person last saw, not from the click.
+    The section clips while they slide, never the scroller.
+17. **A FLIP is measured in the list's own box, and only the person's handler measures.** The
+    tab's handler reads each row's place in `[data-asg-rows]` (a plain block around the rows,
+    laid out as before); the commit it causes glides and fades from that. Code that changes the
+    tab (`openPickerFor`) does not go through the handler and plays nothing. The sticky column
+    header is a sibling above the box, at `z-10`, so a row gliding under it is drawn under it.
+
+**What a person sees in the cases around them.**
+
+- **histWeek.** Two weeks back before the first lands: the last one swings, once. Back and
+  forth before it lands: the week in the cache swings at once, and the late answer plays
+  nothing. A week from the cache swings in the commit of the click itself.
+- **asgMerge.** With two drivers to ask about, answering one slides the rows up by that one's
+  height, and the prompt, still there, does not fade again. A refusal shows in the prompt and
+  nothing moves.
+- **asgTab.** A tab that leaves a row in place moves it nowhere. Going from a short tab to All,
+  the rows that stay glide down past the ones fading in; their grounds are see-through, as on
+  the board (unverified as to feel, which is Alex's).
+
+**Where.** Desktop. The phone has no Assignments page (§12.106), and its History week is the
+phone's (`phoneWeek`), which plays nothing here.
+
+**Where the demo's shape changed,** the durations and distances all kept: (1) on an answer the
+demo slides the rows alone, and its column header jumps up at once, opening a gap the prompt's
+height between the header and the rows for 270ms; here the header slides with the rows; (2) the
+demo swings the rows as one block; here each row swings, because the rows' group is
+`display: contents` on screen (§12.103's print table), the same on screen; (3) the demo has no
+fetch: a week that lands empty or fails swings nothing here.
+
+**The numbers** are `MOTION_MS` and `MOTION_SHAPE` in `tokens.ts`, one token for each motion so
+that each can be taken back alone: `histWeekSwing` (and `histWeekSwingPx`), `asgMergeFade` (its
+arrival and its answer's slide), `asgTabGlide` (its glide and its fade). All equal the demo's
+Bold. **To take one back:** its token to 0 turns it off, and its On value makes it weaker
+(HANDOFF, "Phase 3br").
+
+**Tests.** `history/week-motion.test.tsx`: both directions, from the network after the skeleton
+and from the cache, the commit the rows land in (a Profiler), the table's clip, the cases above,
+the non-causes and reduced motion. `assignments/assign-medium-motion.test.tsx`: the tab's glide
+and fade, the clip, the header, the code-called `setFilter`, the prompt's arrival and both
+answers, a failed answer, a poll and a refresh, and reduced motion, each ending in the same
+markup. `design/motion-tokens.test.ts`: the numbers. In a browser: each motion's lengths and
+distances as given, the frame History's rows land on, the header where it stood on the first
+frame after the prompt goes, the header drawn over the rows gliding under it, a poll, reduced
+motion, nothing grown on any frame, nothing left.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

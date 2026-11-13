@@ -127,6 +127,9 @@ Not live until pushed. App only (Vercel): no worker file reaches a changed one (
 **At the start of 3bq (2026-11-13): 3bo and 3bp are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `9b226ca`.
 **3bq: NOT pushed, NOT live** (2026-11-13): 3bo's fetched-timeline test no longer flakes (test only), and a note typed on a new load's stop now makes a fill ask Replace or Keep mine (§12.122). Committed as `81f8438`, `d317889` and the docs commit; check 247 files / 4545 tests, three runs in a row.
 Not live until pushed. App only (Vercel): one app file, `EditStopModal.tsx`, which no worker file imports, so no worker deploy. See "Phase 3bq" below.
+**At the start of 3br (2026-11-13): 3bo, 3bp and 3bq are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `e9f9b2f`.
+**3br: NOT pushed, NOT live** (2026-11-13): the last three medium motions off the map and the phone at the demo's Bold (§12.158): History's week swings in from the side of its arrow, the merge prompt fades in and an answer slides the board up, and a tab glides the board's rows. Committed as `04f2fc1` and the docs commit; check 249 files / 4575 tests; full e2e `2026-11-13T17-58-13-649Z` 557 passed, 0 failed, `phone-signout` ran, 1.1 h.
+Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3br" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -12131,6 +12134,112 @@ Every appointment field above shows only once the appointment is ticked (`Appoin
 **Unverified:** why the Sentry envelope went when it did (inferred from the timing, not traced); the 13 files not run; whether the strip can show with arrival or departure editable (above); any browser but Chromium.
 
 **Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, then 3bq's three. The table above is for Alex. Then the next motion batch, as the build order says.
+
+### Phase 3br: histWeek, asgMerge and asgTab, at Bold (2026-11-13)
+
+Motion batch 3c, from the advisor's brief: the 3be demo's last three medium rows that are neither the map's nor the phone's, at its Bold, after Alex's "i want motion, animations EVERYWHERE" with All bold (2026-11-06). None is left off. §12.158 is the record. The six live motions, 3bj's and 3bk's small ones, the chip and its gap test, and 3bo's and 3bp's nine are untouched. **NOT pushed, NOT live.** App only (Vercel): a script walked the worker's imports from `src/worker` (12 entry files, 40 reached), and none of the four changed app files (`tokens.ts`, `HistoryPage.tsx`, `AssignmentBoard.tsx`, `MergePrompt.tsx`) is among them, so no worker deploy. Built on `e9f9b2f`; origin's master was `7464e30` (fetched at the start, nothing new), so 3bo, 3bp and 3bq are not pushed either.
+
+| Commit | What |
+|---|---|
+| `04f2fc1` | The tokens, the three motions, the two new unit test files, the two narrowed older tests, the e2e tests |
+| The docs commit | §12.158, its pointer from §12.152, this section and "What is live" |
+
+**The lines, re-grepped at `e9f9b2f`.** 3be's table cites `b45cd15`, and writes `assign/` for `src/components/assignments/` and `history/` for `src/components/history/`.
+
+| Row | At `b45cd15` | At `e9f9b2f` | What is there |
+|---|---|---|---|
+| histWeek | `history/HistoryPage.tsx:129` | `:96` | `const [week, setWeek] = useState(…)` |
+| histWeek | `history/HistoryPage.tsx:158` | `:176` | `queryKey: ['history', weekKey]` |
+| histWeek | `history/HistoryPage.tsx:392` | `:438` | `<LoadingRows />` |
+| histWeek | `history/HistoryStates.tsx:127` | `:127` | the skeleton row's pulse |
+| asgMerge | `assign/AssignmentBoard.tsx:612` | `:687` | `<MergePrompt role={role} />` |
+| asgMerge | `assign/MergePrompt.tsx:43`, `:116` | `:43`, `:116` | `setCandidates(…)`; `if (candidates.length === 0) return null;` |
+| asgTab | `assign/AssignmentBoard.tsx:566` | `:638` | `onClick={() => setFilter(key)}` |
+| asgTab | `assign/AssignmentBoard.tsx:325` | `:336` | `const [filter, setFilter] = useState<BoardFilter>('all')` |
+| asgTab | `assign/AssignmentBoard.tsx:390` (the brief) | `:401` | `setFilter('all')` in `openPickerFor`'s `flushSync` |
+
+**The three.** Bold values from `.taste-skill/motion/everywhere/core.js` (`SWING` 270ms 40px, `FADE` 270ms, `GLIDE` 390ms) and the demo's shapes from `pages.js` (`changeWeek`, `askMerge`, `answerMerge`, `chooseTab`).
+
+| Row | Bold (demo) | Token(s) | What moves | Cause: set, spent | What must not |
+|---|---|---|---|---|---|
+| histWeek | `SWING` 270ms, 40px | `histWeekSwing`, `histWeekSwingPx` | Each driver row of the week: from 40px to the week's side (earlier from the left), opacity 0 to 1; the table clips sideways | Set in `toWeek` (`HistoryPage.tsx`), the desktop page's one way to change week (toolbar arrows, This week, the picker, the empty week's and the error's Previous week, the first week and This week before the records), with the week and its side. Spent by a layout effect in the first commit not waiting for that week: rows there, it plays; no rows, an error, or another week, it goes unplayed | A refetch or a poll of the week; the page a load lands on; Back (a remount, no cause); the phone's `phoneWeek`; the skeleton, whose pulse stays |
+| asgMerge | `FADE` 270ms | `asgMergeFade` | Arriving: the prompt fades in, opacity only, linear. Answered: the column header and the rows' box slide up from where they stood | Arrival: the prompt's shown state compared with the commit before, in `MergePrompt`'s layout effect. Answer: set in `act` (the person's click), read in `load` just before the answer's list is set (`placesOf` in the section), spent by the commit that list lands in (`glideFrom`) | A poll; a refresh; an answer that fails (the cause is cleared in `finally`); the prompt fading again when one of two answers leaves the other |
+| asgTab | `GLIDE` 390ms | `asgTabGlide` | The rows that stay glide (`glideFrom`); the rows that come fade in (`fadeIn`, linear); the rows that go are gone at once, as the demo | Set in `chooseTab` (the tab's `onClick`): each row's place in `[data-asg-rows]`, only if the tab changes. Spent by the next commit's layout effect | The tab already chosen; `openPickerFor`'s own `setFilter('all')`; the search; a refresh; a poll |
+
+**Helpers, and why.**
+
+- **histWeek: `slideIn`** (`lib/appear-motion.ts`, the tour's step): already this shape, a sideways entry with opacity inside a box it clips on the x axis only (`overflow-x: clip`, so the table head stays sticky and nothing grows `main`). Per row, because the rows' group in `HistoryTable` is `display: contents` on screen and has no box. A wrapper with a box would draw the same, but was not needed.
+- **asgMerge and asgTab: `placesOf` and `glideFrom`** (`console/list-motion.ts`, 3bo's): places in a box of the list's own, a slide from there by `translate`, the box clipping (`overflow: clip`) while anything is on its way, never the scroller. `fadeIn` (`lib/appear-motion.ts`) for the prompt's arrival and a tab's arriving rows.
+- **Not `row-glide.ts`:** it is the virtualized board's, moving wrappers in the virtualizer's coordinates; the Assignments list is not virtualized. **Not `stop-motion.ts` or `segment-slide.ts`:** the first measures in layout for the edit window's tabs, the second is a live motion's overlay; neither is these shapes.
+
+**New markup.** `[data-asg-rows]`, a plain `div` with no class around the board's rows and "No trucks match." (block in block, laid out as before); `[data-asg-head]` on the sticky column header; `[data-merge-prompt]` on the prompt. `MergePrompt` takes an optional `below` (the section, the header and the rows' box), kept in a ref so its `load` never changes and never checks again. No CSS changed.
+
+**Where the demo's shape changed,** the durations and distances all kept: (1) on an answer the demo slides the rows' box alone, and its header jumps up at once, leaving a gap the prompt's height between the header and the rows for 270ms; here the header slides with the rows; (2) each History row swings, not one block (above), the same on screen; (3) the demo has no fetch: a week that lands empty or fails plays nothing.
+
+**The values.** All in `tokens.ts`; all equal the demo's Bold. "On" is the demo's On, for taking one back a step.
+
+| Token | On | Bold |
+|---|---|---|
+| `histWeekSwing` / `histWeekSwingPx` | 180 / 16 | **270 / 40** |
+| `asgMergeFade` | 180 | **270** |
+| `asgTabGlide` | 260 | **390** |
+
+**To take one motion back: one line in `tokens.ts`.** Its duration to 0 turns it off (`slideIn`, `fadeIn` and `slideFrom` return at once on 0; the tab and the answer also skip their measure on 0), and its On value above makes it weaker. Its number is also written out in these places, which fail until told:
+
+| Motion | Unit test (describe) | e2e (`new-motion.spec.ts`, "phase 3br") |
+|---|---|---|
+| histWeek | `history/week-motion.test.tsx`, "histWeek: a change of week on the arrows swings its rows in from that side" | `WEEK_MS`, `WEEK_PX` |
+| asgMerge | `assignments/assign-medium-motion.test.tsx`, "asgMerge: the prompt fades in by itself, and a person’s answer slides what was below it up" | `MERGE_MS` |
+| asgTab | the same file, "asgTab: a tab a person chose glides the rows that stay, and fades in the rows that come" | `TAB_MS` |
+| every one | `design/motion-tokens.test.ts`, "the numbers of the last medium motions off the map and the phone (§12.158)" | |
+
+**Tests.** With the numbers written out. `npm run check`: **249 files, 4575 tests** (247 and 4545 before): 30 new, in two new files and one existing one, and two older tests narrowed (below). Exit 0; also run by the pre-commit hook on `04f2fc1`, 4575 passed.
+
+- `history/week-motion.test.tsx` (13), on the real `HistoryPage`: Previous from the network, the skeleton first with nothing played, then each row from −40px in 270ms, and a Profiler's first commit with the rows already holding both swings; Next, +40px, the same; This week from W39, +40px; a week in the cache swinging in the click's own commit; the table clipping sideways until the last lands, nothing left; two weeks back before the first lands, one swing; back and forth before it lands, the cached week at once and the late answer nothing; a refetch with new rows and a fleet poll, nothing; a week that lands empty spends it, its rows by a later refetch nothing; the empty week's own Previous week, −40px; a load, and Back on a week the props do not hold, nothing; the phone's week, nothing; reduced motion, nothing, the table's markup the same.
+- `assignments/assign-medium-motion.test.tsx` (14), on the real `AssignmentBoard`: **asgTab** (7): No driver glides the two that stay 44px and 88px in 390ms, nothing fades; All fades in the two that come (390ms, linear) and glides the two back; the rows' box clips, never the scroller, nothing left; the header sticky, `z-10`, opaque, before the box and outside it; the panel's chip for a truck the tab hides sets All by code and nothing plays; the tab already chosen, the search, a refresh and a poll, nothing; reduced motion, the same rows' markup. **asgMerge** (7): arriving, a fade of 270ms in the commit it lands in (a Profiler), nothing below moving; Different people, the header and the rows' box slide up 160px in 270ms in the commit it goes in; the section clips, never the scroller, nothing left; with two to ask, Same person slides 60px and the prompt does not fade again; an answer that fails, nothing; a poll and a refresh, nothing; reduced motion, the section's markup the same. Markup is compared with React's `useId` names left out, since each run mounts its own root.
+- `design/motion-tokens.test.ts` (+3): the numbers.
+- **The 3bq rule:** every fetch is waited on by what the page shows, an act at a time with a 2s timeout, never one tick, and a Profiler checks the commit the data lands in.
+- **Narrowed, because a motion now plays where they said nothing does:** 3bk's `assign-motion.test.tsx` "a refresh, a tab and the search play nothing more" is now "… draw no rows: a tab plays only its own glide (§12.158)", which drops the 390ms animations before it compares; 3bk's e2e History test names a History row's sideways animation `histWeek`, still requires `n` draws and nothing else, and now requires one swing a row for the week back (W38 has no loads and swings nothing).
+
+**Each new file alone, 20 runs, after the last change to it:**
+
+| File | Runs | Failures |
+|---|---|---|
+| `components/history/week-motion.test.tsx` | 20 | 0 |
+| `components/assignments/assign-medium-motion.test.tsx` | 20 | 0 |
+| `design/motion-tokens.test.ts` | 20 | 0 |
+
+**Mutations,** each in a worktree at `e9f9b2f` with this phase's changes, each file restored byte-identical after (checked with `filecmp`, byte for byte, against the main tree), the five suites (`week-motion`, `assign-medium-motion`, `motion-tokens`, `history-motion`, `assign-motion`) passing 94/94 there unmutated before and after:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) histWeek dropped: no row swings | 8: "Previous: the skeleton while it loads, then each row from 40px to the left in 270ms, in the commit they land in"; "Next: from 40px to the right, the other way"; "This week is a person’s change too: a later week, from the right"; "a week in the cache lands in the commit of the click itself, and swings there"; "the table clips sideways while they come in, and lets go when the last lands, leaving nothing"; "two weeks back before the first lands: the week that lands swings once, from the left"; "back and forth before it lands: the week in the cache swings at once, and the late answer plays nothing"; "the empty week’s own Previous week is a person’s change too: from the left" |
+| (b) histWeek flipped: each week from the other side | 7: the same, less the clip test |
+| (c) asgMerge's arrival dropped | 2: "arriving by itself: the prompt fades in for 270ms, opacity only, linear, in the commit it lands in; nothing below it moves"; "Same person, with two to ask: … the prompt does not fade again" |
+| (d) asgMerge's answer dropped | 3: "answered, Different people: it goes, and the column header and the rows slide up from where they stood, 160px in 270ms"; "the section clips while they slide, never the scroller, …"; "Same person, with two to ask: that one goes, the rows slide up by its 60px, …" |
+| (e) asgTab dropped | 3: "No driver: the two that stay glide up, 44px and 88px, in 390ms, …"; "All again: the two that come fade in for 390ms …"; "the rows’ own box clips while they move, never the scroller, …" |
+| (f) asgTab on the code-called `setFilter('all')` (`openPickerFor` through `chooseTab`) | 1: "a truck’s chip in the panel, for a truck the tab hides, sets the tab back to All by code: nothing plays on any row" |
+
+**e2e, new** (`new-motion.spec.ts`, "phase 3br, the last medium motions off the map and the phone (§12.158)"), four tests, at 1440x900 unless said:
+
+- **histWeek:** `/history?week=2026-W40` loaded plays nothing; Previous with W39's answer held: the skeleton on screen and no swing; released: one swing a row (`-40px 0` to `0 0`, opacity 0 to 1, 270ms, the dialog curve), the table's inline `overflow-x: clip` set; the first frame that draws any W39 row draws all of them moving; Next to W40 from the cache, `+40px`, one a row; a fleet poll, nothing; to the board and Back, the rows draw (3bk's) and none swings. Nothing grown, nothing left.
+- **asgTab:** a load plays nothing; No driver: the three empty trucks glide by the distance measured in the rows' box, 390ms, the box `clip,clip`, nothing fades; then at 1440x420, scrolled to the end so the header is stuck over the rows, All: on every frame, at each point the header shares with a moving row, `elementFromPoint` is the header (overlaps seen > 0, covered 0), the three glide, the eleven fade (390ms, linear); No phone, then the panel's chip for 410: All by code, nothing; a poll, nothing. Nothing grown, nothing left.
+- **asgMerge:** `/api/drivers` routed in the browser (one invented candidate, then none after the POST; no real request is made). A load plays nothing; the list released: one fade (270ms, linear), no slide, and the header jumped down; Different people: on the first frame without the prompt the header is drawn where it stood (within 2px), then the header and the rows' box slide up by the measured distance, 270ms, the section `clip,clip`; the fade not again; a poll, nothing. Nothing grown, nothing left.
+- **Reduced motion:** a week, No driver and All, the prompt arriving and Different people: nothing plays, and nothing is left running or styled.
+- **Targeted run** (`2026-11-13T17-51-03-009Z`), the four with 3bk's two changed tests: 7 passed (and the sign-in), 1.7 min.
+- **Full e2e, one invocation** (`2026-11-13T17-58-13-649Z`), after `04f2fc1`, nothing but docs changed since: **557 passed, 0 failed**, 1.1 h, `phone-signout` ran last in the same invocation (557 of 557), the machine awake throughout. The run folder's `.last-run.json`: `"status": "passed"`, `"failedTests": []`. `desktop-baseline` passed at every width with nothing re-saved (`git status` clean under `e2e/`). `ratecon-scan.spec.ts:137` passed, so it was not re-run.
+
+**Found wrong:**
+
+1. **The brief says asgMerge's prompt lands through react-query.** It does not: `MergePrompt` fetches `/api/drivers` with plain `fetch` and keeps the list in `useState`. The cause for the answer is read in `load`, just before that `setCandidates`, which is what "spent by the commit it lands in" means here.
+2. **3be's line references have moved** (the table above), and its `assign/` is `src/components/assignments/`.
+3. **The demo's answer slides the rows only.** Its column header jumps up at once and leaves a gap for 270ms. Here the header and the rows slide together, which is the brief's "the rows slide up from where they stood" without the gap.
+4. **3bk's unit test "another week…" in `history-motion.test.tsx`** clicks the first Previous button in the DOM, which in happy-dom is the phone layout's (`phoneWeek`, no cause). It still passes with or without histWeek, so it does not test the desktop toolbar. Left as it is; the new file selects `[data-history-toolbar]`.
+5. **The merge check's failure notice** ("Could not check…") arrives at once, not faded: the brief names only the prompt. Whether it should fade too is Alex's.
+
+**Unverified:** the feel (Alex's), including rows that glide past rows that fade in on a tab, where the rows' grounds are see-through; Chromium's scroll anchoring on a merge answer while scrolled; any browser but Chromium; a real GPU.
+
+**Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, then 3br's two. Item 5 is Alex's. Then the map and the phone rows, as the build order says.
 
 ## Next
 
