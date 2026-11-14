@@ -53,7 +53,8 @@ const FLY_Z = '3';
 /** The bar over that. The column header is outside the box and over all of it. */
 const BAR_Z = '4';
 
-type Host = { el: HTMLElement; id: string; inList: boolean };
+/** A row's host: its wrapper in the list, or its pinned host in the block. */
+export type Host = { el: HTMLElement; id: string; inList: boolean };
 type Snapshot = {
   kind: MoveKind;
   id: string | null;
@@ -81,7 +82,7 @@ export interface BoardMove {
 
 const idOf = (el: Element) => el.firstElementChild?.getAttribute('data-row-id') ?? null;
 
-function hostsIn(box: HTMLElement, body: HTMLElement): Host[] {
+export function hostsIn(box: HTMLElement, body: HTMLElement): Host[] {
   const hosts: Host[] = [];
   for (const el of box.querySelectorAll<HTMLElement>(`[${PINNED_HOST}]`)) {
     const id = idOf(el);

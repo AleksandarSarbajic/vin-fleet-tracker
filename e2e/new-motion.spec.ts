@@ -7426,6 +7426,11 @@ test.describe('phase 3bs, the board’s large motions (§12.159)', () => {
       expect(moved.played.filter((e) => e.what === 'slide').length).toBeGreaterThan(0);
       // The same scrollTop and the same markup as with no motion.
       expect(moved.ends[i]!.scrollTop, name).toBe(still.ends[i]!.scrollTop);
+      // Phase 3bt: and that scrollTop is the held view's. The row at the top stays where it was on
+      // the pin, and stays at the top on Compact, under the header by the same share of its height.
+      for (const end of [moved.ends[i]!, still.ends[i]!]) {
+        expect(end.lookedAfter, name).toBeCloseTo(name === 'pin' ? end.looked! : 28 + ((end.looked! - 28) * 32) / 44, 0);
+      }
       const [m, n] = [moved.ends[i]!.markup, still.ends[i]!.markup];
       if (m !== n) {
         let at = 0;
@@ -7501,7 +7506,7 @@ test.describe('phase 3bs, the board’s large motions (§12.159)', () => {
     await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
   });
 
-  test('a short view, scrolled: P pins the truck and it glides up out of the view under the column header; P again brings it down from just past the top edge, under the header; scrollTop holds; nothing grown, nothing left', async ({
+  test('a short view, scrolled: P pins the truck and it glides up out of the view under the column header; P again brings it down from just past the top edge, under the header; scrollTop holds the view (3bt); nothing grown, nothing left', async ({
     page,
   }) => {
     test.setTimeout(3 * 60_000);
@@ -7552,11 +7557,14 @@ test.describe('phase 3bs, the board’s large motions (§12.159)', () => {
       const from = Math.max(-44, Math.min(view, before[target]!));
       expect(dyOf(flight.frames).y, name).toBeCloseTo(from - after[target]!, 0);
       expect(name === 'pin' ? after[target]! < -44 : before[target]! < -44, name).toBe(true);
-      // It passes under the column header, which stays over it on every frame.
+      // It passes under the column header, which stays over it on every frame. Since 3bt the rows
+      // in view stay where they were, so on the pin only the truck crosses the header, and it is
+      // past its 28px between two frames: the frames show an overlap on the way back down.
       expect(frames.length, name).toBeGreaterThan(5);
-      expect(frames.reduce((n, f) => n + f.overlaps, 0), name).toBeGreaterThan(0);
+      if (name === 'unpin') expect(frames.reduce((n, f) => n + f.overlaps, 0), name).toBeGreaterThan(0);
       expect(frames.reduce((n, f) => n + f.covered, 0), name).toBe(0);
-      expect([...new Set(tops.map((f) => f.scrollTop))], name).toEqual([scrollTop]);
+      // Phase 3bt: the view is held, in the commit: the block's 69px on the pin, given back on the unpin.
+      expect([...new Set(tops.map((f) => f.scrollTop))], name).toEqual([name === 'pin' ? scrollTop + 69 : scrollTop]);
       await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
     }
     expect(await scroller.evaluate((s) => s.scrollTop)).toBe(scrollTop);
@@ -7765,5 +7773,161 @@ test.describe('phase 3bs, the board’s large motions (§12.159)', () => {
     await quiet(page);
     expect(await bs(page)).toEqual([]);
     await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+});
+
+/*
+ * Phase 3bt (§12.159's addition): the board's view held on a person's pin or density.
+ */
+test.describe('phase 3bt, the view held on a pin or a density (§12.159)', () => {
+  test.beforeEach(async () => {
+    await resetWorld();
+  });
+
+  /* ---- Part 2, the view held, at 1440x900 ---- */
+
+  test('the view holds in the middle of the list: a pin keeps the trucks in view above it where they were, Compact keeps the top truck at the top, with motion and without, and the glides end there', async ({
+    page,
+  }) => {
+    test.setTimeout(4 * 60_000);
+    await logBs(page);
+    type Seen = {
+      before: number;
+      after: number;
+      top: { id: string; top: number } | null;
+      topAfter: number | null;
+      topNow: string | null;
+      kept: Record<string, [number, number | null]>;
+      markup: string;
+    };
+    const run = async () => {
+      await page.evaluate(() => {
+        localStorage.removeItem('ft.pinned');
+        localStorage.removeItem('ft.density');
+      });
+      await resetWorld({ extraTrucks: 57 });
+      await page.goto('/');
+      await page.locator('[data-row-id]').first().waitFor();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+      await scroller.evaluate((s) => (s.scrollTop = 865));
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      await clearBs(page);
+      const seen: Seen[] = [];
+      // The truck drawn a third of the way down the view is the one pinned.
+      const target = await page.evaluate(() => {
+        const s = document.querySelector('[data-board-rows]')!.parentElement!;
+        const r = s.getBoundingClientRect();
+        return document
+          .elementFromPoint(r.left + 300, r.top + r.height / 3)!
+          .closest('[data-row-id]')!
+          .getAttribute('data-row-id')!;
+      });
+      for (const act of [
+        () => page.locator(`[data-row-id="${target}"] button[aria-pressed]`).click(),
+        () => page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click(),
+      ]) {
+        const before = await scroller.evaluate((s) => s.scrollTop);
+        const top = await topRow(page);
+        // Every truck drawn in view above the one pinned, and where.
+        const above = await page.evaluate((pinned) => {
+          const box = document.querySelector('[data-board-rows]')!;
+          const r = box.parentElement!.getBoundingClientRect();
+          const head = box.parentElement!.querySelector(':scope > [role="row"]')!.getBoundingClientRect().bottom;
+          const at = document.querySelector(`[data-row-id="${pinned}"]`)?.getBoundingClientRect().top ?? 0;
+          const out: Record<string, number> = {};
+          for (const row of box.querySelectorAll('[data-row-id]')) {
+            const b = row.getBoundingClientRect();
+            if (b.bottom > head && b.top < at) out[row.getAttribute('data-row-id')!] = b.top - r.top;
+          }
+          return out;
+        }, target);
+        await act();
+        await expect.poll(() => stillMoving(page)).toBe(0);
+        await quiet(page);
+        const kept: Seen['kept'] = {};
+        if (seen.length === 0) {
+          for (const [id, was] of Object.entries(above)) kept[id] = [was, await rowTop(page, id)];
+        }
+        seen.push({
+          before,
+          after: await scroller.evaluate((s) => s.scrollTop),
+          top,
+          topAfter: top ? await rowTop(page, top.id) : null,
+          topNow: (await topRow(page))?.id ?? null,
+          kept,
+          markup: await boardMarkup(page),
+        });
+      }
+      return { seen, played: await bs(page) };
+    };
+
+    await page.goto('/');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await run();
+    expect(still.played).toEqual([]);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const moved = await run();
+    process.stdout.write(
+      `3bt view hold: no motion ${JSON.stringify(still.seen.map(({ markup: _m, kept: _k, ...e }) => e))}; with motion ${JSON.stringify(
+        moved.seen.map(({ markup: _m, kept: _k, ...e }) => e),
+      )}; pin kept ${JSON.stringify(moved.seen[0]!.kept)}\n`,
+    );
+    for (const { seen } of [still, moved]) {
+      const [pin, density] = seen;
+      // Pin: every truck in view above the one pinned is drawn where it was; the view moved by the block.
+      expect(Object.keys(pin!.kept).length).toBeGreaterThan(3);
+      for (const [id, [was, now]] of Object.entries(pin!.kept)) expect(now, id).toBeCloseTo(was, 0);
+      expect(pin!.after - pin!.before).toBe(69);
+      // Density: the truck at the top is at the top, partly under the header by the same share of its height.
+      expect(density!.topNow).toBe(density!.top!.id);
+      expect(density!.topAfter!).toBeCloseTo(28 + ((density!.top!.top - 28) * 32) / 44, 0);
+    }
+    // With motion each glided, and ended where no motion leaves it.
+    expect(moved.played.filter((e) => e.what === 'slide').length).toBeGreaterThan(5);
+    for (const i of [0, 1]) {
+      expect(moved.seen[i]!.after).toBe(still.seen[i]!.after);
+      expect(moved.seen[i]!.markup).toBe(still.seen[i]!.markup);
+    }
+    await expect.poll(() => bsAtRest(page)).toEqual(BS_REST);
+  });
+
+  test('the view at the end of the list: Compact asks to keep the top truck, the scroller clamps, as with no motion', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * 60_000);
+    const run = async () => {
+      await page.evaluate(() => localStorage.removeItem('ft.density'));
+      await resetWorld({ extraTrucks: 57 });
+      await page.goto('/');
+      await page.locator('[data-row-id]').first().waitFor();
+      const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+      await scroller.evaluate((s) => (s.scrollTop = s.scrollHeight));
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const before = await scroller.evaluate((s) => s.scrollTop);
+      await page.getByRole('group', { name: 'Row density' }).getByRole('button', { name: /compact/i }).click();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      return {
+        before,
+        after: await scroller.evaluate((s) => s.scrollTop),
+        max: await scroller.evaluate((s) => s.scrollHeight - s.clientHeight),
+        markup: await boardMarkup(page),
+      };
+    };
+    await page.goto('/');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await run();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const moved = await run();
+    process.stdout.write(
+      `3bt view at the end: ${still.before} -> ${still.after} (max ${still.max}); with motion ${moved.before} -> ${moved.after}\n`,
+    );
+    expect(still.after).toBe(still.max);
+    expect(moved.after).toBe(still.after);
+    expect(moved.markup).toBe(still.markup);
   });
 });

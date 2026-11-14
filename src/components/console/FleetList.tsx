@@ -1,7 +1,7 @@
 'use client';
 
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import { ListFooter } from './ListFooter';
@@ -11,7 +11,8 @@ import { BulkBarSlot } from './BulkBarSlot';
 import { openBoardOnce } from './board-opening';
 import { landSelection, slideSelection } from './selection-slide';
 import { createRowGlide } from './row-glide';
-import { createBoardMove } from './board-move';
+import { createBoardMove, type MoveKind } from './board-move';
+import { holdView, viewAnchor, type ViewAnchor } from './board-view';
 import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
@@ -162,6 +163,36 @@ export function FleetList({
     return () => observer.disconnect();
   }, []);
 
+  /**
+   * §12.159, phase 3bt. Where the view stands as a person's pin or density arrives, read from the
+   * old layout in the render that brings it (the DOM is not yet changed), and held in the commit
+   * it lands in (`board-view.ts`). Independent of the motion: with the tokens at 0 and under
+   * reduced motion too. Read here, not just before the commit, because a density change held
+   * deep in a long list needs rows the old scrollTop would not draw: `holdRows` adds them to this
+   * one commit, so the rows in the held view are drawn in it and glide.
+   */
+  const heldFor = useRef({ pin: pinCause.count, density: densityCause });
+  const hold = useRef<{ kind: MoveKind; anchor: ViewAnchor } | null>(null);
+  const holdRows = useRef<[number, number] | null>(null);
+  if (heldFor.current.pin !== pinCause.count || heldFor.current.density !== densityCause) {
+    const kind: MoveKind = heldFor.current.density !== densityCause ? 'density' : 'pin';
+    heldFor.current = { pin: pinCause.count, density: densityCause };
+    const scroller = scrollRef.current;
+    const box = rowsRef.current;
+    const body = bodyRef.current;
+    const anchor =
+      scroller && box && body
+        ? viewAnchor(scroller, box, body, kind === 'pin' ? pinCause.id : null)
+        : null;
+    hold.current = anchor ? { kind, anchor } : null;
+    holdRows.current = null;
+    const index = anchor && kind === 'density' ? rows.findIndex((r) => r.id === anchor.id) : -1;
+    if (scroller && index >= 0) {
+      const shown = Math.ceil(scroller.clientHeight / ROW_HEIGHT[density]);
+      holdRows.current = [Math.max(0, index - 8), Math.min(rows.length - 1, index + shown + 8)];
+    }
+  }
+
   /** Virtualized regardless of fleet size, per the brief. */
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -171,6 +202,15 @@ export function FleetList({
     estimateSize: () => ROW_HEIGHT[density],
     overscan: 8,
     getItemKey: (index) => rows[index]?.id ?? index,
+    // §12.159, phase 3bt: the held view's rows too, for the one commit a density change lands in.
+    rangeExtractor: (range: Range) => {
+      const drawn = defaultRangeExtractor(range);
+      const extra = holdRows.current;
+      if (!extra) return drawn;
+      const all = new Set(drawn);
+      for (let i = extra[0]; i <= extra[1]; i++) all.add(i);
+      return [...all].sort((a, b) => a - b);
+    },
   });
 
   const items = virtualizer.getVirtualItems();
@@ -248,16 +288,33 @@ export function FleetList({
    * §12.159. Spent in the commit its cause lands in. A chip's glide in flight lands first, so
    * what was captured mid-glide is where those rows were drawn and nothing is moved twice.
    */
+  const holdTheView = () => {
+    const held = hold.current;
+    hold.current = null;
+    holdRows.current = null;
+    const scroller = scrollRef.current;
+    const box = rowsRef.current;
+    const body = bodyRef.current;
+    if (!held || !scroller || !box || !body) return;
+    const startOf = (id: string) => {
+      const index = rows.findIndex((r) => r.id === id);
+      return index < 0 ? null : (virtualizer.measurementsCache[index]?.start ?? null);
+    };
+    holdView(scroller, box, body, held.kind, held.anchor, startOf, ROW_HEIGHT[density]);
+  };
   const spendMove = () =>
     move.run(() => {
       if (scrollRef.current) landSelection(scrollRef.current);
       return glide.settle();
     });
+  // §12.159, phase 3bt: the view held first, so the glides end where the rows rest in it.
   useLayoutEffect(() => {
+    holdTheView();
     spendMove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinCause.count]);
   useLayoutEffect(() => {
+    holdTheView();
     spendMove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [densityCause]);
