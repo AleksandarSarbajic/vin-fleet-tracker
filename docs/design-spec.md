@@ -10531,6 +10531,8 @@ and tour, the truck list editor, the timeline window, and the four phone sheets
 chooser. Menus: the account menu, the
 scope menu, the driver dropdown, the week picker. Hover and press: every button
 and button-like link.
+*(§12.160, phase 3bt: the phone's truck and filters sheets now come up from below the screen in 300ms, and a
+person's close leaves a copy that goes back down while its scrim fades. Every other window here is as above.)*
 
 **Left out:** nothing we draw, since phase 3bc put the last three windows on
 frames. `frames-guard.test.ts` names every frame and fails on any full-screen scrim
@@ -11639,6 +11641,96 @@ and curve, the truck over the rest and under the bar and the header, scrolled an
 holding in the middle and clamping at the end as with no motion, five mid-flight pairs, a held poll, rows drawn fresh
 during a glide, a truck pinned while not drawn, stored pins and density on a reload, reduced motion, nothing grown on
 any frame, nothing left.
+
+**Phase 3bt: the view is held (Alex's, from 3bs's found wrong 2).** *Supersedes* "What they do with no motion,
+unchanged" above, and the scrollTop in "The scroll holds": a person's pin or density no longer leaves scrollTop as it
+was, in the middle of the list, but keeps what was in view where it was.
+
+- **Density.** The truck at the top of the view before the change is at the top after it. If it was partly under
+  the column header, it is under it by the same share of its new height: drawn at -1 of 44px (29px under the 28px
+  header) it is at 6.9 of 32px, 21.1px under (at 1440x900 in the middle of 60 trucks, scrollTop 934 to 686; it
+  stayed at 934 before). Rows the held view needs that the old scrollTop would not have drawn are drawn in that one
+  commit (the virtualizer's `rangeExtractor`), so the rows in the held view glide, deep in the list too.
+- **Pin and unpin.** The top truck in view other than the one pinned or unpinned stays where it was drawn, and so does
+  every truck in view on its side: scrollTop 865 to 934 on the first pin, by the block's 69px. Those below the truck
+  pinned close up the place it left; the truck pinned leaves the view for the block, which is above it.
+- **At the top of the list** (scrollTop 0) nothing is held: the list grows or shrinks below the top, as before. **At
+  its end** what is asked for is clamped by the browser (1729 to 1009 on Compact, as before). **The phone, and the
+  narrow board on its map,** draw no list: nothing is held.
+- **However it moves.** The same with the tokens at 0, under reduced motion and with the glides on: scrollTop is set
+  once, in the commit the change lands in, before anything is measured, so the glides take each row from where it was
+  drawn to where it rests in the held view. It reads where rows rest, from layout (`offsetTop` and the virtualizer's
+  own starts), never where a glide is drawing them. `console/board-view.ts`; `console/board-view.test.tsx` and
+  `e2e/new-motion.spec.ts` ("phase 3bt, the view held").
+
+## 12.160 The phone's two motions: a pane a person taps, and the sheets
+
+Phase 3bt. The last two of the 18 medium rows from the 3be demo that are not the map's, at its Bold
+(`.taste-skill/motion/everywhere/core.js`: `SWING` for phPane, and phSheet's own; `pages.js`, the pane switch,
+`openSheet`, `closeSheet`). Alex, 2026-11-06: "i want motion, animations EVERYWHERE", with All bold. **Supersedes in
+part** §12.148 for the phone's truck sheet and filters sheet only: their 220ms rise from 96% and their copy's 140ms
+fade. Every other window keeps §12.148, the history page's two phone sheets among them. §12.152's six rules,
+§12.156's four, §12.157's four, §12.158's three and §12.159's three hold; four more are below.
+
+| Motion | What moves | Length | Shape | Curve | What starts it | What never does |
+|---|---|---|---|---|---|---|
+| **phPane** | The pane coming in, on the phone's List and Map tabs | 270ms (On 180) | The list comes in from 40px to the left, the map from 40px to the right (On 16), fading in. The pane going out is hidden by its class at once | `EASING.dialog` | A person's tap on List or Map (or Enter or Space on the tab, which is its click) | The pane the board opens on; "Show on map" in the truck sheet; a selection; a resize, across 768 or not; a poll |
+| **phSheet** | The truck sheet and More ("Filters") | 300ms (On 200) | Opening: the panel comes up from `translateY(100%)` to its place, opaque; its tap-to-close keeps the scrim's own fade (220ms, linear). Closing: a copy of the sheet goes back down to 100% while its tap-to-close fades, then goes | Panel `EASING.dialog`; the fades linear | Opening: a person's tap on a card, a marker or a toast (truck), or More. Closing: Close, the tap outside it, and "Show on map" (truck); Done and the tap outside it (More) | Anything not a person's: a sheet closed by anything else leaves §12.148's fading copy; a poll neither opens, replays nor closes one |
+
+**Every way the pane changes, and which start phPane.** A tap on the tab: yes. "Show on map": no (the sheet's own
+button; the pane changes by code). Selecting a card or a marker: the pane does not change. A stored pane: there is
+none on the phone (§12.96: it always opens on the list; `ft.narrowPane` is the 768–1085 toggle's). A resize across
+768: the pane's classes change what shows, nothing is started. Esc and Back do not close a sheet: the sheets handle
+no keys and the board's keys stop behind a window (`isWindowOpen`), and no sheet is in the history.
+
+**The rules this batch adds,** each held by a test:
+
+21. **`DialogFrame` is every window's; the sheet is a variant two of them take.** Only `TruckSheet` and
+    `PhoneMoreSheet` pass `sheet`, read from each file's syntax tree; no frame spreads props that could pass it
+    (`overlay/frames-unchanged.test.tsx`). Every other window opens with `dialog-in` and `fade-in`, 220ms, and leaves
+    a `fade-away` copy of 140ms, before and after this phase (`e2e/dialog-motion.spec.ts`, every window it reaches,
+    run on both).
+22. **The close copy matches nothing.** It is §12.148's copy: every id, name, role, tab stop, label and data
+    attribute stripped, `inert`, `aria-hidden`, no pointer, in `body`; its one mark is `data-dialog-fading`. No
+    selector for the real sheet or its controls finds it (3bj's lesson). Focus goes back where it went before: the
+    sheet's own `useReturnFocus`, at once, to the card or More.
+23. **A person's close is the sheet's own.** Each sheet sets "a person closed me" in its own close handlers and the
+    frame reads it as it unmounts, in that commit. Anything else that unmounts it (a page change) leaves a window's
+    copy. A sheet's opening is its mount, which only a person's tap makes (traced: a card, a marker on a phone, a
+    toast, More); a poll re-renders it and starts nothing.
+24. **The pane is never rebuilt.** Both panes stay mounted and hidden by class, so the motion is on a pane already
+    there: nothing is copied and the map is the same map. A `translate` changes no size Mapbox reads: its canvas ends
+    the size of its box (390x577 in a 390x577 box, at 390x844). The box clipped sideways while it moves is the plain
+    one around the split's own, which has a style of its own that React leaves as `style=""`.
+
+**Mid-flight.** A tap on the other tab during a swing: the first pane is hidden by its class and its swing is
+cancelled where it stood; the other's starts. A sheet closed mid-opening: its copy goes down from where it was drawn
+(95.2px down, at 120ms in), never back to its place first. A poll during either restarts nothing.
+
+**Reduced motion.** phPane plays nothing; the sheets do what they did under reduced motion: no opening, no copy. The
+page ends in the same markup with motion and without.
+
+**Where.** The phone, below 768px. At 768 and up the tabs and the sheets are not drawn (`md:hidden`), so nothing
+starts them; the 768–1085 map toggle is a map row and is not touched.
+
+**Where the demo's shape changed:** none, but that the copy is §12.148's (the demo clones the frame), and the clip
+of a pane coming in is the box around the split's own.
+
+**The numbers** are `MOTION_MS.phPane`, `MOTION_SHAPE.phPanePx` and `MOTION_MS.phSheet` in `tokens.ts`, and the
+`sheet-in`, `sheet-out` and `sheet-scrim-out` animations in `tailwind.config.ts`, built from them. **To take one
+back:** its token to 0. phPane then plays nothing (and measures nothing: there is nothing to measure); the sheets
+then open and close as every other window does (§12.148). The On values make each weaker.
+
+**Tests.** `console/phone/phone-motion.test.tsx`, on the real console at 390px: each pane from its side with its
+numbers and the commit it lands in, the tab already shown, the load, a poll and "Show on map" playing nothing, a tap
+mid-swing, a poll mid-swing, the token at 0, reduced motion in the same markup; each sheet coming up in the commit it
+opens and nothing left, a poll mid-opening, five closes each leaving a copy that goes down, the copy matching
+nothing, focus as at 0, the token at 0 giving §12.148's, reduced motion as before. `overlay/frames-unchanged.test.tsx`:
+rule 21, and a sheet closed by no person. `design/motion-tokens.test.ts`: the numbers. In a browser
+(`e2e/new-motion.spec.ts`, "phase 3bt, the phone's two motions", at 390x844): both panes' frames, the other hidden on
+the first frame, the canvas's size; what never starts phPane; both sheets' frames up and down with their computed
+animations, the copy's identity and its click going through, focus; a close mid-opening; reduced motion in the same
+markup; a density from More holding no view.
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 

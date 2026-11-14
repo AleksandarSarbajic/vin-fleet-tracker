@@ -133,6 +133,9 @@ Not live until pushed. App only (Vercel): no worker file reaches a changed one (
 **At the start of 3bs (2026-11-13): 3bo, 3bp, 3bq and 3br are NOT pushed**: origin's master was `7464e30` (fetched, nothing new), HEAD `a55b390`.
 **3bs: NOT pushed, NOT live** (2026-11-13): 3br's merge slide while scrolled is measured in the scroller (fixed), and the board's pin and density glide at the demo's Bold (§12.159). Committed as `13f5132`, `31f5b70`, `0866849` and the docs commit; check 252 files / 4600 tests; full e2e `2026-11-13T22-05-53-333Z` 567 passed, 0 failed, `phone-signout` ran, 1.1 h.
 Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bs" below.
+**At the start of 3bt (2026-11-14): 3bo to 3bs are NOT pushed**: origin's master was `7464e30`, HEAD `9c1600d`.
+**3bt: NOT pushed, NOT live** (2026-11-14): 3bp's narrow-width setup waits on what the page shows (test only); a person's pin or density keeps the board's view (§12.159, Part 2, Alex's to keep or strike); and the phone's pane swings in on a tap and its two sheets slide up and back down at the demo's Bold (§12.160). Committed as `566aa96`, `bec8fd0`, `257841e` and the docs commit; check 255 files / 4640 tests; full e2e `2026-11-14T06-02-14-083Z` 571 passed, 3 failed (none from 3bt: found wrong 6 and 7), 1.4 h, awake; `phone-signout` alone 2 passed.
+Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bt" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -12335,6 +12338,110 @@ From the advisor's brief: close 3br's unverified scroll anchoring first, then th
 **Unverified:** the feel, which is Alex's; a key on the focused star itself (above); any browser but Chromium; a real GPU; a real phone (the phone's More sheet changes density with no desktop list drawn: nothing plays, read from the code, not tested).
 
 **Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, 3br's two, then 3bs's four. Item 2 is Alex's. Then the map and the phone rows, as the build order says.
+
+### Phase 3bt: 3bp's narrow setup, the view held on a pin or density, and the phone's two motions, at Bold (2026-11-14)
+
+From the advisor's brief, in three parts: 3bs's found wrong 4 (3bp's narrow-width setup failing by itself), 3bs's found wrong 2 (the view moving on a pin or a density in the middle of the list; Alex may strike it), and the phone's two medium motions, phPane and phSheet, at the demo's Bold. §12.159's addition and §12.160 are the record, with a pointer under §12.148's "Where". **NOT pushed, NOT live.** App only (Vercel): a script walked the worker's imports from `src/worker` (12 entry files, 40 reached), and none of the 18 files this phase changed is among them, so no worker deploy. Built on `9c1600d`; origin's master was `7464e30` (fetched at the start, nothing new), so 3bo to 3bs are not pushed either.
+
+| Commit | What |
+|---|---|
+| `566aa96` | Part 1, test only: 3bp's `openNewLoad` waits on the selection the page shows |
+| `bec8fd0` | Part 2: `console/board-view.ts`, its wiring in `FleetList`, `board-view.test.tsx`, the e2e describe "phase 3bt, the view held", two 3bs e2e tests updated |
+| `257841e` | Part 3: the tokens, the sheet keyframes, `DialogFrame`'s `sheet` variant and its copy, the sheets' own close cause, phPane in `Split` and its cause in `Console`, the unit tests, the e2e describe "phase 3bt, the phone's two motions", dialog-motion's two phone tests |
+| The docs commit | §12.159's addition, §12.160, the §12.148 pointer, this section and "What is live" |
+
+**Part 1: the cause, proved, and fixed in the setup.** 3bs's account held. Below 1086px the board opens on the map when no pane is stored (§12.105), and a hidden list draws no rows. A probe (a throwaway spec, deleted) logged, on 10 of 10 loads at 1007 and 1008px: the selected row attached at about 100ms, the map toggle ("Hide map", list pane `display: none`) 4 to 10ms later, the row detached 10 to 25ms after it attached, and 0 rows in the page after that. `openNewLoad` waited for that row (`state: 'attached'`), so it passed only when one of Playwright's looks fell inside that window. The state at a failure (`test-results/2026-11-13T23-18-59-242Z`, its error context): "Hide map" shown, the map drawn with truck 200, the header saying "1 selected · Esc to clear", no row in the page, the wait run out at 180s. Nothing in the app is wrong. The setup now waits for what the page shows at every width: the selection line in the header (`[data-selection-hint]`, the one drawn), then the board measured (the map toggle below 1086px, the selected row above).
+
+| Width | Before (`2026-11-13T23-18-59-242Z`, 33.2 min) | After (`2026-11-13T23-55-40-776Z`, 3.7 min) |
+|---|---|---|
+| 1007px | 13 of 20 passed, 7 timed out | 20 of 20 |
+| 1008px | 17 of 20 passed, 3 timed out | 20 of 20 |
+
+All 10 failures before were the same: `locator.waitFor` on `[data-row-id][aria-selected="true"]`, test timeout 180000ms. The first try at the fix found the header line twice (it is drawn once up to 1439px and once from 1440px): a strict-mode error on all 40. It now takes the one drawn.
+
+**Part 2: the view held** (§12.159, "Phase 3bt"). As built: on a person's density change, the truck at the top of the view stays at the top, under the column header by the same share of its new height; on a person's pin or unpin, the top truck in view other than that one stays where it was drawn, and so does every truck in view on its side. At scrollTop 0 nothing is held; at the list's end the browser clamps; with no list drawn (the phone, the narrow board on its map) nothing is held. It holds with the tokens at 0, under reduced motion and with the glides on: scrollTop is set once, in the commit the change lands in, from where rows rest (`offsetTop` and the virtualizer's starts), before the glides measure. A density held deep in a long list needs rows the old scrollTop would not draw, so for that one commit the virtualizer's `rangeExtractor` adds them, and the rows in the held view are drawn in the commit and glide.
+
+| At 1440x900, 60 trucks, from scrollTop 865 | Before this phase (3bs's log) | Now (`2026-11-14T00-00-39-846Z`), with motion and without |
+|---|---|---|
+| Pin a truck a third down the view | scrollTop 865; the top row 69px lower | scrollTop 934; the top row at -1, where it was, and every truck above the one pinned where it was |
+| Then Compact | scrollTop stays; the top truck leaves the drawn rows | scrollTop 686; the same top truck, at 7 (was -1: 29px of 44 under the 28px header, now 21px of 32) |
+| Compact at the end of the list | 1729 to 1009, clamped | 1729 to 1009, clamped (it asks for more) |
+
+In the unit test's layout (no block first), Compact from 865 keeps truck 1020 at the top: scrollTop 629.09, the truck at 6.91.
+
+**3bs assertions that changed, and why.** (1) "the scroll holds" (mid-list): still the same scrollTop and markup with motion as without; now also the row at the top of the view where it was after the pin, and at `28 + (top - 28) · 32/44` after Compact, in both runs. (2) "a short view, scrolled: P pins…": scrollTop while the truck glides is now the held one, `scrollTop + 69` on the pin and back on the unpin, where it was the old scrollTop; and "a moving row overlaps the header on some frame" is now asked on the unpin only. With the view held the rows in view no longer move, so on the pin only the truck crosses the header, and it clears the 28px header between two frames (from about 35 to about -50). "Covered on no frame" is asked on both, as before. Its name gains "(3bt)". Nothing else in 3bs's tests changed.
+
+**Part 3, per motion** (§12.160). Bold from `core.js` (`SWING` Bold 270ms 40px; phSheet Bold 300ms), shapes from `pages.js` (the pane switch, `openSheet`, `closeSheet`).
+
+| Motion | Files | Cause: set, spent | Numbers | Helper, and why |
+|---|---|---|---|---|
+| phPane | `Console.tsx` (`tapPane`, `paneTaps`), `Split.tsx` (a layout effect on `paneCause`) | Counted in the tabs' own handler (`tapPane`), only when the pane changes; passed to `Split`; spent in the commit the pane's class changes: the pane now shown swings | `phPane` 270, `phPanePx` 40 (On 180, 16) | `slideIn` (`lib/appear-motion.ts`): opacity and `translate` from one side, through `play`, so reduced motion and a press hold it, with a box clipped sideways while it moves. The box is the plain one around the split's own (found wrong 2) |
+| phSheet | `DialogFrame.tsx` (`sheet`), `useOpening.ts`, `dialog-motion.ts` (a `'sheet'` copy), `TruckSheet.tsx`, `PhoneMoreSheet.tsx`, `tailwind.config.ts` (`sheet-in`, `sheet-out`, `sheet-scrim-out`) | Opening: the mount, which only a person's tap makes (a card, a marker on a phone, a toast, More), as for every window (§12.148). Closing: each sheet's `closedByPerson`, set in its own close handlers (Close, the tap outside it, Show on map; Done, the tap outside it), read by the frame as it unmounts, in that commit | `phSheet` 300 (On 200) | §12.148's own frame and copy, so a sheet keeps everything a window has (once per opening, resumed by family, nothing left, a copy nothing can use). CSS classes, as the frame's are, not a Web Animation |
+
+- **Every way the pane changes.** The tab's tap (and Enter or Space on it, its click): wired. "Show on map": not wired, code. A selection: the pane does not change. A stored pane: none on the phone. A resize across 768: classes only. Esc and Back close no sheet: the sheets handle no keys, the board's keys stop behind a window, and no sheet is in the history.
+- **The DialogFrame proof.** `frames-unchanged.test.tsx` reads every `<DialogFrame>` from each file's syntax tree: 18 in 15 files, only `TruckSheet` and `PhoneMoreSheet` pass `sheet`, and none spreads props; `dialog-in`, `scrim-in` and `window-out` are still 220, 220 and 140ms; a frame without it opens and closes as before. In Chromium, `dialog-motion.spec.ts` at `bec8fd0` (before, `2026-11-14T00-26-52-636Z`, 105 passed) and with Part 3 (`2026-11-14T00-13-31-540Z`): the same 102 tests pass unchanged on both, every window they reach (the edit modal, the confirm over it, Discard, the palette, the shortcut sheet, the tour, bulk, add-to-list, the list editor, the timeline, the history page's load sheet and week chooser) at `dialog-in`/`fade-in` 0.22s and a `fade-away` copy of 0.14s; the two that changed are the phone sheets' own, now `sheet-in` 0.3s. The five confirms no e2e opens (clear stop, reassign, reopen, previous load, stop reached) are held by the syntax-tree test.
+- **The map's canvas.** Both panes stay mounted and hidden by class: the motion runs on a pane already there, nothing is copied or rebuilt, and the map is told to measure by `onResizeEnd` as before. After the swing at 390x844: canvas 390x577 in a 390x577 map box. A `translate` changes no size Mapbox reads.
+- **The copy.** Its one mark is `data-dialog-fading`; no role, `aria-modal`, label, id or data attribute; `inert`, `aria-hidden`, no pointer: a press at its centre reaches the page. Focus goes to the card at once, as with `phSheet` at 0.
+
+**The lines, re-grepped.** 3be's table cites `b45cd15`.
+
+| Row | At `b45cd15` | At `bec8fd0` | After 3bt | What is there |
+|---|---|---|---|---|
+| phPane | `console/Split.tsx:268` | `:268` | `:301` | the list pane's classes, `phonePane === 'list' ? '' : 'max-md:hidden'` |
+| phPane | `console/Split.tsx:308` | `:308` | `:341` | the map pane's classes |
+| phPane | `console/Console.tsx:823` | `:847` | `:847` | `const [phonePane, setPhonePane] = useState<'list' \| 'map'>('list');` |
+| phSheet | `phone/TruckSheet.tsx:75` | `:75` | `:84` | `<DialogFrame` |
+| phSheet | `phone/PhoneMoreSheet.tsx:45` | `:45` | `:54` | `<DialogFrame` |
+| phSheet | `overlay/DialogFrame.tsx:63` | `:63` | `:82` | the panel's opening class |
+
+**Tests.** `npm run check`: **255 files, 4640 tests** (252 and 4600 before: +3 files, +40 tests).
+
+- `console/board-view.test.tsx` (new, 13): density in the middle, deep in the list (held rows drawn in the commit, and gliding), at the end, at the top, the token at 0, reduced motion, a poll after; a pin in view, its unpin, a pin above the view by P, at the top, the token at 0, reduced motion. Its own layout model: a 600px scroller, the 28px header, the block, rows by their style, scrollTop clamped and told a task later.
+- `console/phone/phone-motion.test.tsx` (new, 20), on the real console at 390px.
+- `overlay/frames-unchanged.test.tsx` (new, 5).
+- `design/motion-tokens.test.ts` (+2).
+
+**Each new file alone, 20 runs:**
+
+| File | Runs | Failures |
+|---|---|---|
+| `components/console/board-view.test.tsx` | 20 | 0 |
+| `components/console/phone/phone-motion.test.tsx` | 20 | 0 |
+| `components/overlay/frames-unchanged.test.tsx` | 20 | 0 |
+| `design/motion-tokens.test.ts` | 20 | 0 |
+
+**Mutations,** in a worktree at `bec8fd0` with Part 3's changes, each file restored byte-identical after (`filecmp`), nine suites 146/146 there unmutated before and after:
+
+| Planted | Failed, by name |
+|---|---|
+| (a) phPane dropped | 4: "Map: the map comes in from 40px to the right…", "List: the list comes back in from 40px to the left", "a tap during the other pane’s swing…", "a poll during the swing neither restarts nor doubles it" |
+| (b) phSheet dropped | 9: "a card’s tap: the panel comes up from below…", "More comes up the same way", "a poll during the opening…", the five closers ("the truck sheet’s Close", "…tap outside it", "…Show on map", "More’s Done", "More’s tap outside it"), and `frames-unchanged`'s "a sheet closed by anything but a person…" |
+| (c) phPane's direction flipped | 3: "Map: …", "List: …", "a tap during the other pane’s swing…" |
+| (d) the sheet variant on every window | 10: nine in `DialogFrame.test.tsx` ("fades the scrim in and grows the panel in", "is not ended by an animation inside the panel", "opens with motion once under StrictMode…", "takes the opening up where it stood", "simply appears when the opening has finished", "a different window in the same commit…", "is a fresh opening when the first closed in an earlier commit", "closed mid-opening, fades from where it stood…", "removes the old copy at once…") and `frames-unchanged`'s "opens with the scrim fading in and the panel rising…" |
+| (e) the close copy given `role="dialog"` | 1: "the copy matches nothing: …" |
+| (f) phPane on the pane the board opens on (stored or default) | 5: "Map: …", "a tap on the pane already shown plays nothing", "the pane on load, a poll and "Show on map" play nothing on a pane", "a tap during the other pane’s swing…", "a poll during the swing…" |
+| (f2) phPane on any change of pane, code included | 2: "a tap on the pane already shown plays nothing", "the pane on load, a poll and "Show on map" play nothing on a pane" |
+| (g) Part 2's hold dropped for density | 5: "in the middle of the list: Compact keeps 1020 at the top…", "deep in the list…", "at the end of the list…", "under reduced motion…", "with the glide’s token at 0…" (density) |
+| (h) Part 2's hold dropped for pin | 5: "a truck in view pinned from its star…", "unpinned again from its star in the block…", "a truck above the view pinned by P…", "with the glide’s token at 0…", "under reduced motion…" (pin) |
+| (i) Part 2's held rows dropped | 1: "deep in the list the held view’s rows are drawn in the commit itself, and glide" |
+
+**e2e.** New: "phase 3bt, the view held" (2, at 1440x900: mid-list with motion and without; the end of the list) and "phase 3bt, the phone’s two motions" (6, at 390x844, the size the phone tests use: phPane's frames and the canvas; what never starts phPane; the truck sheet up and its copy down, with the copy's identity and focus; More, its two closes, and a close mid-opening, the copy going down from 95.2px where the sheet stood; reduced motion in the same page markup; a density from More holding no view). Changed: 3bs's two above, and dialog-motion's two phone tests (`SHEET`: `sheet-in` 0.3s; its recorder finds a sheet's panel too). Targeted runs: `2026-11-14T00-00-39-846Z` (3bs and 3bt's Part 2, 11 of 12; the short view, then changed), `2026-11-14T00-10-03-065Z` (every 3bt test and dialog-motion's phone tests, 11 of 12; the markup compared the server's payload, then the page alone), and the reduced-motion test 3 of 3 after. Early, with Part 3 (`2026-11-14T00-13-31-540Z`): `desktop-baseline` 13 of 13, nothing re-saved; all of `dialog-motion`; 3bg's press tests, "a press behind a cancel" 16 of 16 presses in the gap: 128 passed, 13.0 min.
+
+**Full e2e, two invocations.** The first (`test-results/2026-11-14T00-36-18-161Z`) does not count: 554 passed, 20 failed, 1 did not run, 3.6 h, and its teardown said "the Mac slept 138 minutes during this run" (the lid closed at 02:41 local, 65 minutes in). 18 of the 20 come after that, each running 5 to 17 minutes against timeouts of 45 to 240s. Of the two before it, 3bj's press test (`new-motion.spec.ts:3961`, "Route is already handled") passed 5 of 5 alone, awake (`2026-11-14T04-59-59-595Z`). The other is found wrong 6. The second, under `caffeinate` (`test-results/2026-11-14T06-02-14-083Z`): **571 passed, 3 failed, 1 did not run, 1.4 h, the machine awake for the whole run**. `.last-run.json`: `"status": "failed"`, four ids, the three below and phone-signout. Phone-signout depends on the whole chromium project, so the three kept it from running. It was run alone in one invocation with setup (`2026-11-14T07-46-00-409Z`): 2 passed, awake. The three failures, none in a file or path 3bt changed (`git diff 9c1600d HEAD` on them is empty): `new-motion.spec.ts:3226` (found wrong 6), `previous-load.spec.ts:98` and `reopen-load.spec.ts:194` (found wrong 7). `ratecon-scan.spec.ts:137` passed in both.
+
+**Found wrong:**
+
+1. **3bp's narrow setup waited on a row a hidden list drops** (Part 1). Fixed, test only.
+2. **`slideIn`'s box must have no style of its own, and the split's box has one**: React leaves `style=""` when the split's columns go, and `slideIn`'s `clearStyle` takes the attribute away, so a swing would have changed the page's markup against reduced motion (found by the reduced-motion markup test). The swing clips the plain box around it instead.
+3. **3bs's short-view test asked for a moving row over the header on the pin**, met only by the rows a pin pushed. With the view held none is pushed, and the truck pinned clears the header between frames. Narrowed to the unpin (above).
+4. **A phone sheet faded with its whole frame under §12.148** (the scrim's class is on the frame, the panel inside it). The demo fades the backdrop alone and keeps the panel opaque. The variant does the demo's.
+5. **3be's line references have moved** (the table above): one by `bec8fd0`, all six after this phase.
+6. **3bg's "a press in a gap selects the nearest row drawn, never nothing" (`new-motion.spec.ts:3226`) fails, and not because of 3bt.** It failed 5 of 5 alone on HEAD and 3 of 3 alone in a worktree at `9c1600d`, the commit before 3bt (`2026-11-14T05-45-07-583Z`), both with the machine awake, each time on the poll for the row selected after a press (1s). It passed in 3bs's full run. Cause not found, and not fixed: built motions are out of this phase.
+7. **Two tests fail in the first hours after midnight in Chicago.** `previous-load.spec.ts:98` puts the arrival `hoursAgo(2)` and expects a time with no day, and from 00:00 to 02:00 CT the arrival is yesterday, so the app rightly writes "arrived Fri 23:20 CST". `reopen-load.spec.ts:194` puts it `minutesAgo(90)` and looks in today's day cell (00:00 to 01:30 CT). The second full run reached them at about 01:15 CT. These are windows in the tests, not the app. Not fixed.
+
+**Unverified:** the feel, which is Alex's; a marker's tap and a toast's tap opening the truck sheet (traced in `Console`, not tested); a physical keyboard on a phone (Esc, Enter on a tab); Back on a phone; any browser but Chromium (`translate` as its own property, the sheets' keyframes); a real phone; a real GPU (the map pane's fade over a WebGL canvas).
+
+**Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, 3br's two, 3bs's four, then 3bt's four. Part 2 is Alex's to keep or strike: `bec8fd0` carries it and its tests (a revert of it also touches `e2e/new-motion.spec.ts`, which `257841e` appended to after it, so the two 3bs tests and the 3bt describe come out by hand). Then the map's six rows, waiting on a real-GPU measure.
 
 ## Next
 
