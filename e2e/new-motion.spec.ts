@@ -3074,6 +3074,35 @@ test.describe('the press during a glide', () => {
     page.evaluate((k) => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
     }, key);
+  /**
+   * The chip's key, handled, and the glide it starts running, all before this returns, so a
+   * press sent after it comes down on the glide. Phase 3bu: sent side by side, as `startGlide`
+   * and a press are, a busy page handles the press first (Chromium runs input ahead of a
+   * queued script call), and the press lands on a list at rest. False if no glide starts.
+   */
+  const glideFrom = (page: Page, key: string) =>
+    page.evaluate(
+      async ({ k, ms }) => {
+        const gliding = () =>
+          document
+            .getAnimations()
+            .some(
+              (a) =>
+                !(a instanceof CSSTransition) &&
+                !(a instanceof CSSAnimation) &&
+                Boolean((a.effect as KeyframeEffect).getKeyframes()[0]?.transform) &&
+                (a.effect as KeyframeEffect).getTiming().duration === ms,
+            );
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+        // The chip commits in a microtask queued by the key, and the glide starts in that commit.
+        await Promise.resolve();
+        for (let frame = 0; frame < 30 && !gliding(); frame += 1) {
+          await new Promise((next) => requestAnimationFrame(next));
+        }
+        return gliding();
+      },
+      { k: key, ms: GLIDE_MS },
+    );
   test('a real mouse, at 20, 60, 120 and 300ms into a glide, held 16 to 150ms: the row drawn under it is the row selected', async ({ page }, info) => {
     test.setTimeout(30 * 60_000);
     await listenForPresses(page);
@@ -3238,13 +3267,15 @@ test.describe('the press during a glide', () => {
     let gaps = 0;
     for (let i = 0; i < 16; i += 1) {
       await page.mouse.move(x, spots[i % spots.length]!);
-      const fired = startGlide(page, '2');
+      expect(await glideFrom(page, '2'), `press ${i + 1}: the chip started a glide`).toBe(true);
       await sleep(4 + (i % 4) * 6);
       await page.mouse.down();
-      await fired;
       await sleep(40);
       await page.mouse.up();
       const press = await page.evaluate(() => (window as unknown as { __press: Press }).__press);
+      // The control: at rest a press off every row selects nothing, as it should, so a press is
+      // only about the glide if it came down during one (`at` is the glide's time, null with none).
+      expect(press.at, `press ${i + 1}: it came down during the glide`).not.toBeNull();
       const expected = press.gap ? press.nearest : [press.hit!];
       if (press.gap) gaps += 1;
       await expect
