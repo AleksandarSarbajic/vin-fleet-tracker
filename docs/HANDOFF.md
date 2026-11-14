@@ -136,6 +136,7 @@ Not live until pushed. App only (Vercel): no worker file reaches a changed one (
 **At the start of 3bt (2026-11-14): 3bo to 3bs are NOT pushed**: origin's master was `7464e30`, HEAD `9c1600d`.
 **3bt: NOT pushed, NOT live** (2026-11-14): 3bp's narrow-width setup waits on what the page shows (test only); a person's pin or density keeps the board's view (§12.159, Part 2, Alex's to keep or strike); and the phone's pane swings in on a tap and its two sheets slide up and back down at the demo's Bold (§12.160). Committed as `566aa96`, `bec8fd0`, `257841e` and the docs commit; check 255 files / 4640 tests; full e2e `2026-11-14T06-02-14-083Z` 571 passed, 3 failed (none from 3bt: found wrong 6 and 7), 1.4 h, awake; `phone-signout` alone 2 passed.
 Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bt" below.
+**3bu: NOT pushed, tests only** (2026-11-14): 3bg's gap-press test sends its press once the chip's glide runs and fails by name on a press that missed it (the cause: a slow page handled the press before the key; the app was right), and six tests that put a time hours ago expect its own day and week in Chicago, through `src/test/zone-day.ts`. Committed as `19a1f55`, `3a89bf7`, `b9c3f9f` and the docs commit; check 256 files / 4654 tests; the gap test 20 of 20. No app file changed, so nothing to deploy. See "Phase 3bu" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -12442,6 +12443,85 @@ In the unit test's layout (no block first), Compact from 865 keeps truck 1020 at
 **Unverified:** the feel, which is Alex's; a marker's tap and a toast's tap opening the truck sheet (traced in `Console`, not tested); a physical keyboard on a phone (Esc, Enter on a tab); Back on a phone; any browser but Chromium (`translate` as its own property, the sheets' keyframes); a real phone; a real GPU (the map pane's fade over a WebGL canvas).
 
 **Next:** the advisor's verification and Alex's push (app only): 3bo's two commits, 3bp's two, 3bq's three, 3br's two, 3bs's four, then 3bt's four. Part 2 is Alex's to keep or strike: `bec8fd0` carries it and its tests (a revert of it also touches `e2e/new-motion.spec.ts`, which `257841e` appended to after it, so the two 3bs tests and the 3bt describe come out by hand). Then the map's six rows, waiting on a real-GPU measure.
+
+### Phase 3bu: 3bg's gap press lands on the glide, and the tests that assumed today (2026-11-14)
+
+From the advisor's brief, in two parts: 3bt's found wrong 6 (3bg's "a press in a gap selects the nearest row drawn, never nothing" failing 11 runs in a row with no code change) and found wrong 7 (tests that fail from 00:00 to about 02:00 in Chicago). **Tests only: no app file changed, so nothing to deploy. NOT pushed.** Built on `007393b`; origin's master was `7464e30`, so 3bo to 3bt are not pushed either.
+
+| Commit | What |
+|---|---|
+| `19a1f55` | Part 1: the gap-press test sends its press only once the chip's key is handled and its glide runs (`glideFrom`), and checks that each press came down during the glide |
+| `3a89bf7` | Part 2's helper, `src/test/zone-day.ts`, and its 14 cases |
+| `b9c3f9f` | Part 2: six tests expect the instant's own day and week in Chicago |
+| The docs commit | This section and "What is live" |
+
+**Part 1: the cause, and it is the test, not the app.**
+
+- **What failed was the press, not the selection.** The failing trace (`test-results/2026-11-14T06-02-14-083Z`, the gap test's `trace.zip`): press 1 landed in a gap and selected its nearest row (truck 208). Press 2 (at `view.bottom - 120`, At risk going off) reports `at: null`, no glide running at the pointerdown, and nothing under the pointer: the list was still At risk only, its last row ending above the pointer. The chip's own `_rsc` request started 62ms after the key was sent and 50ms after the press was sent, so the page handled the press first. With nothing in flight, `pressed` in `row-glide.ts` does nothing (`flights.size === 0 && ghosts.size === 0 && !moving`), so the selection stayed on 208, which is what §12.149 asks: its rule is for a press during a glide. The test sent the key (`page.evaluate`, not awaited) and the press (Playwright's mouse) side by side, 4 to 22ms apart, and assumed the key would be handled first. A busy page runs the queued input first.
+- **What changed was the machine's speed, not the code, the clock or the browser.** The same press in two traces:
+
+| | Passing (`2026-11-14T11-33-48-177Z`, run with `--trace on`) | Failing (`2026-11-14T06-02-14-083Z`) |
+|---|---|---|
+| Main thread busy after the mouse move | 1 to 10ms | 36.6ms |
+| The key's evaluate answered in | 5 to 9ms | 62.1ms |
+| A simple evaluate (`stillMoving`), median / p90 | 2.0 / 10.5ms (73) | 6.5 / 24.9ms (11) |
+
+  Ruled out: the code (it failed at origin `7464e30` too); the clock (it failed at 05:20 CST and passed from 05:26 CST, with no day or appointment boundary between: the seed's appointment is now + 26h, 07:2x CST the next day both times); Playwright and Chromium (1.63.0; the lock file last changed 2026-10-28; `chromium-1243` on disk since 2026-09-17). The power log (`pmset -g log`): the lid closed at 02:41:56 CET, and every 3bt run after that ran in DarkWake under caffeinate ("Entering DarkWake state due to 'Clamshell Sleep'" at 06:10 and 07:02 CET; the full run 07:02 to 08:25). 3bs's passing full run (23:05 to 00:11 CET) ran in full wake, and so did mine (from 12:26 CET, the lid closed on an external display, no sleep or DarkWake entry). The advisor's 3 of 3 (12:18 to 12:25 CET, a fresh worktree) ran in full wake, six minutes after the lid woke the machine from two hours of sleep: what slowed that run is unverified.
+- **The controlled change.** CPU throttling (`Emulation.setCPUThrottlingRate`), the same code and the same test:
+
+| | ×1 | ×4 |
+|---|---|---|
+| The test as it was (`2026-11-14T11-40-46-313Z`, `11-39-54-510Z`) | 16 of 16 presses after the key; passed | 2 of 16 handled before the key (by 73 and 69ms), `at: null`; failed |
+| Fixed (`11-47-07-249Z`, `11-44-19-883Z`) | 20 of 20 runs | 5 of 5 runs: 75 presses recorded, 0 outside the glide, 73 in a gap |
+
+  Holding the chip's `_rsc` answer 300ms does the same, with the page busy committing the late answers (`11-31-43-878Z`): press 1 handled 1ms before the key, failed. Without the hold, 16 of 16 (`11-30-59-092Z`).
+- **The fix, in the test.** `glideFrom` dispatches the key in the page and returns only once a 380ms glide runs, so the press is sent after it. And a control, as the press table already has one: each press must report a glide (`press.at` not null), and a miss fails as "press N: it came down during the glide". Still required: more than 0 gaps, and the nearest row drawn for a press in a gap. No retry, no longer wait. No spec line: the app is right.
+
+**Part 2: the tests that assumed today.** The sweep covered every e2e and vitest file with a time relative to now (`hoursAgo`, `minutesAgo`, `Date.now() ±`, `new Date()` arithmetic, a `now` taken once). Six are fixed; the rest hold at any hour.
+
+| Test | Its window | Now |
+|---|---|---|
+| `e2e/previous-load.spec.ts:98` (`:104` now) | Arrived 2h ago, departed 1h ago, with no weekday expected: 00:00 to 02:00 CT (found wrong 7) | Each clock as `dispatchTime` prints it on the day the modal opened, from the instants `finishOnTheRoad` wrote |
+| `e2e/reopen-load.spec.ts:194` (`:195`) | Arrival 90min ago in today's cell, 00:00 to 01:30 CT (found wrong 7); in last week on a Monday; on-time 1, 00:00 to 01:30; Dallas due in 10min in `remaining`, 23:50 to 00:00 | The arrival's own weekday cell and ISO week (`/history?week=`), and each count from the day the server counted (`day` in `/api/health`) |
+| `e2e/clear-stop.spec.ts:166` (`:180`) | "The delivered arrival still counts as done today" held as 0 = 0 from 00:00 to 02:00 CT | Done and remaining from the stored instants and the server's day |
+| `e2e/reached-stop.spec.ts:107` | `(\w{3} )?\d{2}:\d{2} C[DS]T`: any weekday or none, any time. Never failed, checked little | Exact, as of the question's drawing |
+| `src/components/edit/EditStopModal.test.tsx:725` | The unit twin of previous-load: 00:00 to 02:00 CT | The same helper |
+| `src/server/load-edit.test.ts:396` (`:391`) | Today's date with the time 10 minutes ago: 00:00 to 00:10 CT, refused "in the future" before the rule it tests | `wallAgo(10)`, one instant's date and time |
+
+Checked and left, because each holds at any hour: `e2e/arrival-anchor.spec.ts:72`, `src/server/clear-stop.test.ts:560`, `src/worker/arrival-anchor.test.ts:42`, `src/server/reopen-load.test.ts:244`, `src/server/departure.test.ts:24`, `src/server/stop-edit.test.ts:2029` (date and time from one instant); `src/server/health.test.ts:27` (today's date, then hours on it); `e2e/chip-counts.spec.ts:23`, `e2e/header.spec.ts:115`, `e2e/phone.spec.ts:45`, `e2e/poll-never-closes-a-window.spec.ts:18` (late is not a day); `e2e/fixtures.ts:111`, `e2e/phone.spec.ts:743`, `e2e/header.spec.ts:461` (now + 26h is Upcoming, a catch-all for any later day, §12.1); `e2e/header.spec.ts:332` (the sync label has no weekday); `src/server/stop-edit.test.ts:1749` (a UTC date with a Chicago 06:44: past at every hour, its now + 36h partner future); `src/server/override.test.ts:42`, `e2e/paste-address.spec.ts:84`, `e2e/multi-stop.spec.ts:77` ("tomorrow" as now + 24h, which on the fall-back day before 01:00 is today and on the spring-forward eve after 23:00 is the day after; each needs only a future date, or does not read it); the rest of the sweep measures durations (feed age, 24-hour stays, ETAs, deadlines). `src/components/edit/EditStopModal.test.tsx:265` and `:827` paste 2026-09-18, which can no longer be today.
+
+- **The helper** (`src/test/zone-day.ts`), Intl only and no `@/` import, so e2e loads it: `dayIn`, `isoDayIn`, `sameDayIn`, `weekdayIndexIn`, `weekdayIn`, `isoWeekIn`, `zoneNameIn`, `clockAsOf`, `clockPatternAsOf` (a clock for a line drawn between two moments; both days when they straddle a midnight), `startOfDayIn` (midnight found by asking Intl, never by subtracting 24 hours) and `nextMidnightIn`.
+- **Its cases** (`zone-day.test.ts`, 14), every instant derived: Chicago's midnight today, the minutes either side, the next Monday 00:30 found by days, and `springForward`/`fallBack` from `dst.ts`. Cross-checked against the app's `dispatchTime`, `isoWeekOf` and `shiftWeek`. Included: a 23-hour and a 25-hour day, and "now + 24h" missing tomorrow on both DST changes.
+- **Proved in the window,** by temporary changes, each reverted and compared byte for byte. load-edit's old line with `Date` faked to 00:05 CT failed "That arrival time is in the future…", and the new one passed. EditStopModal's old expectation at 00:30 CT the next day failed on "arrived Sat 03:59 CST, departed Sat 04:59 CST", and the new one passed. In Chromium, the four e2e tests with their instants moved back by the time since Chicago's midnight (reopen-load: since Monday's) passed 4 of 4 (`2026-11-14T12-01-58-247Z`): "Fri 22:00 CST" and "Fri 23:00 CST" with weekdays, reopen-load on 2026-W45, Sunday's cell and on-time 0, clear-stop done 0. The same reopen-load asking for plain `/history`, as before, failed: the entry was not found (`12-05-29-779Z`). The current week stays covered by `history.spec.ts`'s "This week".
+
+**Tests.** `npm run check`: **256 files, 4654 tests** (+1 file, +14 tests). Alone: `zone-day.test.ts` 20 of 20, `EditStopModal.test.tsx` 10 of 10, `load-edit.test.ts` 10 of 10. Targeted e2e: the four Part 2 specs 21 of 21 (`2026-11-14T11-59-38-351Z`).
+
+**Mutations,** each file restored byte for byte after:
+
+| Planted | Caught by |
+|---|---|
+| `clockAsOf` never names a weekday | 3 cases: one minute after midnight, the straddle, Monday's Sun 22:30 |
+| `isoWeekIn` one week short | 3: Monday's last week, both DST cases' week checks |
+| `startOfDayIn` returns UTC's midnight | 12 of 14 |
+| `weekdayIndexIn` Sunday first | 4: one minute after, Monday's two, the spring-forward eve |
+| `sameDayIn` by the UTC date | 4: midnight's start, one minute after, the straddle, Monday's Sun 22:30 |
+| The app: a press in a gap selects nothing (`row-glide.ts`) | The fixed gap test, at the nearest-row poll, after its control passed (`12-03-21-674Z`) |
+| The test's old order (key and press side by side), CPU ×4 | 3 of 3 runs, each named: "press 5 / press 3 / press 5: it came down during the glide" (`12-04-06-741Z`) |
+
+**Full e2e, two invocations on `b9c3f9f`.** The first (`test-results/2026-11-14T12-10-51-931Z`, 1.1h, awake) does not count: I started it with `npx playwright test` and not `npm run e2e`, so the server read `.env.local`'s reader settings (the live vendor and its key) instead of the fake vendor. 570 passed, 3 failed, 1 skipped, 1 did not run. The 3 were `ratecon-ai.spec.ts:99`, `:177` and `:196`, each "ratecon read failed … AdapterFailure, vendorStatus: 401" (found wrong 6). The skip was `reader-key-bundle.spec.ts`, which runs only under `E2E_READER_KEY_SCAN=1`, and phone-signout did not run because it depends on the whole chromium project. The gap test and the four Part 2 tests passed in it. The second, through `npm run e2e` under `caffeinate -dims`, on AC, the lid closed on the external display, so full wake with no sleep or DarkWake entry in `pmset -g log` for its window (`test-results/2026-11-14T13-17-35-107Z`): **575 passed, 0 failed, 1.1h**. `phone-signout` ran in it (1 passed), as did `ratecon-ai` (3 of 3 through the fake vendor) and the key scan. `.last-run.json`: `"status": "passed"`, `failedTests` `[]`. `git status` clean under `e2e/` after it.
+
+**Found wrong:**
+
+1. **3bg's gap-press test had no control that its press landed during a glide,** and sent the key and the press side by side. On a slow page the press came first and the test asked for a selection §12.149 does not promise. The press table and "a press behind a cancel" both had such a control (3bg's own lesson); this test did not. Fixed.
+2. **"The machine stayed awake for the whole run" does not see DarkWake.** 3bt's lid-closed runs said "awake" while macOS ran them in DarkWake (`pmset -g log`). The teardown looks for sleep only. Not changed: the e2e harness is outside this phase.
+3. **Two windows the brief did not list:** `load-edit.test.ts:396` (00:00 to 00:10 CT) and `EditStopModal.test.tsx:725` (00:00 to 02:00). Fixed.
+4. **reached-stop's check was loose** and clear-stop's "done today" proved nothing for two hours a night. Fixed.
+5. **`e2e/fixtures.ts:110` says "Tomorrow mid-afternoon Chicago time"** for now + 26h, which is any hour of the next day or the day after. Every test reading it needs only "a later day", so nothing fails. Not changed.
+6. **Nothing but `npm run e2e` keeps the suite off the live reader.** The fake vendor, its script and the synthetic key are set only in that npm script (`package.json:21`). `playwright.config.ts` passes the server no reader settings, so `npx playwright test` (my first full run, and any targeted run started that way) gives it `.env.local`'s: `LLM_READER_ENABLED=true`, the live vendor and its key. In that run the three ratecon-ai reads went to the live vendor and were refused with 401. Each sent the spec's invented layout, no real document, and the 401 says that key is no longer accepted (unverified beyond that status). `ratecon-ai.spec.ts` checks only that the button exists. Not changed: the e2e harness is outside this phase. Pinning the four reader settings in the config's `webServer.env` would close it, and is Alex's call.
+
+**Unverified:** what slowed the advisor's run at 12:18 CET; that DarkWake itself slows Chromium's main thread (inferred from the power log and the 3× slower evaluates in that run, not measured in DarkWake); the Part 2 e2e tests at a real midnight (the window was reached by moving the instants, not the clock); any browser but Chromium.
+
+**Next:** the advisor's verification and Alex's push: 3bo to 3bt as before, then 3bu's three test commits and its docs commit. 3bt's view hold stays Alex's to keep or strike.
 
 ## Next
 
