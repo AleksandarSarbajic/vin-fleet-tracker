@@ -2,20 +2,23 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { E2E_DIST_DIR, SENTRY_SINK_PORT } from '../playwright.config';
+import { E2E_READER_ENV } from './reader-env';
 
 /**
  * The language-model reader's key is in no file the browser can load
  * (CLAUDE.md, non-negotiable; Alex, 2026-10-14). The source-level proof is
  * src/test/reader-key-bundle.test.ts; this one reads the BUILD.
  *
- * The key is SYNTHETIC — never the real one. `npm run e2e` puts it in the
- * environment the e2e build and server start with, and sets
- * E2E_READER_KEY_SCAN=1. The real key is never read, compared or printed
- * here: run any other way (e2e:ui), this spec is skipped.
+ * The key is SYNTHETIC — never the real one. `playwright.config.ts` puts it
+ * in the environment of every run, and of the e2e build and server, however
+ * the run is started (`E2E_READER_ENV`, §12.161), and does so BEFORE it loads
+ * `.env.local`: the real key never reaches this process, so it is never read,
+ * compared or printed here. The scan itself runs only with
+ * E2E_READER_KEY_SCAN=1, which `npm run e2e` sets; any other run skips it.
  */
 
-/** Must match the `e2e` script in package.json. Invented: it opens nothing. */
-const SYNTHETIC_KEY = 'sk-ant-e2e-SYNTHETIC-not-a-real-key-4f1c9a';
+/** Invented: it opens nothing. Kept in one place, `e2e/reader-env.ts`. */
+const SYNTHETIC_KEY = E2E_READER_ENV.LLM_READER_API_KEY;
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -25,9 +28,9 @@ function files(dir: string): string[] {
 }
 
 test('the reader key is in no file of the browser bundle', () => {
-  test.skip(process.env.E2E_READER_KEY_SCAN !== '1', 'Run through `npm run e2e`, which gives the build the synthetic key.');
+  test.skip(process.env.E2E_READER_KEY_SCAN !== '1', 'The key scan runs with E2E_READER_KEY_SCAN=1, which `npm run e2e` sets.');
   // A boolean, so a mismatch can never print whatever key is there instead.
-  expect(process.env.LLM_READER_API_KEY === SYNTHETIC_KEY, 'the e2e script must set the synthetic key').toBe(true);
+  expect(process.env.LLM_READER_API_KEY === SYNTHETIC_KEY, 'playwright.config.ts must give the run the synthetic key').toBe(true);
 
   const shipped = files(join(E2E_DIST_DIR, 'static'));
   expect(shipped.length).toBeGreaterThan(10);

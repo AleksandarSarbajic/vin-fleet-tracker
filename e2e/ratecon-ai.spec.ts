@@ -5,6 +5,7 @@ import { CHAIN_VERSION } from '../src/server/geocode';
 import { MODEL_REPLY, UNKNOWN_LAYOUT } from '../src/test/model-read-fixtures';
 import { field } from './field';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
+import { E2E_READER_ENV } from './reader-env';
 
 /**
  * "Read with AI" end to end (docs/llm-reader-design.md §8.1): the real
@@ -14,15 +15,14 @@ import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
  * to one, no real document: the text is invented, every line carries the
  * sentinel, and no screenshot is taken.
  *
- * NEEDS the e2e server started with:
- *   LLM_READER_ENABLED=true
- *   LLM_READER_VENDOR=fake
- *   LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json
- * Without them the strip offers no button and this test says so first.
+ * The e2e server runs with the reader on and the fake vendor, its script this file's
+ * FAKE_SCRIPT, however the run is started: `playwright.config.ts` gives every run
+ * `E2E_READER_ENV` (`e2e/reader-env.ts`, §12.161). If the server ever offers no button,
+ * this test says so first.
  */
 
 /** Read by the server for every read; written here, before the click. Git-ignored. */
-const FAKE_SCRIPT = 'e2e/.fake-reader.json';
+const FAKE_SCRIPT = E2E_READER_ENV.LLM_READER_FAKE_SCRIPT;
 const TRUCK = TRUCK_NUMBERS.chicago;
 /** The invented unknown layout, as pasted: 23 lines. */
 const CLIP = UNKNOWN_LAYOUT.map((l) => l.text).join('\n');
@@ -91,7 +91,7 @@ async function pasteInvented(page: Page, context: BrowserContext, script: unknow
   await expect(strip.getByText('Layout not recognised, nothing filled.')).toBeVisible();
   test.skip(
     !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
-    'The e2e server runs with the reader off. Start it with LLM_READER_ENABLED=true, LLM_READER_VENDOR=fake, LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json.',
+    'The e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts): see what changed there.',
   );
   return strip;
 }

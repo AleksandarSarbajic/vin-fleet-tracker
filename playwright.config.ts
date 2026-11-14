@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
+import { E2E_READER_ENV } from './e2e/reader-env';
 import { RESULTS_ROOT, newRunId } from './e2e/results';
 
 /**
@@ -17,6 +18,14 @@ import { RESULTS_ROOT, newRunId } from './e2e/results';
  * §12.29's `useSearchParams` bug discarded a server-side prefetch, which is a
  * production-render concern that dev mode is more forgiving about.
  */
+/**
+ * §12.161. The fake reader for every run, however it is started, set BEFORE `.env.local` is
+ * loaded: dotenv never overrides a variable already set, so `.env.local`'s live vendor and
+ * its key reach no process of the run. In the environment, like `E2E_RUN_ID` below, because
+ * every worker and global setup and teardown inherit the runner's; and in the app's
+ * `webServer.env` too. Forced, not `??=`: a value in the shell must not win either.
+ */
+Object.assign(process.env, E2E_READER_ENV);
 loadEnv({ path: '.env.local' });
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
@@ -198,6 +207,11 @@ export default defineConfig({
          */
         NEXT_PUBLIC_SENTRY_DSN: SENTRY_SINK_DSN,
         SENTRY_WORKER_DSN: '',
+        /**
+         * §12.161. The fake vendor, its script and the synthetic key, for the build and the
+         * start alike, whatever started the run: never `.env.local`'s live reader.
+         */
+        ...E2E_READER_ENV,
       },
     },
   ],

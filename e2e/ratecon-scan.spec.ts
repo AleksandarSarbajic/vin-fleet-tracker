@@ -30,8 +30,9 @@ import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
  * text, the redaction, exactly what leaves the page, and the fill. The same
  * reply against the same scan is checked in Node (`read-scan.test.ts`).
  *
- * NEEDS, for the AI test only, the server to offer Read with AI, as
- * `npm run e2e` starts it (LLM_READER_ENABLED=true, a vendor).
+ * NEEDS, for the AI test only, the server to offer Read with AI, as every
+ * run starts it: `playwright.config.ts` gives it `E2E_READER_ENV`
+ * (`e2e/reader-env.ts`, §12.161), the reader on and the fake vendor.
  */
 
 const TRUCK = TRUCK_NUMBERS.chicago;
@@ -145,7 +146,7 @@ test('a scan no template reads goes to Read with AI as any template miss does, t
   await expect(strip.locator('[data-ratecon-scan]')).toHaveText('Read from a scan, by OCR in this browser: every field it fills is marked Check.');
   test.skip(
     !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
-    'The e2e server runs with the reader off. Start it as `npm run e2e` does (LLM_READER_ENABLED=true, a vendor).',
+    'The e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts): see what changed there.',
   );
 
   await strip.locator('[data-ratecon-sent] summary').click();
