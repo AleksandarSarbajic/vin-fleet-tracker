@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { isoDayIn } from '../src/test/zone-day';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -65,10 +66,24 @@ async function openModal(page: Page, truckId: string, truck: number) {
   await expect(editModal(page, truck)).toBeVisible();
 }
 
+type Health = { day: string; onTime: number; late: number; remaining: number };
+
 async function health(page: Page) {
   const response = await page.request.get('/api/health');
   expect(response.ok()).toBe(true);
-  return (await response.json()) as { onTime: number; late: number; remaining: number };
+  return (await response.json()) as Health;
+}
+
+/** A stop's arrival and appointment, as stored. */
+async function instantsOf(stopId: string) {
+  const sql = connect();
+  try {
+    const [stop] = await sql<{ arrived_at: Date | null; appointment_start_utc: Date | null }[]>`
+      select arrived_at, appointment_start_utc from stops where id = ${stopId}`;
+    return { arrivedAt: stop!.arrived_at, appointmentAt: stop!.appointment_start_utc };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 async function dbState(loadId: string) {
@@ -169,7 +184,22 @@ test('a "+1 load" truck: choose, close, and the timeline and counter follow', as
   await page.goto('/');
   const row = rowOf(page, IDS.truckDallas);
   await expect(row).toContainText('+1 load');
+  /*
+   * Phase 3bu. The strip counts on the server's own day (`day`): an arrival is done on the day
+   * it happened, a stop is remaining on its appointment's day while its load is open. E2E-102-B
+   * was reached two hours ago, which is yesterday from 00:00 to 02:00 in Chicago, so each count
+   * is derived from the stored instants and the day it was counted on. 101's arrival, 30 hours
+   * ago, and 103's appointment, the fixture's, are never on today.
+   */
+  const reachedB = (await instantsOf(STOP_B)).arrivedAt!;
+  const dueA = (await instantsOf(IDS.stopDallas)).appointmentAt!;
+  const counted = (h: Health) => ({ done: h.onTime + h.late, remaining: h.remaining });
+  const expected = (h: Health, dueOpen: boolean) => ({
+    done: isoDayIn(reachedB, 'America/Chicago') === h.day ? 1 : 0,
+    remaining: dueOpen && isoDayIn(dueA, 'America/Chicago') === h.day ? 1 : 0,
+  });
   const before = await health(page);
+  expect(counted(before)).toEqual(expected(before, true));
   await shot('5-strip-before', page.getByTitle(/^(Today:|No stops scheduled)/));
 
   await openModal(page, IDS.truckDallas, TRUCK_NUMBERS.dallas);
@@ -246,9 +276,8 @@ test('a "+1 load" truck: choose, close, and the timeline and counter follow', as
   // The counter: the cancelled stop is no longer due; the delivered arrival
   // still counts as done today.
   const after = await health(page);
-  expect(afterFirst.remaining).toBe(before.remaining);
-  expect(after.remaining).toBe(before.remaining - 1);
-  expect(after.onTime + after.late).toBe(before.onTime + before.late);
+  expect(counted(afterFirst)).toEqual(expected(afterFirst, true));
+  expect(counted(after)).toEqual(expected(after, false));
   await page.reload();
   await expect(row).toContainText(/No appt/i);
   await shot('11-strip-after', page.getByTitle(/^(Today:|No stops scheduled)/));

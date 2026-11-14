@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { isoDayIn, isoWeekIn, weekdayIndexIn } from '../src/test/zone-day';
 import { IDS, TRUCK_NUMBERS, ZIP_STOP, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 
@@ -182,9 +183,9 @@ test('the truck has driven away: the late-departure warning', async ({ page }, i
 });
 
 /**
- * The history page and the counters. Truck 101's load is reached today (a
- * detected arrival); truck 102's is due in ten minutes. Both are closed as
- * Delivered, then reopened from the modal.
+ * The history page and the counters. Truck 101's load was reached ninety
+ * minutes ago (a detected arrival); truck 102's is due in ten minutes. Both are
+ * closed as Delivered, then reopened from the modal.
  *
  * What a close takes away, and a reopen gives back: 101 from the Arrived
  * chip, and 102 from the strip's "remaining" (a closed load is due nowhere,
@@ -195,12 +196,20 @@ test('the history page shows it In progress in its original day cell, and the co
   page,
 }, info) => {
   test.setTimeout(90_000);
+  const TZ = 'America/Chicago';
+  const arrived = minutesAgo(90);
+  const due = new Date(Date.now() + 10 * 60_000);
   await sql(async (db) => {
-    await db`update stops set arrived_at = ${minutesAgo(90)}, arrived_source = 'detected' where id = ${IDS.stopChicago}`;
-    await db`update stops set appointment_start_utc = ${new Date(Date.now() + 10 * 60_000)} where id = ${IDS.stopDallas}`;
+    await db`update stops set arrived_at = ${arrived}, arrived_source = 'detected' where id = ${IDS.stopChicago}`;
+    await db`update stops set appointment_start_utc = ${due} where id = ${IDS.stopDallas}`;
   });
-  const today = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short' }).format(new Date());
-  const dayIndex = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(today);
+  /*
+   * Phase 3bu. A trip sits on the day of its first arrival, in dispatch time (§12.101), so its
+   * cell and its week are the arrival's own: ninety minutes ago is yesterday from 00:00 to 01:30
+   * in Chicago, and last week from Monday 00:00 to 01:30. The page is asked for that week.
+   */
+  const dayIndex = weekdayIndexIn(arrived, TZ);
+  const history = `/history?week=${isoWeekIn(arrived, TZ)}`;
   /*
    * The row is found by its load, not by driver: the fixture's assignment
    * starts when the world is seeded, after this arrival, so the history page
@@ -213,8 +222,21 @@ test('the history page shows it In progress in its original day cell, and the co
       .locator('[role="cell"]')
       .nth(dayIndex)
       .locator('[data-load="E2E-101"]');
-  const health = async () =>
-    (await (await page.request.get('/api/health')).json()) as { onTime: number; remaining: number };
+  type Health = { day: string; onTime: number; late: number; unscheduled: number; remaining: number };
+  const health = async () => (await (await page.request.get('/api/health')).json()) as Health;
+  const counts = ({ onTime, late, unscheduled, remaining }: Health) => ({ onTime, late, unscheduled, remaining });
+  /*
+   * What the strip counts on the day the server counted (`day`, its own): 101's arrival is done
+   * on time on the day it happened, and 102's stop is due on its appointment's day while its load
+   * is open. 103's appointment is the fixture's, a day or more away. Ninety minutes ago is not
+   * today from 00:00 to 01:30, nor ten minutes on from 23:50, so each count is the day's own.
+   */
+  const expected = (day: string, open: boolean) => ({
+    onTime: isoDayIn(arrived, TZ) === day ? 1 : 0,
+    late: 0,
+    unscheduled: 0,
+    remaining: open && isoDayIn(due, TZ) === day ? 1 : 0,
+  });
   const arrivedChip = () => page.getByRole('button', { name: /^Arrived/ }).first();
   const reopenFrom = async (truckId: string, truck: number) => {
     await openModal(page, truckId, truck);
@@ -227,15 +249,13 @@ test('the history page shows it In progress in its original day cell, and the co
   await page.goto('/');
   await expect(arrivedChip()).toContainText('1');
   const before = await health();
-  expect(before.remaining).toBeGreaterThanOrEqual(1);
-  expect(before.onTime).toBe(1);
+  expect(counts(before)).toEqual(expected(before.day, true));
 
   await close(page, IDS.truckChicago, IDS.loadChicago);
   await close(page, IDS.truckDallas, IDS.loadDallas);
   const closed = await health();
-  expect(closed.remaining).toBe(before.remaining - 1);
-  expect(closed.onTime).toBe(before.onTime);
-  await page.goto('/history');
+  expect(counts(closed)).toEqual(expected(closed.day, false));
+  await page.goto(history);
   await expect(entry()).toHaveAttribute('aria-label', /, Delivered$/);
   await shot(page, info, '5-history-delivered');
 
@@ -246,8 +266,9 @@ test('the history page shows it In progress in its original day cell, and the co
 
   // Counted again: the chip and "remaining" come back; on-time is not doubled.
   await expect(arrivedChip()).toContainText('1');
-  expect(await health()).toEqual(before);
-  await page.goto('/history');
+  const after = await health();
+  expect(counts(after)).toEqual(expected(after.day, true));
+  await page.goto(history);
   await expect(entry()).toHaveAttribute('aria-label', /, In progress$/);
   await shot(page, info, '6-history-in-progress');
 });

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { clockPatternAsOf } from '../src/test/zone-day';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -16,20 +17,27 @@ const LOAD_B = '33333333-3333-4333-8333-3333333333b3';
 const STOP_B = '44444444-4444-4444-8444-4444444444b3';
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
-/** Arrived 2 h ago, left 1 h ago, both detected; the load still AVAILABLE. */
-async function finishOnTheRoad(loadId: string, stopId: string, loadNumber: string) {
+/** Arrived 2 h ago, left 1 h ago, both detected; the load still AVAILABLE. The instants written. */
+async function finishOnTheRoad(
+  loadId: string,
+  stopId: string,
+  loadNumber: string,
+): Promise<{ arrived: Date; departed: Date }> {
+  const arrived = hoursAgo(2);
+  const departed = hoursAgo(1);
   const sql = connect();
   try {
     await sql`update loads set load_number = ${loadNumber}, status = 'AVAILABLE'
                where id = ${loadId}`;
     await sql`
       update stops set city = ${'Vernon Hills'}, zip = ${'60061'},
-                       arrived_at = ${hoursAgo(2)}, arrived_source = 'detected',
-                       departed_at = ${hoursAgo(1)}, departed_source = 'detected'
+                       arrived_at = ${arrived}, arrived_source = 'detected',
+                       departed_at = ${departed}, departed_source = 'detected'
        where id = ${stopId}`;
   } finally {
     await sql.end({ timeout: 5 });
   }
+  return { arrived, departed };
 }
 
 /** A second previous load on 102: no number, marked by hand, left 3 h ago. */
@@ -86,26 +94,25 @@ async function openModal(page: Page, truckId: string, truck: number) {
   await expect(editModal(page, truck)).toBeVisible();
 }
 
-/** The dispatch-time clock for an instant, as the line prints it. */
-const clock = (at: Date) =>
-  new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/Chicago',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(at);
+/**
+ * The dispatch-time clock the line prints for an instant, on the day the modal opened: with
+ * the weekday when the instant was not that day (`dispatchTime`). Phase 3bu: two hours ago is
+ * yesterday from 00:00 to 02:00 in Chicago, and the line rightly says `Fri 23:20 CST` then.
+ */
+const said = (at: Date, opened: readonly Date[]) => clockPatternAsOf(at, opened, 'America/Chicago');
 
 test('one previous load: the header and the line say so, and Close load… closes it', async ({
   page,
 }, info) => {
   await resetWorld();
-  const arrived = hoursAgo(2);
-  await finishOnTheRoad(IDS.loadChicago, IDS.stopChicago, '6612193');
+  const { arrived, departed } = await finishOnTheRoad(IDS.loadChicago, IDS.stopChicago, '6612193');
   await page.goto('/');
   const row = rowOf(page, IDS.truckChicago);
   await expect(row).not.toContainText('6612193');
 
+  const opening = new Date();
   await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+  const opened = [opening, new Date()];
   const modal = editModal(page, TRUCK_NUMBERS.chicago);
   await expect(modal.locator('h2')).toHaveText('New load — truck 101');
   await expect(modal.locator('h2 + p')).toContainText(
@@ -116,7 +123,7 @@ test('one previous load: the header and the line say so, and Close load… close
   await expect(line).toHaveCount(1);
   await expect(line).toContainText(
     new RegExp(
-      `Previous load 6612193: Vernon Hills, arrived ${clock(arrived)} C[DS]T, departed \\d{2}:\\d{2} C[DS]T \\(detected automatically\\)\\. Still open\\.`,
+      `Previous load 6612193: Vernon Hills, arrived ${said(arrived, opened)}, departed ${said(departed, opened)} \\(detected automatically\\)\\. Still open\\.`,
     ),
   );
   await expect(modal.getByRole('button', { name: 'Clear stop' })).toHaveAttribute(

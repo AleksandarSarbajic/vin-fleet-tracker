@@ -9,6 +9,7 @@ import { fleetRow, nextStop } from '@/test/fleet-row';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { stopView } from '@/test/load-body';
 import { primeLoadRead } from '@/test/load-read';
+import { clockPatternAsOf } from '@/test/zone-day';
 
 /**
  * §12.44, and the §12.21 rule it rests on: **the cache must never hold a
@@ -711,18 +712,16 @@ describe('a truck with no next stop but open loads (§12.92)', () => {
   });
 
   it('shows one line for one previous load, in dispatch time, with Close load…', async () => {
+    const opening = new Date();
     await renderEmpty(1, ONE);
-    const t = (h: number) =>
-      new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'America/Chicago',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(new Date(ago(h)));
+    // Phase 3bu: as the modal prints them on the day it opened, with the weekday when not that
+    // day. Two hours ago is yesterday from 00:00 to 02:00 in Chicago.
+    const opened = [opening, new Date()];
+    const t = (h: number) => clockPatternAsOf(new Date(ago(h)), opened, 'America/Chicago');
     expect(lines()).toHaveLength(1);
     expect(lines()[0]).toMatch(
       new RegExp(
-        `^Previous load 6612193: Vernon Hills, arrived ${t(2)} C[DS]T, departed ${t(1)} C[DS]T \\(detected automatically\\)\\. Still open\\.$`,
+        `^Previous load 6612193: Vernon Hills, arrived ${t(2)}, departed ${t(1)} \\(detected automatically\\)\\. Still open\\.$`,
       ),
     );
     expect(buttonLabelled('Clear stop').title).toBe(

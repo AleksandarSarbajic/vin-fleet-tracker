@@ -392,25 +392,15 @@ describeDb('one save writes several stops (§12.117)', () => {
     const seen = await rolledBack(async (tx) => {
       const lane = await loadWith(tx, [{ city: 'A', arrived: true }, { city: 'B' }]);
       const version = await readLoadVersion(tx, lane.loadId);
-      const now = localDateOf(TZ, new Date());
-      const hm = new Intl.DateTimeFormat('en-GB', {
-        timeZone: TZ,
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-      })
-        .format(new Date(Date.now() - 10 * 60_000))
-        .split(':')
-        .map(Number);
       const outcome = await attempt(tx, {
         loadId: lane.loadId,
         truckId: lane.truck.id,
         version: version!,
         loadStatus: 'DISPATCHED',
         stops: [
-          await draftOf(tx, lane.stopIds[1]!, {
-            arrivedAt: { date: now, time: { h: hm[0]!, min: hm[1]! }, tz: TZ },
-          }),
+          // Phase 3bu: the date and the time of one instant. Today's date with the time ten
+          // minutes ago was tonight from 00:00 to 00:10, and refused as in the future first.
+          await draftOf(tx, lane.stopIds[1]!, { arrivedAt: wallAgo(10) }),
         ],
       });
       const [second] = await tx.select({ arrivedAt: stops.arrivedAt }).from(stops).where(eq(stops.id, lane.stopIds[1]!));

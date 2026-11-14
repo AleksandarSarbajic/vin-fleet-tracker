@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { normalizeAddress } from '../src/lib/address';
 import { CHAIN_VERSION } from '../src/server/geocode';
+import { clockPatternAsOf } from '../src/test/zone-day';
 import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
 
 /**
@@ -20,10 +21,12 @@ const NEXT = { addressLine: '1 Test Dock', city: 'Des Plaines', state: 'IL', zip
 const DES_PLAINES = { lat: 42.0334, lng: -87.8834 };
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
-async function reachChicagoStop() {
+/** Truck 101's stop, detected in an hour ago. The instant written. */
+async function reachChicagoStop(): Promise<Date> {
+  const arrived = hoursAgo(1);
   const sql = connect();
   try {
-    await sql`update stops set arrived_at = ${hoursAgo(1)}, arrived_source = 'detected'
+    await sql`update stops set arrived_at = ${arrived}, arrived_source = 'detected'
                where id = ${IDS.stopChicago}`;
     await sql`
       insert into geocode_cache (normalized_address, lat, lng, precision, confidence,
@@ -34,6 +37,7 @@ async function reachChicagoStop() {
   } finally {
     await sql.end({ timeout: 5 });
   }
+  return arrived;
 }
 
 async function truckState(truckId: string) {
@@ -97,14 +101,22 @@ test('"Next trip": the reached load closes as Delivered and the new load is save
   page,
 }, info) => {
   await resetWorld();
-  await reachChicagoStop();
+  const arrived = await reachChicagoStop();
   await page.goto('/');
   await openModal(page, IDS.truckChicago, TRUCK_NUMBERS.chicago);
+  const asking = new Date();
   await typeNextTripAndSave(page);
 
   const question = reachedQuestion(page);
+  await question.waitFor();
+  /*
+   * Phase 3bu: the time as `dispatchTime` prints it on the day the question was drawn, with the
+   * weekday when the arrival was not that day (an hour ago is yesterday from 00:00 to 01:00 in
+   * Chicago). It was drawn between the save and now.
+   */
+  const reachedAt = clockPatternAsOf(arrived, [asking, new Date()], 'America/Chicago');
   await expect(question).toContainText(
-    /This stop was reached at (\w{3} )?\d{2}:\d{2} C[DS]T\. Is this a correction, or the next trip\?/,
+    new RegExp(`This stop was reached at ${reachedAt}\\. Is this a correction, or the next trip\\?`),
   );
   await expect(question).toContainText('Load E2E-101 closes as Delivered');
   await expect(question.getByRole('button', { name: 'Back to the form' })).toBeFocused();
