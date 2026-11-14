@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { config as loadEnv } from 'dotenv';
 import { connect, TEST_DATABASE_URL } from './fixtures';
 import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
-import { markRunStart } from './run-clock';
+import { markRunStart, startPowerSampling } from './run-clock';
 
 /**
  * Runs once, before the web server is started.
@@ -20,6 +20,12 @@ export default async function globalSetup(): Promise<void> {
     markRunStart();
   } catch (error) {
     console.warn(`e2e: no sleep check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
+  }
+  // And sampled once a minute until the end: did macOS run it in DarkWake? (run-clock.ts, phase 3bv)
+  try {
+    startPowerSampling();
+  } catch (error) {
+    console.warn(`e2e: no DarkWake check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
   }
 
   const host = new URL(TEST_DATABASE_URL.replace(/^postgres(ql)?:/, 'http:')).hostname;

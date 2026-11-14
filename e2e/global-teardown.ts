@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { FullConfig } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
 import { redactRun, secretsFromEnv, type RedactReport } from './redact';
-import { runSleepReport } from './run-clock';
+import { runPowerReport, runSleepReport } from './run-clock';
 import {
   envFromProcess,
   signOutE2eAccount,
@@ -78,6 +78,8 @@ export default async function globalTeardown(config: FullConfig): Promise<void> 
 
   // Said before anything can throw below it, so a failed run still says whether the machine slept.
   console.info(runSleepReport());
+  // And whether macOS ran it in DarkWake, which the sleep line cannot see (phase 3bv).
+  for (const line of runPowerReport()) console.info(line);
 
   if (problems.length > 0) throw new Error(`e2e teardown: ${problems.join(' ')}`);
 }
