@@ -164,3 +164,24 @@ describe('the fall-back, from dst.ts', () => {
     expect(isoWeekIn(early, TZ)).toBe(formatIsoWeek(appWeek(early)));
   });
 });
+
+describe('a zone whose Intl name carries a regular-expression character (phase 3bv)', () => {
+  // en-US Intl names Berlin by its offset. The name is derived here and checked, never pasted.
+  const ZONE = 'Europe/Berlin';
+  const zoneMidnight = startOfDayIn(new Date(), ZONE);
+
+  it('the pattern matches the instant’s own clock line, either side of its midnight', () => {
+    const before = at(zoneMidnight, -MIN);
+    const after = at(zoneMidnight, MIN);
+    const arrived = at(after, -2 * HOUR);
+    expect(zoneNameIn(arrived, ZONE)).toContain('+');
+
+    const lines = [clockAsOf(arrived, before, ZONE), clockAsOf(arrived, after, ZONE)];
+    expect(lines[0]).not.toBe(lines[1]);
+    const pattern = new RegExp(`^${clockPatternAsOf(arrived, [before, after], ZONE)}$`);
+    for (const line of lines) {
+      expect(line).toContain(zoneNameIn(arrived, ZONE));
+      expect(pattern.test(line), line).toBe(true);
+    }
+  });
+});

@@ -107,7 +107,9 @@ export interface SeedOptions {
 export async function seedFleet(sql: postgres.Sql, options: SeedOptions = {}): Promise<void> {
   const feedAge = options.feedAgeMinutes ?? 1;
   const recordedAt = new Date(Date.now() - feedAge * 60_000);
-  // Tomorrow mid-afternoon Chicago time, unless a spec pins its own.
+  // Now + 26 hours: a later calendar day in Chicago at any hour, the next day or the one after
+  // (no day is longer than 25 hours), so Upcoming whenever the run starts (§12.82). Not any
+  // particular hour. Unless a spec pins its own.
   const appointment = options.appointmentUtc ?? new Date(Date.now() + 26 * 3_600_000);
 
   const truck = (id: string, number: number) => sql`

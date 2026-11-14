@@ -87,15 +87,19 @@ export function clockAsOf(instant: Date, now: Date, zone: string): string {
   return `${day}${clock} ${zoneNameIn(instant, zone)}`;
 }
 
+/** A string as a regular-expression source that matches exactly it. */
+const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * `clockAsOf` as a regular-expression source, for a line drawn at some moment between the
  * `nows` given (taken just before and just after it appeared). When they straddle a midnight
  * in `zone`, either day can be the one the line used, and both are allowed; otherwise exactly
- * one clock is.
+ * one clock is. Each clock is escaped (phase 3bv): en-US Intl names many zones by offset, such
+ * as `GMT+1`, and an unescaped `+` there never matches its own clock.
  */
 export function clockPatternAsOf(instant: Date, nows: readonly Date[], zone: string): string {
   const said = [...new Set(nows.map((now) => clockAsOf(instant, now, zone)))];
-  return `(?:${said.join('|')})`;
+  return `(?:${said.map(literal).join('|')})`;
 }
 
 /**
