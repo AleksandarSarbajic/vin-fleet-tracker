@@ -16,6 +16,11 @@ import {
   type FrameKind,
 } from './dialog-motion';
 
+/** §12.160. A sheet a person closed leaves a sheet's copy; anything else, the frame's own. */
+function closingKind(personClosed: { readonly current: boolean } | undefined, kind: FrameKind) {
+  return personClosed?.current === true ? 'sheet' : kind;
+}
+
 /**
  * §12.148. What a window's frame and a menu's frame have in common: the
  * opening decided once, the classes off when it ends, and a copy on the way out.
@@ -27,6 +32,12 @@ export function useOpening<T extends HTMLElement>(
   kind: FrameKind,
   duration: number,
   family?: string,
+  /**
+   * §12.160. A phone sheet's own "a person closed me", set in its close handlers: read as it
+   * unmounts, so its copy slides back down. Left false (anything else closed it), the copy is a
+   * window's. A ref, so its identity never changes and the frame never re-registers.
+   */
+  personClosed?: { readonly current: boolean },
 ): {
   node: RefObject<T | null>;
   entering: boolean;
@@ -50,8 +61,9 @@ export function useOpening<T extends HTMLElement>(
     }
     const el = node.current;
     const opening = openedAt.current;
-    return () => frameUnmounted(owner, el, opening, family, kind);
-  }, [owner, family, kind, duration]);
+    // Read as it unmounts, on purpose: a person's close sets it in the same commit.
+    return () => frameUnmounted(owner, el, opening, family, closingKind(personClosed, kind));
+  }, [owner, family, kind, duration, personClosed]);
 
   return {
     node,

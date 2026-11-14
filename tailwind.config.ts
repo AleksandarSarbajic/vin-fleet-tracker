@@ -121,6 +121,13 @@ const config: Config = {
         /** No `from`: a copy fades from where it stands, full strength or not. */
         'fade-away': { to: { opacity: '0' } },
         /**
+         * §12.160, phSheet. A phone sheet comes up from below the screen to its place, and its
+         * copy goes back down. Transform only: the sheet stays opaque. The way down has no
+         * `from`, so a copy taken mid-opening goes down from where it stood.
+         */
+        'sheet-in': { from: { transform: 'translateY(100%)' }, to: { transform: 'none' } },
+        'sheet-out': { to: { transform: 'translateY(100%)' } },
+        /**
          * §12.153. The login form coming up into its place on a page load: `translate` and
          * `scale`, never `transform` (§12.152), so it composes with Sign in's own press. A CSS
          * animation and not a Web Animation, because the form is in the server's HTML: it
@@ -158,6 +165,10 @@ const config: Config = {
         'window-out': `fade-away ${ms(MOTION_MS.dialogOut)} linear forwards`,
         'menu-in': `menu-in ${ms(MOTION_MS.menuIn)} ${EASING.dialog} backwards`,
         'menu-out': `fade-away ${ms(MOTION_MS.menuOut)} linear forwards`,
+        // §12.160, phSheet: a phone sheet a person opens, and the copy of one a person closes.
+        'sheet-in': `sheet-in ${ms(MOTION_MS.phSheet)} ${EASING.dialog} backwards`,
+        'sheet-out': `sheet-out ${ms(MOTION_MS.phSheet)} ${EASING.dialog} forwards`,
+        'sheet-scrim-out': `fade-away ${ms(MOTION_MS.phSheet)} linear forwards`,
         // `backwards`, as the dialog's: nothing is left on the form once it lands.
         'login-in': `login-in ${ms(MOTION_MS.loginFormIn)} ${EASING.dialog} backwards`,
       },

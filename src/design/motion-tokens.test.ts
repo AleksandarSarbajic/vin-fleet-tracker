@@ -250,3 +250,14 @@ describe('the numbers of the board’s two large motions (§12.159)', () => {
     expect(MOTION_MS.densityGlide).toBe(390);
   });
 });
+
+describe('the numbers of the phone’s two motions (§12.160)', () => {
+  it('the pane a person tapped comes in from 40px in 270ms', () => {
+    expect(MOTION_MS.phPane).toBe(270);
+    expect(MOTION_SHAPE.phPanePx).toBe(40);
+  });
+
+  it('a phone sheet comes up, and its copy goes down, in 300ms', () => {
+    expect(MOTION_MS.phSheet).toBe(300);
+  });
+});

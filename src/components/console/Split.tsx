@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { slideIn } from '@/lib/appear-motion';
 
 /** design-spec §3.2. */
 const STORAGE_KEY = 'ft.splitPct';
@@ -71,10 +73,41 @@ interface Props {
    * whichever the width says, so neither reads the width.
    */
   phonePane?: 'list' | 'map';
+  /**
+   * §12.160, phPane. A person's taps on the phone's List | Map tabs, counted where they tap: the
+   * pane each one shows comes in from its tab's side. Nothing else changes it.
+   */
+  paneCause?: number;
 }
 
-export function Split({ list, map, onResizeEnd, phonePane = 'list' }: Props) {
+export function Split({ list, map, onResizeEnd, phonePane = 'list', paneCause = 0 }: Props) {
   const boxRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * §12.160, phPane. Spent in the commit the tap lands in, the pane already shown by its class:
+   * the list comes in from the left, the map from the right, and fades in. The one going out is
+   * hidden by its class at once, as both always are, so there is nothing to copy. Both stay
+   * mounted, so nothing is rebuilt: the map is the same map, told to measure by `onResizeEnd`,
+   * and a `translate` changes no size it reads. The box around this one clips sideways while it
+   * is on its way: a plain block with no style of its own, as `slideIn` asks. This box has one,
+   * the split's columns, which React leaves behind as `style=""` when it goes.
+   */
+  const paneSpent = useRef(paneCause);
+  const paneSwing = useRef<Animation | null>(null);
+  useLayoutEffect(() => {
+    if (paneSpent.current === paneCause) return;
+    paneSpent.current = paneCause;
+    const box = boxRef.current;
+    const pane = box?.querySelector<HTMLElement>(`:scope > [data-pane="${phonePane}"]`);
+    const clip = box?.parentElement;
+    if (!pane || !clip) return;
+    // A tap during the other pane's swing: that one is hidden now, and lands where it is.
+    paneSwing.current?.cancel();
+    const side = phonePane === 'list' ? -1 : 1;
+    paneSwing.current = slideIn(pane, clip, MOTION_MS.phPane, side * MOTION_SHAPE.phPanePx);
+    // The tap alone: a poll, a resize or the default pane changes none of this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneCause]);
   const [pct, setPct] = useState(DEFAULT_PCT);
   /**
    * §12.29. The drag handlers are plain DOM listeners registered once at

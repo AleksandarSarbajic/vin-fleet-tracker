@@ -853,6 +853,18 @@ export function Console({
     [onResizeEnd],
   );
   /**
+   * §12.160, phPane. A person's tap on List or Map, counted: the pane it shows comes in. Set here
+   * and nowhere else, so "Show on map", a selection, a resize and the default pane never start it.
+   */
+  const [paneTaps, setPaneTaps] = useState(0);
+  const tapPane = useCallback(
+    (pane: 'list' | 'map') => {
+      if (pane !== phonePane) setPaneTaps((n) => n + 1);
+      showPane(pane);
+    },
+    [phonePane, showPane],
+  );
+  /**
    * §12.96, stage 3. The phone's truck sheet, in place of the map popup: a
    * card's tap opens it over the list, a marker's over the map.
    */
@@ -976,7 +988,7 @@ export function Console({
           onMore={() => setMoreOpen(true)}
           moreOpen={moreOpen}
           pane={phonePane}
-          onPane={showPane}
+          onPane={tapPane}
         />
         <PhoneNotes notes={headerNotes} />
         {sheetRow ? (
@@ -1095,6 +1107,7 @@ export function Console({
             <Split
               onResizeEnd={onResizeEnd}
               phonePane={phonePane}
+              paneCause={paneTaps}
               /*
                * `min-h-0` beside `h-full` on the wrapper below.
                *

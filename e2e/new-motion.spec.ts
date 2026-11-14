@@ -1,4 +1,4 @@
-import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { IDS, connect, resetWorld } from './fixtures';
 import { SIZES, onPhone } from './phone-helpers';
 import { FREE, seedBoard } from './assignments-seed';
@@ -7929,5 +7929,406 @@ test.describe('phase 3bt, the view held on a pin or a density (§12.159)', () =>
     expect(still.after).toBe(still.max);
     expect(moved.after).toBe(still.after);
     expect(moved.markup).toBe(still.markup);
+  });
+});
+
+/*
+ * Phase 3bt (§12.160): the phone's two motions, phPane and phSheet, at the demo's Bold.
+ */
+const PANE_MS = 270;
+const PANE_PX = 40;
+
+type PaneLog = { pane: string; frames: string; duration: number; easing: string; t: number };
+/** Every Web Animation started on a phone pane, from the page's first script on. */
+const logPanes = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as { __panes: PaneLog[] };
+    w.__panes = [];
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      const pane = this.getAttribute('data-pane');
+      if (pane) {
+        const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+        w.__panes.push({
+          pane,
+          frames: JSON.stringify(frames),
+          duration: Number(timing.duration),
+          easing: String(timing.easing ?? ''),
+          t: performance.now(),
+        });
+      }
+      return animation;
+    };
+  });
+const panes = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __panes: PaneLog[] }).__panes.map((p) => ({ ...p })));
+const SWING = (dx: number) =>
+  JSON.stringify([
+    { opacity: 0, translate: `${dx}px 0` },
+    { opacity: 1, translate: '0 0' },
+  ]);
+/** On every frame: each pane's display, the shown one's opacity and translate, the map's canvas and its box. */
+type PaneFrame = { list: string; map: string; opacity: number; dx: number; canvas: string; pane: string };
+const paneFrame = (): PaneFrame => {
+  const list = document.querySelector<HTMLElement>('[data-pane="list"]')!;
+  const map = document.querySelector<HTMLElement>('[data-pane="map"]')!;
+  const shown = getComputedStyle(map).display !== 'none' ? map : list;
+  const cs = getComputedStyle(shown);
+  const canvas = map.querySelector('canvas');
+  const box = map.querySelector<HTMLElement>('.mapboxgl-map');
+  return {
+    list: getComputedStyle(list).display,
+    map: getComputedStyle(map).display,
+    opacity: Number(cs.opacity),
+    dx: Number.parseFloat(cs.translate === 'none' ? '0' : cs.translate),
+    canvas: canvas ? `${canvas.clientWidth}x${canvas.clientHeight}` : '',
+    pane: box ? `${box.clientWidth}x${box.clientHeight}` : '',
+  };
+};
+/** What phPane can leave: a style on a pane or on their box, or an animation running there. */
+const paneAtRest = (page: Page) =>
+  page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>('[data-pane="list"]')!;
+    const map = document.querySelector<HTMLElement>('[data-pane="map"]')!;
+    return {
+      list: list.getAttribute('style'),
+      map: map.getAttribute('style'),
+      box: list.parentElement!.parentElement!.getAttribute('style'),
+      running: [...list.getAnimations(), ...map.getAnimations()].length,
+    };
+  });
+const PANE_REST = { list: null, map: null, box: null, running: 0 };
+
+/** The real sheet's panel, the copy's, and what each is drawn with, on every frame. */
+type SheetFrame = {
+  real: boolean;
+  realAnim: string;
+  realY: number;
+  backAnim: string;
+  backOpacity: number;
+  frameAnim: string;
+  copy: boolean;
+  copyY: number;
+  copyBackOpacity: number;
+  copyAnims: string;
+};
+const sheetFrame = (): SheetFrame => {
+  const y = (el: Element | null | undefined) => {
+    if (!el) return Number.NaN;
+    const t = getComputedStyle(el).transform;
+    return t === 'none' ? 0 : new DOMMatrixReadOnly(t).m42;
+  };
+  const anim = (el: Element | null | undefined) => {
+    if (!el) return '';
+    const cs = getComputedStyle(el);
+    return `${cs.animationName} ${cs.animationDuration} ${cs.animationTimingFunction}`;
+  };
+  const panel = document.querySelector('[data-truck-sheet], [data-phone-more-sheet]');
+  const frame = panel?.parentElement;
+  const back = frame?.firstElementChild;
+  const copy = document.querySelector('[data-dialog-fading]');
+  return {
+    real: panel !== null,
+    realAnim: anim(panel),
+    realY: y(panel),
+    backAnim: anim(back),
+    backOpacity: back ? Number(getComputedStyle(back).opacity) : Number.NaN,
+    frameAnim: anim(frame),
+    copy: copy !== null,
+    copyY: y(copy?.lastElementChild),
+    copyBackOpacity: copy?.firstElementChild ? Number(getComputedStyle(copy.firstElementChild).opacity) : Number.NaN,
+    copyAnims: copy ? `${anim(copy)} | ${anim(copy.firstElementChild)} | ${anim(copy.lastElementChild)}` : '',
+  };
+};
+const DIALOG = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+/** The page as a person would read it, with what changes on its own taken out. */
+const pageMarkup = (page: Page) =>
+  page.evaluate(() =>
+    // The page, not the server's payload beside it in a script tag, which carries the seed's clock.
+    (document.querySelector('[data-page]')?.outerHTML ?? '')
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '#')
+      .replace(/_r_[0-9a-z]+_/g, '_r_')
+      .replace(/<canvas[^>]*>/g, '<canvas>')
+      // The clock: "Synced 2s ago", the dispatch time.
+      .replace(/\b\d+(?:s|m|h)\b/g, 'N')
+      .replace(/\b\d{1,2}:\d\d\b/g, 'HH:MM')
+      .replace(/style="[^"]*"/g, (s) => (/translate|opacity|animation/.test(s) ? 'style=MOVED' : s)),
+  );
+
+async function openPhoneBoard(browser: Browser, reduced = false) {
+  const { context, page } = await onPhone(browser, SIZES[3]!);
+  await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+  await logPanes(page);
+  await page.goto('/');
+  await page.locator(`[data-phone-card="${IDS.truckChicago}"]`).waitFor();
+  await expect.poll(() => stillMoving(page)).toBe(0);
+  await quiet(page);
+  return { context, page };
+}
+
+test.describe('phase 3bt, the phone’s two motions (§12.160)', () => {
+  test.beforeEach(async () => {
+    await resetWorld();
+  });
+
+  /* ---- Part 3, phPane, at 390x844 ---- */
+
+  test('phPane: Map comes in from 40px to the right and List from 40px to the left, fading in, 270ms; the other is gone at once; the map’s canvas ends the size of its pane; nothing left', async ({
+    browser,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    const { context, page } = await openPhoneBoard(browser);
+    try {
+      expect(await panes(page)).toEqual([]);
+      for (const [to, dx] of [
+        ['map', PANE_PX],
+        ['list', -PANE_PX],
+      ] as const) {
+        const from = (await panes(page)).length;
+        const frames = await record(page, paneFrame);
+        await page.locator(`[data-phone-tab="${to}"]`).tap();
+        await expect.poll(async () => (await page.evaluate(paneFrame))[to]).not.toBe('none');
+        await expect.poll(() => stillMoving(page)).toBe(0);
+        await quiet(page);
+        const seen = await frames();
+        const started = (await panes(page)).slice(from);
+        expect(
+          started.map(({ pane, frames: f, duration, easing }) => ({ pane, f, duration, easing: curve(easing) })),
+        ).toEqual([{ pane: to, f: SWING(dx), duration: PANE_MS, easing: curve('cubic-bezier(.22,.61,.36,1)') }]);
+        // The one going out is gone on the first frame the one coming in is drawn.
+        const shown = seen.filter((f) => f[to] !== 'none');
+        expect(shown[0]![to === 'map' ? 'list' : 'map']).toBe('none');
+        // It comes from its side, fading in, and never past its place.
+        const moving = shown.filter((f) => f.dx !== 0);
+        expect(moving.length).toBeGreaterThan(3);
+        for (const f of moving) {
+          expect(Math.sign(f.dx)).toBe(Math.sign(dx));
+          expect(Math.abs(f.dx)).toBeLessThanOrEqual(PANE_PX);
+        }
+        expect(shown.at(-1)).toMatchObject({ dx: 0, opacity: 1 });
+        await expect.poll(() => paneAtRest(page)).toEqual(PANE_REST);
+        if (to === 'map') {
+          // The map's canvas ends the size of its pane: a translate changes nothing it measures.
+          await expect
+            .poll(async () => {
+              const f = await page.evaluate(paneFrame);
+              return `${f.canvas} in ${f.pane}`;
+            })
+            .toMatch(/^(\d+x\d+) in \1$/);
+          const f = await page.evaluate(paneFrame);
+          process.stdout.write(`3bt phPane map: canvas ${f.canvas}, pane ${f.pane}\n`);
+        }
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('phPane never starts on load, a poll, Show on map or a resize across 768; at 768 and up the tabs are not there to tap', async ({
+    browser,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    const { context, page } = await openPhoneBoard(browser);
+    try {
+      expect(await panes(page)).toEqual([]);
+      await pollWith(page, lateFirst(2));
+      await page.locator(`[data-phone-card="${IDS.truckChicago}"]`).tap();
+      await page.locator('[data-truck-sheet]').getByRole('button', { name: 'Show on map' }).tap();
+      await expect.poll(async () => (await page.evaluate(paneFrame)).map).not.toBe('none');
+      await page.setViewportSize({ width: 800, height: 844 });
+      await expect(page.locator('[data-phone-tab="list"]')).toBeHidden();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.locator('[data-phone-tab="list"]')).toBeVisible();
+      await quiet(page);
+      expect(await panes(page)).toEqual([]);
+    } finally {
+      await context.close();
+    }
+  });
+
+  /* ---- Part 3, phSheet, at 390x844 ---- */
+
+  test('phSheet: the truck sheet comes up from below in 300ms while its tap-to-close fades in; Close leaves a copy that goes back down while its scrim fades, which nothing can find or press; focus back on the card', async ({
+    browser,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    const { context, page } = await openPhoneBoard(browser);
+    try {
+      const card = page.locator(`[data-phone-card="${IDS.truckChicago}"]`);
+      const frames = await record(page, sheetFrame);
+      await card.tap();
+      const sheet = page.locator('[data-truck-sheet]');
+      await expect(sheet).toBeVisible();
+      await expect.poll(() => stillMoving(page)).toBe(0);
+      await quiet(page);
+      const opening = (await frames()).filter((f) => f.real);
+      // From the first frame it is drawn: the panel's own motion, the backdrop's own fade, none on the frame.
+      expect(opening[0]).toMatchObject({
+        realAnim: `sheet-in 0.3s ${DIALOG}`,
+        backAnim: 'fade-in 0.22s linear',
+        frameAnim: 'none 0s ease',
+      });
+      const height = await sheet.evaluate((el) => el.getBoundingClientRect().height);
+      // It starts below the screen, near its own height down, and comes up without passing its place.
+      expect(opening[0]!.realY).toBeGreaterThan(height * 0.8);
+      const ys = opening.map((f) => f.realY);
+      for (let i = 1; i < ys.length; i++) expect(ys[i]!).toBeLessThanOrEqual(ys[i - 1]! + 0.5);
+      expect(opening.at(-1)).toMatchObject({ realAnim: 'none 0s ease', realY: 0, backOpacity: 1 });
+
+      const closing = await record(page, sheetFrame);
+      const read = await page.evaluate(async () => {
+        [...document.querySelectorAll<HTMLButtonElement>('[data-truck-sheet] button')]
+          .find((b) => b.textContent?.trim() === 'Close')!
+          .click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const copy = document.querySelector<HTMLElement>('[data-dialog-fading]')!;
+        const b = copy.lastElementChild!.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + b.width / 2, b.top + Math.min(40, b.height / 2));
+        return {
+          realDialogs: document.querySelectorAll('[role="dialog"]').length,
+          inert: copy.hasAttribute('inert'),
+          hidden: copy.getAttribute('aria-hidden'),
+          identity: [copy, ...copy.querySelectorAll('*')].flatMap((el) =>
+            [...el.attributes]
+              .map((a) => a.name)
+              .filter((a) => /^(id|name|for|role|tabindex|aria-label|aria-modal|data-.*)$/.test(a)),
+          ),
+          clicks: getComputedStyle(copy).pointerEvents,
+          clickGoesThrough: hit !== null && !copy.contains(hit),
+          focus: document.activeElement?.getAttribute('data-phone-card') ?? document.activeElement?.tagName ?? null,
+        };
+      });
+      expect(read).toEqual({
+        realDialogs: 0,
+        inert: true,
+        hidden: 'true',
+        identity: ['data-dialog-fading'],
+        clicks: 'none',
+        clickGoesThrough: true,
+        focus: IDS.truckChicago,
+      });
+      // Nothing a selector for the real sheet or its controls finds is the copy.
+      await expect(page.locator('[data-truck-sheet]')).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+      await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+      const down = (await closing()).filter((f) => f.copy);
+      expect(down[0]!.copyAnims).toBe(`none 0s ease | fade-away 0.3s linear | sheet-out 0.3s ${DIALOG}`);
+      // Down from its place to below the screen, while the scrim fades.
+      const cy = down.map((f) => f.copyY);
+      for (let i = 1; i < cy.length; i++) expect(cy[i]!).toBeGreaterThanOrEqual(cy[i - 1]! - 0.5);
+      expect(cy[0]!).toBeLessThan(height * 0.25);
+      expect(cy.at(-1)!).toBeGreaterThan(height * 0.75);
+      expect(down.at(-1)!.copyBackOpacity).toBeLessThan(0.3);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('phSheet: More comes up the same; Done and the tap outside it each leave a copy going down; closed mid-opening, the copy goes down from where it stood', async ({
+    browser,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    const { context, page } = await openPhoneBoard(browser);
+    try {
+      const more = page.getByRole('button', { name: /^More filters/ });
+      for (const close of ['Done', 'outside'] as const) {
+        const frames = await record(page, sheetFrame);
+        await more.tap();
+        await expect(page.locator('[data-phone-more-sheet]')).toBeVisible();
+        await expect.poll(() => stillMoving(page)).toBe(0);
+        await quiet(page);
+        expect((await frames()).find((f) => f.real)!.realAnim).toBe(`sheet-in 0.3s ${DIALOG}`);
+        const closing = await record(page, sheetFrame);
+        if (close === 'Done') {
+          await page.locator('[data-phone-more-sheet]').getByRole('button', { name: 'Done' }).tap();
+        } else {
+          await page.getByRole('button', { name: 'Close filters' }).tap({ position: { x: 8, y: 8 } });
+        }
+        await expect(page.locator('[data-phone-more-sheet]')).toHaveCount(0);
+        await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+        const down = (await closing()).filter((f) => f.copy);
+        expect(down.length, close).toBeGreaterThan(3);
+        expect(down[0]!.copyAnims, close).toBe(`none 0s ease | fade-away 0.3s linear | sheet-out 0.3s ${DIALOG}`);
+      }
+      // Mid-opening: closed 120ms in, it goes down from where it was drawn, never back to its place first.
+      const frames = await record(page, sheetFrame);
+      await page.evaluate(async () => {
+        [...document.querySelectorAll<HTMLButtonElement>('button')]
+          .find((b) => /^More filters/.test(b.getAttribute('aria-label') ?? ''))!
+          .click();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        [...document.querySelectorAll<HTMLButtonElement>('[data-phone-more-sheet] button')]
+          .find((b) => b.textContent?.trim() === 'Done')!
+          .click();
+      });
+      await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+      const seen = await frames();
+      const lastReal = seen.filter((f) => f.real).at(-1)!;
+      const firstCopy = seen.find((f) => f.copy)!;
+      process.stdout.write(`3bt phSheet mid-opening: last real ${lastReal.realY}, first copy ${firstCopy.copyY}\n`);
+      expect(lastReal.realY).toBeGreaterThan(0);
+      expect(firstCopy.copyY).toBeGreaterThanOrEqual(lastReal.realY - 0.5);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('under reduced motion neither plays, the sheets open and close at once, and the page ends in the same markup', async ({
+    browser,
+  }) => {
+    test.setTimeout(2 * 60_000);
+    const ends: string[] = [];
+    for (const reduced of [false, true]) {
+      await resetWorld();
+      const { context, page } = await openPhoneBoard(browser, reduced);
+      try {
+        const frames = await record(page, sheetFrame);
+        await page.locator('[data-phone-tab="map"]').tap();
+        await page.locator('[data-phone-tab="list"]').tap();
+        await page.locator(`[data-phone-card="${IDS.truckChicago}"]`).tap();
+        await expect(page.locator('[data-truck-sheet]')).toBeVisible();
+        await page.locator('[data-truck-sheet]').getByRole('button', { name: 'Close', exact: true }).tap();
+        await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
+        await expect.poll(() => stillMoving(page)).toBe(0);
+        await quiet(page);
+        const seen = await frames();
+        if (reduced) {
+          expect(await panes(page)).toEqual([]);
+          expect(seen.filter((f) => f.copy)).toEqual([]);
+          expect(seen.filter((f) => f.real && f.realY !== 0)).toEqual([]);
+        }
+        ends.push(await pageMarkup(page));
+      } finally {
+        await context.close();
+      }
+    }
+    if (ends[1] !== ends[0]) {
+      let at = 0;
+      while (ends[1]![at] === ends[0]![at]) at += 1;
+      process.stdout.write(`3bt MARKUP DIFF at ${at}: motion …${ends[0]!.slice(at - 200, at + 200)}… reduced …${ends[1]!.slice(at - 200, at + 200)}…\n`);
+    }
+    expect(ends[1]).toBe(ends[0]);
+  });
+
+  test('a density from the phone’s More sheet: no desktop list is drawn, so no view is held and no row glides', async ({
+    browser,
+  }) => {
+    const { context, page } = await openPhoneBoard(browser);
+    try {
+      await logBs(page);
+      await page.reload();
+      await page.locator(`[data-phone-card="${IDS.truckChicago}"]`).waitFor();
+      await quiet(page);
+      await page.getByRole('button', { name: /^More filters/ }).tap();
+      await page.locator('[data-phone-more-sheet]').getByRole('button', { name: 'compact' }).tap();
+      await expect(page.locator('[data-phone-more-sheet] button[aria-pressed="true"]', { hasText: 'compact' })).toBeVisible();
+      const scroller = page.locator('[data-board-rows]').locator('xpath=..');
+      expect(await scroller.evaluate((s) => [s.clientHeight, s.scrollTop])).toEqual([0, 0]);
+      expect(await bs(page)).toEqual([]);
+    } finally {
+      await context.close();
+    }
   });
 });

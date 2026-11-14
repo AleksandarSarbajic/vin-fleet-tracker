@@ -409,6 +409,22 @@ export const MOTION_MS = {
    * rows' own height, and rows out of view, jump. Never a stored density, a resize or a poll.
    */
   densityGlide: 390,
+  /*
+   * §12.160. The phone's two motions (phase 3bt), at the demo's Bold. One token each: 0 turns
+   * one off and skips its measuring.
+   */
+  /**
+   * The pane a person tapped on the phone's List | Map tabs: it comes in from the side of its
+   * tab (the list from the left, the map from the right) and fades in. The one going out is
+   * gone at once. SWING, Bold 270ms (On 180). Never a stored or default pane, a resize, code.
+   */
+  phPane: 270,
+  /**
+   * The phone's two sheets, the truck sheet and More: one a person opens comes up from the
+   * bottom, and one a person closes leaves a copy that slides back down while its scrim fades.
+   * Bold 300ms (On 200). At 0 they open and close as every other window does (§12.148).
+   */
+  phSheet: 300,
 } as const;
 
 /**
@@ -474,6 +490,9 @@ export const MOTION_SHAPE = {
 
   /** §12.159, beside its duration above. A pinned or unpinned truck's star grows from this scale. */
   pinStarFromScale: 0.2,
+
+  /** §12.160, beside its duration above. The pane a person tapped comes in from this far. */
+  phPanePx: 40,
 } as const;
 
 /**

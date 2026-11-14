@@ -1,6 +1,13 @@
 'use client';
 
-import type { HTMLAttributes, ReactNode, Ref } from 'react';
+import {
+  cloneElement,
+  isValidElement,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { MOTION_MS } from '@/design/tokens';
 import { useOpening } from './useOpening';
 
@@ -21,6 +28,13 @@ type Props = Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children' | 'st
   backdrop?: ReactNode;
   /** What goes on the panel: on a phone sheet the panel is the dialog. */
   panelProps?: HTMLAttributes<HTMLDivElement> & { [key: `data-${string}`]: string };
+  /**
+   * §12.160, phSheet. Only the phone's truck sheet and More sheet pass it: the sheet's own
+   * "a person closed me", which its close handlers set. With it, the panel comes up from below
+   * the screen while the backdrop fades in, and a person's close leaves a copy that goes back
+   * down while its backdrop fades. With `phSheet` at 0, or without it, a frame is §12.148's.
+   */
+  sheet?: { readonly current: boolean };
   children: ReactNode;
 };
 
@@ -40,27 +54,34 @@ export function DialogFrame({
   family,
   backdrop,
   panelProps,
+  sheet,
   children,
   ...scrim
 }: Props) {
+  const slide = sheet !== undefined && MOTION_MS.phSheet > 0;
   const { node, entering, style, ended } = useOpening<HTMLDivElement>(
     'window',
-    MOTION_MS.dialogIn,
+    slide ? MOTION_MS.phSheet : MOTION_MS.dialogIn,
     family,
+    slide ? sheet : undefined,
   );
 
   return (
     <div
       {...scrim}
       ref={node}
-      className={entering ? `${className} animate-scrim-in` : className}
-      style={style}
+      className={entering && !slide ? `${className} animate-scrim-in` : className}
+      style={slide ? undefined : style}
     >
-      {backdrop}
+      {slide && entering ? fadingIn(backdrop, style) : backdrop}
       <div
         {...panelProps}
         ref={panelRef}
-        className={entering ? `${panelClassName} animate-dialog-in` : panelClassName}
+        className={
+          entering
+            ? `${panelClassName} ${slide ? 'animate-sheet-in' : 'animate-dialog-in'}`
+            : panelClassName
+        }
         style={style}
         onAnimationEnd={ended}
       >
@@ -68,4 +89,15 @@ export function DialogFrame({
       </div>
     </div>
   );
+}
+
+/**
+ * §12.160. A sheet's scrim is its backdrop, the tap to close: it fades in on its own, so the
+ * panel coming up stays opaque. The class comes off with the panel's when the opening ends.
+ */
+function fadingIn(backdrop: ReactNode, style: CSSProperties | undefined): ReactNode {
+  if (!isValidElement<{ className?: string; style?: CSSProperties }>(backdrop)) return backdrop;
+  const own = backdrop.props.className;
+  const className = own ? `${own} animate-scrim-in` : 'animate-scrim-in';
+  return cloneElement(backdrop, style ? { className, style } : { className });
 }

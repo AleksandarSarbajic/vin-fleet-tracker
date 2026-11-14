@@ -94,7 +94,8 @@ async function recordOpening(page: Page) {
       };
     };
     const look = () => {
-      const panel = document.querySelector('.animate-dialog-in');
+      // A phone sheet's panel comes up rather than rising (§12.160): the same reading, its own name.
+      const panel = document.querySelector('.animate-dialog-in, .animate-sheet-in');
       if (panel && !w.__opening.panel) w.__opening.panel = read(panel);
       const scrim = document.querySelector('.animate-scrim-in');
       if (scrim && !w.__opening.scrim) w.__opening.scrim = read(scrim);
@@ -447,6 +448,17 @@ test('the copy shows what was on screen: typed text, a select choice, the scroll
   expect(result.clickReachesRow).toBe(true);
   await expect(page.locator('[data-dialog-fading]')).toHaveCount(0);
 });
+
+/** §12.160: the phone's truck sheet and More come up from the bottom; their tap-to-close keeps the scrim's fade. */
+const SHEET = {
+  panel: {
+    name: 'sheet-in',
+    duration: '0.3s',
+    timing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    fill: 'backwards',
+  },
+  scrim: { name: 'fade-in', duration: '0.22s', timing: 'linear', fill: 'backwards' },
+};
 
 const WINDOW = {
   panel: {
@@ -1246,7 +1258,7 @@ test.describe('every menu and dropdown opens at Medium, and fades when it closes
 test.describe('on a phone', () => {
   const size = SIZES[3]!;
 
-  test('the truck sheet opens at Medium from the bottom, and its backdrop never moves', async ({
+  test('the truck sheet comes up from the bottom (§12.160), and its backdrop never moves', async ({
     browser,
   }) => {
     const { context, page } = await onPhone(browser, size);
@@ -1259,7 +1271,7 @@ test.describe('on a phone', () => {
       await card.tap();
       const sheet = page.locator('[data-truck-sheet]');
       await expect(sheet).toBeVisible();
-      await expect.poll(opening).toEqual(WINDOW);
+      await expect.poll(opening).toEqual(SHEET);
       await expect(page.locator('.animate-dialog-in')).toHaveCount(0);
       expect(await sheet.getAttribute('role')).toBe('dialog');
 
@@ -1278,7 +1290,7 @@ test.describe('on a phone', () => {
     }
   });
 
-  test('the filters sheet opens at Medium', async ({ browser }) => {
+  test('the filters sheet comes up from the bottom (§12.160)', async ({ browser }) => {
     const { context, page } = await onPhone(browser, size);
     try {
       await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -1288,7 +1300,7 @@ test.describe('on a phone', () => {
       const opening = await recordOpening(page);
       await more.tap();
       await expect(page.locator('[data-phone-more-sheet]')).toBeVisible();
-      await expect.poll(opening).toEqual(WINDOW);
+      await expect.poll(opening).toEqual(SHEET);
     } finally {
       await context.close();
     }

@@ -57,6 +57,15 @@ export function TruckSheet({
   onShowOnMap: (id: string) => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  /**
+   * §12.160. Set by a person's close here, read as the sheet unmounts: its copy slides back
+   * down. Anything else that closes it leaves the window's copy (§12.148).
+   */
+  const closedByPerson = useRef(false);
+  const close = () => {
+    closedByPerson.current = true;
+    onClose();
+  };
   useReturnFocus(true);
   useEffect(() => {
     panel.current?.focus();
@@ -76,6 +85,7 @@ export function TruckSheet({
       className="fixed inset-0 z-40 md:hidden"
       panelClassName="absolute inset-x-0 bottom-0 flex max-h-[calc(100dvh-12px)] flex-col border-t border-accent bg-surface-raised outline-none origin-bottom"
       panelRef={panel}
+      sheet={closedByPerson}
       panelProps={{
         role: 'dialog',
         'aria-modal': true,
@@ -89,7 +99,7 @@ export function TruckSheet({
           type="button"
           aria-label="Close the truck sheet"
           tabIndex={-1}
-          onClick={onClose}
+          onClick={close}
           data-no-press=""
           className="absolute inset-0 h-full w-full bg-scrim"
         />
@@ -104,7 +114,7 @@ export function TruckSheet({
         </span>
         <button
           type="button"
-          onClick={onClose}
+          onClick={close}
           className="h-11 min-w-11 shrink-0 border border-line-control px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text"
         >
           Close
@@ -204,7 +214,11 @@ export function TruckSheet({
           </button>
           <button
             type="button"
-            onClick={() => onShowOnMap(row.id)}
+            onClick={() => {
+              // A person's tap: the sheet steps aside the way Close takes it (§12.160).
+              closedByPerson.current = true;
+              onShowOnMap(row.id);
+            }}
             className="h-11 flex-1 whitespace-nowrap border border-line-control px-3 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text"
           >
             Show on map

@@ -32,14 +32,17 @@ export { prefersReducedMotion };
 export const FADING_COPY = 'data-dialog-fading';
 
 /** Written whole, so Tailwind's content scan generates them. */
-const MOTION_IN = ['animate-scrim-in', 'animate-dialog-in', 'animate-menu-in'];
+const MOTION_IN = ['animate-scrim-in', 'animate-dialog-in', 'animate-menu-in', 'animate-sheet-in'];
 const FADING: Record<FrameKind, string[]> = {
   window: ['pointer-events-none', 'animate-window-out'],
   menu: ['pointer-events-none', 'animate-menu-out'],
+  // §12.160: the copy itself does not fade; its scrim does, and its panel goes back down.
+  sheet: ['pointer-events-none'],
 };
 const FADE_MS: Record<FrameKind, number> = {
   window: MOTION_MS.dialogOut,
   menu: MOTION_MS.menuOut,
+  sheet: MOTION_MS.phSheet,
 };
 /**
  * Above the highest window (z-[60]). A menu's copy stands in `body`, outside
@@ -50,8 +53,11 @@ const MENU_COPY_LAYER = '70';
 /** What would let anything find the copy instead of the real thing. */
 const IDENTITY = /^(id|name|for|role|tabindex|autofocus|aria-.*|data-.*)$/;
 
-/** A window fills the screen; a menu hangs from something. */
-export type FrameKind = 'window' | 'menu';
+/**
+ * A window fills the screen; a menu hangs from something. A sheet is a phone sheet a person
+ * closed (§12.160): a window whose copy slides back down rather than fading.
+ */
+export type FrameKind = 'window' | 'menu' | 'sheet';
 
 type Picture = {
   node: HTMLElement;
@@ -173,7 +179,7 @@ function takePicture(frame: HTMLElement, kind: FrameKind): Picture {
       copy.style.removeProperty('animation-delay');
       copy.style.opacity = opacity;
       // A menu's copy is placed by the box it was seen in, transform and all.
-      if (kind === 'window' && transform !== 'none') copy.style.transform = transform;
+      if (kind !== 'menu' && transform !== 'none') copy.style.transform = transform;
     }
     for (const a of [...copy.attributes]) {
       if (IDENTITY.test(a.name)) copy.removeAttribute(a.name);
@@ -213,7 +219,18 @@ function showPicture({ node, kind, scrolls }: Picture): void {
   node.setAttribute('aria-hidden', 'true');
   node.setAttribute('inert', '');
   const remove = () => node.remove();
-  node.addEventListener('animationend', remove, { once: true });
+  if (kind === 'sheet') {
+    // §12.160: the scrim (the frame's first child, its tap to close) fades, linear, and the panel
+    // (its last) goes back down. The copy goes when the panel is down.
+    const scrim = node.firstElementChild;
+    const panel = node.lastElementChild;
+    scrim?.classList.add('animate-sheet-scrim-out');
+    panel?.classList.add('animate-sheet-out');
+    const down = (event: Event) => {
+      if (event.target === panel) remove();
+    };
+    node.addEventListener('animationend', down);
+  } else node.addEventListener('animationend', remove, { once: true });
   // A tab in the background may hold the event back; the copy still goes.
   window.setTimeout(remove, FADE_MS[kind] * 2);
   document.body.append(node);

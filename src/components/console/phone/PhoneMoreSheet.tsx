@@ -36,6 +36,15 @@ export function PhoneMoreSheet({
 }) {
   const counts = chipCounts(rows);
   const panel = useRef<HTMLDivElement>(null);
+  /**
+   * §12.160. Set by a person's close here, read as the sheet unmounts: its copy slides back
+   * down. Anything else that closes it leaves the window's copy (§12.148).
+   */
+  const closedByPerson = useRef(false);
+  const close = () => {
+    closedByPerson.current = true;
+    onClose();
+  };
   useReturnFocus(true);
   useEffect(() => {
     panel.current?.focus();
@@ -46,6 +55,7 @@ export function PhoneMoreSheet({
       className="fixed inset-0 z-40 md:hidden"
       panelClassName="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto border-t border-line-control bg-surface-raised pb-3 outline-none origin-bottom"
       panelRef={panel}
+      sheet={closedByPerson}
       panelProps={{
         role: 'dialog',
         'aria-modal': true,
@@ -59,7 +69,7 @@ export function PhoneMoreSheet({
           type="button"
           aria-label="Close filters"
           tabIndex={-1}
-          onClick={onClose}
+          onClick={close}
           data-no-press=""
           className="absolute inset-0 h-full w-full bg-scrim"
         />
@@ -71,7 +81,7 @@ export function PhoneMoreSheet({
         </h2>
         <button
           type="button"
-          onClick={onClose}
+          onClick={close}
           className="h-11 min-w-11 border border-line-control px-4 font-cond text-[13px] font-semibold uppercase tracking-[.08em] text-text"
         >
           Done
