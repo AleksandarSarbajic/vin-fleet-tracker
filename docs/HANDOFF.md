@@ -137,6 +137,8 @@ Not live until pushed. App only (Vercel): no worker file reaches a changed one (
 **3bt: NOT pushed, NOT live** (2026-11-14): 3bp's narrow-width setup waits on what the page shows (test only); a person's pin or density keeps the board's view (§12.159, Part 2, Alex's to keep or strike); and the phone's pane swings in on a tap and its two sheets slide up and back down at the demo's Bold (§12.160). Committed as `566aa96`, `bec8fd0`, `257841e` and the docs commit; check 255 files / 4640 tests; full e2e `2026-11-14T06-02-14-083Z` 571 passed, 3 failed (none from 3bt: found wrong 6 and 7), 1.4 h, awake; `phone-signout` alone 2 passed.
 Not live until pushed. App only (Vercel): no worker file reaches a changed one (40 files walked), so no worker deploy. See "Phase 3bt" below.
 **3bu: NOT pushed, tests only** (2026-11-14): 3bg's gap-press test sends its press once the chip's glide runs and fails by name on a press that missed it (the cause: a slow page handled the press before the key; the app was right), and six tests that put a time hours ago expect its own day and week in Chicago, through `src/test/zone-day.ts`. Committed as `19a1f55`, `3a89bf7`, `b9c3f9f` and the docs commit; check 256 files / 4654 tests; the gap test 20 of 20. No app file changed, so nothing to deploy. See "Phase 3bu" below.
+**At the start of 3bv (2026-11-14): 3bo to 3bu are pushed**: origin's master was `9744ada`, the same as HEAD (pushed from this machine at 23:02 CET, `update by push` in the reflog; `git ls-remote` agreed). Whether Vercel has deployed 3bo to 3bt is not checked here.
+**3bv: NOT pushed, harness only** (2026-11-14): every e2e run, however it is started, gets the fake reader from `playwright.config.ts` (§12.161); the end of a run says when macOS ran it in DarkWake; `clockPatternAsOf` escapes its clocks; fixtures.ts's comment says what now + 26h is. Committed as `92e8cba`, `9ec65be`, `8a891cc` and the docs commit; check 256 files / 4667 tests; full e2e `2026-11-14T22-30-02-688Z` 575 passed, 0 failed, `phone-signout` ran, 1.4 h, awake, graphics on in all 85 power samples. No app file changed, so nothing to deploy. See "Phase 3bv" below.
 
 | Commit | What | § |
 |---|---|---|
@@ -514,7 +516,9 @@ exported parsed as `readerEnv` from `src/env/server.ts`. It never throws.
   `LLM_READER_API_KEY=sk-ant-e2e-SYNTHETIC-not-a-real-key-4f1c9a` and
   `E2E_READER_KEY_SCAN=1`. Playwright's `webServer` inherits them, so the
   e2e build and server start with them. `playwright.config.ts` is not
-  touched.
+  touched. **Since 3bv:** the config sets the four reader values for every
+  run, from `e2e/reader-env.ts` (§12.161); the script keeps only
+  `E2E_READER_KEY_SCAN=1`.
 - **The spec,** `e2e/reader-key-bundle.spec.ts`, scans every file under
   `.next-e2e/static` (the e2e build's directory) for that key.
   - A control first: the e2e Sentry DSN, which Next does inline, must be
@@ -12513,15 +12517,82 @@ Checked and left, because each holds at any hour: `e2e/arrival-anchor.spec.ts:72
 **Found wrong:**
 
 1. **3bg's gap-press test had no control that its press landed during a glide,** and sent the key and the press side by side. On a slow page the press came first and the test asked for a selection §12.149 does not promise. The press table and "a press behind a cancel" both had such a control (3bg's own lesson); this test did not. Fixed.
-2. **"The machine stayed awake for the whole run" does not see DarkWake.** 3bt's lid-closed runs said "awake" while macOS ran them in DarkWake (`pmset -g log`). The teardown looks for sleep only. Not changed: the e2e harness is outside this phase.
+2. **"The machine stayed awake for the whole run" does not see DarkWake.** 3bt's lid-closed runs said "awake" while macOS ran them in DarkWake (`pmset -g log`). The teardown looks for sleep only. Not changed: the e2e harness is outside this phase. **Closed by 3bv:** the end of a run samples `pmset -g systemstate` and says when Graphics was missing (see "Phase 3bv").
 3. **Two windows the brief did not list:** `load-edit.test.ts:396` (00:00 to 00:10 CT) and `EditStopModal.test.tsx:725` (00:00 to 02:00). Fixed.
 4. **reached-stop's check was loose** and clear-stop's "done today" proved nothing for two hours a night. Fixed.
-5. **`e2e/fixtures.ts:110` says "Tomorrow mid-afternoon Chicago time"** for now + 26h, which is any hour of the next day or the day after. Every test reading it needs only "a later day", so nothing fails. Not changed.
-6. **Nothing but `npm run e2e` keeps the suite off the live reader.** The fake vendor, its script and the synthetic key are set only in that npm script (`package.json:21`). `playwright.config.ts` passes the server no reader settings, so `npx playwright test` (my first full run, and any targeted run started that way) gives it `.env.local`'s: `LLM_READER_ENABLED=true`, the live vendor and its key. In that run the three ratecon-ai reads went to the live vendor and were refused with 401. Each sent the spec's invented layout, no real document, and the 401 says that key is no longer accepted (unverified beyond that status). `ratecon-ai.spec.ts` checks only that the button exists. Not changed: the e2e harness is outside this phase. Pinning the four reader settings in the config's `webServer.env` would close it, and is Alex's call.
+5. **`e2e/fixtures.ts:110` says "Tomorrow mid-afternoon Chicago time"** for now + 26h, which is any hour of the next day or the day after. Every test reading it needs only "a later day", so nothing fails. Not changed. **Closed by 3bv:** the comment says what the value is, a later day at any hour (see "Phase 3bv"; the bucket's section is §12.82, not §12.1).
+6. **Nothing but `npm run e2e` keeps the suite off the live reader.** The fake vendor, its script and the synthetic key are set only in that npm script (`package.json:21`). `playwright.config.ts` passes the server no reader settings, so `npx playwright test` (my first full run, and any targeted run started that way) gives it `.env.local`'s: `LLM_READER_ENABLED=true`, the live vendor and its key. In that run the three ratecon-ai reads went to the live vendor and were refused with 401. Each sent the spec's invented layout, no real document, and the 401 says that key is no longer accepted (unverified beyond that status). `ratecon-ai.spec.ts` checks only that the button exists. Not changed: the e2e harness is outside this phase. Pinning the four reader settings in the config's `webServer.env` would close it, and is Alex's call. **Closed by 3bv** on the advisor's brief: every run gets them from `playwright.config.ts` (§12.161, see "Phase 3bv").
 
 **Unverified:** what slowed the advisor's run at 12:18 CET; that DarkWake itself slows Chromium's main thread (inferred from the power log and the 3× slower evaluates in that run, not measured in DarkWake); the Part 2 e2e tests at a real midnight (the window was reached by moving the instants, not the clock); any browser but Chromium.
 
 **Next:** the advisor's verification and Alex's push: 3bo to 3bt as before, then 3bu's three test commits and its docs commit. 3bt's view hold stays Alex's to keep or strike.
+
+### Phase 3bv: the e2e harness, the fake reader for every run, a DarkWake line, two test-file fixes (2026-11-14)
+
+From the advisor's brief: 3bu's found wrong 6 (nothing but `npm run e2e` kept the suite off the live reader), found wrong 2 (the end-of-run line does not see DarkWake) and found wrong 5 (fixtures.ts's "tomorrow mid-afternoon"), and a gap in 3bu's helper. **Harness, test and docs files only: no app file changed, so nothing to deploy. NOT pushed.** Built on `9744ada`. The brief expected origin's master at `7464e30` and said to stop on any difference; it was at `9744ada`, because 3bo to 3bu were pushed from this machine at 23:02 CET (the reflog's `update by push`; `git ls-remote` agreed). HEAD and the tree were as expected and no part of this phase depends on origin, so it went on (found wrong 1).
+
+| Commit | What | Files |
+|---|---|---|
+| `92e8cba` | Part 1: `E2E_READER_ENV` (`e2e/reader-env.ts`), set by `playwright.config.ts` before `.env.local` loads and passed to the app's `webServer.env`; the `e2e` script keeps `E2E_READER_KEY_SCAN=1`; the specs' texts | 6 files, +61 −19 |
+| `9ec65be` | Part 2: `pmset -g systemstate` at the start, once a minute and at the end; the parser and the end lines; 12 cases | 4 files, +375 −5 |
+| `8a891cc` | Part 3: `clockPatternAsOf` escapes each clock, with a Berlin case; fixtures.ts's comment | 3 files, +30 −3 |
+| The docs commit | This section, §12.161, 3bu's found wrong 2, 5 and 6 closed, a pointer in the 2b follow-up, "What is live" | 2 files |
+
+**Part 1: the fake reader for every run (§12.161).**
+
+- **One place for the four values,** `E2E_READER_ENV`: `LLM_READER_ENABLED=true`, `LLM_READER_VENDOR=fake`, `LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json` and the synthetic `LLM_READER_API_KEY`. `playwright.config.ts` assigns them to `process.env` before `loadEnv({ path: '.env.local' })`, and spreads them into the app's `webServer.env`. ratecon-ai.spec.ts's `FAKE_SCRIPT` and the key scan's needle read the constant, so neither keeps its own copy.
+- **The test process: the runner's environment, not the constant alone.** dotenv (16.6.1) never overrides a variable already set, so with the values set first `.env.local`'s reader key reaches no process of the run: workers and global setup and teardown inherit the runner's environment, as `E2E_RUN_ID` does (§12.84). The key scan's check (`process.env.LLM_READER_API_KEY === SYNTHETIC_KEY`, a boolean) keeps its meaning and never holds the real key. The spec reading the constant alone would have left the real key in every worker. Forced (`Object.assign`), not `??=`, so a value in the shell does not win either.
+- **`LLM_READER_MODEL` is not pinned: the fake never reads it.** `parseReaderEnv` returns for `fake` at `src/env/schema.ts:418`, before the model is read at `:422` (for `anthropic` only), and the fake adapter names its own (`model = 'fake'`, `src/server/ratecon-reader/fake.ts:25`). No test depends on its value.
+- **Texts:** ratecon-ai.spec.ts's header and skip message; reader-key-bundle.spec.ts's header, skip message and check message; and ratecon-scan.spec.ts:34 and :148, which the brief did not list and which said the same ("as `npm run e2e` starts it"). The key scan's gate (`E2E_READER_KEY_SCAN=1`) and `e2e:ui` are unchanged.
+- **Proof, the invocation that failed in 3bu:** plain `npx playwright test e2e/ratecon-ai.spec.ts`, no npm script and no env on the command line (`test-results/2026-11-14T22-10-54-017Z`): 4 passed, setup and 3 of 3. The server's own row for the last read, in `fleet_e2e.ratecon_ai_reads`: `vendor = fake`, `outcome = ok`, 23 lines, 6400 input and 1080 output tokens, the spec's scripted usage (3200 and 540) for each read of the pair. That vendor is the server's setting (`handle-read.ts:191`, from `readerSettings()`), so it shows the server's environment, not the test's. The 503 in the second test's server log is its script's (`ratecon-ai.spec.ts:180`).
+- **The key scan:** `npm run e2e -- e2e/reader-key-bundle.spec.ts e2e/ratecon-ai.spec.ts` (`22-12-02-443Z`): 5 passed, the scan among them, not skipped. Both specs passed again after `FAKE_SCRIPT` took the constant (`22-18-14-059Z`, `22-21-20-117Z`).
+- **Nothing that can reach the live vendor was run:** no run with the pin removed, no `ratecon:eval-ai`, no `reader:smoke`. 3bu's 401 run (`2026-11-14T12-10-51-931Z`) is the "before".
+
+**Part 2: the end of a run sees DarkWake.** `e2e/run-clock.ts`, beside the sleep check:
+
+- **Sampling, macOS only:** `startPowerSampling` (global setup) deletes `test-results/.run-power.jsonl`, writes the first sample (`execFileSync`, 2s timeout), and starts an unref'd one-minute timer (`execFile`, 2s timeout, which never throws into the runner). `runPowerReport` (global teardown) stops the timer, appends the last sample, reads the file and returns the lines. Each sample is a JSON line: `atMs`, `pid`, and what pmset printed (`out`, cut at 500 characters) or why it did not (`error`). On other platforms both return at once: no sampling and no line.
+- **Setup and teardown share the file, not a module.** The timer's handle is kept on `globalThis` only so that a runner that starts a second run in one process (UI mode) stops the first one's timer; the samples live only in the file.
+- **The parser,** `readPowerSample`: `full` when the capabilities line lists Graphics as a word; `dark` for a capabilities line without it; `unread`, with the reason (`pmset printed nothing`, `no capabilities line`, `pmset timed out after 2000 ms`, `pmset failed: …`), for the rest and for any sample with an error. A stored line that is not a sample is counted as unread too (`storedPowerSamples`). An unread sample is named and counted as neither full wake nor dark.
+- **The end lines** (`powerLines`), after the sleep line, which is unchanged. Each sample stands for the time halfway to its neighbours, so the dark samples' share is about how long the run had no graphics. The texts, from the cases:
+  - dark: `e2e: 3 of 11 power samples found macOS without graphics (DarkWake), about 3 minutes of a 10-minute run: the page runs about 3x slower there, so timing failures may be from that.` One: `1 of 11 … about 1 minute …`; less than a minute: `under a minute`.
+  - unread: `e2e: 4 of 12 power samples could not be read, so the DarkWake check does not cover them: pmset timed out after 2000 ms (minutes 2 and 3); no capabilities line (minute 8); 1 stored line not readable as a sample.` One: `… does not cover it: pmset timed out after 2000 ms (minute 7).` Over five minutes for one reason: `minutes 1, 2, 3, 4, 5 and 2 more`.
+  - **Added, not in the brief: an all-clear** when no sample was dark, as the sleep check has one: `e2e: graphics were on in all 7 power samples: no DarkWake.` Beside unread ones: `e2e: graphics were on in 10 of 11 power samples, every one that could be read: no DarkWake.` None when nothing could be read. Without it a full-wake run would say nothing, and that cannot be told from a run that sampled nothing. It is also what shows the teardown read the timer's samples.
+  - none stored: `e2e: no power samples for this run, so no DarkWake check.`; the file unreadable: `e2e: the DarkWake check could not read its samples (…).` Neither throws or fails the run.
+- **Proof, a real run:** `npm run e2e --` six specs (`test-results/2026-11-14T22-21-20-117Z`, 98 passed, 5.6 min). Stored, 7 samples, all from pid 13639: setup's at 22:21:48.610Z; the timer's at 22:22:48.624, 22:23:48.624, 22:24:48.625, 22:25:48.627 and 22:26:48.628; teardown's at 22:26:56.028. Each was `Current System Capabilities are: CPU Graphics Audio Network \nCurrent Power State: 4\n`. The end lines: `e2e: the machine stayed awake for the whole run.`, then `e2e: graphics were on in all 7 power samples: no DarkWake.` Seven in the line and seven in the file: the teardown read what the setup's timer wrote, all in one process, the runner. A shorter run before it (`22-18-14-059Z`, 20 passed) stored 3, with one timer sample.
+- **Cases** (`src/test/run-clock.test.ts`, 12 new, 17 in all), made-up strings: today's full-wake line; a capabilities line without Graphics, marked in the test as the expected DarkWake shape, unverified on this Mac; Graphics as a word, not a piece of one; empty, blank and garbage output and an error, each unread with its reason; the lines with dark 0, 1 and several, unread 1 and several (two reasons and a stored line that is not a sample; seven for one reason), every sample unread, none stored, and samples stored out of order.
+
+**Part 3.**
+
+- **`e2e/fixtures.ts:110`:** the comment now says what the value is: now + 26 hours is a later calendar day in Chicago at any hour, the next day or the one after (no day is longer than 25 hours), so Upcoming whenever the run starts (§12.82), and not any particular hour. The value is unchanged.
+- **`src/test/zone-day.ts` `clockPatternAsOf`** escapes each clock before joining them. A new case in `zone-day.test.ts`, in Europe/Berlin, which en-US Intl names by offset: it checks that the name it derives contains `+`, takes the two clock lines either side of Berlin's midnight (one with the weekday, one without), and requires the pattern to match each in full. The Chicago cases are unchanged: their clocks have nothing to escape.
+
+**Tests.** `npm run check`: **256 files, 4667 tests** (+13: 12 in `run-clock.test.ts`, 1 in `zone-day.test.ts`). Alone: `run-clock.test.ts` 17 of 17, `zone-day.test.ts` 15 of 15.
+
+**Mutations,** each file restored and compared byte for byte (`cmp`):
+
+| Planted | Caught by |
+|---|---|
+| `readPowerSample` calls every sample full | 7 of 17: the dark and the unread parse cases, dark 1, dark several, unread 1, unread several, every sample unread. Still passing, rightly: the full-wake parse, the all-clear, none stored, the time order, the stored round trip and the five sleep cases |
+| `clockPatternAsOf` joins the clocks unescaped again | The Berlin case alone: `22:01 GMT+1: expected false to be true`; the other 14 pass |
+
+**Full e2e,** one invocation on `8a891cc`, through `npm run e2e` under `caffeinate -dims`, the lid open, in full wake (`pmset -g systemstate` before it: `Current System Capabilities are: CPU Graphics Audio Network`), on battery with Low Power Mode on (found wrong 6), 22:30:02 to 23:54:18 UTC (`test-results/2026-11-14T22-30-02-688Z`): **575 passed, 0 failed, 1.4 h**. `phone-signout` ran in it (1 passed), and so did the gap test (`new-motion.spec.ts:3255`), `ratecon-ai` (3 of 3, the fake vendor) and the key scan. `.last-run.json`: `"status": "passed"`, `failedTests` `[]`. Its end lines: `e2e: the machine stayed awake for the whole run.`, then `e2e: graphics were on in all 85 power samples: no DarkWake.` The file held 85 samples, all from pid 20812, from 22:30:35.611Z to 23:54:17.952Z, one a minute (59,999 to 60,015 ms apart), each the full-wake line. `git status` after it: only this commit's two docs files changed.
+
+**Found wrong:**
+
+1. **The brief's start state:** origin's master was `9744ada`, not `7464e30`: 3bo to 3bu had been pushed (above). The brief said to stop on any difference; the phase went on because HEAD and the tree matched and nothing in it depends on origin. Said here so it can be judged.
+2. **Global setup runs after the web servers start, not before.** `e2e/global-setup.ts:10` says it "Runs once, before the web server is started". In Playwright 1.63 the plugin setup, the web servers among it, comes first (`createGlobalSetupTasks`, `node_modules/playwright/lib/runner/index.js:6324`), and the runs agree: the run id is minted when the config loads (22:21:20), the first sample comes after the build, 28s later. So the sleep and DarkWake checks start after the build and do not cover it. Not changed: outside this phase's two test-file fixes.
+3. **§12.1 is not where Upcoming is.** The brief and 3bu's HANDOFF cite §12.1 (Deadline, LATE and AT_RISK) for "now + 26h is Upcoming". The bucket for a later calendar day is §12.82; the comment cites that.
+4. **ratecon-scan.spec.ts:34 and :148** also named `npm run e2e` as the way the reader comes on, not in the brief's list. Fixed with Part 1's texts.
+5. **The ratecon-ai and ratecon-scan skips can now only hide a breakage.** With the reader pinned on for every run, a server with no "Read with AI" button means the pin broke, and those specs skip instead of failing. A skip shows in the counts. Not changed: the brief did not ask.
+6. **Low Power Mode is a slow machine the end lines do not see.** The full run ran on battery (73% at its start, 57% at its end) with Low Power Mode on (`pmset -g`: `lowpowermode 1`), the lid open. It passed, in 1.4 h, where 3bu's full run on AC took 1.1 h. Graphics stays listed in Low Power Mode, so neither end line says so; `pmset -g` names it. Not added: outside the brief.
+
+**Unverified:**
+
+- That DarkWake drops Graphics from `pmset -g systemstate` on this Mac: no lid-closed run was sampled, and nobody closed the lid in this phase. The dark line and the all-clear both rest on it.
+- UI mode (`npm run e2e:ui`): not run, since it needs a person. It loads the same config, so the reader pin applies, and the timer for a second run in one process is stopped first; neither is seen in a run.
+- Any platform but macOS: no sampling and no line by the code, not run there.
+
+**Next:** the advisor's verification, then Alex's push of 3bv's four commits. 3bt's view hold stays Alex's to keep or strike.
 
 ## Next
 

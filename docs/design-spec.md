@@ -11732,6 +11732,31 @@ the first frame, the canvas's size; what never starts phPane; both sheets' frame
 animations, the copy's identity and its click going through, focus; a close mid-opening; reduced motion in the same
 markup; a density from More holding no view.
 
+## 12.161 Every e2e run reads with the fake vendor
+
+Until phase 3bv the fake reader was set in one place, the `e2e` npm script. `playwright.config.ts` loads
+`.env.local` and passed the app's server no reader settings, so `npx playwright test` and `npm run e2e:ui` built and
+started the server with `.env.local`'s: the reader on, the live vendor, its key. 3bu's first full run was started
+that way, and its three ratecon-ai reads went to the live vendor and were refused with a 401.
+
+- **One place:** `E2E_READER_ENV` in `e2e/reader-env.ts`: `LLM_READER_ENABLED=true`, `LLM_READER_VENDOR=fake`,
+  `LLM_READER_FAKE_SCRIPT=e2e/.fake-reader.json`, and an invented `LLM_READER_API_KEY` that opens nothing. The
+  ratecon-ai spec's script path and the key scan's needle read it.
+- **In the runner's environment, set before `.env.local` is loaded.** dotenv never overrides a variable already set,
+  so `.env.local`'s reader key reaches no process of the run: workers and global setup and teardown inherit the
+  runner's environment, as with `E2E_RUN_ID` (§12.84). Forced (`Object.assign`), not `??=`, so a value in the shell
+  does not win either. Chosen over the key scan reading the constant alone, which would leave the real key in every
+  worker: this way the scan's check that the run holds the synthetic key keeps its meaning, and no test process holds
+  the real key to send or print.
+- **And in the app's `webServer.env`,** for the build and the start alike.
+- **`LLM_READER_MODEL` is not pinned:** the fake never reads it. `parseReaderEnv` returns for `fake`
+  (`src/env/schema.ts:418`) before the model is read (`:422`, for `anthropic` only), and the fake names its own
+  (`model = 'fake'`, `ratecon-reader/fake.ts:25`).
+- The `e2e` script keeps `E2E_READER_KEY_SCAN=1` alone: the bundle scan still runs only through it.
+
+Proved by the invocation that failed in 3bu, plain `npx playwright test e2e/ratecon-ai.spec.ts`: 3 of 3, and the
+server's own row of the last read says `vendor = fake`, with the script's tokens.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
