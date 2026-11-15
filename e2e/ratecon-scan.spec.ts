@@ -143,11 +143,16 @@ test('a scan no template reads goes to Read with AI as any template miss does, t
   const { strip, requests } = await openNewLoad(page, context);
   const droppedAt = await dropScan(strip, unknownLayoutPages());
   await expect(strip.getByText('Layout not recognised, nothing filled.')).toBeVisible({ timeout: FIRST_SCAN });
+  /*
+   * Phase 3bw (§12.162): a failure, not a skip. playwright.config.ts gives every run E2E_READER_ENV,
+   * so a server with no "Read with AI" button means the pin broke, and a skip would only hide that.
+   * First after the miss: with the reader off the strip never reaches the state the scan note is in.
+   */
+  await expect(
+    strip.getByRole('button', { name: 'Read with AI' }),
+    'No "Read with AI" button: the e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts). See what changed there.',
+  ).toBeVisible();
   await expect(strip.locator('[data-ratecon-scan]')).toHaveText('Read from a scan, by OCR in this browser: every field it fills is marked Check.');
-  test.skip(
-    !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
-    'The e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts): see what changed there.',
-  );
 
   await strip.locator('[data-ratecon-sent] summary').click();
   const sent = (await strip.locator('[data-ratecon-sent] pre').textContent()) ?? '';

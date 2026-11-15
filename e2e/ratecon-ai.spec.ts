@@ -55,8 +55,8 @@ const PLACES = [
 
 /**
  * Writes the script; opens the new-load modal and pastes the invented layout.
- * Skips, and says why, when the e2e server runs with the reader off (no
- * button) rather than failing the gate. It asks the strip, not the route: a
+ * Fails, and says why, when the e2e server runs with the reader off (no
+ * button): until phase 3bw it skipped, which could only hide a broken pin. It asks the strip, not the route: a
  * probe of the route would spend one of the user's three reads a minute
  * (LIMITS.llm), and this file makes exactly three.
  */
@@ -89,10 +89,14 @@ async function pasteInvented(page: Page, context: BrowserContext, script: unknow
   await strip.getByLabel("Or paste the rate confirmation's text").focus();
   await page.keyboard.press('ControlOrMeta+v');
   await expect(strip.getByText('Layout not recognised, nothing filled.')).toBeVisible();
-  test.skip(
-    !(await strip.getByRole('button', { name: 'Read with AI' }).isVisible()),
-    'The e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts): see what changed there.',
-  );
+  /*
+   * Phase 3bw (§12.162): a failure, not a skip. playwright.config.ts gives every run E2E_READER_ENV,
+   * so a server with no "Read with AI" button means the pin broke, and a skip would only hide that.
+   */
+  await expect(
+    strip.getByRole('button', { name: 'Read with AI' }),
+    'No "Read with AI" button: the e2e server runs with the reader off, though playwright.config.ts gives every run E2E_READER_ENV (e2e/reader-env.ts). See what changed there.',
+  ).toBeVisible();
   return strip;
 }
 
