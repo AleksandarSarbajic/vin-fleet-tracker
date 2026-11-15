@@ -15,6 +15,7 @@ import { NoEldTag, needsNoEldTag } from '@/components/DriverName';
 export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
 import { calendarDayInZone } from '@/lib/calendar';
+import { searchHint } from './search-hint';
 import { timeInZone, windowEnd } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { ChipFlip } from './ChipFlip';
@@ -378,7 +379,8 @@ function DriverSlash() {
 
 function Marked({ text, query }: { text: string; query: string }) {
   const parts = highlight(text, query);
-  if (parts.length <= 1) return <>{text}</>;
+  // §12.163, phase 3bw: a cell matched whole is one part, and a hit. It was left plain.
+  if (!parts.some((p) => p.hit)) return <>{text}</>;
   return (
     <>
       {parts.map((p, i) =>
@@ -546,6 +548,13 @@ function TruckRowImpl({
   const appt = apptText(row);
 
   const position = stale ? `Last seen ${row.cityState ?? '—'}` : (row.cityState ?? '—');
+  /** §12.163 (QoL 10). What the search matched, when no text the row draws shows it. */
+  const hint = searchHint(
+    row,
+    query,
+    [String(truckLabel), row.driverName, columns === 8 ? position : null, row.nextStop ? nextStopText(row) : null],
+    columns === 8,
+  );
 
   /*
    * §14.5. Checked and selected are the same ground by design ("= selected"
@@ -667,7 +676,10 @@ function TruckRowImpl({
       >
         {/* One vehicle in this org is named literally "Truck" — fall back to
             the raw name rather than render a blank cell. */}
-        <span className="truncate">{row.truckNumber ?? row.samsaraName}</span>
+        {/* §12.163, phase 3bw (QoL 10): the truck number is marked as the other cells are. */}
+        <span className="truncate">
+          <Marked text={String(truckLabel)} query={query} />
+        </span>
         {/*
           §14.5: "pin after the truck number", in the truck cell rather than a
           column of its own — three per-row affordances, three cells, and none
@@ -763,6 +775,18 @@ function TruckRowImpl({
           push it into the ellipsis.
         */}
         <span className="min-w-0 truncate">
+          {/*
+            §12.163, phase 3bw (QoL 10). The field the search matched when nothing else on the
+            row shows it, first in the cell: at its left end, clear of the copy controls, which
+            sit over the right edge.
+          */}
+          {hint ? (
+            <span data-search-hint="">
+              <span className="font-cond text-micro uppercase tracking-[.08em] text-text-muted">{hint.label}</span>{' '}
+              <Marked text={hint.text} query={query} />
+              {' · '}
+            </span>
+          ) : null}
           {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
         </span>
         {row.nextStop && otherOpenLoads(row) > 0 ? (

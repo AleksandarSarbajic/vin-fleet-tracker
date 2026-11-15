@@ -84,3 +84,53 @@ test.describe('4: Today and Tomorrow beside the appointment date', () => {
     expect(clockIn(stop!.start, CHICAGO)).toBe(clockIn(seeded, CHICAGO));
   });
 });
+
+/* ------------------------------------------------------------------ 10 */
+
+const search = (page: Page) => page.getByRole('textbox', { name: 'Search the fleet' });
+
+test.describe('10: search marks what matched, everywhere it matched', () => {
+  test('the truck number is marked; a ZIP and a load number the row does not show are shown, marked; the copy controls over that cell still work', async ({
+    page,
+    context,
+  }) => {
+    await resetWorld();
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    const row = rowOf(page);
+    await expect(row).toBeVisible();
+
+    await search(page).fill(String(TRUCK_NUMBERS.chicago));
+    await expect(row.locator('.bg-highlight').first()).toHaveText(String(TRUCK_NUMBERS.chicago));
+    await expect(row.locator('[data-search-hint]')).toHaveCount(0);
+
+    // The seed's stop: 1 Test Dock, Chicago, IL 60601, load E2E-101, the truck's one open load.
+    await search(page).fill('60601');
+    await expect(row.locator('[data-search-hint]')).toHaveText('ZIP 60601 · ');
+    await expect(row.locator('[data-search-hint] .bg-highlight')).toHaveText('60601');
+    await expect(rowOf(page, IDS.truckAtZipStop)).toHaveCount(0);
+
+    // The copy controls sit over the right edge of the cell the hint starts: each is still the
+    // thing under its own middle, and each still copies.
+    await row.hover();
+    for (const [label, expected] of [
+      ['Copy address', '1 Test Dock, Chicago, IL, 60601'],
+      ['Copy load info', 'Load: E2E-101'],
+    ] as const) {
+      const button = row.getByRole('button', { name: label });
+      await expect(button).toBeVisible();
+      const box = (await button.boundingBox())!;
+      const top = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x!, y!)?.closest('button')?.getAttribute('aria-label') ?? null,
+        [box.x + box.width / 2, box.y + box.height / 2],
+      );
+      expect(top, `${label} is what lies under its own middle`).toBe(label);
+      await button.click();
+      await expect(button).toContainText('Copied');
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(expected);
+    }
+
+    await search(page).fill('e2e-101');
+    await expect(row.locator('[data-search-hint]')).toHaveText('Load E2E-101 · ');
+  });
+});
