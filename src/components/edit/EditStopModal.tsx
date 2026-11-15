@@ -134,6 +134,12 @@ interface Props {
    */
   onReload?: () => void;
   /**
+   * §12.163, phase 3bw (QoL 6). A save that closed the window: called with the truck, after the
+   * save's own fetch of the fleet has landed, so the board can show the row it saved. Not on a
+   * save that stays open to say something (warnings): the window says it there.
+   */
+  onSaved?: (truckId: string) => void;
+  /**
    * The server offers "Read with AI" to this user: the flag, a vendor, a
    * dispatcher or admin (docs/llm-reader-design.md §4). A prop from the
    * server, never a NEXT_PUBLIC_ variable. Off unless given.
@@ -295,6 +301,7 @@ function LoadEditor({
   dispatchTz,
   onClose,
   onReload,
+  onSaved,
   aiReader = false,
   read,
   landed,
@@ -1025,6 +1032,7 @@ function LoadEditor({
         }
 
         if (warnings.length === 0) {
+          onSaved?.(row.id);
           onClose();
           return;
         }
@@ -1040,7 +1048,7 @@ function LoadEditor({
         setSaving(false);
       }
     },
-    [active, closes, driverChanged, form, landOn, nextKey, onClose, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, selected, send, spent, version],
+    [active, closes, driverChanged, form, landOn, nextKey, onClose, onSaved, openedActive, overrideEdit, parsed, queryClient, reachedAnswer, read?.loadId, row.id, selectKey, selected, send, spent, version],
   );
 
   /** A driver change is confirmed against the SERVER's preview first (§9.10). */

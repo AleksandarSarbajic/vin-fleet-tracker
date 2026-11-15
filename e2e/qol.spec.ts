@@ -280,3 +280,277 @@ test.describe('12: drop anywhere in the edit window', () => {
     await expect(saved).toBeVisible();
   });
 });
+
+/* ------------------------------------------------------------------ 6 */
+
+type Glow = { duration: number; easing: string; frames: string; startTime: number | null; scrollTop: number };
+type GlowLog = { __glows: Glow[]; __glowAnimations: Animation[]; __scrolls: number[] };
+
+/** Every glow the page starts, with the list's scroll at that moment, from before the app's code runs. */
+const logGlows = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as unknown as GlowLog;
+    w.__glows = [];
+    w.__glowAnimations = [];
+    w.__scrolls = [];
+    const real = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames, options) {
+      const animation = real.call(this, frames, options);
+      if (this.hasAttribute('data-saved-glow')) {
+        const timing = (typeof options === 'object' ? options : { duration: options }) as KeyframeAnimationOptions;
+        const scroller = document.querySelector('[data-board-rows]')?.parentElement;
+        w.__glowAnimations.push(animation);
+        w.__glows.push({
+          duration: Number(timing.duration),
+          easing: String(timing.easing ?? ''),
+          frames: JSON.stringify(frames),
+          startTime: animation.startTime === null ? null : Number(animation.startTime),
+          scrollTop: scroller?.scrollTop ?? -1,
+        });
+      }
+      return animation;
+    };
+  });
+
+const glowsIn = (page: Page) => page.evaluate(() => (window as unknown as GlowLog).__glows);
+const scroller = (page: Page) => page.locator('[data-board-rows]').locator('..');
+
+/**
+ * Selects truck 101 by its row, as a person does: scrolled to where the virtualized list draws it,
+ * then clicked until the row says it is selected (a click before the page has hydrated selects
+ * nothing).
+ */
+async function selectRow(page: Page) {
+  const row = rowOf(page);
+  for (let i = 0; i < 60 && (await row.count()) === 0; i += 1) {
+    await scroller(page).evaluate((el) => el.scrollBy(0, 300));
+  }
+  await expect(async () => {
+    await row.click({ timeout: 2_000 });
+    await expect(row).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  return row;
+}
+
+async function saveNote(page: Page, modal: ReturnType<typeof editModal>, text: string) {
+  await modal.locator('textarea').fill(text);
+  await modal.getByRole('button', { name: /^Save$/ }).click();
+  await expect(modal).toBeHidden({ timeout: 20_000 });
+}
+
+test.describe('6: the row you just saved glows once', () => {
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+  test('Save glows the saved row once at the demo\'s values, in view at once when it was off screen, nothing left; a poll glows nothing', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await logGlows(page);
+    await resetWorld({ extraTrucks: 40 });
+    await page.goto('/');
+    await selectRow(page);
+    await page.keyboard.press('Enter');
+    const modal = editModal(page);
+    await expect(modal).toBeVisible();
+
+    // In view already: nothing scrolls.
+    const before = await scroller(page).evaluate((el) => el.scrollTop);
+    await saveNote(page, modal, 'Gate 4');
+    await expect.poll(async () => (await glowsIn(page)).length).toBe(1);
+    const [glow] = await glowsIn(page);
+    expect(glow).toMatchObject({ duration: 1000, easing: 'linear', scrollTop: before });
+    expect(JSON.parse(glow!.frames)).toEqual([{ opacity: 0 }, { opacity: 0.3, offset: 0.25 }, { opacity: 0 }]);
+    await expect(rowOf(page).locator('[data-saved-glow]')).toHaveCount(1);
+    // Over in its 1000ms, and nothing left: no node, no running animation on the row.
+    await expect(rowOf(page).locator('[data-saved-glow]')).toHaveCount(0, { timeout: 3_000 });
+    expect(await rowOf(page).evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length)).toBe(0);
+
+    // Off screen: the list scrolled away from it, to the farther end, while the window was open.
+    // Brought back at once.
+    await page.keyboard.press('Enter');
+    await expect(modal).toBeVisible();
+    const bottom = await scroller(page).evaluate((el) => {
+      const row = el.querySelector<HTMLElement>('[data-row-id="11111111-1111-4111-8111-111111111101"]')!;
+      const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+      el.scrollTop = offset > el.scrollHeight / 2 ? 0 : el.scrollHeight;
+      return el.scrollTop;
+    });
+    await expect(rowOf(page)).not.toBeInViewport();
+    // Every frame's scroll from the press of Save to the glow: one jump, no steps between.
+    await page.evaluate(() => {
+      const w = window as unknown as GlowLog;
+      const el = document.querySelector('[data-board-rows]')!.parentElement!;
+      const sample = () => {
+        w.__scrolls.push(el.scrollTop);
+        if (w.__scrolls.length < 90) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await saveNote(page, modal, 'Gate 5');
+    await expect.poll(async () => (await glowsIn(page)).length).toBe(2);
+    const second = (await glowsIn(page))[1]!;
+    expect(second.scrollTop).not.toBe(bottom);
+    await expect(rowOf(page)).toBeInViewport();
+    await page.waitForFunction(() => (window as unknown as GlowLog).__scrolls.length >= 90);
+    const seen = [...new Set(await page.evaluate(() => (window as unknown as GlowLog).__scrolls))];
+    expect(seen, `scroll positions seen, frame by frame: ${seen.join(', ')}`).toEqual([bottom, second.scrollTop]);
+
+    // A poll after it: nothing more glows.
+    await page.waitForResponse((r) => r.url().includes('/api/fleet') && r.request().method() === 'GET', { timeout: 30_000 });
+    await page.waitForTimeout(500);
+    expect(await glowsIn(page)).toHaveLength(2);
+  });
+
+  /**
+   * The press table, as 3bj's: a real mouse on the glowing row 20, 60, 120 and 300ms into the
+   * glow by its own clock (±18ms), held 40ms, 8 landed presses a cell, and 950ms, just before its
+   * end. A press that came early or late is tried again with a new save; a miss never is.
+   * Landed: it came down and went up on the saved row, the row heard the click, and its box did
+   * not change. The glow is opacity only on a layer that takes no pointer. The page's long tasks
+   * around each glow's start are recorded and said at the end.
+   */
+  test('a real mouse on the glowing row, 20 to 300ms into its glow: every press lands', async ({ page }) => {
+    test.setTimeout(10 * 60_000);
+    await logGlows(page);
+    await resetWorld();
+    await page.addInitScript(() => {
+      type Press = { at: number | null; down: boolean; up: boolean | null; clicked: boolean };
+      const w = window as unknown as GlowLog & { __press: Press | null; __long: { start: number; duration: number }[] };
+      w.__press = null;
+      // What keeps the page from taking a press early in the glow: its long tasks.
+      w.__long = [];
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) w.__long.push({ start: entry.startTime, duration: entry.duration });
+      }).observe({ type: 'longtask', buffered: true });
+      const onRow = (event: Event) => Boolean((event.target as Element | null)?.closest?.('[data-row-id="11111111-1111-4111-8111-111111111101"]'));
+      window.addEventListener(
+        'pointerdown',
+        (event) => {
+          const glow = w.__glowAnimations.at(-1);
+          const start = glow?.startTime;
+          w.__press = {
+            at: glow && start !== null && start !== undefined ? Number(document.timeline.currentTime) - Number(start) : null,
+            down: onRow(event),
+            up: null,
+            clicked: false,
+          };
+        },
+        true,
+      );
+      window.addEventListener('pointerup', (event) => {
+        if (w.__press) w.__press.up = onRow(event);
+      }, true);
+      window.addEventListener('click', (event) => {
+        if (w.__press && onRow(event)) w.__press.clicked = true;
+      }, true);
+    });
+    await page.goto('/');
+    const row = await selectRow(page);
+    const cdp = await page.context().newCDPSession(page);
+    const box = (await row.boundingBox())!;
+    const at = { x: box.x + box.width * 0.4, y: box.y + box.height / 2 };
+
+    const TIMES = [20, 60, 120, 300, 950];
+    const table: Record<number, { landed: number; missed: number; tries: number }> = {};
+    const check = row.locator('input[type="checkbox"]');
+    let lead = 10;
+    let n = 0;
+    let lastSave = 0;
+    const ats: string[] = [];
+    for (const target of TIMES) {
+      table[target] = { landed: 0, missed: 0, tries: 0 };
+      while (table[target]!.landed < 8) {
+        expect(table[target]!.tries, `${target}ms: too many presses came early or late (${ats.join(', ')})`).toBeLessThan(40);
+        table[target]!.tries += 1;
+        n += 1;
+        await page.keyboard.press('Enter');
+        const modal = editModal(page);
+        await expect(modal).toBeVisible();
+        await modal.locator('textarea').fill(`Round ${n}`);
+        const glows = (await glowsIn(page)).length;
+        const checkedBefore = await check.isChecked();
+        // Armed before Save: the page says when the glow's own clock reaches the target, less the
+        // press's own way in, and the press goes the moment it does.
+        const pressNow = page.waitForEvent('console', { predicate: (m) => m.text() === 'press now', timeout: 30_000 });
+        await page.evaluate(
+          ({ glows, until }) => {
+            const tick = () => {
+              const glow = (window as unknown as GlowLog).__glowAnimations[glows];
+              if (glow && glow.startTime !== null && Number(document.timeline.currentTime) - Number(glow.startTime) >= until) {
+                console.info('press now');
+                return;
+              }
+              requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          },
+          { glows, until: target - lead },
+        );
+        // The save route allows a person's pace, not a loop's: a save at most every 1.2s, and
+        // one refused for that is sent again, as a person would.
+        for (let attempt = 0; ; attempt += 1) {
+          await page.waitForTimeout(Math.max(0, lastSave + 1_200 - Date.now()));
+          lastSave = Date.now();
+          await modal.getByRole('button', { name: /^Save$/ }).click();
+          // The click took the mouse to Save: back over the row before the glow comes.
+          await page.mouse.move(at.x, at.y);
+          // The press goes the moment the page says: nothing of the test's may wait in between.
+          const outcome = await Promise.race([
+            pressNow.then(() => 'press' as const, () => 'no glow' as const),
+            modal
+              .getByText('Too many requests')
+              .waitFor({ timeout: 20_000 })
+              .then(() => 'limited' as const, () => 'no glow' as const),
+          ]);
+          expect(outcome, 'the save closed the window and its glow came').not.toBe('no glow');
+          if (outcome === 'press') break;
+          expect(attempt, 'the save route kept refusing').toBeLessThan(5);
+          await page.waitForTimeout(1_500);
+        }
+        // The browser's own press, what `page.mouse.down` sends, straight from a CDP session: the
+        // trace's snapshot around a Playwright action held that one back 350 to 500ms (as 3bm found).
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1 });
+        await page.waitForTimeout(40);
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1 });
+        await expect(modal).toBeHidden();
+        const press = await page.evaluate(() => (window as unknown as { __press: { at: number | null; down: boolean; up: boolean | null; clicked: boolean } | null }).__press);
+        expect(press, 'the press reached the page').not.toBeNull();
+        // Each round meets one glow: let this one land first.
+        await expect(row.locator('[data-saved-glow]')).toHaveCount(0, { timeout: 3_000 });
+        ats.push(`${target}:${press!.at === null ? 'none' : Math.round(press!.at)}/lead ${Math.round(lead)}`);
+        const error = (press!.at ?? 0) - target;
+        lead = Math.max(0, Math.min(150, lead + error));
+        if (press!.at === null || Math.abs(error) > 18) continue;
+        const checkedAfter = await check.isChecked();
+        if (press!.down && press!.up && press!.clicked && checkedAfter === checkedBefore) table[target]!.landed += 1;
+        else table[target]!.missed += 1;
+      }
+    }
+    console.info(`e2e: the glow's press table (landed, missed, tries): ${TIMES.map((t) => `${t}ms ${table[t]!.landed}/${table[t]!.missed}/${table[t]!.tries}`).join('; ')}`);
+    // Each glow's busy start: the long tasks that began within 600ms of it, in ms from its start.
+    const busy = await page.evaluate(() => {
+      const w = window as unknown as GlowLog & { __long: { start: number; duration: number }[] };
+      return w.__glowAnimations.map((glow) => {
+        const start = Number(glow.startTime);
+        return w.__long
+          .filter((t) => t.start + t.duration > start - 50 && t.start < start + 600)
+          .map((t) => `${Math.round(t.start - start)}+${Math.round(t.duration)}`)
+          .join(' ');
+      });
+    });
+    console.info(`e2e: long tasks around each glow's start (ms from it + length): ${busy.slice(0, 8).join(' | ')}`);
+    for (const t of TIMES) expect(table[t]!.missed, `${t}ms into the glow`).toBe(0);
+  });
+});
+
+test.describe('6, under reduced motion: the static tag the flash has', () => {
+  test('Save: nothing plays, and the row says "saved" after its chip', async ({ page }) => {
+    await logGlows(page);
+    await resetWorld();
+    const modal = await openModal(page);
+    await saveNote(page, modal, 'Gate 6');
+    await expect(rowOf(page).locator('[data-saved-tag]')).toHaveText('◆ saved');
+    await expect(rowOf(page).locator('[data-saved-glow]')).toHaveCount(0);
+    expect(await glowsIn(page)).toHaveLength(0);
+  });
+});

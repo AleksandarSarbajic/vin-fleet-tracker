@@ -425,6 +425,12 @@ export const MOTION_MS = {
    * Bold 300ms (On 200). At 0 they open and close as every other window does (§12.148).
    */
   phSheet: 300,
+  /**
+   * §12.163, phase 3bw (QoL 6). The row a person just saved glows once, in place: Bold 1000ms
+   * (On 700), linear, its peak (`savedGlowPeak`) weaker than the status flash. Started by a
+   * save's own cause, never by a poll. At 0 nothing plays.
+   */
+  savedGlow: 1000,
 } as const;
 
 /**
@@ -493,6 +499,13 @@ export const MOTION_SHAPE = {
 
   /** §12.160, beside its duration above. The pane a person tapped comes in from this far. */
   phPanePx: 40,
+
+  /**
+   * §12.163, beside its duration above. The saved row's glow rises to this opacity of the accent's
+   * veil a quarter of the way in: 3bf measured its peak at 12.1 from the row's ground, against
+   * 14.1 to 25.4 for the flash's.
+   */
+  savedGlowPeak: 0.3,
 } as const;
 
 /**

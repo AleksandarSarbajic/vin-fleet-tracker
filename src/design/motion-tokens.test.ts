@@ -261,3 +261,10 @@ describe('the numbers of the phone’s two motions (§12.160)', () => {
     expect(MOTION_MS.phSheet).toBe(300);
   });
 });
+
+describe('the number of the saved row\'s glow (§12.163)', () => {
+  it('the row a person just saved glows once in 1000ms, to 0.3 of the accent\'s veil', () => {
+    expect(MOTION_MS.savedGlow).toBe(1000);
+    expect(MOTION_SHAPE.savedGlowPeak).toBe(0.3);
+  });
+});

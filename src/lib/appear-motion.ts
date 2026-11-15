@@ -218,3 +218,36 @@ export function dropOn(el: Element, ms: number, px: number, started: Started): A
   if (animation) animation.currentTime = Math.max(0, elapsed);
   return animation;
 }
+
+/** Marks the saved row's glow, for `endSavedGlow` and for a test. */
+export const SAVED_GLOW = 'data-saved-glow';
+
+/**
+ * §12.163, phase 3bw (QoL 6). The row a person just saved glows once: an overlay of the accent's
+ * veil, as the flash is an overlay, so the row's own ground is never touched. It rises to `peak`
+ * a quarter of the way in and fades out, opacity only, linear, then goes. Nothing moves and
+ * nothing is left. Under reduced motion, or at 0, it starts nothing and adds nothing: the row
+ * says it another way (the static tag, as the flash does).
+ */
+export function savedGlow(row: HTMLElement, ms: number, peak: number): Animation | null {
+  if (taken(ms) || !mayMove(row)) return null;
+  endSavedGlow(row);
+  const glow = document.createElement('div');
+  glow.setAttribute(SAVED_GLOW, '');
+  glow.setAttribute('aria-hidden', 'true');
+  // At rest, while it waits for its first frame, it shows nothing.
+  glow.className = 'pointer-events-none absolute inset-0 -z-10 bg-accent-veil opacity-0';
+  row.prepend(glow);
+  const animation = play(glow, [{ opacity: 0 }, { opacity: peak, offset: 0.25 }, { opacity: 0 }], {
+    duration: ms,
+    easing: EASING.fade,
+  });
+  if (animation) whenOver(animation, () => glow.remove());
+  else glow.remove();
+  return animation;
+}
+
+/** Takes a glow off its row at once: the flash wins when both land together. */
+export function endSavedGlow(row: HTMLElement): void {
+  row.querySelectorAll(`:scope > [${SAVED_GLOW}]`).forEach((glow) => glow.remove());
+}

@@ -18,8 +18,9 @@ import { PIN_CAP } from '@/lib/pinned';
 import type { RowFlashView } from '@/lib/flash';
 import { EmptyList } from './EmptyList';
 import type { EmptyAction, EmptyState } from '@/lib/empty-state';
-import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
-import { dropIn } from '@/lib/appear-motion';
+import { FLASH_TAG_MS, MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
+import { dropIn, savedGlow } from '@/lib/appear-motion';
+import { prefersReducedMotion } from '@/lib/motion';
 import { useOnAppear } from '@/hooks/useOnAppear';
 
 /**
@@ -96,6 +97,8 @@ interface Props {
   flashFor: (id: string) => RowFlashView | null;
   /** §12.163 (QoL 11). What C last did on a row, while it is still being said. */
   keyCopyFor: (id: string) => KeyCopy | null;
+  /** §12.163 (QoL 6). The last save that closed the edit window: its truck, counted. */
+  savedCause?: { id: string; n: number } | null;
   /** §14 feature 14. One read at the top, not one matchMedia listener per row. */
   reducedMotion: boolean;
   isPinned: (id: string) => boolean;
@@ -138,6 +141,7 @@ export function FleetList({
   pinnedRows,
   flashFor,
   keyCopyFor,
+  savedCause = null,
   reducedMotion,
   isPinned,
   onPin,
@@ -275,6 +279,57 @@ export function FleetList({
     if (selectedId && selectedId !== lastSelected.current) scrollToId(selectedId);
     lastSelected.current = selectedId;
   }, [selectedId, scrollToId]);
+
+  /**
+   * §12.163, phase 3bw (QoL 6). The row a person just saved. Started only by a save's own named
+   * cause (`savedCause`, counted), never by what a poll changes (§12.4). Not in the list the board
+   * shows (a chip or a search hides it): no glow, and nothing in its place. Off screen: brought
+   * into view at once, never by an animated scroll, through the path a marker's click uses. The
+   * flash wins: a row already flashing, its status changed by the save, does not glow as well.
+   * Under reduced motion the row carries a static tag for a minute instead, as the flash does.
+   */
+  const [savedTag, setSavedTag] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!savedTag) return;
+    const timer = window.setTimeout(() => setSavedTag(null), FLASH_TAG_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedTag]);
+  const seenSave = useRef(savedCause?.n ?? 0);
+  useLayoutEffect(() => {
+    if (!savedCause || savedCause.n === seenSave.current) return;
+    seenSave.current = savedCause.n;
+    const { id } = savedCause;
+    const pinned = pinnedRows.some((r) => r.id === id);
+    if (!pinned && !rows.some((r) => r.id === id)) return;
+    if (flashFor(id)) return;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const rowOf = () => scroller.querySelector<HTMLElement>(`[data-row-id="${id}"]`);
+    if (pinned) {
+      // The pinned block opens the list: at the top, it is in view.
+      const row = rowOf();
+      const view = scroller.getBoundingClientRect();
+      const box = row?.getBoundingClientRect();
+      if (!box || box.top < view.top || box.bottom > view.bottom) scroller.scrollTop = 0;
+    } else {
+      scrollToId(id);
+    }
+    if (prefersReducedMotion()) {
+      setSavedTag({ id, at: Date.now() });
+      return;
+    }
+    // Drawn now, or on one of the next frames once the virtualizer has drawn where it scrolled.
+    // Never later: what draws it after that is not this save.
+    const until = performance.now() + 300;
+    const start = () => {
+      const row = rowOf();
+      if (row) savedGlow(row, MOTION_MS.savedGlow, MOTION_SHAPE.savedGlowPeak);
+      else if (performance.now() < until) requestAnimationFrame(start);
+    };
+    start();
+    // The cause alone: rows, pins and flashes are read as they are when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedCause]);
 
   const idsBefore = useRef<string[]>([]);
   useLayoutEffect(() => {
@@ -433,6 +488,7 @@ export function FleetList({
                 onCheck={onCheck}
                 flash={flashFor(row.id)}
                 keyCopy={keyCopyFor(row.id)}
+                savedTag={savedTag?.id === row.id ? savedTag.at : null}
                 reducedMotion={reducedMotion}
                 pinned
                 onPin={onPin}
@@ -490,6 +546,7 @@ export function FleetList({
                   onCheck={onCheck}
                   flash={flashFor(row.id)}
                   keyCopy={keyCopyFor(row.id)}
+                  savedTag={savedTag?.id === row.id ? savedTag.at : null}
                   reducedMotion={reducedMotion}
                   pinned={isPinned(row.id)}
                   onPin={onPin}

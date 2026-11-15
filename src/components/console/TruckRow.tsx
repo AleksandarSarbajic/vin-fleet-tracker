@@ -2,7 +2,7 @@
 
 import { memo, useLayoutEffect, useRef } from 'react';
 import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
-import { popIn } from '@/lib/appear-motion';
+import { endSavedGlow, popIn } from '@/lib/appear-motion';
 import type { FleetRow } from '@/server/fleet-query';
 import {
   basisShort,
@@ -439,6 +439,11 @@ interface Props {
   onPin: (id: string) => void;
   /** §12.163 (QoL 11). What C last did on this row, while it is still being said. */
   keyCopy?: KeyCopy | null;
+  /**
+   * §12.163 (QoL 6). Under reduced motion, when this row's load was saved: the glow's static
+   * tag, as the flash has one (§14.4). Null with motion: the glow said it.
+   */
+  savedTag?: number | null;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -538,11 +543,17 @@ function TruckRowImpl({
   pinned,
   onPin,
   keyCopy = null,
+  savedTag = null,
   query,
   onSelect,
   onEdit,
 }: Props) {
   const truckLabel = row.truckNumber ?? row.samsaraName;
+  /** §12.163 (QoL 6). The flash wins: a flash landing on a glowing row takes the glow away. */
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (flash && rowRef.current) endSavedGlow(rowRef.current);
+  }, [flash]);
   const quiet = !feedStale && row.status === 'TOMORROW';
   const stale = feedStale || row.status === 'STALE_GPS';
   const unassigned = row.status === 'UNASSIGNED';
@@ -577,6 +588,7 @@ function TruckRowImpl({
 
   return (
     <div
+      ref={rowRef}
       role="row"
       tabIndex={0}
       aria-selected={selected}
@@ -898,6 +910,16 @@ function TruckRowImpl({
             <span aria-hidden="true">◆ </span>
             {flash.tag.clock}
           </span>
+        ) : savedTag !== null ? (
+          // §12.163 (QoL 6). The glow's reduced-motion half, as the flash's: a static tag after
+          // the chip for a minute. The flash's tag wins over it.
+          <span
+            data-saved-tag=""
+            title="This truck's load was just saved"
+            className="shrink truncate font-cond text-micro uppercase tracking-[.08em] text-text-muted"
+          >
+            <span aria-hidden="true">◆ </span>saved
+          </span>
         ) : null}
       </div>
     </div>
@@ -927,6 +949,7 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.flash?.tag?.clock === b.flash?.tag?.clock &&
     a.keyCopy?.at === b.keyCopy?.at &&
     a.keyCopy?.refused === b.keyCopy?.refused &&
+    a.savedTag === b.savedTag &&
     a.query === b.query
   );
 });

@@ -722,6 +722,14 @@ export function Console({
   const keyCopyFor = useCallback((id: string) => (keyCopy?.id === id ? keyCopy : null), [keyCopy]);
 
   /**
+   * §12.163, phase 3bw (QoL 6). A save that closed the edit window, by name and counted, as
+   * `glideCause` names a glide's: only a save sets it, so a poll can never start the glow. Set
+   * after the save's own fetch of the fleet has landed (`EditStopModal` awaits it first).
+   */
+  const [savedCause, setSavedCause] = useState<{ id: string; n: number } | null>(null);
+  const onSaved = useCallback((id: string) => setSavedCause((was) => ({ id, n: (was?.n ?? 0) + 1 })), []);
+
+  /**
    * §14's `X` binding, and Esc's new first job.
    *
    * `X` checks the SELECTED row — the keyboard's way into a gesture the
@@ -1183,6 +1191,7 @@ export function Console({
                       pinnedRows={pinnedRows}
                       flashFor={flashFor}
                       keyCopyFor={keyCopyFor}
+                      savedCause={savedCause}
                       reducedMotion={reducedMotion}
                       isPinned={pins.isPinned}
                       onPin={pins.toggle}
@@ -1267,6 +1276,7 @@ export function Console({
             aiReader={aiReader}
             onClose={() => setEditingId(null)}
             onReload={() => setEditOpening((n) => n + 1)}
+            onSaved={onSaved}
           />
         ) : null}
 
