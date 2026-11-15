@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { IDS, TRUCK_NUMBERS, connect, makeFeedStale, resetWorld } from './fixtures';
 import { isoDayIn, startOfDayIn } from '../src/test/zone-day';
 import { nextCalendarDay } from '../src/lib/calendar';
+import { PU_SO, puSoBlocks } from '../src/test/ratecon-fixtures';
+import { tinyPdf } from '../src/test/tiny-pdf';
 
 /**
  * Phase 3bw (§12.163): QoL batch 1, each feature's `hand` path from the 3bf demo, in the real
@@ -209,5 +211,72 @@ test.describe('14: Copy the ETA line, from the popup', () => {
     await popup.getByRole('button', { name: 'Copy ETA' }).click();
     await expect(popup.locator('[data-eta-copy-note]')).toHaveText('The feed is down, so there is no ETA to quote from this screen.');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('before');
+  });
+});
+
+/* ------------------------------------------------------------------ 12 */
+
+/**
+ * A drag the way a browser sends one from the desktop: a real `File` in a real `DataTransfer`,
+ * on a real `DragEvent`. Synthesized, so it is not an OS drag (3bf's check limits): what it shows
+ * is that the window takes the event, by `defaultPrevented`, which is what keeps the browser from
+ * opening the file.
+ */
+async function dragFile(page: Page, selector: string, type: 'dragenter' | 'dragover' | 'drop', bytes: number[]): Promise<boolean> {
+  return page.evaluate(
+    ({ selector, type, bytes }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], 'invented-ratecon.pdf', { type: 'application/pdf' }));
+      const target = document.querySelector(selector);
+      if (!target) throw new Error(`nothing at ${selector}`);
+      const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
+    { selector, type, bytes },
+  );
+}
+
+const FORM = '[role="dialog"] [role="tabpanel"]';
+
+test.describe('12: drop anywhere in the edit window', () => {
+  test('on a new load a PDF let go on the form fills it, as on the strip; on saved stops it is taken, nothing is read, and the window says why', async ({
+    page,
+  }) => {
+    const pdf = [...tinyPdf(puSoBlocks(PU_SO))];
+    await resetWorld();
+    await db(async (sql) => {
+      await sql`delete from stops where load_id = ${IDS.loadChicago}`;
+      await sql`delete from loads where id = ${IDS.loadChicago}`;
+    });
+    const modal = await openModal(page);
+    const strip = modal.locator('[data-ratecon-strip]');
+    await expect(strip).toBeVisible();
+
+    expect(await dragFile(page, FORM, 'dragenter', pdf)).toBe(false);
+    expect(await dragFile(page, FORM, 'dragover', pdf), 'the window takes a file over the form').toBe(true);
+    await expect(modal.locator('.ring-accent')).toHaveCount(1);
+    expect(await dragFile(page, FORM, 'drop', pdf), 'the window takes a file let go on the form').toBe(true);
+    await expect(modal.locator('.ring-accent')).toHaveCount(0);
+    await expect(strip.locator('[data-ratecon-said]')).toHaveText(
+      'Filled 2 stops from PU / SO blocks (Name, Address, Date). Nothing is saved until Save.',
+      { timeout: 20_000 },
+    );
+    await expect(modal.getByRole('tab')).toHaveCount(2);
+    await expect(modal.locator('[data-drop-refused]')).toHaveCount(0);
+
+    // A load with saved stops: no strip, and a file let go is taken and says why.
+    await resetWorld();
+    await page.goto('/');
+    const saved = await openModal(page);
+    await expect(saved.locator('[data-ratecon-strip]')).toHaveCount(0);
+    expect(await dragFile(page, FORM, 'dragover', pdf)).toBe(true);
+    await expect(saved.locator('.ring-accent')).toHaveCount(0);
+    expect(await dragFile(page, FORM, 'drop', pdf), 'the browser would open the file').toBe(true);
+    await expect(saved.locator('[data-drop-refused]')).toHaveText(
+      'Nothing was read: this load has saved stops, and a read only fills a new load.',
+    );
+    expect(new URL(page.url()).pathname).toBe('/');
+    await expect(saved).toBeVisible();
   });
 });

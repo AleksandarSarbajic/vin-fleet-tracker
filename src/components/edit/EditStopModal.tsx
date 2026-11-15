@@ -104,6 +104,7 @@ import {
 import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
 import { DialogFrame } from '@/components/overlay/DialogFrame';
+import { carriesFiles, windowDrop } from './window-drop';
 
 /**
  * design-spec §9.9, §12.119. One modal covers editing a load and entering
@@ -399,6 +400,12 @@ function LoadEditor({
   /** §12.24. The save SUCCEEDED and something about it is worth knowing. */
   const [saveWarnings, setSaveWarnings] = useState<FieldError[]>(() => landed?.warnings ?? []);
   const [saving, setSaving] = useState(false);
+  /** §12.163 (QoL 12). A file is over the window, off the strip, and the strip would take it. */
+  const [dropOver, setDropOver] = useState(false);
+  /** §12.163 (QoL 12). Why the last file let go in the window was not read. */
+  const [dropRefused, setDropRefused] = useState<string | null>(null);
+  /** §12.163 (QoL 12). The strip's own way in for a file (`RateconStrip`'s `takeFile`). */
+  const takeFile = useRef<((file: File) => void) | null>(null);
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
   const [discarding, setDiscarding] = useState(false);
   /** §12.88. Clear stop's confirm step is open. */
@@ -1186,12 +1193,54 @@ function LoadEditor({
       ? `${stopsWithErrors} ${stopsWithErrors === 1 ? 'stop needs' : 'stops need'} attention before saving`
       : '';
 
+  /** §12.122. Only while every stop is unsaved: a fill replaces stops. */
+  const stripOffered = mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null);
+  /**
+   * §12.163, phase 3bw (QoL 12). A file let go anywhere in the window: read by the strip when it
+   * is offered, else swallowed with the reason. Off the strip only: the strip takes its own.
+   */
+  const offStrip = (target: EventTarget | null) =>
+    !(target instanceof Element && target.closest('[data-ratecon-strip]'));
+  const onWindowDragOver = (event: React.DragEvent) => {
+    if (!carriesFiles(event.dataTransfer?.types)) return;
+    // Taken, so the browser never opens the file: offered or not.
+    event.preventDefault();
+    if (!offStrip(event.target)) {
+      setDropOver(false);
+      return;
+    }
+    event.dataTransfer.dropEffect = 'copy';
+    setDropOver(stripOffered);
+  };
+  const onWindowDrop = (event: React.DragEvent) => {
+    if (!carriesFiles(event.dataTransfer?.types) || !offStrip(event.target)) return;
+    event.preventDefault();
+    setDropOver(false);
+    const answer = windowDrop({ mayEdit, saving, spent, anyStored: form.stops.some((s) => s.stored !== null) });
+    if ('refused' in answer) {
+      setDropRefused(answer.refused);
+      return;
+    }
+    setDropRefused(null);
+    takeFile.current?.(event.dataTransfer.files[0]!);
+  };
+
   return (
     <>
       <DialogFrame
         className="fixed inset-0 z-40 grid place-items-center bg-scrim p-6"
         family="edit-load"
-        panelClassName="flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal"
+        panelClassName={`flex max-h-[calc(100dvh-3rem)] w-[960px] max-w-[calc(100vw-3rem)] flex-col border border-line-hair bg-surface-overlay shadow-modal${
+          dropOver ? ' ring-2 ring-inset ring-accent' : ''
+        }`}
+        onDragEnter={(event) => {
+          if (carriesFiles(event.dataTransfer?.types)) setDropRefused(null);
+        }}
+        onDragOver={onWindowDragOver}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropOver(false);
+        }}
+        onDrop={onWindowDrop}
         panelRef={trap}
         role="dialog"
         aria-modal="true"
@@ -1366,9 +1415,22 @@ function LoadEditor({
             onActive={setActive}
           />
 
+          {/* §12.163 (QoL 12). Why a file let go in the window was not read. */}
+          {dropRefused ? (
+            <p
+              data-drop-refused=""
+              role="status"
+              className="border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg"
+            >
+              {dropRefused}
+            </p>
+          ) : null}
+
           {/* §12.122. Only while every stop is unsaved: a fill replaces stops. */}
-          {mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null) ? (
+          {stripOffered ? (
             <RateconStrip
+              takeFile={takeFile}
+              windowOver={dropOver}
               hasEntries={
                 // §12.122. A fill builds every stop afresh, so a typed note is an entry too (3bq).
                 form.loadNumber.trim() !== '' ||

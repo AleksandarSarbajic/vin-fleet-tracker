@@ -114,7 +114,17 @@ export function RateconStrip({
   onFill,
   countsVersion,
   editsVersion,
+  takeFile,
+  windowOver = false,
 }: {
+  /**
+   * §12.163, phase 3bw (QoL 12). Where the edit window finds this strip's own way in for a file:
+   * a file let go anywhere in the window comes here, and is read exactly as one let go on the
+   * strip.
+   */
+  takeFile?: { current: ((file: File) => void) | null };
+  /** A file is over the window, off the strip: the strip shows where it will go. */
+  windowOver?: boolean;
   /** The form already holds a load number or an address someone typed. */
   hasEntries: boolean;
   /** "4 fields to check" — live, from the modal. Null before any fill. */
@@ -269,6 +279,8 @@ export function RateconStrip({
     if (!file) return;
     readFile(file).catch(() => setStatus({ kind: 'said', tone: 'fault', text: 'This PDF could not be read.' }));
   };
+  // §12.163. The window's way in, kept current as `latestFill` is.
+  if (takeFile) takeFile.current = onFile;
 
   const open = status.kind !== 'idle';
 
@@ -297,7 +309,7 @@ export function RateconStrip({
         setOver(false);
         onFile(e.dataTransfer.files[0]);
       }}
-      className={`border-b border-line-hair px-4 ${over ? 'bg-surface-sunken' : ''}`}
+      className={`border-b border-line-hair px-4 ${over || windowOver ? 'bg-surface-sunken' : ''}`}
     >
       {/* The one line: 36 px. */}
       <div data-ratecon-line="" className="flex h-9 items-center gap-3">
