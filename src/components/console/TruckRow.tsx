@@ -16,6 +16,7 @@ export { basisShort, etaCaution, etaDetails, type BasisFacts };
 import type { Status } from '@/lib/status';
 import { calendarDayInZone } from '@/lib/calendar';
 import { searchHint } from './search-hint';
+import type { KeyCopy } from './key-copy';
 import { timeInZone, windowEnd } from '@/lib/format';
 import { highlight } from '@/lib/search';
 import { ChipFlip } from './ChipFlip';
@@ -436,6 +437,8 @@ interface Props {
   /** §14 feature 4. */
   pinned: boolean;
   onPin: (id: string) => void;
+  /** §12.163 (QoL 11). What C last did on this row, while it is still being said. */
+  keyCopy?: KeyCopy | null;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -534,6 +537,7 @@ function TruckRowImpl({
   reducedMotion,
   pinned,
   onPin,
+  keyCopy = null,
   query,
   onSelect,
   onEdit,
@@ -789,6 +793,12 @@ function TruckRowImpl({
           ) : null}
           {row.nextStop ? <Marked text={nextStopText(row)} query={query} /> : '—'}
         </span>
+        {/* §12.163 (QoL 11). Why C copied nothing, on the row it was pressed for. */}
+        {keyCopy?.refused ? (
+          <span data-key-refusal="" role="status" className="shrink-0 text-small text-status-risk-fg">
+            {keyCopy.refused}
+          </span>
+        ) : null}
         {row.nextStop && otherOpenLoads(row) > 0 ? (
           <MoreLoadsTag count={otherOpenLoads(row)} />
         ) : null}
@@ -803,6 +813,7 @@ function TruckRowImpl({
           label="Copy address"
           glyph="address"
           offset="54px"
+          confirmedAt={keyCopy && !keyCopy.refused ? keyCopy.at : null}
         />
       </div>
 
@@ -914,6 +925,8 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.flash?.ground === b.flash?.ground &&
     a.flash?.at === b.flash?.at &&
     a.flash?.tag?.clock === b.flash?.tag?.clock &&
+    a.keyCopy?.at === b.keyCopy?.at &&
+    a.keyCopy?.refused === b.keyCopy?.refused &&
     a.query === b.query
   );
 });

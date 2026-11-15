@@ -151,6 +151,9 @@ export const KEYMAP: readonly Binding[] = [
   },
   { keys: ['P'], label: 'Pin the selected truck', group: 'list', owner: 'usePinned' },
   { keys: ['X'], label: 'Check the selected row', group: 'list', owner: 'Console' },
+  /** §12.163, phase 3bw (QoL 11). Neither clashed with a binding. */
+  { keys: ['C'], label: "Copy the selected truck's address", group: 'list', owner: 'Console' },
+  { keys: ['T'], label: "Open the selected truck's timeline", group: 'list', owner: 'Console' },
   { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },
   /** §12.101. Two keys in turn, not together. Neither clashed with a binding. */
   { keys: ['G', 'H'], label: 'Open driver history', group: 'pages', owner: 'useGoKeys' },

@@ -4,6 +4,7 @@ import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState } 
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
+import type { KeyCopy } from './key-copy';
 import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
@@ -93,6 +94,8 @@ interface Props {
    * object when one of them changed.
    */
   flashFor: (id: string) => RowFlashView | null;
+  /** §12.163 (QoL 11). What C last did on a row, while it is still being said. */
+  keyCopyFor: (id: string) => KeyCopy | null;
   /** §14 feature 14. One read at the top, not one matchMedia listener per row. */
   reducedMotion: boolean;
   isPinned: (id: string) => boolean;
@@ -134,6 +137,7 @@ export function FleetList({
   onCheck,
   pinnedRows,
   flashFor,
+  keyCopyFor,
   reducedMotion,
   isPinned,
   onPin,
@@ -428,6 +432,7 @@ export function FleetList({
                 checked={checked.has(row.id)}
                 onCheck={onCheck}
                 flash={flashFor(row.id)}
+                keyCopy={keyCopyFor(row.id)}
                 reducedMotion={reducedMotion}
                 pinned
                 onPin={onPin}
@@ -484,6 +489,7 @@ export function FleetList({
                   checked={checked.has(row.id)}
                   onCheck={onCheck}
                   flash={flashFor(row.id)}
+                  keyCopy={keyCopyFor(row.id)}
                   reducedMotion={reducedMotion}
                   pinned={isPinned(row.id)}
                   onPin={onPin}

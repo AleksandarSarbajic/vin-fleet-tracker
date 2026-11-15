@@ -23,6 +23,7 @@ export function CopyButton({
   label,
   glyph,
   offset,
+  confirmedAt = null,
 }: {
   /** Null disables the control — there is nothing to copy. */
   value: string | null;
@@ -31,8 +32,20 @@ export function CopyButton({
   glyph: 'address' | 'load';
   /** Distance from the cell's right edge, so two can sit side by side. */
   offset: string;
+  /**
+   * §12.163, phase 3bw (QoL 11). When a copy made for this control by a key landed: C copies
+   * the selected row's address in Console, and the tick and the word are this control's, as
+   * for a click. A new value is a new copy.
+   */
+  confirmedAt?: number | null;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirmedSeen, setConfirmedSeen] = useState(confirmedAt ?? null);
+  if ((confirmedAt ?? null) !== confirmedSeen) {
+    // Adopted while rendering, as React advises for a prop that resets state.
+    setConfirmedSeen(confirmedAt ?? null);
+    if (confirmedAt !== null && confirmedAt !== undefined) setCopied(true);
+  }
 
   /**
    * §12.152. The tick pops inside the button, never the button: it keeps its place by its

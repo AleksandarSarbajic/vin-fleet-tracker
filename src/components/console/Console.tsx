@@ -22,6 +22,7 @@ import { ConsoleHeader, type HeaderNote } from './ConsoleHeader';
 import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
 import { Toasts } from './Toasts';
+import { CLIPBOARD_REFUSED, KEY_REFUSAL_MS, keyCopyText, type KeyCopy } from './key-copy';
 import {
   detectToasts,
   dispatchDay,
@@ -695,6 +696,32 @@ export function Console({
   }, [editingAllowed]);
 
   /**
+   * §12.163, phase 3bw (QoL 11). What C last did, on the row it was pressed for. Copied, the
+   * row's own address control says so (`CopyButton`'s `confirmedAt`), as for a click: the copy
+   * is lifted here, and the control is told when it landed. Refused, the row says why for
+   * `KEY_REFUSAL_MS`, as the pin limit does.
+   */
+  const [keyCopy, setKeyCopy] = useState<KeyCopy | null>(null);
+  useEffect(() => {
+    if (!keyCopy?.refused) return;
+    const timer = window.setTimeout(() => setKeyCopy(null), KEY_REFUSAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [keyCopy]);
+  const copyAddressByKey = useCallback((row: FleetRow) => {
+    const what = keyCopyText(row);
+    if ('refused' in what) {
+      setKeyCopy({ id: row.id, at: Date.now(), refused: what.refused });
+      return;
+    }
+    navigator.clipboard.writeText(what.text).then(
+      () => setKeyCopy({ id: row.id, at: Date.now(), refused: null }),
+      // Refused outside a secure context and in some embedded browsers: said, never silent.
+      () => setKeyCopy({ id: row.id, at: Date.now(), refused: CLIPBOARD_REFUSED }),
+    );
+  }, []);
+  const keyCopyFor = useCallback((id: string) => (keyCopy?.id === id ? keyCopy : null), [keyCopy]);
+
+  /**
    * §14's `X` binding, and Esc's new first job.
    *
    * `X` checks the SELECTED row — the keyboard's way into a gesture the
@@ -722,6 +749,18 @@ export function Console({
         bulk.toggle(selectedRow.id, event.shiftKey);
         return;
       }
+      // §12.163 (QoL 11). C and T, behind the same guards as X: not while typing, not behind a
+      // window, not with a modifier, and only for a selected truck the board is showing.
+      if ((event.key === 'c' || event.key === 'C') && selectedRow) {
+        event.preventDefault();
+        copyAddressByKey(selectedRow);
+        return;
+      }
+      if ((event.key === 't' || event.key === 'T') && selectedRow) {
+        event.preventDefault();
+        setTimelineId(selectedRow.id);
+        return;
+      }
       if (event.key === 'Escape' && bulk.count > 0) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -730,7 +769,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [bulk, selectedRow, editingId]);
+  }, [bulk, selectedRow, editingId, copyAddressByKey]);
 
   /* ------------------------- the header's scope (§12.91) ---------------- */
 
@@ -1143,6 +1182,7 @@ export function Console({
                       onCheck={bulk.toggle}
                       pinnedRows={pinnedRows}
                       flashFor={flashFor}
+                      keyCopyFor={keyCopyFor}
                       reducedMotion={reducedMotion}
                       isPinned={pins.isPinned}
                       onPin={pins.toggle}

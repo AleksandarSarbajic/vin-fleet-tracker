@@ -168,9 +168,10 @@ export function MapPopup({
   onEdit: ((id: string) => void) | null;
   /**
    * §14 feature 15. The popup is the per-truck surface that already exists,
-   * so the timeline opens from here rather than from a new binding — §14
-   * proposed five keys and no more, and a sixth is an addition the cheat
-   * sheet cannot justify.
+   * so the timeline opens from here. §14 proposed five keys and said a sixth
+   * was more than the cheat sheet could justify; phase 3bw (QoL 11, §12.163)
+   * superseded that with T, which opens the selected truck's timeline from the
+   * board, and C beside it. This button stays, for the mouse.
    */
   onTimeline: (id: string) => void;
   onClose: () => void;

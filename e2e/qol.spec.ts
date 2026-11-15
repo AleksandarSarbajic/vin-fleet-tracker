@@ -134,3 +134,46 @@ test.describe('10: search marks what matched, everywhere it matched', () => {
     await expect(row.locator('[data-search-hint]')).toHaveText('Load E2E-101 · ');
   });
 });
+
+/* ------------------------------------------------------------------ 11 */
+
+test.describe('11: C copies the address, T opens the timeline', () => {
+  test('click a row, press C, press T; neither works while typing or behind a window; the sheet lists both', async ({
+    page,
+    context,
+  }) => {
+    await resetWorld();
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    const row = rowOf(page);
+    await row.click();
+
+    await page.evaluate(() => navigator.clipboard.writeText('before'));
+    await page.keyboard.press('c');
+    await expect(row.getByRole('button', { name: 'Copy address' })).toContainText('Copied');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1 Test Dock, Chicago, IL, 60601');
+
+    // Typing: the key goes into the field, and nothing is copied.
+    await page.evaluate(() => navigator.clipboard.writeText('before'));
+    await search(page).focus();
+    await page.keyboard.press('c');
+    await expect(search(page)).toHaveValue('c');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('before');
+    await search(page).fill('');
+    await row.click();
+
+    await page.keyboard.press('t');
+    const timeline = page.getByRole('dialog', { name: `Timeline for truck ${TRUCK_NUMBERS.chicago}` });
+    await expect(timeline).toBeVisible();
+    // Behind a window: C copies nothing.
+    await page.keyboard.press('c');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('before');
+    await page.keyboard.press('Escape');
+    await expect(timeline).toBeHidden();
+
+    await page.keyboard.press('?');
+    const sheet = page.getByRole('dialog').filter({ hasText: "Copy the selected truck's address" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText("Open the selected truck's timeline");
+  });
+});
