@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   powerLines,
   powerSampleLine,
+  readLowPower,
   readPowerSample,
+  readSource,
   sleepLine,
   sleptMs,
   storedPowerSamples,
+  storedSupplySamples,
+  supplyLines,
+  supplySampleLine,
+  type PmsetAnswer,
   type PowerSample,
+  type SupplySample,
 } from '../../e2e/run-clock';
 
 /** The end-of-run sleep check's arithmetic, with invented readings. */
@@ -158,5 +165,119 @@ describe('the stored samples, which setup and teardown share as a file', () => {
     const written = [said(0, FULL_WAKE), failed(1, TIMED_OUT)];
     const text = `${written.map(powerSampleLine).join('')}not json\n\n{"atMs":"soon","pid":1}\n`;
     expect(storedPowerSamples(text)).toEqual({ samples: written, notSamples: 2 });
+  });
+});
+
+/**
+ * Phase 3bw (§12.162). Battery and Low Power Mode, from `pmset -g` and `pmset -g batt` at the
+ * start and the end of a run. Made-up output in the shape pmset prints, never this Mac's.
+ */
+const settings = (mode: string): PmsetAnswer => ({
+  out: `System-wide power settings:\nCurrently in use:\n standby              1\n lowpowermode         ${mode}\n womp                 0\n`,
+});
+const source = (from: string): PmsetAnswer => ({
+  out: `Now drawing from '${from}'\n -InternalBattery-0 (id=1234567)\t61%; discharging; 3:10 remaining present: true\n`,
+});
+const AC = source('AC Power');
+const BATTERY = source('Battery Power');
+const LOW_ON = settings('1');
+const LOW_OFF = settings('0');
+const supply = (minute: number, batt: PmsetAnswer, mode: PmsetAnswer): SupplySample => ({
+  atMs: 1_800_000_000_000 + minute * MIN,
+  pid: 4242,
+  settings: mode,
+  batt,
+});
+const SLOWER = 'a full run took 1.4 h like this in 3bv, against 1.1 h on AC in 3bu.';
+
+describe('reading pmset -g and pmset -g batt', () => {
+  it('Low Power Mode: 1 is on, 0 is off, anything else is named', () => {
+    expect(readLowPower(LOW_ON)).toEqual({ state: 'on' });
+    expect(readLowPower(LOW_OFF)).toEqual({ state: 'off' });
+    expect(readLowPower(settings('2'))).toEqual({ state: 'unread', why: 'lowpowermode 2, not 0 or 1' });
+    expect(readLowPower({ out: 'System-wide power settings:\n standby 1\n' })).toEqual({ state: 'unread', why: 'no lowpowermode line in pmset -g' });
+    expect(readLowPower({ out: '  \n' })).toEqual({ state: 'unread', why: 'pmset -g printed nothing' });
+    expect(readLowPower({ error: 'timed out after 2000 ms' })).toEqual({ state: 'unread', why: 'pmset -g: timed out after 2000 ms' });
+  });
+
+  it('the source: AC Power and Battery Power, anything else named', () => {
+    expect(readSource(AC)).toEqual({ state: 'ac' });
+    expect(readSource(BATTERY)).toEqual({ state: 'battery' });
+    expect(readSource(source('UPS Power'))).toEqual({ state: 'unread', why: 'drawing from UPS Power' });
+    expect(readSource({ out: 'garbage\n' })).toEqual({ state: 'unread', why: 'no power source line in pmset -g batt' });
+    expect(readSource({ out: '' })).toEqual({ state: 'unread', why: 'pmset -g batt printed nothing' });
+    expect(readSource({ error: 'failed: spawn pmset ENOENT' })).toEqual({ state: 'unread', why: 'pmset -g batt: failed: spawn pmset ENOENT' });
+  });
+});
+
+describe('the battery and Low Power Mode line at the end of a run', () => {
+  it('both, at the start and the end: the line the brief gave', () => {
+    expect(supplyLines([supply(0, BATTERY, LOW_ON), supply(84, BATTERY, LOW_ON)])).toEqual([
+      `e2e: ran on battery with Low Power Mode on (at the start and the end): ${SLOWER}`,
+    ]);
+  });
+
+  it('battery only, and only at the start: the charger went in during the run', () => {
+    expect(supplyLines([supply(0, BATTERY, LOW_OFF), supply(70, AC, LOW_OFF)])).toEqual([
+      `e2e: ran on battery (at the start): ${SLOWER}`,
+    ]);
+  });
+
+  it('Low Power Mode only, on AC, turned on during the run', () => {
+    expect(supplyLines([supply(0, AC, LOW_OFF), supply(70, AC, LOW_ON)])).toEqual([
+      `e2e: ran with Low Power Mode on (at the end): ${SLOWER}`,
+    ]);
+  });
+
+  it('each at different times: each says when', () => {
+    expect(supplyLines([supply(0, BATTERY, LOW_ON), supply(70, BATTERY, LOW_OFF)])).toEqual([
+      `e2e: ran on battery (at the start and the end) with Low Power Mode on (at the start): ${SLOWER}`,
+    ]);
+  });
+
+  it('neither, every answer read: an all-clear, so a run that sampled nothing is not mistaken for one that found nothing', () => {
+    expect(supplyLines([supply(0, AC, LOW_OFF), supply(66, AC, LOW_OFF)])).toEqual([
+      'e2e: on AC power with Low Power Mode off (at the start and the end).',
+    ]);
+  });
+
+  it('an answer it could not read is named, and the all-clear is not claimed over it', () => {
+    expect(supplyLines([supply(0, AC, LOW_OFF), supply(66, { error: 'timed out after 2000 ms' }, LOW_OFF)])).toEqual([
+      'e2e: the battery and Low Power Mode check could not read 1 of 4 pmset answers: pmset -g batt: timed out after 2000 ms (at the end).',
+    ]);
+  });
+
+  it('battery found beside an unread answer: both lines', () => {
+    expect(supplyLines([supply(0, BATTERY, { out: '' }), supply(66, BATTERY, LOW_OFF)])).toEqual([
+      `e2e: ran on battery (at the start and the end): ${SLOWER}`,
+      'e2e: the battery and Low Power Mode check could not read 1 of 4 pmset answers: pmset -g printed nothing (at the start).',
+    ]);
+  });
+
+  it('only the start sample, the end never stored: it is "the start" alone', () => {
+    expect(supplyLines([supply(0, BATTERY, LOW_ON)])).toEqual([
+      `e2e: ran on battery with Low Power Mode on (at the start): ${SLOWER}`,
+    ]);
+  });
+
+  it('none stored: says there is no check, rather than nothing', () => {
+    expect(supplyLines([])).toEqual(['e2e: no power-source samples for this run, so no battery or Low Power Mode check.']);
+  });
+
+  it('a stored line that is not a sample is named', () => {
+    expect(supplyLines([supply(0, AC, LOW_OFF), supply(5, AC, LOW_OFF)], 1)).toEqual([
+      'e2e: the battery and Low Power Mode check could not read its samples: 1 stored line not readable as a sample.',
+    ]);
+  });
+
+  it('reads them in time order, whatever order they were stored in', () => {
+    const samples = [supply(0, BATTERY, LOW_OFF), supply(70, AC, LOW_OFF)];
+    expect(supplyLines([...samples].reverse())).toEqual(supplyLines(samples));
+  });
+
+  it('the stored file comes back as written; a line that is not a sample is counted, never dropped', () => {
+    const written = [supply(0, BATTERY, LOW_ON), supply(70, { error: 'timed out after 2000 ms' }, LOW_ON)];
+    const text = `${written.map(supplySampleLine).join('')}not json\n\n{"atMs":1,"pid":2,"settings":{},"batt":{"out":""}}\n`;
+    expect(storedSupplySamples(text)).toEqual({ samples: written, notSamples: 2 });
   });
 });

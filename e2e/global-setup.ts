@@ -3,7 +3,7 @@ import { config as loadEnv } from 'dotenv';
 import { connect, TEST_DATABASE_URL } from './fixtures';
 import { refuseUnlessLoopback } from './loopback';
 import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
-import { markRunStart, startPowerSampling } from './run-clock';
+import { markRunStart, startPowerSampling, startSupplySampling } from './run-clock';
 
 /**
  * Runs once, AFTER the web servers have started: in Playwright 1.63 the plugin setup, the
@@ -32,6 +32,12 @@ export default async function globalSetup(): Promise<void> {
     startPowerSampling();
   } catch (error) {
     console.warn(`e2e: no DarkWake check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
+  }
+  // And whether it started on battery or with Low Power Mode on; asked again at the end (run-clock.ts, phase 3bw).
+  try {
+    startSupplySampling();
+  } catch (error) {
+    console.warn(`e2e: no battery or Low Power Mode check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
   }
 
   const host = refuseUnlessLoopback(TEST_DATABASE_URL);

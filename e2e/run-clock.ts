@@ -305,3 +305,186 @@ export function runPowerReport(file: string = POWER_FILE): string[] {
     return [`e2e: the DarkWake check could not read its samples (${error instanceof Error ? error.message : 'unknown error'}).`];
   }
 }
+
+/**
+ * Phase 3bw (§12.162). A slow power state the end lines did not see (3bv's found wrong 6). On
+ * battery, or with Low Power Mode on, the Mac runs the suite slower with Graphics still listed,
+ * so the DarkWake line calls it full wake: 3bv's full run took 1.4 h on battery with Low Power
+ * Mode on, where 3bu's took 1.1 h on AC. Two questions to pmset, at the start (global setup) and
+ * at the end (global teardown) only: `pmset -g` for its `lowpowermode` line, and `pmset -g batt`
+ * for where the power is drawn from. One line when either sample found battery or Low Power
+ * Mode. It never fails the run; an answer it cannot read is named; macOS only.
+ */
+
+/** What one pmset call printed, or why it did not answer. */
+export type PmsetAnswer = { out: string } | { error: string };
+
+export interface SupplySample {
+  /** Date.now() when pmset was asked. */
+  atMs: number;
+  pid: number;
+  /** `pmset -g`: the settings, with `lowpowermode`. */
+  settings: PmsetAnswer;
+  /** `pmset -g batt`: "Now drawing from 'AC Power'" or "'Battery Power'". */
+  batt: PmsetAnswer;
+}
+
+export type LowPowerReading = { state: 'on' } | { state: 'off' } | { state: 'unread'; why: string };
+export type SourceReading = { state: 'ac' } | { state: 'battery' } | { state: 'unread'; why: string };
+
+const SUPPLY_FILE = 'test-results/.run-supply.jsonl';
+const LOW_POWER = /^\s*lowpowermode\s+(\S+)\s*$/m;
+const DRAWING_FROM = /Now drawing from '([^']*)'/;
+/** The comparison the line carries, from the two full runs that measured it (3bu, 3bv). */
+const SLOWER =
+  'a full run took 1.4 h like this in 3bv, against 1.1 h on AC in 3bu.';
+
+/** `pmset -g`'s `lowpowermode` line: 1 on, 0 off, anything else named. */
+export function readLowPower(answer: PmsetAnswer): LowPowerReading {
+  if ('error' in answer) return { state: 'unread', why: `pmset -g: ${answer.error}` };
+  if (answer.out.trim() === '') return { state: 'unread', why: 'pmset -g printed nothing' };
+  const line = LOW_POWER.exec(answer.out);
+  if (!line) return { state: 'unread', why: 'no lowpowermode line in pmset -g' };
+  if (line[1] === '1') return { state: 'on' };
+  if (line[1] === '0') return { state: 'off' };
+  return { state: 'unread', why: `lowpowermode ${line[1] ?? ''}, not 0 or 1` };
+}
+
+/** `pmset -g batt`'s first line: AC Power, Battery Power, or anything else named. */
+export function readSource(answer: PmsetAnswer): SourceReading {
+  if ('error' in answer) return { state: 'unread', why: `pmset -g batt: ${answer.error}` };
+  if (answer.out.trim() === '') return { state: 'unread', why: 'pmset -g batt printed nothing' };
+  const line = DRAWING_FROM.exec(answer.out);
+  if (!line) return { state: 'unread', why: 'no power source line in pmset -g batt' };
+  if (line[1] === 'AC Power') return { state: 'ac' };
+  if (line[1] === 'Battery Power') return { state: 'battery' };
+  return { state: 'unread', why: `drawing from ${line[1] || 'nothing named'}` };
+}
+
+/** "at the start", "at the end", "at the start and the end"; a third sample is named by number. */
+function whenList(places: readonly string[]): string {
+  if (places.length === 1) return `at ${places[0]!}`;
+  return `at ${places.slice(0, -1).join(', ')} and ${places[places.length - 1]!}`;
+}
+
+/**
+ * The lines for the end of a run: one when battery or Low Power Mode was found, an all-clear when
+ * every answer was read and neither was, and one naming any answer that could not be read.
+ */
+export function supplyLines(stored: readonly SupplySample[], notSamples = 0): string[] {
+  if (stored.length + notSamples === 0) return ['e2e: no power-source samples for this run, so no battery or Low Power Mode check.'];
+  const samples = [...stored].sort((a, b) => a.atMs - b.atMs);
+  const place = (i: number) => (i === 0 ? 'the start' : i === samples.length - 1 ? 'the end' : `sample ${i + 1}`);
+
+  const battery: string[] = [];
+  const low: string[] = [];
+  const unread: string[] = [];
+  let read = 0;
+  samples.forEach((sample, i) => {
+    const source = readSource(sample.batt);
+    const mode = readLowPower(sample.settings);
+    if (source.state === 'battery') battery.push(place(i));
+    if (mode.state === 'on') low.push(place(i));
+    for (const reading of [source, mode]) {
+      if (reading.state === 'unread') unread.push(`${reading.why} (at ${place(i)})`);
+      else read += 1;
+    }
+  });
+  if (notSamples > 0) unread.push(`${notSamples} stored ${notSamples === 1 ? 'line' : 'lines'} not readable as a sample`);
+
+  const lines: string[] = [];
+  if (battery.length > 0 || low.length > 0) {
+    const same = battery.length > 0 && battery.join() === low.join();
+    const ran = same
+      ? `on battery with Low Power Mode on (${whenList(battery)})`
+      : [
+          battery.length > 0 ? `on battery (${whenList(battery)})` : '',
+          low.length > 0 ? `with Low Power Mode on (${whenList(low)})` : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+    lines.push(`e2e: ran ${ran}: ${SLOWER}`);
+  } else if (unread.length === 0 && samples.length > 0) {
+    lines.push(`e2e: on AC power with Low Power Mode off (${whenList(samples.map((_, i) => place(i)))}).`);
+  }
+  if (unread.length > 0) {
+    const answers = samples.length * 2;
+    const missed = answers - read;
+    const counted = missed > 0 ? `${missed} of ${answers} pmset ${answers === 1 ? 'answer' : 'answers'}` : 'its samples';
+    lines.push(`e2e: the battery and Low Power Mode check could not read ${counted}: ${unread.join('; ')}.`);
+  }
+  return lines;
+}
+
+export const supplySampleLine = (sample: SupplySample): string => `${JSON.stringify(sample)}\n`;
+
+function asAnswer(value: unknown): PmsetAnswer | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { out, error } = value as Record<string, unknown>;
+  if (typeof out === 'string') return { out };
+  if (typeof error === 'string') return { error };
+  return null;
+}
+
+/** The stored file back as samples. A line that is not one is counted, never dropped. */
+export function storedSupplySamples(text: string): { samples: SupplySample[]; notSamples: number } {
+  const samples: SupplySample[] = [];
+  let notSamples = 0;
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      // Not silent: counted here, and the end line names it.
+      notSamples += 1;
+      continue;
+    }
+    const { atMs, pid, settings, batt } = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+    const s = asAnswer(settings);
+    const b = asAnswer(batt);
+    if (typeof atMs !== 'number' || !Number.isFinite(atMs) || typeof pid !== 'number' || !s || !b) {
+      notSamples += 1;
+      continue;
+    }
+    samples.push({ atMs, pid, settings: s, batt: b });
+  }
+  return { samples, notSamples };
+}
+
+function askPmset(args: readonly string[]): PmsetAnswer {
+  try {
+    const out = execFileSync('pmset', [...args], { encoding: 'utf8', timeout: PMSET_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+    return { out: out.slice(0, OUT_KEPT * 4) };
+  } catch (error) {
+    return { error: pmsetFailure(error).replace(/^pmset /, '') };
+  }
+}
+
+/** Both questions, asked and waited for. Never throws. */
+export function takeSupplySample(): SupplySample {
+  const atMs = Date.now();
+  return { atMs, pid: process.pid, settings: askPmset(['-g']), batt: askPmset(['-g', 'batt']) };
+}
+
+/** At the start of a run (global setup): a new file holding the first sample. macOS only. */
+export function startSupplySampling(file: string = SUPPLY_FILE): void {
+  if (process.platform !== 'darwin') return;
+  // Gone first, so a failed write leaves no earlier run's samples for the teardown to read.
+  rmSync(file, { force: true });
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, supplySampleLine(takeSupplySample()));
+}
+
+/** At the end (global teardown): the last sample, then the lines. Never fails the run; macOS only. */
+export function runSupplyReport(file: string = SUPPLY_FILE): string[] {
+  if (process.platform !== 'darwin') return [];
+  try {
+    if (!existsSync(file)) return supplyLines([]);
+    appendFileSync(file, supplySampleLine(takeSupplySample()));
+    const { samples, notSamples } = storedSupplySamples(readFileSync(file, 'utf8'));
+    return supplyLines(samples, notSamples);
+  } catch (error) {
+    return [`e2e: the battery and Low Power Mode check could not read its samples (${error instanceof Error ? error.message : 'unknown error'}).`];
+  }
+}
