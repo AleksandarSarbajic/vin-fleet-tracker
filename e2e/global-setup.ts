@@ -1,17 +1,23 @@
 import { execFileSync } from 'node:child_process';
 import { config as loadEnv } from 'dotenv';
 import { connect, TEST_DATABASE_URL } from './fixtures';
+import { refuseUnlessLoopback } from './loopback';
 import { RESULTS_ROOT, RUNS_KEPT, pruneRuns } from './results';
 import { markRunStart, startPowerSampling } from './run-clock';
 
 /**
- * Runs once, before the web server is started.
+ * Runs once, AFTER the web servers have started: in Playwright 1.63 the plugin setup, the
+ * servers among it, comes before global setup (3bv's found wrong 2). Until phase 3bw this said
+ * "before the web server is started", which was never so.
  *
  * Two jobs: make sure the disposable cluster exists and is migrated, and
  * refuse loudly if the suite has been pointed at anything that is not
  * loopback. The second matters more than it looks — this suite truncates every
  * table it can reach, and §12.32 is the record of what that costs when the
- * refusal runs after the damage instead of before it.
+ * refusal runs after the damage instead of before it. So since 3bw the refusal
+ * runs first in `playwright.config.ts`, as the config loads, before any server
+ * starts (`e2e/loopback.ts`, §12.162); it is asked again here, before the first
+ * write, for a runner that loads this without that config.
  */
 export default async function globalSetup(): Promise<void> {
   loadEnv({ path: '.env.local' });
@@ -28,13 +34,7 @@ export default async function globalSetup(): Promise<void> {
     console.warn(`e2e: no DarkWake check this run (${error instanceof Error ? error.message : 'unknown error'}).`);
   }
 
-  const host = new URL(TEST_DATABASE_URL.replace(/^postgres(ql)?:/, 'http:')).hostname;
-  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
-    throw new Error(
-      `The e2e suite truncates every table it can reach and this database is ` +
-        `not on this machine (${host}). Refusing to run.`,
-    );
-  }
+  const host = refuseUnlessLoopback(TEST_DATABASE_URL);
 
   for (const name of ['E2E_EMAIL', 'E2E_PASSWORD', 'E2E_USER_ID']) {
     if (!process.env[name]) {

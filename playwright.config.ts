@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
+import { refuseUnlessLoopback } from './e2e/loopback';
 import { E2E_READER_ENV } from './e2e/reader-env';
 import { RESULTS_ROOT, newRunId } from './e2e/results';
 
@@ -43,6 +44,13 @@ export const E2E_DIST_DIR = '.next-e2e';
 const TEST_DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
   `postgres://postgres@127.0.0.1:${process.env.TEST_PGPORT ?? '55432'}/fleet_e2e`;
+/**
+ * §12.162, phase 3bw. The loopback refusal, as the config loads: before Playwright starts the
+ * web servers, which in 1.63 it does BEFORE global setup (3bv's found wrong 2). Until 3bw it ran
+ * only in global setup, and held because the build, `next start` and the readiness GET of
+ * /login write nothing. A refusal here throws, the config fails to load, and nothing starts.
+ */
+refuseUnlessLoopback(TEST_DATABASE_URL);
 
 /**
  * §12.84. This run's results folder: `test-results/<run id>`, never a shared
