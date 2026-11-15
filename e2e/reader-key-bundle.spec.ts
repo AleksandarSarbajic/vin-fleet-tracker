@@ -13,8 +13,9 @@ import { E2E_READER_ENV } from './reader-env';
  * in the environment of every run, and of the e2e build and server, however
  * the run is started (`E2E_READER_ENV`, §12.161), and does so BEFORE it loads
  * `.env.local`: the real key never reaches this process, so it is never read,
- * compared or printed here. The scan itself runs only with
- * E2E_READER_KEY_SCAN=1, which `npm run e2e` sets; any other run skips it.
+ * compared or printed here. The scan runs in every run, however it is started (phase 3bw,
+ * §12.162): since 3bv every run holds the synthetic key, so the old `E2E_READER_KEY_SCAN=1`
+ * gate only made `npx playwright test` and `npm run e2e:ui` skip it.
  */
 
 /** Invented: it opens nothing. Kept in one place, `e2e/reader-env.ts`. */
@@ -28,7 +29,6 @@ function files(dir: string): string[] {
 }
 
 test('the reader key is in no file of the browser bundle', () => {
-  test.skip(process.env.E2E_READER_KEY_SCAN !== '1', 'The key scan runs with E2E_READER_KEY_SCAN=1, which `npm run e2e` sets.');
   // A boolean, so a mismatch can never print whatever key is there instead.
   expect(process.env.LLM_READER_API_KEY === SYNTHETIC_KEY, 'playwright.config.ts must give the run the synthetic key').toBe(true);
 
