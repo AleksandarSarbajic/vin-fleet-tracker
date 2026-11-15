@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { WINDOW_OPTIONS, endsNextDay, fcfsEndDate, isIanaZone } from '@/lib/appointment';
-import { ZONES, zoneForState } from '@/lib/geo/zone-by-state';
+import { ZONES } from '@/lib/geo/zone-by-state';
+import { FCFS_DEFAULT_EARLIEST, FCFS_DEFAULT_LATEST, type AppointmentDraft } from './appointment-draft';
 import {
   timeInZone,
   wallTimeInstant,
@@ -10,6 +11,7 @@ import {
   windowLength,
   zoneAbbreviation,
 } from '@/lib/format';
+import { ownZone, stopDay, stopDayNote, type StopDayChoice } from '@/lib/stop-day';
 
 /**
  * The appointment as written on the rate confirmation (§9.9).
@@ -22,25 +24,13 @@ import {
  * server exactly as typed; the server converts.
  */
 
-export interface AppointmentDraft {
-  enabled: boolean;
-  type: 'APPT' | 'FCFS';
-  /** yyyy-mm-dd, as the date input gives it. Split into parts on the wire. */
-  date: string;
-  /** HH:mm. The appointment (APPT), or the EARLIEST receiving hour (FCFS). */
-  time: string;
-  /** HH:mm. FCFS only: the LATEST receiving hour — the deadline (§12.22). */
-  endTime: string;
-  tz: string;
-  windowMinutes: number;
-}
-
-/** §12.22. A new FCFS stop starts at the commonest receiving hours. */
-export const FCFS_DEFAULT_EARLIEST = '07:00';
-export const FCFS_DEFAULT_LATEST = '15:00';
-
-/** §12.120: the state map moved to lib, where the ZIP table's build reads it too. */
-export { zoneForState };
+/** The draft and its defaults live in `appointment-draft.ts` (phase 3bw), re-exported here. */
+export {
+  FCFS_DEFAULT_EARLIEST,
+  FCFS_DEFAULT_LATEST,
+  zoneForState,
+  type AppointmentDraft,
+} from './appointment-draft';
 
 export function AppointmentFields({
   draft,
@@ -86,6 +76,33 @@ export function AppointmentFields({
   initialFocus?: boolean;
 }) {
   const set = (patch: Partial<AppointmentDraft>) => onChange({ ...draft, ...patch });
+
+  /**
+   * §12.163, phase 3bw (QoL 4). Today and Tomorrow: the date at the stop, worked out at the
+   * click from the stop's own zone (the one in the field below), never the dispatcher's. It goes
+   * through `set` as a typed date does: a wall date, and the server converts. What the click
+   * found is kept for its note, which shows only while the date is the one it wrote, so the
+   * window looks the same at every hour until someone presses one.
+   */
+  const [picked, setPicked] = useState<{ date: string; zone: string; note: string | null } | null>(null);
+  const pickDay = (which: StopDayChoice) => {
+    if (!isIanaZone(draft.tz)) return;
+    const now = new Date();
+    const date = stopDay(now, draft.tz, which);
+    setPicked({ date, zone: draft.tz, note: stopDayNote(now, draft.tz, ownZone()) });
+    set({ date });
+  };
+  /**
+   * On a new stop whose zone still follows the address (`auto`), a state or ZIP typed after the
+   * click can move the zone. The date stays as written, as a typed date does; the note says
+   * which zone it was worked out in, rather than claim the new one's.
+   */
+  const dayNote =
+    picked && picked.date === draft.date
+      ? picked.zone === draft.tz
+        ? picked.note
+        : `Worked out in ${picked.zone}. The zone is now ${draft.tz}: press Today or Tomorrow again for the date there.`
+      : null;
 
   /**
    * The badge inside the time field, and the read-only "your clock" line.
@@ -233,26 +250,48 @@ export function AppointmentFields({
       {draft.enabled ? (
         <>
           <div className="grid grid-cols-3 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-small text-text-secondary">
-                Date (stop-local)
-              </span>
-              <input
-                type="date"
-                data-fill="appointment.date"
-                data-initial-focus={initialFocus ? '' : undefined}
-                value={draft.date}
-                onChange={(e) => set({ date: e.target.value })}
-                className={`h-10 w-full border bg-surface-sunken px-2.5 text-body tabular-nums text-text ${
-                  dateError ? 'border-status-late-fg' : 'border-line-hair'
-                }`}
-              />
-              {dateError ? (
-                <span role="alert" className="mt-1 block text-small text-status-late-fg">
-                  {dateError}
+            {/*
+              §12.163. The two buttons sit beside the label, not inside it: a button inside a
+              <label> is a labelable control, and the first one would take the label from the
+              date input.
+            */}
+            <div className="relative">
+              <label className="block">
+                <span className="mb-1 block text-small text-text-secondary">
+                  Date (stop-local)
                 </span>
-              ) : null}
-            </label>
+                <input
+                  type="date"
+                  data-fill="appointment.date"
+                  data-initial-focus={initialFocus ? '' : undefined}
+                  value={draft.date}
+                  onChange={(e) => set({ date: e.target.value })}
+                  className={`h-10 w-full border bg-surface-sunken px-2.5 text-body tabular-nums text-text ${
+                    dateError ? 'border-status-late-fg' : 'border-line-hair'
+                  }`}
+                />
+                {dateError ? (
+                  <span role="alert" className="mt-1 block text-small text-status-late-fg">
+                    {dateError}
+                  </span>
+                ) : null}
+              </label>
+              <span className="absolute right-0 top-0 flex items-baseline gap-2">
+                {(['today', 'tomorrow'] as const).map((which) => (
+                  <button
+                    key={which}
+                    type="button"
+                    data-stop-day={which}
+                    aria-label={`${which === 'today' ? 'Today' : 'Tomorrow'} at this stop`}
+                    title={`The date ${which === 'today' ? 'today' : 'tomorrow'} at this stop, in its own zone`}
+                    onClick={() => pickDay(which)}
+                    className="font-cond text-micro font-semibold uppercase leading-none tracking-[.09em] text-accent hover:underline disabled:text-text-muted"
+                  >
+                    {which === 'today' ? 'Today' : 'Tomorrow'}
+                  </button>
+                ))}
+              </span>
+            </div>
 
             <label className="block">
               <span className="mb-1 block text-small text-text-secondary">
@@ -319,6 +358,12 @@ export function AppointmentFields({
               )}
             </label>
           </div>
+
+          {dayNote ? (
+            <p data-stop-day-note="" role="status" className="mt-1.5 text-small text-text-secondary">
+              {dayNote}
+            </p>
+          ) : null}
 
           {deadline && !error ? (
             <p

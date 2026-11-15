@@ -10,7 +10,7 @@ import {
   FCFS_DEFAULT_LATEST,
   zoneForState,
   type AppointmentDraft,
-} from './AppointmentFields';
+} from './appointment-draft';
 import type { ArrivalDraft, DepartureDraft } from './ArrivalFields';
 import { zoneForAddress, type ZoneVerdict } from '@/lib/geo/zone-for-address';
 import type { AddressField, PastedAddress } from '@/lib/paste-address';
