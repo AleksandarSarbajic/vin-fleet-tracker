@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Popup } from 'react-map-gl/mapbox';
 import type { FleetRow } from '@/server/fleet-query';
 import { compassPoint, elapsed, mph, timeInZone, windowEnd } from '@/lib/format';
@@ -11,6 +11,7 @@ import { DriverName, NoEldTag, needsNoEldTag } from '@/components/DriverName';
 import { OVERRIDE_REASON_LABEL } from '@/lib/override';
 import { STATUS_LABEL } from '@/lib/status';
 import { DESKTOP_ONLY } from '@/lib/editing';
+import { etaLine } from './eta-line';
 
 /**
  * Read-only. design-spec §9.3: the popup repeats every fact the detail panel
@@ -198,6 +199,31 @@ export function MapPopup({
     return () => observer.disconnect();
   }, [located]);
 
+  /**
+   * §12.163, phase 3bw (QoL 14). Copy ETA: what the last press did, for this truck. Copied, the
+   * button says so for as long as the row's copy controls do (1.4s); refused, a line under the
+   * buttons says why until the next press or another truck.
+   */
+  const [etaCopy, setEtaCopy] = useState<{ id: string; copied: boolean; note: string | null } | null>(null);
+  useEffect(() => {
+    if (!etaCopy?.copied) return;
+    const timer = window.setTimeout(() => setEtaCopy(null), 1_400);
+    return () => window.clearTimeout(timer);
+  }, [etaCopy]);
+  const shownCopy = etaCopy?.id === row.id ? etaCopy : null;
+  const copyEta = () => {
+    const what = etaLine(row, feedStale);
+    if ('refused' in what) {
+      setEtaCopy({ id: row.id, copied: false, note: what.refused });
+      return;
+    }
+    navigator.clipboard.writeText(what.text).then(
+      () => setEtaCopy({ id: row.id, copied: true, note: null }),
+      // A refused clipboard is said: staying silent would leave the old text to be pasted.
+      () => setEtaCopy({ id: row.id, copied: false, note: 'This browser would not copy, so nothing was copied.' }),
+    );
+  };
+
   if (row.lat === null || row.lng === null) return null;
 
   const speed = mph(row.speedMph);
@@ -339,6 +365,16 @@ export function MapPopup({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-line-soft px-[10px] py-2">
+          {row.nextStop ? (
+            <button
+              type="button"
+              data-copy-eta=""
+              onClick={copyEta}
+              className="h-7 border border-line-hair px-2.5 font-cond text-micro uppercase tracking-[.09em] text-text-secondary hover:bg-row-hover"
+            >
+              {shownCopy?.copied ? '✓ Copied' : 'Copy ETA'}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onTimeline(row.id)}
@@ -360,6 +396,11 @@ export function MapPopup({
             </span>
           )}
         </div>
+        {shownCopy?.note ? (
+          <p data-eta-copy-note="" role="status" className="border-t border-line-soft px-[10px] py-1.5 text-small text-status-risk-fg">
+            {shownCopy.note}
+          </p>
+        ) : null}
       </div>
     </Popup>
   );

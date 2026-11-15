@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
+import { IDS, TRUCK_NUMBERS, connect, makeFeedStale, resetWorld } from './fixtures';
 import { isoDayIn, startOfDayIn } from '../src/test/zone-day';
 import { nextCalendarDay } from '../src/lib/calendar';
 
@@ -175,5 +175,39 @@ test.describe('11: C copies the address, T opens the timeline', () => {
     const sheet = page.getByRole('dialog').filter({ hasText: "Copy the selected truck's address" });
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText("Open the selected truck's timeline");
+  });
+});
+
+/* ------------------------------------------------------------------ 14 */
+
+test.describe('14: Copy the ETA line, from the popup', () => {
+  test('select a truck, Copy ETA: one line whose ETA is the popup\'s own; on a stale feed it copies nothing and says why', async ({
+    page,
+    context,
+  }) => {
+    await resetWorld();
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    await rowOf(page).click();
+    const popup = page.locator('.mapboxgl-popup');
+    await expect(popup).toBeVisible();
+    const projected = (await popup.getByText(/ETA \d\d:\d\d /).first().textContent()) ?? '';
+    const eta = /ETA \d\d:\d\d [A-Z][A-Za-z0-9+-]+/.exec(projected)?.[0];
+    expect(eta, `the popup's Projected line: "${projected}"`).toBeTruthy();
+
+    await page.evaluate(() => navigator.clipboard.writeText('before'));
+    await popup.getByRole('button', { name: 'Copy ETA' }).click();
+    await expect(popup.locator('[data-copy-eta]')).toHaveText('✓ Copied');
+    const line = await page.evaluate(() => navigator.clipboard.readText());
+    expect(line).toMatch(new RegExp(`^Truck ${TRUCK_NUMBERS.chicago} · Chicago, IL · ${eta} · (\\d+ mi|arriving)$`));
+
+    await makeFeedStale();
+    await page.reload();
+    await rowOf(page).click();
+    await expect(popup).toBeVisible();
+    await page.evaluate(() => navigator.clipboard.writeText('before'));
+    await popup.getByRole('button', { name: 'Copy ETA' }).click();
+    await expect(popup.locator('[data-eta-copy-note]')).toHaveText('The feed is down, so there is no ETA to quote from this screen.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('before');
   });
 });
