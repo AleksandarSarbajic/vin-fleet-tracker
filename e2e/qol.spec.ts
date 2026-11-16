@@ -34,6 +34,26 @@ async function db<T>(body: (sql: ReturnType<typeof connect>) => Promise<T>): Pro
   }
 }
 
+/**
+ * Save, and wait for the window to close. The save route allows 15 saves at once and then one
+ * every 4s per user (`LIMITS.geocode`); a save it refuses says "Too many requests. Retry in 1s",
+ * and is sent again, as a person would. The glow's press table spends that allowance and then
+ * waits it back.
+ */
+async function saveAndClose(page: Page, modal: ReturnType<typeof editModal>) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await modal.getByRole('button', { name: /^Save$/ }).click();
+    const outcome = await Promise.race([
+      modal.waitFor({ state: 'hidden', timeout: 20_000 }).then(() => 'closed' as const, () => 'open' as const),
+      modal.getByText('Too many requests').waitFor({ timeout: 20_000 }).then(() => 'limited' as const, () => 'open' as const),
+    ]);
+    if (outcome === 'closed') return;
+    expect(outcome, 'the save neither closed the window nor was refused by the limit').toBe('limited');
+    await page.waitForTimeout(4_500);
+  }
+  throw new Error('the save route kept refusing');
+}
+
 /** A clock as the app's lines write one, in a zone: `15:00`. */
 const clockIn = (instant: Date, zone: string) =>
   new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant);
@@ -76,8 +96,7 @@ test.describe('4: Today and Tomorrow beside the appointment date', () => {
     const tomorrow = await date.inputValue();
     expect(tomorrow).toBe(nextCalendarDay(written));
 
-    await modal.getByRole('button', { name: /^Save$/ }).click();
-    await expect(modal).toBeHidden({ timeout: 20_000 });
+    await saveAndClose(page, modal);
     const [stop] = await db((sql) => sql<{ start: Date; tz: string }[]>`
       select appointment_start_utc as start, appointment_tz as tz from stops where id = ${IDS.stopChicago}`);
     expect(stop!.tz).toBe(CHICAGO);
@@ -269,6 +288,8 @@ test.describe('12: drop anywhere in the edit window', () => {
     await resetWorld();
     await page.goto('/');
     const saved = await openModal(page);
+    // A saved load is read first: the form, not the reading panel, is what a file is let go on.
+    await saved.getByRole('tabpanel').waitFor();
     await expect(saved.locator('[data-ratecon-strip]')).toHaveCount(0);
     expect(await dragFile(page, FORM, 'dragover', pdf)).toBe(true);
     await expect(saved.locator('.ring-accent')).toHaveCount(0);
@@ -334,8 +355,7 @@ async function selectRow(page: Page) {
 
 async function saveNote(page: Page, modal: ReturnType<typeof editModal>, text: string) {
   await modal.locator('textarea').fill(text);
-  await modal.getByRole('button', { name: /^Save$/ }).click();
-  await expect(modal).toBeHidden({ timeout: 20_000 });
+  await saveAndClose(page, modal);
 }
 
 test.describe('6: the row you just saved glows once', () => {
@@ -486,8 +506,8 @@ test.describe('6: the row you just saved glows once', () => {
           },
           { glows, until: target - lead },
         );
-        // The save route allows a person's pace, not a loop's: a save at most every 1.2s, and
-        // one refused for that is sent again, as a person would.
+        // The save route allows a person's pace, not a loop's (15 at once, then one every 4s): a
+        // save at most every 1.2s, and one refused for that is sent again after 4.5s.
         for (let attempt = 0; ; attempt += 1) {
           await page.waitForTimeout(Math.max(0, lastSave + 1_200 - Date.now()));
           lastSave = Date.now();
@@ -505,7 +525,7 @@ test.describe('6: the row you just saved glows once', () => {
           expect(outcome, 'the save closed the window and its glow came').not.toBe('no glow');
           if (outcome === 'press') break;
           expect(attempt, 'the save route kept refusing').toBeLessThan(5);
-          await page.waitForTimeout(1_500);
+          await page.waitForTimeout(4_500);
         }
         // The browser's own press, what `page.mouse.down` sends, straight from a CDP session: the
         // trace's snapshot around a Playwright action held that one back 350 to 500ms (as 3bm found).
@@ -540,6 +560,9 @@ test.describe('6: the row you just saved glows once', () => {
     });
     console.info(`e2e: long tasks around each glow's start (ms from it + length): ${busy.slice(0, 8).join(' | ')}`);
     for (const t of TIMES) expect(table[t]!.missed, `${t}ms into the glow`).toBe(0);
+    // Left as found: the save route's allowance refills in 60s (15 at 0.25 a second), so the next
+    // test to save, here or in the next file, is not refused for this one's pace.
+    await page.waitForTimeout(61_000);
   });
 });
 
