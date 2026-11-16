@@ -11757,6 +11757,96 @@ that way, and its three ratecon-ai reads went to the live vendor and were refuse
 Proved by the invocation that failed in 3bu, plain `npx playwright test e2e/ratecon-ai.spec.ts`: 3 of 3, and the
 server's own row of the last read says `vendor = fake`, with the script's tokens.
 
+## 12.162 The e2e harness: the refusal first, the scan always, no skips that hide a broken pin, the power source
+
+Phase 3bw, from the advisor's brief: what 3bv left (its found wrong 2, 5 and 6, and two of the advisor's own).
+
+- **The loopback refusal runs before anything else.** `e2e/loopback.ts` holds the check, pure: the database URL in,
+  its host or a refusal out. `playwright.config.ts` calls it as the config loads, before Playwright starts the web
+  servers, which in 1.63 it does before global setup (3bv's found wrong 2); global setup asks again. Until 3bw it ran
+  only in global setup, after the build and `next start`, and held because those write nothing. Passes `127.0.0.1` and
+  `localhost`; refuses everything else, `[::1]` included: the WHATWG parser keeps an IPv6 host's brackets, so the old
+  list's `'::1'` never matched, and it stays refused on purpose, because the disposable cluster listens on 127.0.0.1
+  only (`scripts/test-db.sh`) and the app's own `LOCAL_HOSTS` has the same unbracketed entry.
+- **The key scan runs in every run.** Since §12.161 every run holds the synthetic key, so `E2E_READER_KEY_SCAN=1` only
+  made `npx playwright test` and `e2e:ui` skip the scan. The gate and the variable are gone; the `e2e` script is
+  `playwright test`.
+- **No skip where the reader should be on.** `ratecon-ai.spec.ts` and `ratecon-scan.spec.ts` fail, naming
+  `E2E_READER_ENV`, on a server with no "Read with AI" button: with the reader pinned on, that means the pin broke.
+- **The end of a run says when it ran on battery or with Low Power Mode on.** `pmset -g` (`lowpowermode`) and
+  `pmset -g batt` (where the power is drawn from), at the start (global setup) and the end (global teardown) only,
+  into `test-results/.run-supply.jsonl`: `e2e: ran on battery with Low Power Mode on (at the start and the end): a full
+  run took 1.4 h like this in 3bv, against 1.1 h on AC in 3bu.` Each condition says when it was found when the two
+  differ. An all-clear when every answer was read and neither was found; an answer it cannot read is named. It never
+  fails the run, and on any platform but macOS it samples and says nothing. Graphics stays listed in Low Power Mode,
+  so the DarkWake line (§12.161's neighbour, 3bv) cannot see it.
+
+## 12.163 Quality of life, batch 1: six features from the 3bf demo
+
+Phase 3bw, from the advisor's brief: the six of the advisor's recommended line that write nothing to the database,
+need no new route, and are rated small in 3bf's table (6 medium). Alex had not yet picked from the demo. Each does what
+its `does` in the demo says. Not built: 1, 2, 3, 5, 7, 8, 9 and 13, and nothing on the phone.
+
+**4 Today and Tomorrow** beside the appointment date (`edit/AppointmentFields.tsx`). The date at the stop, worked out at
+the click from the stop's own zone (the one in the field), never the dispatcher's (`lib/stop-day.ts`). Date parts
+only: it is set through the same `set({ date })` a typed date goes through, as a wall date, and the server converts.
+Tomorrow is calendar arithmetic on that date, never 24 hours. After a click, a note says when the stop's date differs
+from the dispatcher's own ("At this stop it is Sat 7 Nov. Your own date is Fri 6 Nov."), and only then, so the window
+looks the same at every hour until someone presses one. The two buttons sit beside the label, not inside it: a
+button inside a `<label>` would take the label from the date input. **On a new stop whose zone is still `auto`**, a
+state or ZIP typed after the click can move the zone; the date stays as written, as a typed date does, and the note
+then says which zone it was worked out in ("Worked out in America/New_York. The zone is now America/Chicago: press
+Today or Tomorrow again for the date there."). The draft and its defaults moved to `edit/appointment-draft.ts`, so
+`load-form.ts` loads no component: the eval script runs under `--conditions=react-server`, where React has no
+`useState`.
+
+**6 The row a person just saved glows once.** The cause is named, as `glideCause` is: `EditStopModal` calls
+`onSaved(truck)` when a save closes it, after the save's own fetch of the fleet (awaited before it); Console counts it
+(`savedCause`); FleetList acts on a new count only, so a poll can never start it (§12.4). Not on a save that stays open
+to say something: the window says it there. If the list does not show the row (a chip or a search hides it), no
+glow and nothing in its place. Off screen, the row is brought into view at once, through the path a marker's click
+uses (`scrollToIndex`, align `auto`), never an animated scroll. An overlay of the accent's veil, opacity only, linear,
+1000ms, rising to 0.3 a quarter of the way in (the demo's Bold; On is 700): weaker than the flash (3bf measured 12.1
+against 14.1 to 25.4). **The flash wins:** a row already flashing does not glow, and a flash landing on a glowing row
+takes the glow away. **Under reduced motion** it does what the flash does there (§14.4): nothing plays, and the row
+carries a static tag after its chip for a minute, `◆ saved`; the flash's own tag wins over it.
+
+| Token | On | Bold |
+|---|---|---|
+| `savedGlow` | 700 | **1000** |
+| `savedGlowPeak` | 0.3 | **0.3** |
+
+The press table, a real mouse on the glowing row by the glow's own clock (±18ms), held 40ms, as 3bj's: 20, 60, 120 and
+300ms, and 950ms just before the end, 8 presses a cell: none missed, in two runs and in each of the 20 repeats of
+the QoL file's two 10-time runs.
+
+**10 Search marks what matched, everywhere it matched.** The truck number is marked as the other cells are, and a cell
+matched whole is marked (`Marked` left it plain: a whole match is one part). When no text the row draws holds the
+match, the first hidden field that does is shown with its mark, first in the next-stop cell
+(`console/search-hint.ts`): Load, Street, City, State, ZIP, Position (only below eight columns, where its column is
+cut), Location, Name. At the cell's left end, clear of the copy controls over its right edge, which still work: the
+e2e test finds each control under its own middle while the hint shows, and each still copies.
+
+**11 C and T.** C copies the selected truck's address, T opens its timeline: two keymap rows in the list group, handled
+in Console's existing X listener, behind the same guards (typing, a window, a modifier, a selected truck the board
+shows). No new listener. They are in the shortcut sheet. **Copied is lifted:** Console does the copy, and the row's
+own address control is told it landed (`CopyButton`'s `confirmedAt`), so it says Copied, tick and word, as for a
+click. A refusal says why on the row, for 2.4s as the pin limit does: "No next stop, so no address", or the browser's
+refusal. `MapPopup.tsx`'s "no sixth key" comment now says T superseded it.
+
+**12 Drop anywhere in the edit window.** On a load whose stops are all unsaved, a file let go anywhere in the window,
+scrim included, goes to the strip and is read exactly as one let go on it: the same read, the same marks, the same
+limits (`RateconStrip`'s `takeFile`). While a file is over the window off the strip, the panel shows an accent ring
+and the strip its sunken ground; nothing moves. Where the strip is not offered (§12.122: saved stops, a save on its
+way or landed, a viewer), the window takes the file, so the browser never opens it, and says nothing was read and why
+(`edit/window-drop.ts`). Text dragged into a field is the browser's, as before. The board outside the window is
+feature 1's.
+
+**14 Copy the ETA line**, from the popup: `Truck 101 · Joliet, IL · ETA 14:18 CDT · 412 mi`, the demo's words, the time
+and the miles from the functions the Projected line draws with (`timeInZone`, `milesText`), the abbreviation Intl's at
+the copy (`console/map/eta-line.ts`). It refuses and says why on a stale feed ("The feed is down, so there is no ETA
+to quote from this screen.", as `FeedBanner` says not to quote one) and where there is no ETA. Clipboard only.
+
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
 `2g` says `1`–`7`; the drawn consoles showed **six** chips. Adding the
