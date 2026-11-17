@@ -226,3 +226,138 @@ test.describe("1: drop a PDF on a truck's row", () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------ 2 */
+
+/** Past stops of this company, on loads of truck 102: what Street address suggests from. */
+const pastStops = () =>
+  db(async (sql) => {
+    const places = [
+      { id: '3b000000-3b00-4b00-8b00-0000000000a1', line: '1200 Mill Rd', city: 'Bolingbrook', state: 'IL', zip: '60440', hours: 30 },
+      { id: '3b000000-3b00-4b00-8b00-0000000000a2', line: '45 Millbrook Ave', city: 'Albany', state: 'NY', zip: '12205', hours: 20 },
+    ];
+    for (const p of places) {
+      await sql`insert into loads (id, truck_id, load_number, status, created_at)
+                values (${p.id}, ${IDS.truckDallas}, ${null}, 'DELIVERED', now() - make_interval(hours => ${p.hours}))`;
+      await sql`insert into stops (load_id, type, sequence, address_line, city, state, zip, appointment_tz, appointment_type,
+                                   arrived_at, arrived_source, departed_at, departed_source)
+                values (${p.id}, 'DEL', 1, ${p.line}, ${p.city}, ${p.state}, ${p.zip}, ${'America/Chicago'}, 'APPT',
+                        now() - make_interval(hours => ${p.hours - 2}), 'detected', now() - make_interval(hours => ${p.hours - 3}), 'detected')`;
+    }
+  });
+
+test.describe('2: address suggestions from the company\'s own past stops', () => {
+  const street = (page: Page) => editModal(page).locator('[data-fill="addressLine"]');
+  const options = (page: Page) => editModal(page).locator('[data-address-option]');
+
+  test('type in Street address: the matches; arrows and Enter pick, filling the four; Esc closes only the list; one fetch per window', async ({
+    page,
+  }) => {
+    await resetWorld();
+    await freeChicago();
+    await pastStops();
+    const asked: string[] = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname === '/api/stops/addresses') asked.push(r.method());
+    });
+    await page.goto('/');
+    await rowOf(page).click();
+    await page.keyboard.press('Enter');
+    const modal = editModal(page);
+    await expect(street(page)).toBeVisible();
+    await expect(street(page)).toHaveAttribute('autocomplete', 'off');
+    await expect(street(page)).toHaveAttribute('role', 'combobox');
+
+    await street(page).click();
+    await page.keyboard.type('mill');
+    // Each used once, so the newest first: Millbrook's load is ten hours newer.
+    await expect(options(page)).toHaveText(['45 Millbrook AveAlbany, NY 12205', '1200 Mill RdBolingbrook, IL 60440']);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowUp');
+    await expect(street(page)).toHaveValue('mill');
+    await page.keyboard.press('Enter');
+    await expect(street(page)).toHaveValue('45 Millbrook Ave');
+    await expect(modal.locator('[data-fill="city"]')).toHaveValue('Albany');
+    await expect(modal.locator('[data-fill="state"]')).toHaveValue('NY');
+    await expect(modal.locator('[data-fill="zip"]')).toHaveValue('12205');
+    await expect(options(page)).toHaveCount(0);
+
+    // Esc with the list open closes it and keeps the text; the window stays and asks nothing.
+    await street(page).fill('');
+    await page.keyboard.type('mill');
+    await expect(options(page)).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await expect(options(page)).toHaveCount(0);
+    await expect(street(page)).toHaveValue('mill');
+    await expect(modal).toBeVisible();
+    await expect(page.getByRole('dialog', { name: /discard/i })).toHaveCount(0);
+
+    // A click picks too.
+    await page.keyboard.press('ArrowDown');
+    await expect(options(page)).toHaveCount(2);
+    await options(page).filter({ hasText: '1200 Mill Rd' }).click();
+    await expect(street(page)).toHaveValue('1200 Mill Rd');
+    await expect(modal.locator('[data-fill="city"]')).toHaveValue('Bolingbrook');
+
+    expect(asked, 'fetched once as the window opened, not per key').toEqual(['GET']);
+  });
+
+  test('on a new stop whose zone is auto the zone follows a pick, and the date and time do not move', async ({ page }) => {
+    await resetWorld();
+    await freeChicago();
+    await pastStops();
+    await page.goto('/');
+    await rowOf(page).click();
+    await page.keyboard.press('Enter');
+    const modal = editModal(page);
+    const enabled = modal.locator('input[data-fill="appointment.enabled"], [data-fill="appointment.enabled"] input').first();
+    if (!(await enabled.isChecked())) await enabled.check();
+    await modal.locator('[data-fill="appointment.date"]').fill('2026-12-01');
+    await modal.locator('[data-fill="appointment.time"]').fill('08:30');
+    await expect(modal.locator('select[data-fill="tz"]')).toHaveValue('America/Chicago');
+    await street(page).click();
+    await page.keyboard.type('millbrook');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(modal.locator('select[data-fill="tz"]')).toHaveValue('America/New_York');
+    await expect(modal.locator('[data-fill="appointment.date"]')).toHaveValue('2026-12-01');
+    await expect(modal.locator('[data-fill="appointment.time"]')).toHaveValue('08:30');
+  });
+
+  test('when the route fails, the field is plain text and says suggestions are unavailable', async ({ page }) => {
+    await resetWorld();
+    await freeChicago();
+    await page.route('**/api/stops/addresses', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Past addresses could not be read.","reference":"ADDRESSES-500-E2E"}' }),
+    );
+    await page.goto('/');
+    await rowOf(page).click();
+    await page.keyboard.press('Enter');
+    await expect(editModal(page)).toContainText('Suggestions from past stops are unavailable. Type the address.');
+    await street(page).click();
+    await page.keyboard.type('1 Typed Lane');
+    await expect(street(page)).toHaveValue('1 Typed Lane');
+    await expect(options(page)).toHaveCount(0);
+  });
+
+  test('the route refuses a viewer (403), and the window does not ask for one', async ({ page }) => {
+    await resetWorld();
+    await db((sql) => sql`update profiles set role = 'viewer' where id = ${process.env['E2E_USER_ID']!}`);
+    try {
+      const asked: string[] = [];
+      page.on('request', (r) => {
+        if (new URL(r.url()).pathname === '/api/stops/addresses') asked.push(r.method());
+      });
+      await page.goto('/');
+      expect((await page.request.get('/api/stops/addresses')).status()).toBe(403);
+      await rowOf(page).click();
+      await page.keyboard.press('Enter');
+      await expect(editModal(page)).toBeVisible();
+      await editModal(page).getByRole('tabpanel').waitFor();
+      expect(asked).toEqual([]);
+    } finally {
+      await db((sql) => sql`update profiles set role = 'dispatcher' where id = ${process.env['E2E_USER_ID']!}`);
+    }
+  });
+});

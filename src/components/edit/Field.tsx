@@ -21,6 +21,7 @@ export function Field({
   source,
   ai = false,
   fill,
+  inputProps,
 }: {
   label: string;
   value: string;
@@ -39,6 +40,12 @@ export function Field({
   ai?: boolean;
   /** §12.157. The fill's name for this field: its input fades, and its source drops, when a fill changes it. */
   fill?: string;
+  /**
+   * §12.164 (QoL 2). More for the input itself: Street address is a combobox. Never the value,
+   * its change or its paste, which are the field's.
+   */
+  inputProps?: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onPaste' | 'type'> &
+    Record<`data-${string}`, string>;
 }) {
   /**
    * §12.152. A new message drops in under its field: keyed by its words, so a re-render
@@ -60,6 +67,7 @@ export function Field({
     <label className="block">
       <span className="mb-1 block text-small text-text-secondary">{label}</span>
       <input
+        {...inputProps}
         ref={inputRef}
         type="text"
         data-fill={fill}

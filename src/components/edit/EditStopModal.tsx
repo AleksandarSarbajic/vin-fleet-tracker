@@ -22,6 +22,7 @@ import type { FleetRow } from '@/server/fleet-query';
 import type { BoardDriver } from '@/server/assignments';
 import type { ReassignPreview } from '@/server/reassign';
 import type { LoadEditResult } from '@/server/stop-edit';
+import type { PastAddress } from '@/lib/past-address';
 import type { FleetResponse } from '@/hooks/useFleet';
 import { LOAD_READ_GC_MS, fetchLoadRead, loadReadKey } from '@/hooks/useLoadRead';
 import { DEFAULT_EXPIRY, OVERRIDE_REASON_LABEL, StopOverrideEdit } from '@/lib/override';
@@ -104,6 +105,8 @@ import {
 import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
 import { DialogFrame } from '@/components/overlay/DialogFrame';
+import { useStopAddresses } from '@/hooks/useStopAddresses';
+import { holdsEscape } from './AddressSuggest';
 import { NO_FILE_HANDED, carriesFiles, fileMayFill, nothingRead } from './window-drop';
 
 /**
@@ -207,6 +210,8 @@ export function EditStopModal(props: Props) {
    * editor's strip is there to take it.
    */
   const [startFile] = useState(() => props.startFile ?? null);
+  /** §12.164 (QoL 2). Read once per window, here, where the window's whole life is. */
+  const pastAddresses = useStopAddresses(can(props.role, 'dispatcher'));
   const onLanded = useCallback(
     (at: Landed) => setLanded((was) => ({ n: (was?.n ?? 0) + 1, at })),
     [],
@@ -229,6 +234,7 @@ export function EditStopModal(props: Props) {
       read={landed?.at.read ?? read}
       // Only the first editor: one opened again on a landed save is not given the file again.
       startFile={landed ? null : startFile}
+      pastAddresses={pastAddresses}
       landed={landed?.at ?? null}
       onLanded={onLanded}
       savedStarted={savedStarted}
@@ -318,11 +324,14 @@ function LoadEditor({
   onSaved,
   aiReader = false,
   startFile = null,
+  pastAddresses,
   read,
   landed,
   onLanded,
   savedStarted,
 }: Props & {
+  /** §12.164 (QoL 2). The past addresses, read by the window's root. */
+  pastAddresses: { addresses: readonly PastAddress[] | null; failed: boolean };
   read: LoadForEdit | null;
   /** §12.127. Set when this editor is the load as a save left it. */
   landed: Landed | null;
@@ -1161,6 +1170,8 @@ function LoadEditor({
     const onKey = (event: KeyboardEvent) => {
       // §12.88. A confirm step owns Enter and Esc while it is open.
       if (clearing || asking || reachedAsk || discarding) return;
+      // §12.164 (QoL 2). Street address's open list takes this Esc, and closes only itself.
+      if (event.key === 'Escape' && holdsEscape(event.target)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
@@ -1585,6 +1596,7 @@ function LoadEditor({
               onRemove={() => removeOne(current.key)}
               orderNote={deliveryBeforePickup(form, selected)}
               onConfirmAi={() => setForm((f) => confirmAiStop(f, current.key))}
+              pastAddresses={pastAddresses}
             />
           </div>
 

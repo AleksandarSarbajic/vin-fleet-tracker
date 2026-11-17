@@ -7,6 +7,8 @@ import { AppointmentFields } from './AppointmentFields';
 import { ArrivalFields } from './ArrivalFields';
 import { checkSaid } from './check-said';
 import { Field } from './Field';
+import { AddressSuggest } from './AddressSuggest';
+import type { PastAddress } from '@/lib/past-address';
 import { splitPastedAddress, type AddressField } from '@/lib/paste-address';
 import { zipStateCheck } from '@/lib/geo/zip-state';
 import { aiMarkedFields, aiSourceLine, sourceLine } from './ratecon-fill';
@@ -57,6 +59,7 @@ export function StopForm({
   onRemove,
   orderNote,
   onConfirmAi,
+  pastAddresses = { addresses: null, failed: false },
 }: {
   stop: StopFormState;
   index: number;
@@ -91,6 +94,11 @@ export function StopForm({
   orderNote: string | null;
   /** "Looks right": this stop's AI marks go (docs/llm-reader-design.md §10, item 1). */
   onConfirmAi?: () => void;
+  /**
+   * §12.164 (QoL 2). The company's past stop addresses, read once as the window opened: null
+   * while they are read (or for a viewer, who is not asked), `failed` when they could not be.
+   */
+  pastAddresses?: { addresses: readonly PastAddress[] | null; failed: boolean };
 }) {
   const locked = flags.departed;
   const paste = stop.paste;
@@ -242,10 +250,13 @@ export function StopForm({
       >
         <div className="grid grid-cols-4 gap-x-3 gap-y-2">
           <div className="col-span-4">
-            <Field
-              label="Street address"
+            <AddressSuggest
               value={stop.addressLine}
-              onChange={(v) => onChange({ addressLine: v })}
+              addresses={pastAddresses.addresses}
+              failed={pastAddresses.failed}
+              onType={(v) => onChange({ addressLine: v })}
+              // The four together, through the same patch typing sends: the zone follows (§12.120).
+              onPick={(p) => onChange({ addressLine: p.addressLine, city: p.city ?? '', state: p.state ?? '', zip: p.zip ?? '' })}
               onPaste={(e) => {
                 // Only a paste, never typing; and text that is not an address to
                 // split goes in exactly as the browser would put it.
@@ -258,7 +269,6 @@ export function StopForm({
               check={checkOf('addressLine')}
               source={sourceOf('addressLine')}
               ai={aiFields.has('addressLine')}
-              fill="addressLine"
             />
           </div>
           <Field

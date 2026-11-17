@@ -463,14 +463,18 @@ describe('opening (§12.119)', () => {
     expect(urls.filter((u) => u.startsWith('/api/loads/'))).toEqual([]);
   });
 
+  /** §12.164 (3bx). The window also reads the past stop addresses as it opens: answered apart. */
+  const pastAddresses = { ok: true, status: 200, json: async () => ({ addresses: [] }) };
+
   it('reads the load itself when nothing was prefetched, and says so meanwhile', async () => {
     let answer: (v: unknown) => void = () => {};
-    globalThis.fetch = vi.fn(
-      (url: string) =>
-        new Promise((resolve) => {
-          answer = resolve;
-          expect(url).toBe(`/api/loads/${ROW.nextStop!.loadId}`);
-        }),
+    globalThis.fetch = vi.fn((url: string) =>
+      url === '/api/stops/addresses'
+        ? Promise.resolve(pastAddresses)
+        : new Promise((resolve) => {
+            answer = resolve;
+            expect(url).toBe(`/api/loads/${ROW.nextStop!.loadId}`);
+          }),
     ) as unknown as typeof fetch;
     await mount(ROW);
     expect(container!.textContent).toContain('Reading this load…');
@@ -482,11 +486,13 @@ describe('opening (§12.119)', () => {
   });
 
   it('says so, and offers Retry, when the read fails', async () => {
-    globalThis.fetch = vi.fn(async () => ({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: 'Could not read the load.' }),
-    })) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn(async (url: string) =>
+      url === '/api/stops/addresses'
+        ? pastAddresses
+        : { ok: false, status: 500, json: async () => ({ error: 'Could not read the load.' }) },
+    ) as unknown as typeof fetch;
+    const loadReads = () =>
+      (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(([url]) => url.startsWith('/api/loads/'));
     await mount(ROW);
     // One retry, about a second later, before it says so.
     await vi.waitFor(
@@ -496,7 +502,7 @@ describe('opening (§12.119)', () => {
         ),
       { timeout: 4000, interval: 50 },
     );
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(loadReads()).toHaveLength(2);
     expect(() => button('Retry')).not.toThrow();
   });
 });
