@@ -77,6 +77,7 @@ import { TruckSheet } from './phone/TruckSheet';
 import { dialableTel } from '@/lib/dial';
 import { isPhoneNow } from '@/lib/phone';
 import { rememberBoard } from '@/lib/board-return';
+import { useBoardDrop } from './useBoardDrop';
 
 /**
  * Stable identity, so an empty fleet does not churn every memo downstream.
@@ -470,6 +471,34 @@ export function Console({
     [rows, syncUrl],
   );
 
+  /**
+   * §12.46. Opening a truck's window from the board selects what it opens, so the map is never
+   * showing a different truck from the window. Enter, a dropped file (QoL 1) and the row menu's
+   * Edit load (QoL 8) all come through here.
+   */
+  const editTruck = useCallback(
+    (id: string) => {
+      if (id !== selectedId) select(id);
+      openEditor(id);
+    },
+    [selectedId, select, openEditor],
+  );
+
+  /**
+   * §12.164 (QoL 1). A file a row took, for its window: held here, as a `File` read out of the
+   * drop event (the browser hands over nothing once the event returns), until the window's strip
+   * is there to take it. Gone when the window closes, so a window opened again does not read it
+   * again.
+   */
+  const [startFile, setStartFile] = useState<{ id: string; file: File } | null>(null);
+  const takeDroppedFile = useCallback(
+    (id: string, file: File) => {
+      setStartFile({ id, file });
+      editTruck(id);
+    },
+    [editTruck],
+  );
+
   /** §14 feature 10. The palette prints the selected truck's own label. */
   const selectedRow = useMemo(
     () => (selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null),
@@ -508,6 +537,12 @@ export function Console({
    */
   const chipCause = [...chips].sort().join(',');
 
+  /**
+   * §12.164 (QoL 1). A PDF dragged over the board: the row under it says whose window it opens or
+   * why it takes nothing, and the board takes every file drag so the browser never opens one.
+   */
+  const boardDrop = useBoardDrop({ rows: ordered, role, onTake: takeDroppedFile });
+
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -535,8 +570,7 @@ export function Console({
         // the truck out of the chip), and a window opens on any truck in the fleet.
         if (!targetId || !rows.some((row) => row.id === targetId)) return;
         event.preventDefault();
-        if (targetId !== selectedId) select(targetId);
-        openEditor(targetId);
+        editTruck(targetId);
         return;
       }
 
@@ -558,7 +592,7 @@ export function Console({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ordered, rows, selectedId, select, query, editingId, openEditor]);
+  }, [ordered, rows, selectedId, select, query, editingId, editTruck]);
 
   /**
    * §14 feature 6. Which rows changed since the last poll.
@@ -1117,6 +1151,24 @@ export function Console({
           </div>
         ) : null}
 
+        {/* §12.164 (QoL 1). Why a file let go on the board was not read. */}
+        {boardDrop.notice ? (
+          <div
+            role="status"
+            data-drop-notice=""
+            className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg"
+          >
+            <span className="flex-1">{boardDrop.notice}</span>
+            <button
+              type="button"
+              onClick={boardDrop.dismiss}
+              className="font-cond text-micro uppercase tracking-[.08em] text-text"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {missingTruck ? (
           <div className="flex shrink-0 items-center gap-3 border-b border-status-risk-bd bg-status-risk-bg px-4 py-2 text-body text-status-risk-fg">
             <span className="flex-1">
@@ -1192,6 +1244,7 @@ export function Console({
                       flashFor={flashFor}
                       keyCopyFor={keyCopyFor}
                       savedCause={savedCause}
+                      dropMark={boardDrop.mark}
                       reducedMotion={reducedMotion}
                       isPinned={pins.isPinned}
                       onPin={pins.toggle}
@@ -1274,8 +1327,15 @@ export function Console({
             role={role}
             dispatchTz={dispatchTz}
             aiReader={aiReader}
-            onClose={() => setEditingId(null)}
-            onReload={() => setEditOpening((n) => n + 1)}
+            startFile={startFile?.id === editingRow.id ? startFile.file : null}
+            onClose={() => {
+              setEditingId(null);
+              setStartFile(null);
+            }}
+            onReload={() => {
+              setStartFile(null);
+              setEditOpening((n) => n + 1);
+            }}
             onSaved={onSaved}
           />
         ) : null}

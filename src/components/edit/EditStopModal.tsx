@@ -145,6 +145,13 @@ interface Props {
    * server, never a NEXT_PUBLIC_ variable. Off unless given.
    */
   aiReader?: boolean;
+  /**
+   * §12.164, phase 3bx (QoL 1). A file let go on this truck's row: read as the window opens,
+   * through the strip's own way in, exactly as one let go on the strip. Taken once, by the first
+   * editor; if the window opens on saved stops after all (a poll gave the truck a load between
+   * the drop and the opening), nothing is read and the window says why.
+   */
+  startFile?: File | null;
 }
 
 const truckNameOf = (row: FleetRow) =>
@@ -195,6 +202,11 @@ export function EditStopModal(props: Props) {
   const [landed, setLanded] = useState<{ n: number; at: Landed } | null>(null);
   /** §12.152. When "Saved" began to drop in, so the editor opened after it carries it on. */
   const savedStarted = useRef<Started | null>(null);
+  /**
+   * §12.164 (QoL 1). Kept from the moment the window opens, past a reading panel, until the
+   * editor's strip is there to take it.
+   */
+  const [startFile] = useState(() => props.startFile ?? null);
   const onLanded = useCallback(
     (at: Landed) => setLanded((was) => ({ n: (was?.n ?? 0) + 1, at })),
     [],
@@ -215,6 +227,8 @@ export function EditStopModal(props: Props) {
       key={landed?.n ?? 0}
       {...props}
       read={landed?.at.read ?? read}
+      // Only the first editor: one opened again on a landed save is not given the file again.
+      startFile={landed ? null : startFile}
       landed={landed?.at ?? null}
       onLanded={onLanded}
       savedStarted={savedStarted}
@@ -303,6 +317,7 @@ function LoadEditor({
   onReload,
   onSaved,
   aiReader = false,
+  startFile = null,
   read,
   landed,
   onLanded,
@@ -1207,6 +1222,25 @@ function LoadEditor({
    */
   const fillOffer = fileMayFill({ mayEdit, saving, spent, anyStored: form.stops.some((s) => s.stored !== null) });
   const stripOffered = fillOffer.offered;
+
+  /**
+   * §12.164 (QoL 1). The file a row took, read once the strip is here: its render set its way in
+   * (`takeFile`) before this effect runs. Asked of the same rule as a drop in the window, as the
+   * window is now; refused, it says why there.
+   */
+  const startTaken = useRef(false);
+  const startOffer = useRef(fillOffer);
+  startOffer.current = fillOffer;
+  useEffect(() => {
+    if (!startFile || startTaken.current) return;
+    startTaken.current = true;
+    const offer = startOffer.current;
+    if (!offer.offered) {
+      setDropRefused(nothingRead(offer.reason));
+      return;
+    }
+    takeFile.current?.(startFile);
+  }, [startFile]);
   /**
    * §12.163, phase 3bw (QoL 12). A file let go anywhere in the window: read by the strip when it
    * is offered, else swallowed with the reason. Off the strip only: the strip takes its own.

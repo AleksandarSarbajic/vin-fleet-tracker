@@ -5,6 +5,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import type { FleetRow } from '@/server/fleet-query';
 import { GRID_6, GRID_8, ROW_HEIGHT, TruckRow } from './TruckRow';
 import type { KeyCopy } from './key-copy';
+import type { DropMark } from './useBoardDrop';
 import { ListFooter } from './ListFooter';
 import type { Density } from '@/lib/density';
 import { BulkBar } from './BulkBar';
@@ -99,6 +100,8 @@ interface Props {
   keyCopyFor: (id: string) => KeyCopy | null;
   /** §12.163 (QoL 6). The last save that closed the edit window: its truck, counted. */
   savedCause?: { id: string; n: number } | null;
+  /** §12.164 (QoL 1). The row a file is over, and what it says. */
+  dropMark?: DropMark | null;
   /** §14 feature 14. One read at the top, not one matchMedia listener per row. */
   reducedMotion: boolean;
   isPinned: (id: string) => boolean;
@@ -142,6 +145,7 @@ export function FleetList({
   flashFor,
   keyCopyFor,
   savedCause = null,
+  dropMark = null,
   reducedMotion,
   isPinned,
   onPin,
@@ -489,6 +493,7 @@ export function FleetList({
                 flash={flashFor(row.id)}
                 keyCopy={keyCopyFor(row.id)}
                 savedTag={savedTag?.id === row.id ? savedTag.at : null}
+                dropMark={dropMark?.id === row.id ? dropMark : null}
                 reducedMotion={reducedMotion}
                 pinned
                 onPin={onPin}
@@ -547,6 +552,7 @@ export function FleetList({
                   flash={flashFor(row.id)}
                   keyCopy={keyCopyFor(row.id)}
                   savedTag={savedTag?.id === row.id ? savedTag.at : null}
+                dropMark={dropMark?.id === row.id ? dropMark : null}
                   reducedMotion={reducedMotion}
                   pinned={isPinned(row.id)}
                   onPin={onPin}

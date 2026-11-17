@@ -25,6 +25,8 @@ import { ROW_HEIGHT, type Density } from '@/lib/density';
 import { addressText, loadText } from '@/lib/copy-text';
 import type { FlashGround, RowFlashView } from '@/lib/flash';
 import { CopyButton } from './CopyButton';
+import { PopFrame } from '@/components/overlay/PopFrame';
+import type { DropMark } from './useBoardDrop';
 
 /**
  * design-spec §4.1, with correction 2 applied: Appt 128 AND Status 128, the
@@ -444,6 +446,11 @@ interface Props {
    * tag, as the flash has one (§14.4). Null with motion: the glow said it.
    */
   savedTag?: number | null;
+  /**
+   * §12.164 (QoL 1). A file is over this row: whose window it opens, or why the row takes
+   * nothing. Null otherwise.
+   */
+  dropMark?: Pick<DropMark, 'takes' | 'text'> | null;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -544,6 +551,7 @@ function TruckRowImpl({
   onPin,
   keyCopy = null,
   savedTag = null,
+  dropMark = null,
   query,
   onSelect,
   onEdit,
@@ -598,6 +606,7 @@ function TruckRowImpl({
        * cursors can disagree and the key has to resolve which one it means.
        */
       data-row-id={row.id}
+      {...(dropMark ? { 'data-drop-row': dropMark.takes ? 'yes' : 'no' } : {})}
       onClick={() => onSelect(row.id)}
       /**
        * §12.48. The whole row, because a gesture that works on five cells of
@@ -663,6 +672,26 @@ function TruckRowImpl({
         and the checkbox all stay legible through it. `key` restarts the decay
         when a row changes twice inside one flash.
       */}
+      {/*
+        §12.164 (QoL 1). While a file is over this row: the truck whose window it opens, or why it
+        takes nothing. Over the right end of the row and above its cells, and never in the way of
+        the pointer. A menu's frame (§12.148): it opens once with the menu's motion and its copy
+        fades as it goes; under reduced motion it is simply there.
+      */}
+      {dropMark ? (
+        <PopFrame
+          data-drop-mark=""
+          origin="right"
+          className={`pointer-events-none absolute inset-y-[6px] right-2 z-[1] flex items-center border px-2 font-cond text-micro uppercase tracking-[.08em] ${
+            dropMark.takes
+              ? 'border-accent bg-surface-overlay text-text'
+              : 'border-line-control bg-surface-raised text-text-secondary'
+          }`}
+        >
+          {dropMark.text}
+        </PopFrame>
+      ) : null}
+
       {flash && flash.tag === null ? (
         <div
           key={flash.at}
@@ -950,6 +979,8 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.keyCopy?.at === b.keyCopy?.at &&
     a.keyCopy?.refused === b.keyCopy?.refused &&
     a.savedTag === b.savedTag &&
+    a.dropMark?.takes === b.dropMark?.takes &&
+    a.dropMark?.text === b.dropMark?.text &&
     a.query === b.query
   );
 });
