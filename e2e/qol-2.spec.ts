@@ -480,3 +480,203 @@ test.describe('5: the tab title', () => {
     expect(polls, 'back: one request, not two').toHaveLength(1);
   });
 });
+
+/* ------------------------------------------------------------------ 7 */
+
+type Camera = { lng: number; lat: number; zoom: number };
+/**
+ * The real map, found through React as new-motion.spec's map spy finds it, kept on the window,
+ * with every `fitBounds` the app asks for written down.
+ */
+const holdMap = (page: Page) =>
+  page.waitForFunction(() => {
+    const el = document.querySelector('.mapboxgl-map') as unknown as Record<string, unknown> | null;
+    if (!el) return false;
+    const key = Object.keys(el).find((k) => k.startsWith('__reactFiber'));
+    if (!key) return false;
+    type Fiber = { memoizedState: Hook | null; return: Fiber | null };
+    type Hook = { memoizedState: unknown; next: Hook | null };
+    type M = Record<string, unknown> & { getMap?: () => M; loaded: () => boolean };
+    let fiber = el[key] as Fiber | null;
+    let map: M | null = null;
+    while (fiber && !map) {
+      let hook = fiber.memoizedState;
+      while (hook && !map) {
+        const held = hook.memoizedState as { current?: unknown; map?: unknown } | null;
+        const value = (held?.current ?? held) as { getMap?: () => M; map?: M } | null;
+        if (typeof value?.getMap === 'function') map = value.getMap();
+        else if (value?.map && typeof (value.map as M)['fitBounds'] === 'function') map = value.map;
+        hook = hook.next;
+      }
+      fiber = fiber.return;
+    }
+    if (!map || !map.loaded()) return false;
+    const w = window as unknown as { __map: M; __fits: { duration: number; padding: number; maxZoom: number }[] };
+    if (w.__map === map) return true;
+    w.__map = map;
+    w.__fits = [];
+    const real = map['fitBounds'] as (...args: unknown[]) => unknown;
+    map['fitBounds'] = function (this: unknown, ...args: unknown[]) {
+      w.__fits.push(args[1] as { duration: number; padding: number; maxZoom: number });
+      return real.apply(this, args);
+    };
+    return true;
+  }, undefined, { timeout: 20_000 });
+const camera = (page: Page) =>
+  page.evaluate(() => {
+    const m = (window as unknown as { __map: { getCenter(): { lng: number; lat: number }; getZoom(): number } }).__map;
+    const c = m.getCenter();
+    return { lng: c.lng, lat: c.lat, zoom: m.getZoom() } as Camera;
+  });
+const settled = (page: Page) =>
+  page.waitForFunction(() => !(window as unknown as { __map: { isMoving(): boolean; isEasing(): boolean } }).__map.isMoving(), undefined, {
+    timeout: 10_000,
+  });
+/**
+ * Every given point inside what the map draws, as a person sees it: its projected pixel inside the
+ * map's own box. Not `getBounds()`, which on the globe Mapbox draws below zoom ~6 is not the
+ * drawn area (seen: Dallas drawn on screen and `contains` false). And the zoom the fit itself
+ * would pick.
+ */
+const onMap = (page: Page, p: [number, number]) =>
+  page.evaluate((pt) => {
+    type M = { project(p: [number, number]): { x: number; y: number }; getContainer(): HTMLElement };
+    const m = (window as unknown as { __map: M }).__map;
+    const { x, y } = m.project(pt);
+    const box = m.getContainer();
+    return x >= 0 && y >= 0 && x <= box.clientWidth && y <= box.clientHeight;
+  }, p);
+const fitOf = (page: Page, points: [number, number][]) =>
+  page.evaluate((pts) => {
+    type M = {
+      project(p: [number, number]): { x: number; y: number };
+      getContainer(): HTMLElement;
+      cameraForBounds(b: [[number, number], [number, number]], o: object): { zoom: number } | undefined;
+      getZoom(): number;
+    };
+    const m = (window as unknown as { __map: M }).__map;
+    const lngs = pts.map((p) => p[0]);
+    const lats = pts.map((p) => p[1]);
+    const wanted = m.cameraForBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      { padding: 64, maxZoom: 9 },
+    );
+    const box = m.getContainer();
+    const inside = pts.map((p) => {
+      const { x, y } = m.project(p);
+      return x >= 0 && y >= 0 && x <= box.clientWidth && y <= box.clientHeight;
+    });
+    return { inside, zoom: m.getZoom(), wanted: wanted?.zoom ?? null };
+  }, points);
+const zoomIn = async (page: Page, times: number) => {
+  for (let i = 0; i < times; i += 1) {
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await settled(page);
+  }
+};
+const CHICAGO_AT: [number, number] = [-87.65, 41.85];
+const DALLAS_AT: [number, number] = [-96.797, 32.7767];
+const ZIP_AT: [number, number] = [-87.6298, 41.8781];
+const showAll = (page: Page) => page.locator('[data-show-all]');
+
+test.describe('7: Show all, in the map\'s controls', () => {
+  test('from zoomed in, it travels to the fit of what the list shows; a search narrows it; the travel is a selection\'s', async ({ page }) => {
+    await resetWorld();
+    // Motion on: the runs default to reduced motion (playwright.config.ts).
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/');
+    await holdMap(page);
+    await settled(page);
+    await zoomIn(page, 5);
+    expect((await camera(page)).zoom).toBeGreaterThan(9);
+
+    await showAll(page).click();
+    await settled(page);
+    const all = await fitOf(page, [CHICAGO_AT, DALLAS_AT, ZIP_AT]);
+    expect(all.inside, 'every truck the list shows is on the map').toEqual([true, true, true]);
+    expect(Math.abs(all.zoom - all.wanted!), `zoom ${all.zoom} against the fit's ${all.wanted}`).toBeLessThan(0.6);
+    const fits = await page.evaluate(() => (window as unknown as { __fits: unknown[] }).__fits);
+    expect(fits.at(-1)).toEqual({ padding: 64, maxZoom: 9, duration: 700 });
+
+    // A search narrows what it fits: 102 alone, at the fit's floor.
+    await page.getByRole('textbox', { name: 'Search the fleet' }).fill(String(TRUCK_NUMBERS.dallas));
+    await expect(rowOf(page)).toHaveCount(0);
+    await showAll(page).click();
+    await settled(page);
+    const one = await fitOf(page, [DALLAS_AT]);
+    expect(one.inside).toEqual([true]);
+    expect(one.zoom).toBeCloseTo(9, 0);
+    expect(await onMap(page, CHICAGO_AT), 'a truck the search hides is not what it fits').toBe(false);
+  });
+
+  test('with a truck selected and its popup open: both stay, the map rests on the fit, and no nudge pulls it off', async ({ page }) => {
+    await resetWorld();
+    // Motion on, so the nudge's own way in is live: it waits for a pan to land.
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/');
+    await holdMap(page);
+    // 103, the fit's northernmost truck: its popup hangs above its marker, off the fit's top edge.
+    await rowOf(page, IDS.truckAtZipStop).click();
+    const popup = page.locator('.mapboxgl-popup');
+    await expect(popup).toBeVisible();
+    await settled(page);
+    await zoomIn(page, 3);
+    await showAll(page).click();
+    await settled(page);
+    const landed = await camera(page);
+    // The popup grows, as a poll that changes its height makes it: its ResizeObserver asks for a
+    // nudge (`popupResized`). Standing in for that poll, which would take 20s to come.
+    await page.evaluate(() => {
+      const spacer = document.createElement('div');
+      spacer.style.height = '80px';
+      // Inside the box the popup's ResizeObserver watches: MapPopup's own box, inside the
+      // container react-map-gl portals it into.
+      const watched = document.querySelector('.ft-popup .mapboxgl-popup-content > div > div');
+      if (!watched) throw new Error('no popup box');
+      watched.appendChild(spacer);
+    });
+    // Long enough for any nudge: one waits a frame after a pan lands, and pans 150ms.
+    await page.waitForTimeout(1_500);
+    expect(await camera(page), 'the map stays on the fit it was asked for').toEqual(landed);
+    await expect(popup).toBeVisible();
+    await expect(rowOf(page, IDS.truckAtZipStop)).toHaveAttribute('aria-selected', 'true');
+    expect(new URL(page.url()).searchParams.get('truck')).toBe(String(TRUCK_NUMBERS.zip));
+    const fit = await fitOf(page, [CHICAGO_AT, DALLAS_AT, ZIP_AT]);
+    expect(fit.inside).toEqual([true, true, true]);
+  });
+
+  test('with nothing shown it is disabled, with the reason; under reduced motion it fits without travelling', async ({ page }) => {
+    await resetWorld();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await holdMap(page);
+    await settled(page);
+    await page.getByRole('textbox', { name: 'Search the fleet' }).fill('zzzz-no-truck');
+    await expect(showAll(page)).toBeDisabled();
+    await expect(showAll(page)).toHaveAttribute('title', 'The list shows no trucks, so there is nothing to fit.');
+    await page.getByRole('textbox', { name: 'Search the fleet' }).fill('');
+    await expect(showAll(page)).toBeEnabled();
+    await zoomIn(page, 4);
+    await showAll(page).click();
+    const fits = await page.evaluate(() => (window as unknown as { __fits: { duration: number }[] }).__fits);
+    expect(fits.at(-1)?.duration).toBe(0);
+    await settled(page);
+    expect((await fitOf(page, [CHICAGO_AT, DALLAS_AT, ZIP_AT])).inside).toEqual([true, true, true]);
+  });
+
+  test('it stands with the other controls, clear of the zoom stack where toasts land', async ({ page }) => {
+    await resetWorld();
+    await page.goto('/');
+    await holdMap(page);
+    const show = (await showAll(page).boundingBox())!;
+    const zoomStack = (await page.getByRole('button', { name: 'Zoom in' }).locator('xpath=..').boundingBox())!;
+    const basemap = (await page.getByRole('group', { name: 'Basemap' }).boundingBox())!;
+    expect(show.y).toBeCloseTo(basemap.y, 0);
+    expect(show.x + show.width).toBeLessThanOrEqual(basemap.x);
+    expect(show.x + show.width).toBeLessThan(zoomStack.x);
+    expect(show.y + show.height).toBeLessThanOrEqual(zoomStack.y + zoomStack.height);
+  });
+});

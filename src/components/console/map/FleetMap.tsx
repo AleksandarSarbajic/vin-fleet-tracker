@@ -38,7 +38,8 @@ import { MapPopup } from './MapPopup';
 import { popupClearance, rectOf } from './clearance';
 import { useTrail } from '@/hooks/useTrail';
 import { trailDots } from '@/lib/trail';
-import { BasemapToggle, MapFooter, MarkerKey, ZoomControl } from './MapChrome';
+import { BasemapToggle, MapFooter, MarkerKey, ShowAllControl, TopControls, ZoomControl } from './MapChrome';
+import { FIT_PADDING, showAllFit, showAllState } from './show-all';
 import { useBasemap } from '@/hooks/useBasemap';
 import { BASEMAP_STYLE } from '@/lib/basemap';
 import { MOTION_MS } from '@/design/tokens';
@@ -116,6 +117,12 @@ export function FleetMap({
    */
   const travelEnd = useRef<(() => void) | null>(null);
   const clearRun = useRef(0);
+  /**
+   * §12.164 (QoL 7). Show all's fit stands until a person moves the map: a selection, a zoom, a
+   * drag, a resize. Until then the popup's nudge stands down, so it never pulls the map off the
+   * fit it was asked for (3bf's risk); the popup stays where the fit leaves it.
+   */
+  const fitHeld = useRef(false);
 
   const { problem, clustered } = useMemo(
     () => splitForMap(rows, feedStale),
@@ -212,7 +219,7 @@ export function FleetMap({
    * and never on the dispatcher's own drags, which it would fight.
    */
   const keepPopupClear = useCallback(function clear(round = 1, run = clearRun.current): void {
-    if (run !== clearRun.current) return;
+    if (run !== clearRun.current || fitHeld.current) return;
     const map = mapRef.current?.getMap();
     const frame = frameRef.current;
     const popup = frame?.querySelector('.ft-popup');
@@ -269,7 +276,7 @@ export function FleetMap({
         [bounds.east, bounds.north],
       ],
       {
-        padding: 64,
+        padding: FIT_PADDING,
         // Without this floor, one truck (or a fleet parked in one yard) drops
         // the dispatcher to street level looking at a rooftop.
         maxZoom: MAX_INITIAL_ZOOM,
@@ -287,6 +294,7 @@ export function FleetMap({
    */
   useEffect(() => {
     if (resizeSignal === 0) return;
+    fitHeld.current = false;
     mapRef.current?.getMap()?.resize();
     // Loaded while hidden: the fleet fit it skipped then, now there is a box.
     if (!didFit.current) handleLoad();
@@ -311,6 +319,7 @@ export function FleetMap({
     const map = mapRef.current?.getMap();
     if (!map) return;
     const duration = reducedMotion ? 0 : MOTION_MS.mapTravel;
+    fitHeld.current = false;
     clearRun.current += 1;
     if (travelEnd.current) map.off('moveend', travelEnd.current);
     travelEnd.current = null;
@@ -357,6 +366,8 @@ export function FleetMap({
   const stopForPress = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (!map) return;
+    // A press on the map is a person taking it over: Show all's fit no longer holds.
+    fitHeld.current = false;
     clearRun.current += 1;
     if (travelEnd.current) map.off('moveend', travelEnd.current);
     travelEnd.current = null;
@@ -395,6 +406,7 @@ export function FleetMap({
     (direction: 1 | -1) => {
       const map = mapRef.current?.getMap();
       if (!map) return;
+      fitHeld.current = false;
       map.easeTo({
         zoom: map.getZoom() + direction,
         duration: reducedMotion ? 0 : PAN_MS,
@@ -402,6 +414,32 @@ export function FleetMap({
     },
     [reducedMotion],
   );
+
+  /**
+   * §12.164, phase 3bx (QoL 7). Show all: travel to the fit of what the list shows. The selection
+   * and its popup stay as they are (a selection is a cursor, Show all a camera); any nudge
+   * waiting for a pan is dropped, a travel in flight stops where it is, and no nudge follows the
+   * fit (`fitHeld`). Under reduced motion it fits at once. Below zoom ~6 Mapbox draws a globe
+   * and a fit is inexact there (`FleetMap.tsx`'s pan note); every truck is still inside it.
+   */
+  const shown = useMemo(() => showAllState(rows), [rows]);
+  const showAll = useCallback(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !('bounds' in shown)) return;
+    const { west, south, east, north } = shown.bounds;
+    clearRun.current += 1;
+    if (travelEnd.current) map.off('moveend', travelEnd.current);
+    travelEnd.current = null;
+    fitHeld.current = true;
+    map.stop();
+    map.fitBounds(
+      [
+        [west, south],
+        [east, north],
+      ],
+      showAllFit(reducedMotion),
+    );
+  }, [shown, reducedMotion]);
 
   /**
    * §14 feature 9. Selected-only (§14.3): nothing is fetched while nothing is
@@ -441,7 +479,10 @@ export function FleetMap({
         className="group/map relative min-h-0 flex-1 max-md:overflow-hidden"
       >
         <ZoomControl onZoom={zoom} />
-        <BasemapToggle basemap={basemap} ready={basemapReady} onChange={setBasemap} />
+        <TopControls>
+          <ShowAllControl disabledReason={'disabled' in shown ? shown.disabled : null} onShowAll={showAll} />
+          <BasemapToggle basemap={basemap} ready={basemapReady} onChange={setBasemap} />
+        </TopControls>
         <MarkerKey open={keyOpen} onToggle={() => setKeyOpen((was) => !was)} />
         {/*
           Not mounted until the stored basemap has been read. Mounting at the

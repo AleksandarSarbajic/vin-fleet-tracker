@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useSegmentSlide } from '@/hooks/useSegmentSlide';
 import { STATUSES, type Status } from '@/lib/status';
 import { STATUS_LABEL } from '@/lib/status';
@@ -232,7 +233,7 @@ export function BasemapToggle({
       role="group"
       aria-label="Basemap"
       data-map-control
-      className="absolute right-[56px] top-[14px] z-10 flex border border-line-hair bg-surface-raised max-md:right-[68px] max-md:group-data-[sheet-open]/map:hidden"
+      className="flex border border-line-hair bg-surface-raised"
     >
       {BASEMAPS.map((option, index) => {
         const active = option === basemap;
@@ -256,6 +257,47 @@ export function BasemapToggle({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * §12.164 (QoL 7). Where the basemap toggle stood, `right-[56px] top-[14px]`, now holding it and
+ * Show all to its left: one row of map controls beside the zoom, and none of them under it,
+ * where the toasts land (above). Each keeps its own `data-map-control`, so the popup keeps clear
+ * of each (clearance.ts).
+ */
+export function TopControls({ children }: { children: ReactNode }) {
+  return (
+    <div className="absolute right-[56px] top-[14px] z-10 flex items-start gap-[6px] max-md:right-[68px] max-md:group-data-[sheet-open]/map:hidden">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * §12.164, phase 3bx (QoL 7). Back to the fit of what the list shows. Disabled with the reason
+ * when there is nothing to fit, never hidden (§12.14). Not offered below the editing width,
+ * where nothing new is (§12.94).
+ */
+export function ShowAllControl({
+  disabledReason,
+  onShowAll,
+}: {
+  disabledReason: string | null;
+  onShowAll: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-map-control
+      data-show-all=""
+      onClick={onShowAll}
+      disabled={disabledReason !== null}
+      title={disabledReason ?? 'Fit the map to the trucks the list shows'}
+      className="flex h-8 items-center border border-line-hair bg-surface-raised px-3 font-cond text-micro uppercase tracking-[.08em] text-text-muted transition-colors duration-ground hover:bg-row-hover hover:text-text disabled:opacity-45 disabled:hover:bg-surface-raised disabled:hover:text-text-muted max-md:hidden"
+    >
+      Show all
+    </button>
   );
 }
 
