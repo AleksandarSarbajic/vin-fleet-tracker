@@ -451,6 +451,13 @@ interface Props {
    * nothing. Null otherwise.
    */
   dropMark?: Pick<DropMark, 'takes' | 'text'> | null;
+  /**
+   * §12.164 (QoL 8). A right-click opens the row's menu, at the pointer; null where none is
+   * offered (below the editing width). On selected text the browser's own menu stays.
+   */
+  onMenu?: ((id: string, at: { x: number; y: number }) => void) | null;
+  /** §12.164 (QoL 8). This row's menu is open: the row holds the hover ground, so it is seen. */
+  menuOpen?: boolean;
   query: string;
   onSelect: (id: string) => void;
   /**
@@ -536,6 +543,21 @@ function RowCheck({
   );
 }
 
+/**
+ * Selected text, not just a caret, on the node a press or a menu event came from. `intersectsNode`,
+ * not the demo's `containsNode(node, true)`: by the DOM's own rule a node whose text IS the
+ * selection (a word double-clicked in it) is neither contained nor partially contained, so that
+ * read false on the very element the pointer was on (3bx found wrong).
+ */
+function selectionOver(node: EventTarget | null): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim() || !(node instanceof Node)) return false;
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    if (selection.getRangeAt(i).intersectsNode(node)) return true;
+  }
+  return false;
+}
+
 function TruckRowImpl({
   row,
   fetchedAt,
@@ -552,6 +574,8 @@ function TruckRowImpl({
   keyCopy = null,
   savedTag = null,
   dropMark = null,
+  onMenu = null,
+  menuOpen = false,
   query,
   onSelect,
   onEdit,
@@ -588,11 +612,22 @@ function TruckRowImpl({
   const ground =
     selected || checked
       ? 'bg-row-selected'
-      : unassigned
-        ? // Marginally sunken, so it reads as inert rather than urgent — it is a
-          // problem of allocation, not of time (design-spec §5.8).
-          'bg-row-unassigned'
-        : 'hover:bg-row-hover';
+      : menuOpen
+        ? 'bg-row-hover'
+        : unassigned
+          ? // Marginally sunken, so it reads as inert rather than urgent — it is a
+            // problem of allocation, not of time (design-spec §5.8).
+            'bg-row-unassigned'
+          : 'hover:bg-row-hover';
+
+  /**
+   * §12.164 (QoL 8). Was there selected text under the pointer when the right button went down?
+   * Read at the press, because Chrome on a Mac is said to select the word under a right-click
+   * before `contextmenu` (HANDOFF 3bx measured what Chromium does here): read at `contextmenu`,
+   * every word would look selected and the menu would never open on text. Read then, it is
+   * right either way.
+   */
+  const pressSelected = useRef<boolean | null>(null);
 
   return (
     <div
@@ -607,7 +642,23 @@ function TruckRowImpl({
        */
       data-row-id={row.id}
       {...(dropMark ? { 'data-drop-row': dropMark.takes ? 'yes' : 'no' } : {})}
+      {...(menuOpen ? { 'data-menu-for': '' } : {})}
       onClick={() => onSelect(row.id)}
+      onPointerDown={(e) => {
+        pressSelected.current = e.button === 2 ? selectionOver(e.target) : null;
+      }}
+      onContextMenu={(e) => {
+        if (!onMenu) return;
+        // A field keeps the browser's menu, as anywhere: the row's checkbox.
+        if ((e.target as Element).closest('input, textarea, select')) return;
+        const onText = pressSelected.current ?? selectionOver(e.target);
+        pressSelected.current = null;
+        if (onText) return;
+        e.preventDefault();
+        // What a Mac's press may have just selected: the double-click clears it the same way.
+        window.getSelection()?.removeAllRanges();
+        onMenu(row.id, { x: e.clientX, y: e.clientY });
+      }}
       /**
        * §12.48. The whole row, because a gesture that works on five cells of
        * eight is unlearnable — a dispatcher who finds it on the driver column
@@ -848,13 +899,15 @@ function TruckRowImpl({
           label="Copy load info"
           glyph="load"
           offset="0px"
+          // §12.164 (QoL 8). The row menu's Copy load info lands here, as C's copy does below.
+          confirmedAt={keyCopy && !keyCopy.refused && keyCopy.what === 'load' ? keyCopy.at : null}
         />
         <CopyButton
           value={addressText(row)}
           label="Copy address"
           glyph="address"
           offset="54px"
-          confirmedAt={keyCopy && !keyCopy.refused ? keyCopy.at : null}
+          confirmedAt={keyCopy && !keyCopy.refused && (keyCopy.what ?? 'address') === 'address' ? keyCopy.at : null}
         />
       </div>
 
@@ -979,6 +1032,9 @@ export const TruckRow = memo(TruckRowImpl, (a, b) => {
     a.keyCopy?.at === b.keyCopy?.at &&
     a.keyCopy?.refused === b.keyCopy?.refused &&
     a.savedTag === b.savedTag &&
+    a.menuOpen === b.menuOpen &&
+    a.onMenu === b.onMenu &&
+    a.keyCopy?.what === b.keyCopy?.what &&
     a.dropMark?.takes === b.dropMark?.takes &&
     a.dropMark?.text === b.dropMark?.text &&
     a.query === b.query

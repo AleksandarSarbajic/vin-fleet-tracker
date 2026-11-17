@@ -102,6 +102,10 @@ interface Props {
   savedCause?: { id: string; n: number } | null;
   /** §12.164 (QoL 1). The row a file is over, and what it says. */
   dropMark?: DropMark | null;
+  /** §12.164 (QoL 8). A row's right-click opens its menu; null below the editing width. */
+  onMenu?: ((id: string, at: { x: number; y: number }) => void) | null;
+  /** §12.164 (QoL 8). The truck whose menu is open. */
+  menuFor?: string | null;
   /** §14 feature 14. One read at the top, not one matchMedia listener per row. */
   reducedMotion: boolean;
   isPinned: (id: string) => boolean;
@@ -146,6 +150,8 @@ export function FleetList({
   keyCopyFor,
   savedCause = null,
   dropMark = null,
+  onMenu = null,
+  menuFor = null,
   reducedMotion,
   isPinned,
   onPin,
@@ -494,6 +500,8 @@ export function FleetList({
                 keyCopy={keyCopyFor(row.id)}
                 savedTag={savedTag?.id === row.id ? savedTag.at : null}
                 dropMark={dropMark?.id === row.id ? dropMark : null}
+                onMenu={onMenu}
+                menuOpen={menuFor === row.id}
                 reducedMotion={reducedMotion}
                 pinned
                 onPin={onPin}
@@ -553,6 +561,8 @@ export function FleetList({
                   keyCopy={keyCopyFor(row.id)}
                   savedTag={savedTag?.id === row.id ? savedTag.at : null}
                 dropMark={dropMark?.id === row.id ? dropMark : null}
+                onMenu={onMenu}
+                menuOpen={menuFor === row.id}
                   reducedMotion={reducedMotion}
                   pinned={isPinned(row.id)}
                   onPin={onPin}

@@ -23,7 +23,9 @@ import { ConsoleHeader, type HeaderNote } from './ConsoleHeader';
 import { FeedBanner } from './FeedBanner';
 import type { AccountUser } from './AccountMenu';
 import { Toasts } from './Toasts';
-import { CLIPBOARD_REFUSED, KEY_REFUSAL_MS, keyCopyText, type KeyCopy } from './key-copy';
+import { CLIPBOARD_REFUSED, KEY_REFUSAL_MS, keyCopyText, loadCopyText, type KeyCopy } from './key-copy';
+import { RowMenu } from './RowMenu';
+import { rowMenuItems, type RowMenuItemId } from './row-menu';
 import {
   detectToasts,
   dispatchDay,
@@ -544,7 +546,13 @@ export function Console({
    * §12.164 (QoL 1). A PDF dragged over the board: the row under it says whose window it opens or
    * why it takes nothing, and the board takes every file drag so the browser never opens one.
    */
-  const boardDrop = useBoardDrop({ rows: ordered, role, onTake: takeDroppedFile });
+  const boardDrop = useBoardDrop({
+    rows: ordered,
+    role,
+    onTake: takeDroppedFile,
+    // §12.164 (QoL 8). A file dragged onto the page closes the row menu.
+    onDragStart: () => setMenu(null),
+  });
 
   /** Arrow keys move the selection and the map follows (§8.1). */
   useEffect(() => {
@@ -744,18 +752,23 @@ export function Console({
     const timer = window.setTimeout(() => setKeyCopy(null), KEY_REFUSAL_MS);
     return () => window.clearTimeout(timer);
   }, [keyCopy]);
-  const copyAddressByKey = useCallback((row: FleetRow) => {
-    const what = keyCopyText(row);
-    if ('refused' in what) {
-      setKeyCopy({ id: row.id, at: Date.now(), refused: what.refused });
+  /**
+   * C's copy, and the row menu's two (§12.164, QoL 8): the address by C's own rule, the load by
+   * the row's load control's text. The control the copy belongs to says Copied, tick and word.
+   */
+  const copyFromRow = useCallback((row: FleetRow, what: 'address' | 'load') => {
+    const answer = what === 'address' ? keyCopyText(row) : loadCopyText(row);
+    if ('refused' in answer) {
+      setKeyCopy({ id: row.id, at: Date.now(), refused: answer.refused, what });
       return;
     }
-    navigator.clipboard.writeText(what.text).then(
-      () => setKeyCopy({ id: row.id, at: Date.now(), refused: null }),
+    navigator.clipboard.writeText(answer.text).then(
+      () => setKeyCopy({ id: row.id, at: Date.now(), refused: null, what }),
       // Refused outside a secure context and in some embedded browsers: said, never silent.
-      () => setKeyCopy({ id: row.id, at: Date.now(), refused: CLIPBOARD_REFUSED }),
+      () => setKeyCopy({ id: row.id, at: Date.now(), refused: CLIPBOARD_REFUSED, what }),
     );
   }, []);
+  const copyAddressByKey = useCallback((row: FleetRow) => copyFromRow(row, 'address'), [copyFromRow]);
   const keyCopyFor = useCallback((id: string) => (keyCopy?.id === id ? keyCopy : null), [keyCopy]);
 
   /**
@@ -765,6 +778,32 @@ export function Console({
    */
   const [savedCause, setSavedCause] = useState<{ id: string; n: number } | null>(null);
   const onSaved = useCallback((id: string) => setSavedCause((was) => ({ id, n: (was?.n ?? 0) + 1 })), []);
+
+  /**
+   * §12.164, phase 3bx (QoL 8). The row menu: a right-click on a row, or the menu key and
+   * Shift+F10 for the selected one. Its truck is read live, from the rows the board shows: a poll
+   * that changes the truck changes the items, and one that takes it off the board closes it.
+   */
+  const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number } } | null>(null);
+  const menuRow = useMemo(() => (menu ? (ordered.find((r) => r.id === menu.id) ?? null) : null), [menu, ordered]);
+  useEffect(() => {
+    if (menu && !menuRow) setMenu(null);
+  }, [menu, menuRow]);
+  const openMenu = useCallback((id: string, at: { x: number; y: number }) => {
+    // §12.94: nothing new below the editing width.
+    if (editingAllowedNow()) setMenu({ id, at });
+  }, []);
+  const closeMenu = useCallback((backToRow: boolean) => {
+    setMenu((open) => {
+      if (open && backToRow) {
+        // After the commit that removes the menu, so the focus lands on a row that is there.
+        window.setTimeout(() =>
+          document.querySelector<HTMLElement>(`[data-row-id="${open.id}"]`)?.focus({ preventScroll: true }),
+        );
+      }
+      return null;
+    });
+  }, []);
 
   /**
    * §14's `X` binding, and Esc's new first job.
@@ -787,6 +826,15 @@ export function Console({
       // on a button it would clear the rows behind a window and the window's own Esc
       // would never run. The bulk modal is asking about these very rows.
       if (isWindowOpen()) return;
+      // §12.164 (QoL 8). The menu key, or Shift+F10: the selected row's menu, under its start.
+      if ((event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) && selectedRow) {
+        event.preventDefault();
+        const box =
+          document.querySelector(`[data-row-id="${selectedRow.id}"]`)?.getBoundingClientRect() ??
+          document.querySelector('[data-board-rows]')?.getBoundingClientRect();
+        openMenu(selectedRow.id, box ? { x: box.left + 40, y: box.bottom } : { x: 40, y: 160 });
+        return;
+      }
       // A selected truck the board is not showing: ticked unseen, it would come back
       // checked, and a bulk action would take it along.
       if ((event.key === 'x' || event.key === 'X') && selectedRow) {
@@ -814,7 +862,28 @@ export function Console({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [bulk, selectedRow, editingId, copyAddressByKey]);
+  }, [bulk, selectedRow, editingId, copyAddressByKey, openMenu]);
+
+  /**
+   * §12.164 (QoL 8). Each item through its own control's or key's code: Edit load is Enter's
+   * (`editTruck`), Copy address C's, Copy load info the load control's text, Pin the star's,
+   * Timeline T's, Check the box's and X's. The focus goes back to the row, unless a window
+   * opened: it takes the focus then.
+   */
+  const actOnMenu = useCallback(
+    (id: RowMenuItemId) => {
+      const row = menuRow;
+      if (!row) return;
+      closeMenu(id !== 'edit' && id !== 'timeline');
+      if (id === 'edit') editTruck(row.id);
+      else if (id === 'address') copyFromRow(row, 'address');
+      else if (id === 'load') copyFromRow(row, 'load');
+      else if (id === 'pin') pins.toggle(row.id);
+      else if (id === 'timeline') setTimelineId(row.id);
+      else bulk.toggle(row.id, false);
+    },
+    [menuRow, closeMenu, editTruck, copyFromRow, pins, bulk],
+  );
 
   /* ------------------------- the header's scope (§12.91) ---------------- */
 
@@ -887,6 +956,14 @@ export function Console({
 
   /** §12.96. The phone's More sheet: the filters, Today and density off the first screen. */
   const [moreOpen, setMoreOpen] = useState(false);
+
+  /**
+   * §12.164 (QoL 8). A window opening closes the row menu, whatever opened it (its own Edit load
+   * and Timeline, a toast, the bulk bar): a menu never stands over a window or under one.
+   */
+  useEffect(() => {
+    if (editingId || timelineId || bulkAction || listEditor || addingToList || moreOpen) setMenu(null);
+  }, [editingId, timelineId, bulkAction, listEditor, addingToList, moreOpen]);
 
   /** The scope menu's lists and views, for the desktop header and the phone's top bar. */
   const headerViews = {
@@ -1255,6 +1332,8 @@ export function Console({
                       keyCopyFor={keyCopyFor}
                       savedCause={savedCause}
                       dropMark={boardDrop.mark}
+                      onMenu={editingAllowed ? openMenu : null}
+                      menuFor={menu?.id ?? null}
                       reducedMotion={reducedMotion}
                       isPinned={pins.isPinned}
                       onPin={pins.toggle}
@@ -1319,6 +1398,17 @@ export function Console({
             />
           </div>
         </div>
+
+        {/* §12.164 (QoL 8). The row menu. */}
+        {menu && menuRow ? (
+          <RowMenu
+            truckLabel={String(menuRow.truckNumber ?? menuRow.samsaraName)}
+            items={rowMenuItems(menuRow, { role, pinned: pins.isPinned(menuRow.id), checked: bulk.checked.has(menuRow.id) })}
+            at={menu.at}
+            onAct={actOnMenu}
+            onClose={closeMenu}
+          />
+        ) : null}
 
         {timelineRow ? (
           <TruckTimeline

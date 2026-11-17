@@ -680,3 +680,155 @@ test.describe('7: Show all, in the map\'s controls', () => {
     expect(show.y + show.height).toBeLessThanOrEqual(zoomStack.y + zoomStack.height);
   });
 });
+
+/* ------------------------------------------------------------------ 8 */
+
+test.describe('8: right-click on a row', () => {
+  const menu = (page: Page) => page.getByRole('menu');
+  const focusedRow = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-row-id') ?? null);
+
+  test('a real right-click opens the menu at the pointer; Esc closes it, the focus goes back to the row, and the press reaches nothing else', async ({ page }) => {
+    await resetWorld();
+    await page.goto('/');
+    await rowOf(page, IDS.truckDallas).click();
+    await expect(rowOf(page, IDS.truckDallas)).toHaveAttribute('aria-selected', 'true');
+    const box = (await rowOf(page).locator('[title]').first().boundingBox())!;
+    await page.mouse.click(box.x + 10, box.y + box.height / 2, { button: 'right' });
+    await expect(menu(page)).toHaveAttribute('aria-label', 'Truck 101');
+    await expect(menu(page).getByRole('menuitem')).toHaveText(['Edit loadEnter', 'Copy addressC', 'Copy load info', 'PinP', 'TimelineT', 'CheckX']);
+    const at = (await menu(page).boundingBox())!;
+    expect(Math.abs(at.x - (box.x + 10))).toBeLessThan(2);
+    await expect(menu(page).getByRole('menuitem', { name: 'Edit load' })).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(menu(page)).toHaveCount(0);
+    await expect.poll(() => focusedRow(page)).toBe(IDS.truckChicago);
+    // The board's Esc clears the selection: it must not have heard the press that closed the menu.
+    await expect(rowOf(page, IDS.truckDallas)).toHaveAttribute('aria-selected', 'true');
+    expect(new URL(page.url()).searchParams.get('truck')).toBe(String(TRUCK_NUMBERS.dallas));
+  });
+
+  test("while it is open the board's keys stand down; its items go through their own code; Shift+F10 opens it for the selected row", async ({
+    page,
+    context,
+  }) => {
+    await resetWorld();
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    await rowOf(page, IDS.truckDallas).click();
+    await rowOf(page).click({ button: 'right' });
+    await expect(menu(page)).toBeVisible();
+    await page.evaluate(() => navigator.clipboard.writeText('before'));
+    for (const key of ['x', 'c', 't', 'p', 'ArrowDown', 'ArrowDown']) await page.keyboard.press(key);
+    await expect(rowOf(page, IDS.truckDallas).getByRole('checkbox')).not.toBeChecked();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('before');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(rowOf(page, IDS.truckDallas)).toHaveAttribute('aria-selected', 'true');
+
+    // The arrows moved inside the menu: Edit load, then Copy address, then Copy load info.
+    await expect(menu(page).getByRole('menuitem', { name: 'Copy load info' })).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(menu(page)).toHaveCount(0);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1 Test Dock, Chicago, IL, 60601');
+    await expect(rowOf(page).getByRole('button', { name: 'Copy address' })).toContainText('Copied');
+
+    // Shift+F10 for the selected truck (102), then Timeline.
+    await page.keyboard.press('Shift+F10');
+    await expect(menu(page)).toHaveAttribute('aria-label', 'Truck 102');
+    await menu(page).getByRole('menuitem', { name: 'Timeline' }).click();
+    await expect(page.getByRole('dialog', { name: 'Timeline for truck 102' })).toBeVisible();
+    await expect(menu(page)).toHaveCount(0);
+  });
+
+  test('a scroll closes the menu; Edit load opens the window as Enter does, selecting the truck', async ({ page }) => {
+    // Rows enough to scroll. The list is drawn as it scrolls: the first row drawn is the one used.
+    await resetWorld({ extraTrucks: 30 });
+    await page.goto('/');
+    const first = page.locator('[data-row-id]').first();
+    await first.click({ button: 'right' });
+    await expect(menu(page)).toBeVisible();
+    // Over the list, off the menu: the menu opens at the pointer, and a wheel over it scrolls nothing.
+    // The scroller, not its rows' box, which is the whole list's height.
+    const list = (await page.locator('[data-board-rows]').locator('xpath=..').boundingBox())!;
+    await page.mouse.move(list.x + 40, Math.min(list.y + list.height, 1000) - 60);
+    await page.mouse.wheel(0, 300);
+    await expect(menu(page)).toHaveCount(0);
+
+    await resetWorld();
+    await page.goto('/');
+    await rowOf(page).click({ button: 'right' });
+    await menu(page).getByRole('menuitem', { name: 'Edit load' }).click();
+    await expect(editModal(page)).toBeVisible();
+    await expect(rowOf(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(menu(page)).toHaveCount(0);
+  });
+
+  test("on selected text the browser's own menu stays: ours does not open", async ({ page }) => {
+    await resetWorld();
+    await page.goto('/');
+    // Selected by hand, a press dragged across the name (a double-click would open the window).
+    const driver = rowOf(page).getByText('Ana Petrovic');
+    const name = (await driver.boundingBox())!;
+    await page.mouse.move(name.x + 1, name.y + name.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(name.x + name.width - 1, name.y + name.height / 2, { steps: 8 });
+    await page.mouse.up();
+    expect(await page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
+    const prevented = page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) =>
+          window.addEventListener('contextmenu', (e) => setTimeout(() => resolve(e.defaultPrevented)), { once: true }),
+        ),
+    );
+    await driver.click({ button: 'right' });
+    expect(await prevented, "the browser's own menu: our handler left the event alone").toBe(false);
+    await expect(menu(page)).toHaveCount(0);
+  });
+
+  test('a viewer: Edit load is there, disabled, with the reason', async ({ page }) => {
+    await resetWorld();
+    await db((sql) => sql`update profiles set role = 'viewer' where id = ${process.env['E2E_USER_ID']!}`);
+    try {
+      await page.goto('/');
+      await rowOf(page).click({ button: 'right' });
+      const edit = menu(page).getByRole('menuitem', { name: 'Edit load' });
+      await expect(edit).toHaveAttribute('aria-disabled', 'true');
+      await expect(edit).toHaveAttribute('title', 'Your role is viewer. Editing needs dispatcher.');
+      // Forced: Playwright will not press what says it is disabled; a person's click still lands.
+      await edit.click({ force: true });
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(menu(page)).toBeVisible();
+    } finally {
+      await db((sql) => sql`update profiles set role = 'dispatcher' where id = ${process.env['E2E_USER_ID']!}`);
+    }
+  });
+
+  test('measured: what a real right-click in Chromium selects before contextmenu (CDP Input.dispatchMouseEvent, button right)', async ({ page }) => {
+    await resetWorld();
+    await page.goto('/');
+    const word = rowOf(page).getByText('Ana Petrovic');
+    const box = (await word.boundingBox())!;
+    await page.evaluate(() => {
+      const w = window as unknown as { __seen: string[] };
+      w.__seen = [];
+      const note = (when: string) => w.__seen.push(`${when}: "${window.getSelection()?.toString() ?? ''}"`);
+      window.addEventListener('pointerdown', () => note('pointerdown'), true);
+      window.addEventListener('mousedown', () => setTimeout(() => note('after mousedown'), 0), true);
+      window.addEventListener('contextmenu', () => note('contextmenu'), true);
+      window.addEventListener('mouseup', () => note('mouseup'), true);
+    });
+    const cdp = await page.context().newCDPSession(page);
+    const x = box.x + 8;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'right', buttons: 2, clickCount: 1 });
+    await page.waitForTimeout(100);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'right', buttons: 0, clickCount: 1 });
+    await page.waitForTimeout(200);
+    const seen = await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen);
+    process.stdout.write(`right-click measured (${process.platform}, Chromium ${page.context().browser()?.version()}): ${seen.join(' | ')}\n`);
+    // Whatever the press selected, the menu opens: the selection is read at the press.
+    await expect(menu(page)).toHaveAttribute('aria-label', 'Truck 101');
+  });
+});

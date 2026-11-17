@@ -60,7 +60,8 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  * every `DialogFrame` carries (`window-keys-guard.test.ts` holds them to it):
  *
  * - **A menu is not a window.** It has no `aria-modal`, and the board's keys work
- *   around it as they always did.
+ *   around it as they always did. The one exception is the row menu (§12.164), which
+ *   holds them, by its own mark (`data-row-menu`).
  * - **The fading copy does not count.** `dialog-motion.ts` strips its `aria-*`, so
  *   keys work again the moment a window closes, not when its copy has faded.
  * - **A window nobody can see does not count.** The phone sheets are `md:hidden` and
@@ -77,7 +78,13 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  * that press has to be stopped by the window that took it.
  */
 export function isWindowOpen(): boolean {
-  return [...document.querySelectorAll('[aria-modal="true"]')].some(
+  /**
+   * A window (`aria-modal`), and §12.164's row menu (QoL 8), the one menu that holds the board's
+   * keys. The account and view menus let them work around them, as above; the row menu is about
+   * one truck while the board's keys act on another (the selected one), and it takes the arrows,
+   * Enter and Esc for itself, so they stand down while it is open.
+   */
+  return [...document.querySelectorAll('[aria-modal="true"], [data-row-menu]')].some(
     (el) => typeof el.checkVisibility !== 'function' || el.checkVisibility(),
   );
 }
@@ -154,6 +161,8 @@ export const KEYMAP: readonly Binding[] = [
   /** §12.163, phase 3bw (QoL 11). Neither clashed with a binding. */
   { keys: ['C'], label: "Copy the selected truck's address", group: 'list', owner: 'Console' },
   { keys: ['T'], label: "Open the selected truck's timeline", group: 'list', owner: 'Console' },
+  /** §12.164, phase 3bx (QoL 8). The keyboard's way to a right-click's menu; neither clashed. */
+  { keys: ['⇧', 'F10'], label: "Open the selected truck's menu (or the menu key)", group: 'list', owner: 'Console' },
   { keys: ['D'], label: 'Toggle row density', group: 'list', owner: 'ListToolbar' },
   /** §12.101. Two keys in turn, not together. Neither clashed with a binding. */
   { keys: ['G', 'H'], label: 'Open driver history', group: 'pages', owner: 'useGoKeys' },
