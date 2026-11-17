@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PdfOutcome, ScanReading } from '@/lib/ratecon/read-pdf';
 import { EditStopModal } from './EditStopModal';
-import { carriesFiles, windowDrop } from './window-drop';
+import { NO_FILE_HANDED, carriesFiles, fileMayFill, nothingRead, rowFillRule } from './window-drop';
 import { fleetRow, nextStop } from '@/test/fleet-row';
 import { primeLoadRead } from '@/test/load-read';
 import type { FleetResponse } from '@/hooks/useFleet';
@@ -80,10 +80,14 @@ const render = async (row = NEW_LOAD) => {
 const PDF = new File(['%PDF-1.4 invented'], 'ratecon.pdf', { type: 'application/pdf' });
 
 /** A drag event as the browser sends one: files listed in `types`, the file in `files`. */
-async function drag(target: Element, type: 'dragover' | 'drop', carrying: 'files' | 'text' = 'files'): Promise<Event> {
+async function drag(target: Element, type: 'dragover' | 'drop', carrying: 'files' | 'text' | 'empty' = 'files'): Promise<Event> {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'dataTransfer', {
-    value: carrying === 'files' ? { types: ['Files'], files: [PDF], dropEffect: 'none' } : { types: ['text/plain'], files: [], dropEffect: 'none' },
+    value:
+      carrying === 'files'
+        ? { types: ['Files'], files: [PDF], dropEffect: 'none' }
+        : // 'empty': a folder, or a browser that keeps the file back: it says Files and hands none.
+          { types: carrying === 'empty' ? ['Files'] : ['text/plain'], files: [], dropEffect: 'none' },
   });
   await act(async () => {
     target.dispatchEvent(event);
@@ -97,19 +101,31 @@ const strip = () => container!.querySelector<HTMLElement>('[data-ratecon-strip]'
 const refused = () => container!.querySelector('[data-drop-refused]')?.textContent ?? null;
 const panel = () => container!.querySelector<HTMLElement>('[role="dialog"]')!.firstElementChild as HTMLElement;
 
-describe('the rule (QoL 12)', () => {
-  it('reads only while the strip would: an editor, no saved stop, no save on its way or landed', () => {
-    expect(windowDrop({ mayEdit: true, saving: false, spent: false, anyStored: false })).toEqual({ read: true });
-    expect(windowDrop({ mayEdit: true, saving: false, spent: false, anyStored: true })).toEqual({
-      refused: 'Nothing was read: this load has saved stops, and a read only fills a new load.',
+describe('the rule (QoL 12), one function for the window, the strip and the board (3bx, §12.164)', () => {
+  it('offers a fill only while the strip would: an editor, no saved stop, no save on its way or landed', () => {
+    const said = (rule: Parameters<typeof fileMayFill>[0]) => {
+      const offer = fileMayFill(rule);
+      return offer.offered ? 'offered' : nothingRead(offer.reason);
+    };
+    expect(said({ mayEdit: true, saving: false, spent: false, anyStored: false })).toBe('offered');
+    expect(said({ mayEdit: true, saving: false, spent: false, anyStored: true })).toBe(
+      'Nothing was read: this load has saved stops, and a read only fills a new load.',
+    );
+    expect(said({ mayEdit: false, saving: false, spent: false, anyStored: false })).toBe('Nothing was read: a viewer cannot fill a load.');
+    expect(said({ mayEdit: true, saving: true, spent: false, anyStored: false })).toBe('Nothing was read: a save is on its way.');
+    expect(said({ mayEdit: true, saving: false, spent: true, anyStored: false })).toBe(
+      'Nothing was read: this load was just saved, and a read only fills a new load.',
+    );
+  });
+
+  it("a row asks it as the window it would open: no next stop is a new load, a next stop is a saved one, a viewer can't", () => {
+    expect(fileMayFill(rowFillRule(NEW_LOAD, 'dispatcher'))).toEqual({ offered: true });
+    expect(fileMayFill(rowFillRule(NEW_LOAD, 'admin'))).toEqual({ offered: true });
+    expect(fileMayFill(rowFillRule(SAVED, 'dispatcher'))).toEqual({
+      offered: false,
+      reason: 'this load has saved stops, and a read only fills a new load',
     });
-    expect(windowDrop({ mayEdit: false, saving: false, spent: false, anyStored: false })).toEqual({
-      refused: 'Nothing was read: a viewer cannot fill a load.',
-    });
-    expect(windowDrop({ mayEdit: true, saving: true, spent: false, anyStored: false })).toEqual({ refused: 'Nothing was read: a save is on its way.' });
-    expect(windowDrop({ mayEdit: true, saving: false, spent: true, anyStored: false })).toEqual({
-      refused: 'Nothing was read: this load was just saved, and a read only fills a new load.',
-    });
+    expect(fileMayFill(rowFillRule(NEW_LOAD, 'viewer'))).toEqual({ offered: false, reason: 'a viewer cannot fill a load' });
   });
 
   it('only a drag that carries files', () => {
@@ -152,6 +168,29 @@ describe('a file let go anywhere in the edit window (QoL 12)', () => {
     expect(event.defaultPrevented, 'the browser would open the file').toBe(true);
     expect(pending.reads).toHaveLength(0);
     expect(refused()).toBe('Nothing was read: this load has saved stops, and a read only fills a new load.');
+  });
+
+  it('a drag that says Files and hands none over, on the form: taken, nothing read, and the window says why (3bx)', async () => {
+    await render();
+    const event = await drag(form(), 'drop', 'empty');
+    expect(event.defaultPrevented).toBe(true);
+    expect(pending.reads).toHaveLength(0);
+    expect(refused()).toBe(NO_FILE_HANDED);
+  });
+
+  it('the same drag on the strip: nothing read, and the strip says why (3bx)', async () => {
+    await render();
+    const event = await drag(strip()!, 'drop', 'empty');
+    expect(event.defaultPrevented).toBe(true);
+    expect(pending.reads).toHaveLength(0);
+    expect(strip()!.querySelector('[data-ratecon-said="fault"]')?.textContent).toBe(NO_FILE_HANDED);
+  });
+
+  it('text let go on the strip stays as quiet as it was: nothing read, nothing said (3bx)', async () => {
+    await render();
+    await drag(strip()!, 'drop', 'text');
+    expect(pending.reads).toHaveLength(0);
+    expect(strip()!.querySelector('[data-ratecon-said]')).toBeNull();
   });
 
   it('text dragged into the window is the browser\'s: not taken, nothing read', async () => {

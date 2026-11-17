@@ -104,7 +104,7 @@ import {
 import { bumpCount } from '@/lib/ratecon/session-counts';
 import { StopForm } from './StopForm';
 import { DialogFrame } from '@/components/overlay/DialogFrame';
-import { carriesFiles, windowDrop } from './window-drop';
+import { NO_FILE_HANDED, carriesFiles, fileMayFill, nothingRead } from './window-drop';
 
 /**
  * design-spec §9.9, §12.119. One modal covers editing a load and entering
@@ -1201,8 +1201,12 @@ function LoadEditor({
       ? `${stopsWithErrors} ${stopsWithErrors === 1 ? 'stop needs' : 'stops need'} attention before saving`
       : '';
 
-  /** §12.122. Only while every stop is unsaved: a fill replaces stops. */
-  const stripOffered = mayEdit && !saving && !spent && form.stops.every((s) => s.stored === null);
+  /**
+   * §12.122. Only while every stop is unsaved: a fill replaces stops. The one rule (§12.164), asked
+   * by the strip, by a file let go in the window, and by the board for a row.
+   */
+  const fillOffer = fileMayFill({ mayEdit, saving, spent, anyStored: form.stops.some((s) => s.stored !== null) });
+  const stripOffered = fillOffer.offered;
   /**
    * §12.163, phase 3bw (QoL 12). A file let go anywhere in the window: read by the strip when it
    * is offered, else swallowed with the reason. Off the strip only: the strip takes its own.
@@ -1224,13 +1228,19 @@ function LoadEditor({
     if (!carriesFiles(event.dataTransfer?.types) || !offStrip(event.target)) return;
     event.preventDefault();
     setDropOver(false);
-    const answer = windowDrop({ mayEdit, saving, spent, anyStored: form.stops.some((s) => s.stored !== null) });
-    if ('refused' in answer) {
-      setDropRefused(answer.refused);
+    if (!fillOffer.offered) {
+      setDropRefused(nothingRead(fillOffer.reason));
+      return;
+    }
+    // Read now, in the event: once it returns the browser hands over nothing (§12.164).
+    const file = event.dataTransfer.files[0];
+    if (!file) {
+      // A folder, or a browser that kept the file back: said, never silent (3bx).
+      setDropRefused(NO_FILE_HANDED);
       return;
     }
     setDropRefused(null);
-    takeFile.current?.(event.dataTransfer.files[0]!);
+    takeFile.current?.(file);
   };
 
   return (

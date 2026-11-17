@@ -15,6 +15,7 @@ import type { ReadFrom } from './ratecon-fill';
 import { MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 import { dropIn } from '@/lib/appear-motion';
 import { useOnAppear } from '@/hooks/useOnAppear';
+import { NO_FILE_HANDED, carriesFiles } from './window-drop';
 
 /**
  * §12.122. "Fill from rate confirmation": drop a PDF, choose one, or paste
@@ -307,7 +308,18 @@ export function RateconStrip({
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        onFile(e.dataTransfer.files[0]);
+        const file = e.dataTransfer.files[0];
+        if (file) {
+          onFile(file);
+          return;
+        }
+        // §12.164 (3bx). A drag that said Files and handed over none (a folder, or a browser that
+        // kept it back): said, never silent. A newer drop replaces a scan, as a newer file does.
+        // Text let go here is not a file, and stays as quiet as it always was.
+        if (carriesFiles(e.dataTransfer.types)) {
+          scanning.current?.abort();
+          setStatus({ kind: 'said', tone: 'fault', text: NO_FILE_HANDED });
+        }
       }}
       className={`border-b border-line-hair px-4 ${over || windowOver ? 'bg-surface-sunken' : ''}`}
     >
