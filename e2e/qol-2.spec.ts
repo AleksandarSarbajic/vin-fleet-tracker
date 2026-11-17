@@ -3,7 +3,7 @@ import { normalizeAddress } from '../src/lib/address';
 import { CHAIN_VERSION } from '../src/server/geocode';
 import { PU_SO, puSoBlocks } from '../src/test/ratecon-fixtures';
 import { tinyPdf } from '../src/test/tiny-pdf';
-import { IDS, TRUCK_NUMBERS, connect, resetWorld } from './fixtures';
+import { IDS, TRUCK_NUMBERS, connect, makeFeedStale, resetWorld } from './fixtures';
 
 /**
  * Phase 3bx (§12.164): QoL batch 2, each feature's `hand` path from the 3bf demo, in the real
@@ -359,5 +359,124 @@ test.describe('2: address suggestions from the company\'s own past stops', () =>
     } finally {
       await db((sql) => sql`update profiles set role = 'dispatcher' where id = ${process.env['E2E_USER_ID']!}`);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ 5 */
+
+const PLAIN = 'Fleet Tracker — Vin Logistics';
+/** Truck 101's stop two hours gone, so it is late. */
+const TWO_HOURS_AGO = () => new Date(Date.now() - 2 * 3_600_000);
+/** The Late chip's number, as a person reads it. */
+const lateChip = (page: Page) =>
+  page
+    .getByRole('group', { name: 'Filter by status' })
+    .getByRole('button')
+    .evaluateAll((buttons) => {
+      const late = buttons.find((b) => (b.getAttribute('aria-label') ?? b.textContent ?? '').trim().startsWith('Late'));
+      return Number(late?.lastElementChild?.textContent ?? 'NaN');
+    });
+
+/**
+ * The page as a hidden tab sees itself, emulated: Playwright keeps every page it drives visible
+ * (its focus emulation), so the tab says hidden by its own two properties and the event. The
+ * browser's own throttling of a hidden tab is not in this: HANDOFF 3bx measured a really hidden
+ * tab apart, over CDP with nothing attached.
+ */
+const hideable = (page: Page) =>
+  page.addInitScript(() => {
+    let state: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => state === 'hidden' });
+    (window as unknown as { __setVisibility: (s: DocumentVisibilityState) => void }).__setVisibility = (next) => {
+      state = next;
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
+const setVisibility = (page: Page, state: 'hidden' | 'visible') =>
+  page.evaluate((s) => (window as unknown as { __setVisibility: (v: string) => void }).__setVisibility(s), state);
+
+test.describe('5: the tab title', () => {
+  test("says how many are late, the Late chip's own count; a list in scope narrows it; History says the plain title", async ({ page }) => {
+    await resetWorld({ appointmentUtc: TWO_HOURS_AGO() });
+    await page.goto('/');
+    await expect(rowOf(page)).toBeVisible();
+    const late = await lateChip(page);
+    expect(late, 'the fixture has late trucks').toBeGreaterThan(0);
+    await expect(page).toHaveTitle(`${late} late · Fleet Tracker`);
+
+    // A list of truck 103 alone, which is not late: the chip says 0, the title is plain.
+    const listId = await db(async (sql) => {
+      const [list] = await sql<{ id: string }[]>`insert into truck_lists (name) values (${'Just 103'}) returning id`;
+      await sql`insert into truck_list_members (list_id, truck_id) values (${list!.id}, ${IDS.truckAtZipStop})`;
+      return list!.id;
+    });
+    await page.goto(`/?list=${listId}`);
+    await expect(rowOf(page, IDS.truckAtZipStop)).toBeVisible();
+    expect(await lateChip(page)).toBe(0);
+    await expect(page).toHaveTitle(PLAIN);
+
+    await page.goto('/');
+    await expect(page).toHaveTitle(`${late} late · Fleet Tracker`);
+    // The board's way to History, the keys: the board's title must not stay behind.
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('g');
+    await page.keyboard.press('h');
+    await page.waitForURL('**/history**');
+    await expect(page).toHaveTitle(PLAIN);
+  });
+
+  test('on a stale feed it claims nothing and says the feed is down, while the chip still counts late', async ({ page }) => {
+    await resetWorld({ appointmentUtc: TWO_HOURS_AGO() });
+    await makeFeedStale();
+    await page.goto('/');
+    await expect(rowOf(page)).toBeVisible();
+    expect(await lateChip(page)).toBeGreaterThan(0);
+    await expect(page).toHaveTitle('Feed down · Fleet Tracker');
+  });
+
+  test("when the console cannot reach its server: Not updating, from the header's own state", async ({ page }) => {
+    await resetWorld();
+    await page.clock.install();
+    await page.goto('/');
+    await expect(rowOf(page)).toBeVisible();
+    await page.route('**/api/fleet', (route) => route.abort());
+    await page.clock.fastForward(70_000);
+    await page.locator('[data-console-header] [data-not-updating]').waitFor();
+    await expect(page).toHaveTitle('Not updating · Fleet Tracker');
+  });
+
+  test('the login page has the plain title', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      const page = await context.newPage();
+      await page.goto('/login');
+      await expect(page).toHaveTitle(PLAIN);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('a hidden tab polls about once a minute; coming back polls once, not twice', async ({ page }) => {
+    test.setTimeout(150_000);
+    await resetWorld();
+    await hideable(page);
+    const polls: number[] = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname === '/api/fleet') polls.push(Date.now());
+    });
+    await page.goto('/');
+    await expect(rowOf(page)).toBeVisible();
+    await setVisibility(page, 'hidden');
+    const hiddenAt = Date.now();
+    polls.length = 0;
+    await page.waitForTimeout(70_000);
+    // Visible, 70s is three or four polls; hidden, one, about a minute in.
+    expect(polls.length, `polls while hidden: ${polls.map((t) => t - hiddenAt).join(', ')} ms`).toBe(1);
+    expect(polls[0]! - hiddenAt).toBeGreaterThan(55_000);
+    polls.length = 0;
+    await setVisibility(page, 'visible');
+    await page.waitForTimeout(3_000);
+    expect(polls, 'back: one request, not two').toHaveLength(1);
   });
 });

@@ -28,3 +28,10 @@ export const BRAND = {
   },
   alt: 'Vin Logistics Inc',
 } as const;
+
+/**
+ * The page's title, as `app/layout.tsx` gives it to every page (History, Assignments and the login
+ * page set none of their own). §12.164 (QoL 5): the board's tab says something else only while
+ * there is something to say, and comes back to this, so the two are one constant.
+ */
+export const APP_TITLE = 'Fleet Tracker — Vin Logistics';

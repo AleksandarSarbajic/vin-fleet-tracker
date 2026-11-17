@@ -13,7 +13,8 @@ import { useOnAppear } from '@/hooks/useOnAppear';
 import { fadeIn } from '@/lib/appear-motion';
 import { MOTION_MS } from '@/design/tokens';
 import { SEARCH_DEBOUNCE_MS, filterRows } from '@/lib/search';
-import { passesFilters, type FilterKey } from './FilterChips';
+import { chipCounts, passesFilters, type FilterKey } from './FilterChips';
+import { TabTitle } from './TabTitle';
 import type { BoardDriver } from '@/server/assignments';
 import type { Role } from '@/lib/roles';
 import { EditStopModal } from '@/components/edit/EditStopModal';
@@ -274,6 +275,8 @@ export function Console({
     () => scoped.filter((row) => passesFilters(row, chips)),
     [scoped, chips],
   );
+  /** §12.164 (QoL 5). The Late chip's own count (`FilterChips` is given `scoped` too), for the tab. */
+  const lateCount = useMemo(() => chipCounts(scoped).late, [scoped]);
 
   /**
    * §12.90. A list's inactive trucks follow the Inactive chip rule like any
@@ -1020,6 +1023,13 @@ export function Console({
         future structural break fails a test rather than hiding behind this.
       */}
       <div className="flex h-dvh flex-col overflow-hidden bg-surface-base">
+        {/* §12.164 (QoL 5). The tab's title: the Late chip's count over the same rows, or the feed or the link down. */}
+        <TabTitle
+          late={lateCount}
+          feedStale={feedStale}
+          fetchedAt={data?.fetchedAt ?? null}
+          poll={poll}
+        />
         <ConsoleHeader
           rows={scoped}
           chips={chips}

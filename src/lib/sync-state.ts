@@ -37,6 +37,26 @@ export function isNotUpdating(
   return now - health.lastSuccessAt > NOT_UPDATING_AFTER_MS;
 }
 
+/**
+ * §12.164 (QoL 5). Three of a hidden tab's polls missed (`FLEET_HIDDEN_POLL_MS`, 60s, in
+ * `useFleet`): the same three polls as `NOT_UPDATING_AFTER_MS`, at the hidden rate.
+ */
+export const NOT_UPDATING_HIDDEN_AFTER_MS = 180_000;
+
+/**
+ * §12.164 (QoL 5). Not updating, for the tab's title, which is read most while the tab is hidden.
+ * The header's own rule (`isNotUpdating`), which says nothing while the tab is hidden or just
+ * back; and, hidden or not, three hidden polls with no answer, which a hidden tab now asks
+ * (Alex, 2026-11-15). So the title says it behind the dispatcher's back, and does not take it
+ * back for the moments after they return while the board is still not hearing from us.
+ */
+export function titleNotUpdating(
+  health: Pick<PollHealth, 'lastSuccessAt' | 'visible' | 'visibleSince'>,
+  now: number,
+): boolean {
+  return isNotUpdating(health, now) || now - health.lastSuccessAt > NOT_UPDATING_HIDDEN_AFTER_MS;
+}
+
 /** Whole seconds until Retry may ask again, or 0. */
 export function retryWaitSeconds(health: Pick<PollHealth, 'retryBlockedUntil'>, now: number): number {
   if (health.retryBlockedUntil === null) return 0;
