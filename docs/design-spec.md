@@ -11785,7 +11785,7 @@ Phase 3bw, from the advisor's brief: what 3bv left (its found wrong 2, 5 and 6, 
 
 Phase 3bw, from the advisor's brief: the six of the advisor's recommended line that write nothing to the database,
 need no new route, and are rated small in 3bf's table (6 medium). Alex had not yet picked from the demo. Each does what
-its `does` in the demo says. Not built: 1, 2, 3, 5, 7, 8, 9 and 13, and nothing on the phone.
+its `does` in the demo says. Not built: 1, 2, 3, 5, 7, 8, 9 and 13, and nothing on the phone. (1, 2, 5, 7 and 8 are batch 2, §12.164.)
 
 **4 Today and Tomorrow** beside the appointment date (`edit/AppointmentFields.tsx`). The date at the stop, worked out at
 the click from the stop's own zone (the one in the field), never the dispatcher's (`lib/stop-day.ts`). Date parts
@@ -11846,6 +11846,98 @@ feature 1's.
 and the miles from the functions the Projected line draws with (`timeInZone`, `milesText`), the abbreviation Intl's at
 the copy (`console/map/eta-line.ts`). It refuses and says why on a stale feed ("The feed is down, so there is no ETA
 to quote from this screen.", as `FeedBanner` says not to quote one) and where there is no ETA. Clipboard only.
+
+## 12.164 Quality of life, batch 2: 1, 2, 5, 7 and 8 from the 3bf demo, and 3bw's drop
+
+Phase 3bx. Alex picked from the 3bf demo on 2026-11-15: everything but 3 (the mark box), 13 (which needs 3) and 9
+(row and marker hover: its cost on the map is unmeasured), with 5 a yes and a hidden tab polling about once a minute.
+Batch 1 was 3bw (§12.163); this is batch 2. Each does what its `does` in the demo says, except where said below.
+Nothing new is offered below the editing width (§12.94).
+
+**One rule for a file to fill a load** (`edit/window-drop.ts`). 3bw wrote it twice, as the strip's `stripOffered` and
+the window's drop; it is now `fileMayFill`, asked by the window with its form, by the strip (offered by it) and by the
+board for a row (`rowFillRule`: no next stop opens a new load, so it may; a next stop is a saved stop, so it may not).
+Its reasons follow "Nothing was read: " (`nothingRead`), on the board with the truck: "Nothing was read for truck 102:
+this load has saved stops, and a read only fills a new load." A drag that says Files and hands none over (a folder,
+or a browser that keeps the file back) now says so, on the window and on the strip; both were silent. Text on the
+strip stays as quiet as it was.
+
+**1 Drop a PDF on a truck's row** (`console/useBoardDrop.ts`). While a file is over a row, the row says, over its
+right end, whose window it opens ("Read this for truck 101 · Ana Petrovic") or why it takes nothing ("Truck 102: this
+load has saved stops, and a read only fills a new load"), in the menu family's frame (§12.148). Let go on a row that
+takes it, that truck is selected and its window opens with the read started through the strip's own way in
+(`RateconStrip`'s `takeFile`, 3bw): the same read, the same marks, Read with AI still its own press. The `File` is read
+out of the drop event (a browser hands over nothing once it returns) and held by the window's root past a reading
+panel, until the strip is there; the window asks the rule again as it opens, so a truck that gained a load in between
+gets nothing read and the reason. Every file drag on the board is taken, `dropEffect: copy` everywhere as in the
+window, so the browser never opens one; let go off the rows, behind a window that takes none, or on a row that
+cannot take it, the board says nothing was read and why, in a dismissible line under the header that the next file
+drag clears. Text and links are the browser's. A drop the edit window or its strip took is theirs. A viewer's row
+says "a viewer cannot fill a load". A truck still holding an old load asks §12.92's question at Save, as before.
+
+**2 Address suggestions from the company's own past stops** (`edit/AddressSuggest.tsx`, `lib/past-address.ts`,
+`server/stop-addresses.ts`). `GET /api/stops/addresses`: read-only, over `stops` joined to `loads`; dispatcher or admin
+(the route asks, `requireRole`); on the pooler; RLS unchanged, no policy added or widened. Distinct as a person reads an
+address (street and city without case or outer spaces, state and ZIP as stored), the newest spelling offered, `uses`
+counted; a stop with no street is not offered. **The cap: the newest 500 addresses,** by the newest load that used
+each: the list is for the places the company goes again, 500 rows of four short fields is tens of kilobytes fetched
+once a window, and at 3bf's count (90 loads in three weeks, many of them the same places) it is more than a year of
+distinct addresses, an estimate not measured on the hosted database. Its unexpected failure goes through
+`unexpectedFailure`, prefix `ADDRESSES`, no text (§12.142, §12.143). The window's root fetches it once per opening
+(`useStopAddresses`: `staleTime: Infinity`, `gcTime: 0`) and a viewer is not asked. Street address is a combobox:
+from two typed characters, the past stops holding the text anywhere in street, city, state or ZIP, most used first then
+newest, six at most, the match marked. The arrows move through them and never write into the field; Enter or a click
+picks; a pick fills street, city, state and ZIP through the same patch typing sends, so a new stop's `auto` zone
+follows it (`followZone`) and date and time do not move. Esc closes the list and keeps the text, and only the list:
+the window's Esc stands down while the list is open (`holdsEscape`) and the field stops the press. Tab closes it. Free
+text stays allowed. When the read fails the field is plain text and says "Suggestions from past stops are
+unavailable. Type the address." `autoComplete="off"` keeps Chrome's history of the field from standing over the list;
+what Chrome offers from a saved address of its own it decides, reported not to heed that attribute on address
+fields (unverified).
+
+**5 The tab title** (`lib/tab-title.ts`, `console/TabTitle.tsx`). "N late · Fleet Tracker", N the Late chip's own
+count (`chipCounts` over the same rows the chips count, so a list in scope narrows it); "Feed down · Fleet Tracker" on
+a stale feed, where the chip still counts late (3bf found wrong 3) and the title does not follow it; "Not updating ·
+Fleet Tracker" when the console cannot reach its server: the header's own rule (§12.123), and also, hidden or just back,
+three of a hidden tab's polls with no answer (`titleNotUpdating`). Not updating comes first, as in the header: nothing
+on the board is current then, the feed's state included. Otherwise the layout's title, `APP_TITLE`, one constant with
+`app/layout.tsx`; it comes back when the board goes (History, Assignments and the login page set no title of their
+own), and the title is written back each second if anything writes over it (Next wrote the layout's title after the
+board hydrated). Below the editing width the title stays plain. **The poll:** a hidden tab polls every 60s
+(`FLEET_HIDDEN_POLL_MS`), the visible rate stays 20s, and below the editing width a hidden tab stops as before;
+coming back asks once (the resume refetch and the focus refetch join).
+
+**7 Show all** (`console/map/show-all.ts`, `MapChrome.tsx`'s `TopControls` and `ShowAllControl`). Beside the basemap
+toggle, in one row of controls left of the zoom, never under it where toasts land. It travels to the fit of `boundsOf`
+over the map's rows (the list's: its scope, chips and search), with the load fit's padding (64) and zoom floor (9), for
+a selection's 700ms (`mapTravel`); at once under reduced motion. Disabled with the reason when the list shows no trucks
+or none has a position. A selection and its popup stay; any nudge waiting for a pan is dropped, and no nudge follows
+the fit until a person moves the map (a selection, a zoom, a press on the map, a resize), so a popup that changes size
+after it never pulls the map off it. The popup stays where the fit leaves it, which can be off the map's edge. In
+that row the basemap toggle's box keeps a stacking context of its own (`relative isolate`), as a segment slide's host
+must (§12.149): it had one only through its old placement, and without it the slide's highlight was drawn under the
+box's ground (HANDOFF "Phase 3bx", found wrong 1).
+
+**8 Right-click on a row** (`console/RowMenu.tsx`, `console/row-menu.ts`). The demo's menu without Mark arrived: Edit
+load (Enter's `editTruck`), Copy address (C's copy), Copy load info (the row's load copy control's text; the demo's
+"Copy load number" would be a second path), Pin (the star's), Timeline (T's), Check (the box's and X's). Disabled,
+never hidden, each with its reason in the words its control or key already uses: a viewer's Edit load "Your role is
+viewer. Editing needs dispatcher.", a copy with nothing to copy "No next stop, so no address" or "…no load". The copy
+that landed says Copied on the row's own control, as C's does. `role="menu"`, the menu family's motion; arrows, Home,
+End, Enter, Space; Esc and Tab close it and give the focus back to the row, the closing press stopped. The menu key
+and Shift+F10 open it for the selected row (a keymap row). On selected text the browser's own menu stays: read at the
+press (Chrome on a Mac is said to select the word under a right-click first; the Chromium measured here does not) and
+by `intersectsNode`. While it is open `isWindowOpen` counts it (`data-row-menu`), so every board key stands down. A
+poll leaves it open and its items read the live row; a poll that takes its truck off the board closes it. A scroll, a
+press outside, a resize, leaving the window, a window opening and a file drag close it.
+
+| Constant | Value |
+|---|---|
+| `FLEET_HIDDEN_POLL_MS` | 60 000 |
+| `NOT_UPDATING_HIDDEN_AFTER_MS` | 180 000 (three hidden polls) |
+| `PAST_ADDRESS_CAP` | 500 |
+| `SUGGEST_MIN_CHARS`, `SUGGEST_SHOWN` | 2, 6 |
+| `FIT_PADDING` | 64 (the load fit's) |
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
