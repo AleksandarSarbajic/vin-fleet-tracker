@@ -233,7 +233,9 @@ export function BasemapToggle({
       role="group"
       aria-label="Basemap"
       data-map-control
-      className="flex border border-line-hair bg-surface-raised"
+      // `relative isolate`: a segment slide's host (`useSegmentSlide`). It met that by being
+      // `absolute z-10` until that placement moved up to TopControls (§12.164).
+      className="relative isolate flex border border-line-hair bg-surface-raised"
     >
       {BASEMAPS.map((option, index) => {
         const active = option === basemap;
