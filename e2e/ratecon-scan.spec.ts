@@ -56,16 +56,51 @@ async function db<T>(body: (sql: ReturnType<typeof connect>) => Promise<T>): Pro
 
 /** Every request the context makes, from the page or any of its workers, with when it was made. */
 function watch(context: BrowserContext) {
-  const seen: { at: number; url: URL }[] = [];
-  const on = (r: Request) => seen.push({ at: Date.now(), url: new URL(r.url()) });
+  const seen: { at: number; url: URL; request: Request }[] = [];
+  const on = (r: Request) => seen.push({ at: Date.now(), url: new URL(r.url()), request: r });
   context.on('request', on);
   return {
+    all: () => seen,
     before: (at: number) => seen.filter((s) => s.at < at),
     since: (at: number) => seen.filter((s) => s.at >= at),
   };
 }
 
-/** A new load's modal on an empty truck, the page and its requests watched from the first load. */
+/**
+ * 3bx found wrong 8. The map's own first load, by name: what `openNewLoad` waits to have seen
+ * before it returns, so that the origins the map uses are known before a scan is dropped and
+ * `expectOnlyKnownOrigins` does not race them. The style is its first request; `map.load` is its
+ * last, because mapbox-gl posts that telemetry from `_authenticate()`, which it calls only once
+ * the map is fully loaded, its style and first tiles drawn (mapbox-gl 3.30, `Map#_render`).
+ */
+const MAP_FIRST_LOAD: { name: string; is: (r: Request, url: URL) => boolean }[] = [
+  {
+    name: "the map's style (api.mapbox.com/styles/v1/…)",
+    is: (_r, url) => url.hostname === 'api.mapbox.com' && url.pathname.startsWith('/styles/v1/'),
+  },
+  {
+    name: "the map's map.load telemetry POST (events.mapbox.com/events/v2)",
+    is: (r, url) =>
+      url.hostname === 'events.mapbox.com' &&
+      r.method() === 'POST' &&
+      /"event"\s*:\s*"map\.load"/.test(r.postData() ?? ''),
+  },
+];
+
+/** Waits until every one of the map's first-load requests has been seen; a failure names those that were not. */
+async function mapLoaded(requests: ReturnType<typeof watch>): Promise<void> {
+  const missing = () =>
+    MAP_FIRST_LOAD.filter((m) => !requests.all().some((s) => m.is(s.request, s.url))).map((m) => m.name);
+  await expect
+    .poll(missing, { timeout: 30_000, message: "the map's first-load requests, before the scan is dropped" })
+    .toEqual([]);
+}
+
+/**
+ * A new load's modal on an empty truck, the page and its requests watched from the first load.
+ * It returns once the map's own first load is over (3bx found wrong 8): the origin check counts
+ * only origins the page used before the drop, and the map's telemetry came after it 2 runs in 41.
+ */
 async function openNewLoad(page: Page, context: BrowserContext) {
   await resetWorld();
   await db(async (sql) => {
@@ -78,6 +113,7 @@ async function openNewLoad(page: Page, context: BrowserContext) {
   await page.locator(`[data-row-id="${IDS.truckChicago}"]`).click();
   await page.keyboard.press('Enter');
   await stopForm(page).waitFor();
+  await mapLoaded(requests);
   return { strip: editModal(page).locator('[data-ratecon-strip]'), requests };
 }
 
