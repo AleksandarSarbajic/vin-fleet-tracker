@@ -1,5 +1,6 @@
 import { EASING } from '@/design/tokens';
 import { clearStyle, mayMove, play, settleLook, whenOver } from './motion';
+import { layUnder } from './under-layer';
 
 /**
  * §12.152. The small motions: something arriving in the place it already has.
@@ -146,9 +147,13 @@ export function groundPop(host: HTMLElement, on: boolean, ms: number, from: numb
   look.setAttribute(GROUND_POP, on ? 'on' : 'off');
   look.setAttribute('aria-hidden', 'true');
   look.className =
-    'pointer-events-none absolute -inset-px -z-10 border border-accent bg-surface-overlay';
-  host.prepend(look);
+    'pointer-events-none -inset-px border border-accent bg-surface-overlay';
+  // The mark first: globals.css makes a marked chip its look's stacking context (§12.165).
   host.setAttribute(GROUND_HOST, '');
+  if (!layUnder(host, look)) {
+    host.removeAttribute(GROUND_HOST);
+    return;
+  }
   settleLook(host);
 
   const frames = [
@@ -236,8 +241,9 @@ export function savedGlow(row: HTMLElement, ms: number, peak: number): Animation
   glow.setAttribute(SAVED_GLOW, '');
   glow.setAttribute('aria-hidden', 'true');
   // At rest, while it waits for its first frame, it shows nothing.
-  glow.className = 'pointer-events-none absolute inset-0 -z-10 bg-accent-veil opacity-0';
-  row.prepend(glow);
+  glow.className = 'pointer-events-none inset-0 bg-accent-veil opacity-0';
+  // §12.165: under the row's cells, inside the row's own stacking context, or not at all.
+  if (!layUnder(row, glow)) return null;
   const animation = play(glow, [{ opacity: 0 }, { opacity: peak, offset: 0.25 }, { opacity: 0 }], {
     duration: ms,
     easing: EASING.fade,

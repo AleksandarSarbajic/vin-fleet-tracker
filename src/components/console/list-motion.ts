@@ -1,6 +1,7 @@
 import { makeInert } from '@/components/overlay/dialog-motion';
 import { slideFrom } from '@/lib/appear-motion';
 import { clearStyle, mayMove, whenOver } from '@/lib/motion';
+import { layUnder } from '@/lib/under-layer';
 
 /**
  * §12.156. What a short list does when a person adds to it or takes from it: the saved views in
@@ -88,7 +89,7 @@ export function takeLeaving(el: HTMLElement, box: HTMLElement): Leaving | null {
   copy.setAttribute(LEAVING_COPY, '');
   copy.setAttribute('aria-hidden', 'true');
   copy.setAttribute('inert', '');
-  copy.classList.add('pointer-events-none', 'absolute', '-z-10', 'm-0');
+  copy.classList.add('pointer-events-none', 'm-0');
   // Where it was drawn, about the centre a scale keeps, at the size it has in layout.
   const drawn = el.getBoundingClientRect();
   const frame = box.getBoundingClientRect();
@@ -132,7 +133,8 @@ export function leave(
     width: `${leaving.width}px`,
     height: `${leaving.height}px`,
   });
-  box.prepend(copy);
+  // §12.165: under the list's content, inside its own stacking context, or not at all.
+  if (!layUnder(box, copy)) return;
   const animation = out(copy);
   if (!animation) {
     copy.remove();

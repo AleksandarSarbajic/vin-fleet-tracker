@@ -1,5 +1,6 @@
 import { EASING, MOTION_MS } from '@/design/tokens';
 import { mayMove, play, settleLook, whenOver } from './motion';
+import { layUnder } from './under-layer';
 
 /**
  * §12.149. A segment's highlight slides from what was chosen to what is chosen.
@@ -51,14 +52,15 @@ export function slideSegment(host: HTMLElement, from: HTMLElement, to: HTMLEleme
   const overlay = document.createElement('span');
   overlay.setAttribute(SEGMENT_SLIDE, '');
   overlay.setAttribute('aria-hidden', 'true');
-  overlay.className = 'absolute -z-10 border border-accent bg-surface-overlay';
+  overlay.className = 'border border-accent bg-surface-overlay';
   Object.assign(overlay.style, {
     left: `${end.x}px`,
     top: `${end.y}px`,
     width: `${end.width}px`,
     height: `${end.height}px`,
   });
-  host.prepend(overlay);
+  // §12.165: under the buttons' words, inside the host's own stacking context, or not at all.
+  if (!layUnder(host, overlay)) return;
   to.setAttribute(SEGMENT_TARGET, '');
   settleLook(to);
 

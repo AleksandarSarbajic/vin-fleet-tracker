@@ -39,6 +39,8 @@ afterEach(() => {
 });
 
 const el = () => document.body.appendChild(document.createElement('div'));
+/** A filter chip is a `button`: globals.css makes a marked one its look's stacking context (§12.165). */
+const chipEl = () => document.body.appendChild(document.createElement('button'));
 
 describe('the shapes', () => {
   it('a drop comes 14px down from above and fades in, on the windows’ curve', () => {
@@ -132,7 +134,7 @@ describe('taken back, or reduced', () => {
 
 describe('a chip’s look (groundPop)', () => {
   it('arriving: an overlay grows in from 75%, the chip’s own look held back, and all of it goes on landing', () => {
-    const chip = el();
+    const chip = chipEl();
     groundPop(chip, true, 270, 0.75);
     const look = chip.querySelector(`[${GROUND_POP}]`)!;
     expect(look.getAttribute('aria-hidden')).toBe('true');
@@ -144,11 +146,11 @@ describe('a chip’s look (groundPop)', () => {
     ]);
     expect(recorder.played[0]!.options.duration).toBe(270);
     recorder.finishAll();
-    expect(chip.outerHTML).toBe('<div></div>');
+    expect(chip.outerHTML).toBe('<button></button>');
   });
 
   it('leaving: the same overlay shrinks away to 75%', () => {
-    groundPop(el(), false, 270, 0.75);
+    groundPop(chipEl(), false, 270, 0.75);
     expect(recorder.played[0]!.keyframes).toEqual([
       { opacity: 1, scale: '1' },
       { opacity: 0, scale: '0.75' },
@@ -156,14 +158,25 @@ describe('a chip’s look (groundPop)', () => {
   });
 
   it('a second change mid-way: one overlay, and the chip held back until the last one lands', () => {
-    const chip = el();
+    const chip = chipEl();
     groundPop(chip, true, 270, 0.75);
     groundPop(chip, false, 270, 0.75);
     expect(chip.querySelectorAll(`[${GROUND_POP}]`)).toHaveLength(1);
     recorder.played[0]!.animation.finish();
     expect(chip.hasAttribute(GROUND_HOST)).toBe(true);
     recorder.played[1]!.animation.finish();
-    expect(chip.outerHTML).toBe('<div></div>');
+    expect(chip.outerHTML).toBe('<button></button>');
+  });
+
+  it('a host the stylesheet does not make a stacking context (not a button) is refused, loudly, and left as it was', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const host = el();
+    groundPop(host, true, 270, 0.75);
+    expect(host.outerHTML).toBe('<div></div>');
+    expect(recorder.played).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(String(errors.mock.calls[0]?.[0])).toMatch(/§12\.165: nothing may be drawn under <div/);
+    errors.mockRestore();
   });
 });
 

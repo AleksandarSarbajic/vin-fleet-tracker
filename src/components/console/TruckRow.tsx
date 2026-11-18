@@ -26,6 +26,7 @@ import { addressText, loadText } from '@/lib/copy-text';
 import type { FlashGround, RowFlashView } from '@/lib/flash';
 import { CopyButton } from './CopyButton';
 import { PopFrame } from '@/components/overlay/PopFrame';
+import { UnderLayer } from '@/components/overlay/UnderLayer';
 import type { DropMark } from './useBoardDrop';
 
 /**
@@ -744,10 +745,9 @@ function TruckRowImpl({
       ) : null}
 
       {flash && flash.tag === null ? (
-        <div
+        <UnderLayer
           key={flash.at}
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 -z-10 animate-flash ${FLASH_BG[flash.ground]}`}
+          className={`pointer-events-none inset-0 animate-flash ${FLASH_BG[flash.ground]}`}
         />
       ) : null}
 

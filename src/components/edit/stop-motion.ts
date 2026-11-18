@@ -3,6 +3,7 @@ import { ARRIVING, LEAVING_COPY } from '@/components/console/list-motion';
 import { dropIn, fadeIn, fadeOut, slideFrom } from '@/lib/appear-motion';
 import { EASING, MOTION_MS, MOTION_SHAPE } from '@/design/tokens';
 import { clearStyle, mayMove, play, settleLook, whenOver } from '@/lib/motion';
+import { layUnder } from '@/lib/under-layer';
 import type { AppointmentDraft } from './AppointmentFields';
 
 /**
@@ -100,7 +101,7 @@ export function beforeRemove(box: HTMLElement, tab: HTMLElement): StopCause | nu
     el.setAttribute(LEAVING_COPY, '');
     el.setAttribute('aria-hidden', 'true');
     el.setAttribute('inert', '');
-    el.classList.add('pointer-events-none', 'absolute', '-z-10', 'm-0');
+    el.classList.add('pointer-events-none', 'm-0');
     copy = { el, x: at.x, y: at.y, width: tab.offsetWidth, height: tab.offsetHeight };
   }
   return { kind: 'remove', box, gone: tab.id, before: placesOf(box), copy };
@@ -188,12 +189,14 @@ export function stopRemoved(cause: Extract<StopCause, { kind: 'remove' }>): void
       width: `${copy.width}px`,
       height: `${copy.height}px`,
     });
-    box.prepend(copy.el);
-    const animation = fadeOut(copy.el, ms);
-    if (animation) {
-      clipWhile(box, animation);
-      whenOver(animation, () => copy.el.remove());
-    } else copy.el.remove();
+    // §12.165: behind the tabs, inside the box's own stacking context, or not at all.
+    if (layUnder(box, copy.el)) {
+      const animation = fadeOut(copy.el, ms);
+      if (animation) {
+        clipWhile(box, animation);
+        whenOver(animation, () => copy.el.remove());
+      } else copy.el.remove();
+    }
   }
   slideMoved(box, cause.before, ms, true);
 }
@@ -226,14 +229,15 @@ export function stopChosen(tablist: HTMLElement, from: HTMLElement, to: HTMLElem
   const overlay = document.createElement('span');
   overlay.setAttribute(STOP_SLIDE, '');
   overlay.setAttribute('aria-hidden', 'true');
-  overlay.className = 'pointer-events-none absolute -z-10 border border-accent bg-accent-veil';
+  overlay.className = 'pointer-events-none border border-accent bg-accent-veil';
   Object.assign(overlay.style, {
     left: `${end.x}px`,
     top: `${end.y}px`,
     width: `${to.offsetWidth}px`,
     height: `${to.offsetHeight}px`,
   });
-  tablist.prepend(overlay);
+  // §12.165: behind every tab, inside the tablist's own stacking context, or not at all.
+  if (!layUnder(tablist, overlay)) return;
   to.setAttribute(STOP_TARGET, '');
   settleLook(from);
   settleLook(to);

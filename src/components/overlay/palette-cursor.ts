@@ -1,5 +1,6 @@
 import { EASING, MOTION_MS } from '@/design/tokens';
 import { mayMove, play, settleLook, whenOver } from '@/lib/motion';
+import { layUnder } from '@/lib/under-layer';
 
 /**
  * §12.156. The palette's cursor slides from the row it was on to the row it is on, on the arrow
@@ -42,9 +43,10 @@ export function slideCursor(list: HTMLElement, from: HTMLElement, to: HTMLElemen
   const overlay = document.createElement('span');
   overlay.setAttribute(CURSOR_SLIDE, '');
   overlay.setAttribute('aria-hidden', 'true');
-  overlay.className = 'pointer-events-none absolute left-0 -z-10 w-full bg-row-selected';
+  overlay.className = 'pointer-events-none left-0 w-full bg-row-selected';
   Object.assign(overlay.style, { top: `${end}px`, height: `${to.offsetHeight}px` });
-  list.prepend(overlay);
+  // §12.165: behind every row, inside the list's own stacking context, or not at all.
+  if (!layUnder(list, overlay)) return;
   to.setAttribute(CURSOR_TARGET, '');
   settleLook(from);
   settleLook(to);
