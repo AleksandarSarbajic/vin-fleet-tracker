@@ -58,16 +58,64 @@ export function connect() {
   return postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
 }
 
+/** SQLSTATE `deadlock_detected`: Postgres aborted this statement as one side of a cycle. */
+export const DEADLOCK = '40P01';
+/** How many times a statement is sent when it deadlocks, the first time included. */
+export const DEADLOCK_TRIES = 3;
+
+export type Log = (line: string) => void;
+const warn: Log = (line) => console.warn(line);
+
+function isDeadlock(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === DEADLOCK;
+}
+
+/**
+ * 3bx found wrong 6. `run`, sent again when Postgres aborts it as one side of a deadlock, at most
+ * `DEADLOCK_TRIES` times in all, with a line each time it is sent again. Any other error is thrown
+ * at once, and the last deadlock is thrown as it came.
+ *
+ * Why a deadlock is worth one more try and nothing else is: a deadlock's victim has done nothing
+ * (Postgres rolled it back), and the other side was let go by that abort, so it finishes and the
+ * second try waits for it instead of meeting it. A missing table, a refused connection or a lock
+ * timeout would fail the same way again, and a retry would only hide it.
+ */
+export async function retryOnDeadlock<T>(what: string, run: () => Promise<T>, log: Log = warn): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!isDeadlock(error) || attempt >= DEADLOCK_TRIES) throw error;
+      log(`e2e: ${what} deadlocked (${DEADLOCK}) on try ${attempt} of ${DEADLOCK_TRIES}; sending it again`);
+    }
+  }
+}
+
+/**
+ * Empties the named tables in one statement, sent again on a deadlock (`retryOnDeadlock`).
+ *
+ * The deadlock this is for (3bx found wrong 6, `.testdb/postgres.log` 2026-11-06 and 2026-11-17):
+ * the truncate takes each table's exclusive lock in turn, while a read the previous test's page
+ * left running holds a share lock on one table and then asks for another the truncate already
+ * holds. Postgres aborts the truncate. Every reset goes through here, so every spec gets the retry.
+ */
+export async function truncateTables(sql: postgres.Sql, tables: string[], log: Log = warn): Promise<void> {
+  if (tables.length === 0) return;
+  const statement = `truncate table ${tables.join(', ')} restart identity cascade`;
+  await retryOnDeadlock('the truncate', () => sql.unsafe(statement), log);
+}
+
 /** Empties every table in public. The cluster is loopback-only by construction. */
 export async function truncateAll(sql: postgres.Sql): Promise<void> {
   const tables = await sql<{ name: string }[]>`
     select tablename as name from pg_tables where schemaname = 'public'`;
-  const list = tables
-    .map((t) => t.name)
-    .filter((n) => /^[a-z_][a-z0-9_]*$/.test(n))
-    .map((n) => `public."${n}"`)
-    .join(', ');
-  if (list) await sql.unsafe(`truncate table ${list} restart identity cascade`);
+  await truncateTables(
+    sql,
+    tables
+      .map((t) => t.name)
+      .filter((n) => /^[a-z_][a-z0-9_]*$/.test(n))
+      .map((n) => `public."${n}"`),
+  );
   await sql`delete from auth.users`;
 }
 
