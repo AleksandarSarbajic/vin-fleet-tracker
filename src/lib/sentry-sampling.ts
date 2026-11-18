@@ -1,8 +1,9 @@
 import type { SamplingContext } from '@sentry/core';
 
 /**
- * Which traces the app keeps (§12.87). Shared by the Node and edge configs;
- * the browser and the worker stay at `tracesSampleRate: 0`.
+ * Which traces the app keeps (§12.87). Shared by the Node and edge configs.
+ * The browser samples nothing through `neverSample`, below (§12.165), and the
+ * worker stays at `tracesSampleRate: 0`.
  *
  * **Every sign-in, and 1% of everything else.** A flat rate is the wrong
  * tool for the question tracing was turned on to answer — "how long does a
@@ -19,7 +20,7 @@ import type { SamplingContext } from '@sentry/core';
  * be broken down by. So `parentSampled === true` keeps the span.
  *
  * `parentSampled === false` is deliberately NOT inherited (and neither is
- * `inheritOrSampleWith`): the browser runs at rate 0, so every request it
+ * `inheritOrSampleWith`): the browser samples nothing, so every request it
  * makes arrives carrying an unsampled parent, and inheriting that would drop
  * exactly the sign-ins this exists to see.
  *
@@ -82,3 +83,18 @@ export function sampleTraces(ctx: Context): number {
   if (ctx.parentSampled === true) return 1;
   return isSignInPost(ctx) ? SIGN_IN_SAMPLE_RATE : DEFAULT_SAMPLE_RATE;
 }
+
+/**
+ * §12.165. The browser's sampler: no span, whatever it is handed.
+ *
+ * `tracesSampleRate: 0` was not that. Without a sampler a sampled parent wins
+ * over the rate (@sentry/core tracing/sampling.js:66), and a traced page
+ * render hands the page one: `withSentryConfig` turns on Next's
+ * `clientTraceMetadata`, which writes `<meta name="sentry-trace" …-1>`. The
+ * pageload continued it, and when it ended its sampled flag went into the
+ * tab's propagation context (@sentry/browser
+ * tracing/browserTracingIntegration.js:156-163), so every later poll carried a
+ * sampled parent and `sampleTraces` kept each one. A sampler is asked even
+ * when there is a parent, so this one closes both.
+ */
+export const neverSample: (ctx?: Context) => number = () => 0;

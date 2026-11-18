@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SAMPLE_RATE, SIGN_IN_SAMPLE_RATE, isSignInPost, sampleTraces } from './sentry-sampling';
+import { DEFAULT_SAMPLE_RATE, SIGN_IN_SAMPLE_RATE, isSignInPost, neverSample, sampleTraces } from './sentry-sampling';
 
 /**
  * §12.87. The contexts below are the ones the real SDK passed during a local
  * sign-in against the production build (the sampler was made to log them):
  * Node names the span `POST /login`, the edge runtime `middleware POST
  * /login`, both carry `http.target`, and both arrive with `parentSampled:
- * false` because the browser runs at rate 0.
+ * false` because the browser samples nothing (§12.165).
  */
 
 const ctx = (
@@ -60,5 +60,19 @@ describe('which traces are kept', () => {
         normalizedRequest: { method: 'post', url: 'https://vin-fleet-tracker.vercel.app/login' },
       }),
     ).toBe(true);
+  });
+});
+
+/**
+ * §12.165. The browser's sampler. A sampler is asked even when there is a parent, so a sampled
+ * parent from a traced page render (`<meta name="sentry-trace" …-1>`) cannot win over it, as it won
+ * over `tracesSampleRate: 0`.
+ */
+describe('neverSample, the browser', () => {
+  it('returns 0 with a sampled parent, for a sign-in, and with nothing at all', () => {
+    const sampledParent = { ...ctx('pageload /', {}, true), parentSampleRate: 1 };
+    expect(neverSample(sampledParent)).toBe(0);
+    expect(neverSample(ctx('POST /login', { 'http.request.method': 'POST', 'http.target': '/login' }, true))).toBe(0);
+    expect(neverSample()).toBe(0);
   });
 });

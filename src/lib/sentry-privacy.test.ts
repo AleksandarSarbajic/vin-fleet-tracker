@@ -102,6 +102,11 @@ describe('every runtime that starts Sentry applies the policy', () => {
  * sampler, and off everywhere else — decided per init site, in code, so a
  * fifth `Sentry.init` cannot quietly trace at the SDK's default or at a rate
  * someone typed.
+ *
+ * §12.165. "Off" in the browser is a sampler, `neverSample`, not a rate of 0:
+ * a page whose render was traced hands the browser a sampled parent, and a
+ * parent wins over a rate. The worker stays at rate 0: nothing hands it a
+ * parent (it serves no requests and continues no trace).
  */
 describe('every runtime that starts Sentry declares its tracing', () => {
   const root = join(import.meta.dirname, '..', '..');
@@ -111,6 +116,7 @@ describe('every runtime that starts Sentry declares its tracing', () => {
       .map((f) => ({ file: f.slice(root.length + 1), body: code(f) }));
 
   const usesSampler = (body: string) => /tracesSampler:\s*sampleTraces\b/.test(body);
+  const samplesNothing = (body: string) => /tracesSampler:\s*neverSample\b/.test(body);
   const tracingOff = (body: string) => /tracesSampleRate:\s*0\s*[,}\n]/.test(body);
 
   it('samples the Node and edge runtimes with the shared sampler, and nothing else', () => {
@@ -123,23 +129,28 @@ describe('every runtime that starts Sentry declares its tracing', () => {
     }
   });
 
-  it('keeps the browser and the worker at rate 0', () => {
-    for (const file of ['src/instrumentation-client.ts', 'src/worker/sentry.ts']) {
-      const site = sites().find((s) => s.file === file);
-      expect(site, file).toBeDefined();
-      expect(tracingOff(site!.body), `${file} sets tracesSampleRate: 0`).toBe(true);
-      expect(site!.body, `${file} has no tracesSampler`).not.toMatch(/tracesSampler/);
-    }
+  it('samples nothing in the browser, through neverSample and no rate', () => {
+    const site = sites().find((s) => s.file === 'src/instrumentation-client.ts');
+    expect(site, 'src/instrumentation-client.ts').toBeDefined();
+    expect(samplesNothing(site!.body), 'the browser uses neverSample').toBe(true);
+    expect(site!.body, 'the browser has no tracesSampleRate').not.toMatch(/tracesSampleRate/);
+  });
+
+  it('keeps the worker at rate 0', () => {
+    const site = sites().find((s) => s.file === 'src/worker/sentry.ts');
+    expect(site, 'src/worker/sentry.ts').toBeDefined();
+    expect(tracingOff(site!.body), 'src/worker/sentry.ts sets tracesSampleRate: 0').toBe(true);
+    expect(site!.body, 'src/worker/sentry.ts has no tracesSampler').not.toMatch(/tracesSampler/);
   });
 
   it('lets no init site leave tracing to a default or to a hand-typed rate', () => {
     const undeclared = sites()
-      .filter(({ body }) => !usesSampler(body) && !tracingOff(body))
+      .filter(({ body }) => !usesSampler(body) && !samplesNothing(body) && !tracingOff(body))
       .map((s) => s.file);
     expect(
       undeclared,
-      'Declare tracing explicitly: `tracesSampler: sampleTraces` (server runtimes) ' +
-        'or `tracesSampleRate: 0`. See src/lib/sentry-sampling.ts.',
+      'Declare tracing explicitly: `tracesSampler: sampleTraces` (server runtimes), ' +
+        '`tracesSampler: neverSample` (the browser) or `tracesSampleRate: 0` (the worker). See src/lib/sentry-sampling.ts.',
     ).toEqual([]);
 
     /** Every value assigned to `key` in the code, trimmed. */
@@ -152,8 +163,8 @@ describe('every runtime that starts Sentry declares its tracing', () => {
     expect(otherRates, 'a tracesSampleRate other than 0').toEqual([]);
 
     const otherSamplers = sourceFiles(root)
-      .filter((f) => valuesOf('tracesSampler', code(f)).some((v) => v !== 'sampleTraces'))
+      .filter((f) => valuesOf('tracesSampler', code(f)).some((v) => v !== 'sampleTraces' && v !== 'neverSample'))
       .map((f) => f.slice(root.length + 1));
-    expect(otherSamplers, 'a tracesSampler other than sampleTraces').toEqual([]);
+    expect(otherSamplers, 'a tracesSampler other than sampleTraces or neverSample').toEqual([]);
   });
 });

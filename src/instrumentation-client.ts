@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
+import { neverSample } from '@/lib/sentry-sampling';
 
 /**
  * The browser. Next loads this before any client code runs.
@@ -13,7 +14,13 @@ Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   environment: process.env.NODE_ENV,
   release: process.env.SENTRY_RELEASE,
-  tracesSampleRate: 0,
+
+  /**
+   * §12.165. No span from the browser, ever. Not `tracesSampleRate: 0`: a page
+   * whose render was traced hands the browser a sampled parent, and without a
+   * sampler that parent wins over the rate (src/lib/sentry-sampling.ts).
+   */
+  tracesSampler: neverSample,
 
   /**
    * Turned on by `SENTRY_DEBUG=1` without a code change, which is the only

@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext } from '@playwright/test';
 import { SENTRY_SINK_URL } from '../playwright.config';
+import { sampledParent } from './sampled-parent';
 
 /**
  * §12.87. A real sign-in, through the real SDK and the real config, and what
@@ -190,4 +191,96 @@ test('a sign-in trace carries no password, cookie, authorization or body', async
       ),
     ),
   );
+});
+
+/**
+ * A span the browser's SDK made, by its origin: `auto.http.browser`, `auto.ui.browser.metrics`,
+ * `auto.resource.browser.metrics`, `auto.pageload.…`, `auto.navigation.…`. No server span has one
+ * (3by's probe: the server's are `auto.http.node_fetch`, `auto.http.wintercg_fetch`,
+ * `auto.db.postgresjs` and `auto`).
+ */
+const isBrowserSpan = (s: Span): boolean =>
+  /(^|\.)(browser|pageload|navigation)(\.|$)/.test(String(attr(s, 'sentry.origin') ?? ''));
+
+/**
+ * §12.165. The browser sends no span, whatever the page it runs in was handed.
+ *
+ * A traced page render writes `<meta name="sentry-trace" …-1>` (withSentryConfig turns on Next's
+ * `clientTraceMetadata`). With `tracesSampleRate: 0` and no sampler the browser's pageload
+ * continued it, because a sampled parent wins over a rate (@sentry/core tracing/sampling.js:66),
+ * and when the pageload ended its sampled flag went into the tab's propagation context
+ * (@sentry/browser tracing/browserTracingIntegration.js:156-163), so every later poll carried a
+ * sampled parent and `sampleTraces` kept each one. The browser's sampler now says 0 to everything.
+ *
+ * The page's own request is given a sampled parent, so this happens every run. The server may still
+ * trace a poll as it traces 1% of every request: a poll it kept for its PARENT (sample rate 1) is
+ * the failure, and one at 0.01 is only recorded.
+ */
+test.describe('a tab whose page render was traced', () => {
+  test.use({ storageState: 'e2e/.auth/dispatcher.json' });
+
+  test('the browser sends no span, and its later polls carry no sampled parent the server keeps', async ({ page }) => {
+    test.setTimeout(150_000);
+    await fetch(`${SENTRY_SINK_URL}/reset`, { method: 'POST' });
+    const parent = sampledParent();
+    await page.route(
+      (url) => url.pathname === '/',
+      (route) =>
+        route.request().isNavigationRequest()
+          ? route.continue({ headers: { ...route.request().headers(), 'sentry-trace': parent.header } })
+          : route.continue(),
+    );
+    const polls: (string | undefined)[] = [];
+    page.on('request', (r) => {
+      if (new URL(r.url()).pathname === '/api/fleet') polls.push(r.headers()['sentry-trace']);
+    });
+
+    await page.goto('/');
+    // The landed control: the render was traced, and handed the page its trace, sampled.
+    await expect(page.locator('meta[name="sentry-trace"]')).toHaveAttribute(
+      'content',
+      new RegExp(`^${parent.traceId}-[0-9a-f]{16}-1$`),
+    );
+    // 60s of the tab's own polling, every 20s while it is visible: the first read and three more.
+    await expect
+      .poll(() => polls.length, { timeout: 90_000, intervals: [1_000], message: "the tab's first read and three polls" })
+      .toBeGreaterThanOrEqual(4);
+
+    // The server flushes on its own schedule: a request traced on purpose, after the polls, marks the end.
+    const control = sampledParent();
+    await page.request.get('/api/fleet', { headers: { 'sentry-trace': control.header } });
+    let all: Span[] = [];
+    for (const deadline = Date.now() + 30_000; Date.now() < deadline; ) {
+      all = await spans();
+      if (all.some((s) => s.trace_id === control.traceId && s.is_segment)) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    expect(all.some((s) => s.trace_id === control.traceId && s.is_segment), 'the control request was traced').toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    all = await spans();
+
+    const browser = all.filter(isBrowserSpan);
+    const flags = polls.map((h) => (h ? (h.split('-')[2] ?? '(no flag)') : '(no header)'));
+    const tracedPolls = all.filter(
+      (s) => s.is_segment && s.trace_id !== control.traceId && /\/api\/fleet$/.test(s.name) && !isBrowserSpan(s),
+    );
+    const byParent = tracedPolls.filter((s) => attr(s, 'sentry.sample_rate') === 1);
+    test.info().annotations.push(
+      { type: 'browser spans', description: String(browser.length) },
+      { type: 'poll sampled flags', description: flags.join(' ') },
+      {
+        type: 'polls the server traced (sample rate)',
+        description: tracedPolls.map((s) => String(attr(s, 'sentry.sample_rate'))).join(' ') || 'none',
+      },
+    );
+    const pollTraces = new Set(tracedPolls.map((s) => `${s.trace_id}/${s.parent_span_id ?? ''}`));
+    process.stdout.write(
+      `browser spans ${browser.length}; poll flags ${flags.join(' ')}; polls the server traced ${pollTraces.size} ` +
+        `(segments ${tracedPolls.map((s) => `${s.name} [${String(attr(s, 'sentry.origin'))}, rate ${String(attr(s, 'sentry.sample_rate'))}]`).join(', ') || 'none'})\n`,
+    );
+
+    expect.soft(browser.map((s) => `${s.name} (${String(attr(s, 'sentry.origin'))})`), 'a browser span arrived').toEqual([]);
+    expect.soft(flags.filter((f) => f === '1'), 'a poll carried a sampled parent').toEqual([]);
+    expect.soft(byParent.map((s) => s.name), 'the server traced a poll because of its parent').toEqual([]);
+  });
 });
