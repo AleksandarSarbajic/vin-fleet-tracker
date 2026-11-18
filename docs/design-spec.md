@@ -6415,7 +6415,8 @@ account out everywhere as well.
 
 To see real sign-in times from Vercel instead of guessing them from a laptop,
 the app's Node and edge runtimes trace through one sampler
-(`src/lib/sentry-sampling.ts`); the browser and the worker stay at 0.
+(`src/lib/sentry-sampling.ts`); the worker stays at 0, and the browser
+samples nothing through `neverSample` (§12.165).
 
 - **A POST to `/login` → 1.** Sign-ins are a few a day, so a flat rate would
   see one every few months.
@@ -6423,8 +6424,17 @@ the app's Node and edge runtimes trace through one sampler
   can come back through the sampler alone: the first version dropped the
   Supabase `/auth/v1/token` call out of sampled sign-ins as "1% of the rest",
   which is the one span a slow sign-in is broken down by.
-- **An unsampled parent is ignored.** The browser runs at 0, so every request
-  carries `parentSampled: false`; inheriting it would drop every sign-in.
+- **An unsampled parent is ignored.** The browser samples nothing, so its
+  requests carry `parentSampled: false`; inheriting it would drop every sign-in.
+  **Corrected in 3by (§12.165).** This line said "the browser runs at 0, so
+  every request carries `parentSampled: false`". That was not so. With
+  `tracesSampleRate: 0` and no sampler, a sampled parent wins over the rate
+  (`@sentry/core` tracing/sampling.js:66, `resolveSampleRate`). A traced page
+  render hands the page one, in `<meta name="sentry-trace" …-1>`, and when the
+  pageload span ends its sampled flag goes into the tab's propagation context
+  (`@sentry/browser` tracing/browserTracingIntegration.js:156-163). So the
+  browser sent its pageload's spans, and that tab's later requests carried
+  `-1`, which this sampler kept: 4 of 4 `/api/fleet` polls in 60s, measured.
 - **Everything else → 0.01.** Includes the middleware's `getUser`, which
   appears as a `GET <project>.supabase.co` child of `middleware GET`.
 
@@ -11938,6 +11948,96 @@ press outside, a resize, leaving the window, a window opening and a file drag cl
 | `PAST_ADDRESS_CAP` | 500 |
 | `SUGGEST_MIN_CHARS`, `SUGGEST_SHOWN` | 2, 6 |
 | `FIT_PADDING` | 64 (the load fit's) |
+
+## 12.165 No span carries an error's text, the browser sends none, and a layer under a host needs the host's own stacking context
+
+Phase 3by. Three rules. The first two close 3bw's found wrong 9 and what 3by's
+probe found next to it. The third closes the class of 3bx's found wrong 1.
+
+**1. A span keeps its status and never its message.** On a traced request, a
+failed query's span was sent with `status: "error"` and the attribute
+`sentry.status.message` holding the Postgres message word for word. postgres.js,
+undici's fetch and Next's own tracer all set a span's status message from
+`error.message`, and the SDK's streamed serializer copies it into that attribute
+(`@sentry/core` utils/spanUtils.js:193). `beforeSend` sees error events only. So
+both server configs now set `beforeSendSpan: textlessSpan`
+(`src/lib/sentry-server-errors.ts:184`, beside `scrubServerEvent`). It drops
+`sentry.status.message` from every span, segment or child, whatever the
+attribute holds, and keeps the status and every other attribute. Fixed names
+such as `internal_error` go too: the SDK's list of them is not public, and a
+copy would drift. A root span's `http.response.status_code` still tells a 404
+from a 500.
+
+**2. Spans are streamed, pinned.** Both server configs set
+`traceLifecycle: 'stream'`. Without the pin, one environment variable
+(`SENTRY_TRACE_LIFECYCLE=static`) switches both runtimes to transaction events.
+3by's probe saw what those carry: statuses become names, but the failed
+request's transaction has a console breadcrumb of Next's printout of the failed
+query, with the message and the stack. And under `static` the SDK ignores a
+stream-shaped `beforeSendSpan` (`@sentry/core` client.js:110-116). Under the pin
+no transaction is built, so there is no `beforeSendTransaction`.
+
+**3. The browser samples nothing.** `src/instrumentation-client.ts` uses
+`tracesSampler: neverSample` (`src/lib/sentry-sampling.ts:100`), a sampler that
+returns 0 whatever it is handed, in place of `tracesSampleRate: 0`. The rate
+lost to a sampled parent (see §12.87's correction). A sampler is asked even when
+there is a parent, so a traced render can no longer make the tab trace. The
+worker stays at `tracesSampleRate: 0`: it serves no requests and continues no
+trace. (No `SENTRY_TRACE` or `SENTRY_BAGGAGE` is set anywhere in the repo; the
+droplet's environment is not checked.)
+
+The browser change was Alex's answer, with rule 2, on 2026-11-18. Measured with
+a sampled parent on the page's own request, over 60s
+(`e2e/sentry-traces.spec.ts:222`):
+
+| | Before (rate 0) | After (`neverSample`) |
+|---|---|---|
+| Browser spans in the sink | 63, 69, then 64, 64, 63 (planted control) | 0 |
+| `/api/fleet` requests and their flag | 4, all `-1` | 4, all `-0` |
+| Polls the server traced | 4 of 4, at sample rate 1 | 0 |
+
+The server may still trace a poll as it traces 1% of any request (§12.87). So
+the e2e check fails only on a poll kept for its parent (sample rate 1); a literal
+"none" would fail about 4% of runs.
+
+**4. A layer under a host's content needs the host's own stacking context, and
+only the shared layer draws one.** A layer at `absolute -z-10` sits above its
+host's ground and below its words only inside a stacking context of the host's
+own. Without one it paints under the ground and is not seen. That is how the
+basemap slide's highlight vanished in 3bx: the box had a context only through
+its own placement, and the placement moved.
+
+- **Prevention.** `layUnder(host, layer)` (`src/lib/under-layer.ts:65`) and
+  `UnderLayer` (`src/components/overlay/UnderLayer.tsx`, for a layer React
+  draws) are the only writers of `absolute -z-10`. Each refuses under a host
+  that does not own its stacking context. The refusal is loud: `console.error`
+  names the host and the fix. The motion is skipped and the end state lands at
+  once. All nine layers go through it: the segment slide, the stop tabs' copy
+  and slide, the palette cursor, the list copies, the chip's look, the saved
+  row's glow and the row's flash. Their classes are unchanged.
+- **What "owns" reads.** The host's class list: a position (`relative`,
+  `absolute`, `fixed`, `sticky`) and `isolate`, and not `static` or
+  `isolation-auto`. Or it matches a rule in globals.css that sets
+  `position: relative` and `isolation: isolate`: today one, for a chip that
+  `groundPop` marks `data-ground-host`. The class list, because jsdom applies
+  no stylesheet: a computed `position` there reads `static` everywhere. In the
+  browser each of those classes is one Tailwind utility, so the classes are
+  what decides the context. That it paints right is still checked in a real
+  browser by new-motion's slide checks and the baselines.
+- **Check (a), in `npm run check`:** `src/lib/under-layer-hosts.test.tsx`
+  renders ten hosts with their own components, finds each as its motion finds
+  it, and asserts the same predicate, by name. The ten: the basemap box, the
+  density control, the phone tabs, the stop tabs' box, the stop tablist, the
+  palette's results, a truck list's chips, the saved views' rows, a marked
+  chip and a truck row.
+- **Check (b):** `src/lib/under-layer.test.tsx` fails on any negative z-index
+  in `src/` outside the shared layer, with comments stripped: a Tailwind `-z-N`
+  or `z-[-N]`, an inline `zIndex` below 0, or a CSS `z-index` below 0. One CSS
+  rule is known by its selector, the row's press layer (globals.css:302, a
+  `::before`), and its host, the truck row, is in check (a).
+
+A new layer under a new host goes through `layUnder` or `UnderLayer`, and the
+host goes into check (a).
 
 ## 13.1 Filter-chip number keys — resolved by consequence, needs a nod
 
