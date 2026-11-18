@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
 import { withoutAiIntegrations } from '@/lib/sentry-reader';
 import { sampleTraces } from '@/lib/sentry-sampling';
-import { scrubServerEvent, textlessErrors } from '@/lib/sentry-server-errors';
+import { scrubServerEvent, textlessErrors, textlessSpan } from '@/lib/sentry-server-errors';
 
 /**
  * The Next app's Node runtime. A DIFFERENT Sentry project from the worker's
@@ -48,6 +48,22 @@ Sentry.init({
    * cut earlier, by the integration added below.
    */
   beforeSend: scrubServerEvent,
+
+  /**
+   * §12.165. Spans, streamed, and nothing else: no transaction event is ever
+   * built. Pinned, because `SENTRY_TRACE_LIFECYCLE=static` in the host's
+   * environment would otherwise switch both runtimes to transactions, whose
+   * console breadcrumbs carry Next's printout of the failed query (message and
+   * stack), and under which the SDK ignores the hook below
+   * (@sentry/core client.js:110-116).
+   */
+  traceLifecycle: 'stream',
+
+  /**
+   * §12.165. Every span keeps its status and loses its status message, which
+   * on a failed query is the Postgres error word for word (3bw found wrong 9).
+   */
+  beforeSendSpan: textlessSpan,
 
   /**
    * No AI-monitoring integration: with tracing on, Sentry installs ten by

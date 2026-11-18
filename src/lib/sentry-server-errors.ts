@@ -1,4 +1,14 @@
-import type { Client, ErrorEvent, Event, EventHint, Exception, Integration, Mechanism, StackParser } from '@sentry/core';
+import type {
+  Client,
+  ErrorEvent,
+  Event,
+  EventHint,
+  Exception,
+  Integration,
+  Mechanism,
+  StackParser,
+  StreamedSpanJSON,
+} from '@sentry/core';
 import { isReaderEvent, scrubReaderEvent, withoutText } from './sentry-reader';
 
 /**
@@ -147,11 +157,36 @@ export function textlessErrors(): Integration {
 /**
  * Both server configs' `beforeSend`, the backstop: an event from the reader
  * route exactly as `scrubReaderEvent` leaves it, any other error event through
- * `withoutText`. `beforeSend` sees error events only; transactions and spans
- * have their own hooks, which neither config sets.
+ * `withoutText`. `beforeSend` sees error events only. Spans go through
+ * `textlessSpan`, below; with the lifecycle pinned to `stream` no transaction
+ * event is built (§12.165).
  */
 export function scrubServerEvent(event: ErrorEvent): ErrorEvent {
   return isReaderEvent(event) ? scrubReaderEvent(event) : withoutText(event, REMOVED);
+}
+
+/** The attribute a streamed span's status message travels in (@sentry/core utils/spanUtils.js:193). */
+export const SPAN_STATUS_MESSAGE = 'sentry.status.message';
+
+/**
+ * §12.165. Both server configs' `beforeSendSpan`: every span, a segment or a
+ * child, keeps its status (`ok` or `error`) and every other attribute, and
+ * loses `sentry.status.message`, whatever it holds.
+ *
+ * A failed span's status message is the error's message as raised: postgres.js
+ * (a Postgres error, word for word), undici's fetch and Next's own tracer all
+ * set `message: error.message`, and the streamed serializer copies it into
+ * this attribute (3bw found wrong 9). Some are fixed names (`internal_error`,
+ * `not_found`), but the SDK's list of those is not public, and a hand-copied
+ * one would drift; a root span's `http.response.status_code` still tells a
+ * 404 from a 500.
+ */
+export function textlessSpan(span: StreamedSpanJSON): StreamedSpanJSON {
+  if (!(SPAN_STATUS_MESSAGE in span.attributes)) return span;
+  const attributes = Object.fromEntries(
+    Object.entries(span.attributes).filter(([key]) => key !== SPAN_STATUS_MESSAGE),
+  ) as StreamedSpanJSON['attributes'];
+  return { ...span, attributes };
 }
 
 /** The category of the worker's own breadcrumbs (src/worker/sentry.ts). */

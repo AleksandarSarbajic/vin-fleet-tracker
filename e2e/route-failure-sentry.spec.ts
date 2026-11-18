@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { SENTRY_SINK_URL } from '../playwright.config';
 import { connect } from './fixtures';
+import { sampledParent } from './sampled-parent';
 
 /**
  * §12.142. A real 500 from the production build, and what Sentry would
@@ -38,6 +39,25 @@ const sinkItems = async (): Promise<SinkItem[]> =>
 
 const errorEvents = (items: SinkItem[]) =>
   items.filter((i) => i.type === 'event').map((i) => i.payload as SentEvent);
+
+interface SentSpan {
+  name: string;
+  trace_id: string;
+  is_segment?: boolean;
+  status?: string;
+  attributes: Record<string, { value: unknown }>;
+}
+
+const sentSpans = (items: SinkItem[]): SentSpan[] =>
+  items.filter((i) => i.type === 'span').flatMap((i) => (i.payload as { items?: SentSpan[] }).items ?? []);
+
+/** Transactions of a trace: under `traceLifecycle: 'static'` a request is sent as one (§12.165). */
+const transactionsOf = (items: SinkItem[], traceId: string) =>
+  items.filter(
+    (i) =>
+      i.type === 'transaction' &&
+      (i.payload as { contexts?: { trace?: { trace_id?: string } } }).contexts?.trace?.trace_id === traceId,
+  );
 
 test("a route's unexpected error reaches Sentry once, by its reference, without its message", async ({ page }) => {
   const sentinel = `q${Math.random().toString(36).slice(2, 11).padEnd(9, '0')}`;
@@ -90,6 +110,10 @@ test("a route's unexpected error reaches Sentry once, by its reference, without 
  * line shaped like a stack frame — the text Sentry would otherwise parse into
  * a frame. Sentry's wrapper around the page captures the error, then Next
  * hands the same error to onRequestError: one event is expected.
+ *
+ * §12.165. The page's request carries a sampled parent, so it is traced every
+ * time: the failed query's span must arrive, status error, with no status
+ * message, and no transaction may arrive at all.
  */
 test("a page's uncaught database error reaches Sentry once, as types and frames, without its text", async ({ page }) => {
   const sentinel = `q${Math.random().toString(36).slice(2, 11).padEnd(9, '0')}`;
@@ -106,15 +130,34 @@ test("a page's uncaught database error reaches Sentry once, as types and frames,
     `).simple();
 
     await fetch(`${SENTRY_SINK_URL}/reset`, { method: 'POST' });
+    // §12.165. Traced every time: a sampled parent on the page's own request, and on nothing else.
+    const parent = sampledParent();
+    await page.route(
+      (url) => url.pathname === '/history',
+      (route) =>
+        route.request().isNavigationRequest()
+          ? route.continue({ headers: { ...route.request().headers(), 'sentry-trace': parent.header } })
+          : route.continue(),
+    );
     const response = await page.goto('/history');
     test.info().annotations.push({ type: 'page status', description: String(response?.status()) });
 
     // Server events only: the browser may report the error page too, with no text of the server's.
     const fromServer = (items: SinkItem[]) => errorEvents(items).filter((e) => e.platform === 'node');
+    /**
+     * §12.165. The failed query's span: a child of the forced trace, status error. Spans are
+     * flushed about 5s after they end, later than the error event. A transaction of the trace ends
+     * the wait too, so that under the static lifecycle the check below names it.
+     */
+    const failedQuery = (items: SinkItem[]) =>
+      sentSpans(items).find(
+        (s) => s.trace_id === parent.traceId && !s.is_segment && s.status === 'error' && /truck_lists/.test(s.name),
+      );
     let items: SinkItem[] = [];
-    for (const deadline = Date.now() + 15_000; Date.now() < deadline; ) {
+    for (const deadline = Date.now() + 20_000; Date.now() < deadline; ) {
       items = await sinkItems();
-      if (fromServer(items).length > 0) break;
+      const traced = failedQuery(items) !== undefined || transactionsOf(items, parent.traceId).length > 0;
+      if (fromServer(items).length > 0 && traced) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -130,6 +173,17 @@ test("a page's uncaught database error reaches Sentry once, as types and frames,
     // Named by shape: the build minifies postgres.js's class name to one letter.
     expect(event?.exception?.values?.map((v) => v.type)).toEqual(['PostgresError', 'DrizzleQueryError']);
     expect(event?.exception?.values?.every((v) => v.value === REMOVED)).toBe(true);
+
+    // §12.165. Spans, streamed, and never a transaction: its breadcrumbs would hold Next's printout of the query.
+    expect(
+      items.filter((i) => i.type === 'transaction').map((i) => (i.payload as { transaction?: string }).transaction),
+      'a transaction arrived',
+    ).toEqual([]);
+    const span = failedQuery(items);
+    expect(span, "the failed query's span, status error, in the forced trace").toBeDefined();
+    expect(Object.keys(span?.attributes ?? {}), "the failed query's span carries its status message").not.toContain(
+      'sentry.status.message',
+    );
 
     const everything = items.map((i) => i.raw).join('\n');
     expect(everything.includes(sentinel), 'the sentinel reached the sink').toBe(false);

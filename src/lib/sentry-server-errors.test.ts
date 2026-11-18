@@ -3,13 +3,22 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import * as Sentry from '@sentry/nextjs';
 import * as SentryNode from '@sentry/node';
-import type { ErrorEvent, Event, StackParser } from '@sentry/core';
+import type { ErrorEvent, Event, StackParser, StreamedSpanJSON } from '@sentry/core';
 import { DrizzleQueryError } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { onRequestError } from '@/instrumentation';
 import { sentryCapture } from '@/test/sentry-capture';
 import { scrubReaderEvent } from './sentry-reader';
-import { REMOVED, errorType, rebuildException, scrubServerEvent, sqlstateOf, typeAndStack } from './sentry-server-errors';
+import {
+  REMOVED,
+  SPAN_STATUS_MESSAGE,
+  errorType,
+  rebuildException,
+  scrubServerEvent,
+  sqlstateOf,
+  textlessSpan,
+  typeAndStack,
+} from './sentry-server-errors';
 
 /**
  * §12.143. No server error event carries text, whoever captured it.
@@ -170,16 +179,102 @@ const code = (file: string) =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
+/**
+ * 3ar asserted "nothing on transactions or spans" here: `beforeSend` was the whole guard. It no
+ * longer holds (§12.165). A failed query's span carries the Postgres message in
+ * `sentry.status.message` (3bw found wrong 9), and `beforeSend` never sees a span, so spans get
+ * their own hook. And the lifecycle is pinned to `stream`: under `static` (one environment
+ * variable, SENTRY_TRACE_LIFECYCLE) the SDK sends transactions instead, whose breadcrumbs carry
+ * Next's printout of the failed query, and it ignores a stream-shaped hook. A
+ * `beforeSendTransaction` would never run under the pin (and the SDK warns about one), so there is
+ * none.
+ */
 describe('both server configs are wired the same way', () => {
   it.each(['sentry.server.config.ts', 'sentry.edge.config.ts'])(
-    '%s: the backstop as beforeSend, the integration added, nothing on transactions or spans',
+    '%s: the backstop as beforeSend, the integration added, every span through textlessSpan, streamed and pinned',
     (file) => {
       const config = code(file);
       expect(config).toMatch(/beforeSend:\s*scrubServerEvent\b/);
       expect(config).toMatch(/Sentry\.addIntegration\(\s*textlessErrors\(\)\s*\)/);
-      expect(config).not.toMatch(/beforeSendTransaction|beforeSendSpan/);
+      expect(config).toMatch(/beforeSendSpan:\s*textlessSpan\b/);
+      expect(config).toMatch(/traceLifecycle:\s*'stream'/);
+      expect(config).not.toMatch(/beforeSendTransaction|withStaticSpan/);
     },
   );
+});
+
+describe('textlessSpan, the beforeSendSpan of both server configs', () => {
+  const span = (isSegment: boolean, attributes: StreamedSpanJSON['attributes']): StreamedSpanJSON => ({
+    trace_id: '0'.repeat(32),
+    span_id: '1'.repeat(16),
+    name: isSegment ? 'GET /history' : 'select "truck_lists" "profiles"',
+    start_timestamp: 1,
+    end_timestamp: 2,
+    status: 'error',
+    is_segment: isSegment,
+    attributes,
+  });
+
+  it.each([
+    ['a child span (the failed query)', false],
+    ["the segment, the request's root", true],
+  ])('%s: loses its status message, and keeps its status and every other attribute', (_label, isSegment) => {
+    const input = span(isSegment, {
+      [SPAN_STATUS_MESSAGE]: `relation "truck_lists_${S}" does not exist`,
+      'db.system.name': 'postgresql',
+      'http.response.status_code': 500,
+    });
+    const out = textlessSpan(input);
+    expect(JSON.stringify(out)).not.toContain(S);
+    expect(out).toEqual({ ...input, attributes: { 'db.system.name': 'postgresql', 'http.response.status_code': 500 } });
+    expect(out.status).toBe('error');
+    expect(out.is_segment).toBe(isSegment);
+  });
+
+  it.each([
+    ['a child span', false],
+    ['the segment', true],
+  ])('%s with no status message: unchanged', (_label, isSegment) => {
+    const input = span(isSegment, { 'db.system.name': 'postgresql' });
+    const before = structuredClone(input);
+    expect(textlessSpan(input)).toBe(input);
+    expect(input).toEqual(before);
+  });
+
+  it('a fixed status name goes too: the attribute never leaves, whatever it holds', () => {
+    expect(textlessSpan(span(false, { [SPAN_STATUS_MESSAGE]: 'internal_error' })).attributes).toEqual({});
+  });
+});
+
+describe('a failed span, through a real Sentry client', () => {
+  type SentSpan = { name: string; status: string; is_segment: boolean; attributes: Record<string, { value: unknown }> };
+  const sentSpans = (): SentSpan[] =>
+    sent.flatMap((raw) =>
+      (JSON.parse(raw) as [unknown, [{ type: string }, { items?: SentSpan[] }][]])[1]
+        .filter(([header]) => header.type === 'span')
+        .flatMap(([, container]) => container.items ?? []),
+    );
+
+  it('the root and its child keep status error and their attributes, and lose the message', async () => {
+    // "POST /login" is a sign-in by its name: sampleTraces keeps it, as it keeps every sign-in.
+    SentryNode.startSpan({ name: 'POST /login', attributes: { 'http.request.method': 'POST' } }, (root) => {
+      SentryNode.startSpan({ name: 'select "truck_lists"', attributes: { 'db.system.name': 'postgresql' } }, (child) => {
+        child.setStatus({ code: 2, message: `relation "truck_lists_${S}" does not exist` });
+      });
+      root.setStatus({ code: 2, message: `list read failed ${S}` });
+    });
+    await SentryNode.flush(2000);
+
+    const spans = sentSpans();
+    expect(spans.map((s) => s.name).sort()).toEqual(['POST /login', 'select "truck_lists"']);
+    expect(sent.join('\n')).not.toContain(S);
+    for (const s of spans) {
+      expect(s.status, s.name).toBe('error');
+      expect(s.attributes, s.name).not.toHaveProperty(SPAN_STATUS_MESSAGE);
+    }
+    expect(spans.find((s) => !s.is_segment)?.attributes['db.system.name']?.value).toBe('postgresql');
+    expect(sent.some((raw) => raw.includes('"type":"transaction"'))).toBe(false);
+  });
 });
 
 describe('one implementation of the stand-in', () => {

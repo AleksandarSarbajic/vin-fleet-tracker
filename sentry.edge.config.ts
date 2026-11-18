@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
 import { sampleTraces } from '@/lib/sentry-sampling';
-import { scrubServerEvent, textlessErrors } from '@/lib/sentry-server-errors';
+import { scrubServerEvent, textlessErrors, textlessSpan } from '@/lib/sentry-server-errors';
 
 /**
  * The edge runtime — which here means exactly one thing: `src/middleware.ts`,
@@ -39,6 +39,14 @@ Sentry.init({
    * breadcrumb text gone.
    */
   beforeSend: scrubServerEvent,
+
+  /**
+   * §12.165. The same as the Node config: spans, streamed, pinned so the host's
+   * `SENTRY_TRACE_LIFECYCLE` cannot switch the hook below off; every span keeps
+   * its status and loses its status message.
+   */
+  traceLifecycle: 'stream',
+  beforeSendSpan: textlessSpan,
 });
 
 /** §12.143. The same early rebuild as the Node config (src/lib/sentry-server-errors.ts). */

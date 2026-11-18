@@ -2,7 +2,7 @@ import type { NodeOptions } from '@sentry/node';
 import { SENTRY_DATA_COLLECTION } from '@/lib/sentry-privacy';
 import { withoutAiIntegrations } from '@/lib/sentry-reader';
 import { sampleTraces } from '@/lib/sentry-sampling';
-import { scrubServerEvent, textlessErrors } from '@/lib/sentry-server-errors';
+import { scrubServerEvent, textlessErrors, textlessSpan } from '@/lib/sentry-server-errors';
 
 /**
  * Options for starting Sentry in a test as sentry.server.config.ts starts it,
@@ -32,6 +32,8 @@ export function sentryCapture() {
     dataCollection: SENTRY_DATA_COLLECTION,
     tracesSampler: sampleTraces,
     beforeSend: scrubServerEvent,
+    traceLifecycle: 'stream',
+    beforeSendSpan: textlessSpan,
     integrations: (defaults) => [...withoutAiIntegrations(defaults), textlessErrors()],
     transport: () => ({
       send: async (envelope) => {
